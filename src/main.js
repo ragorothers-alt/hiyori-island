@@ -13,6 +13,7 @@ import { Mochi } from './scene/mochi.js'
 import { Particles } from './scene/particles.js'
 import { Labels } from './scene/labels.js'
 import { sfx } from './audio.js'
+import { Reminders, systemNotify } from './reminders.js'
 import { LINES } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS } from './theme.js'
 
@@ -340,10 +341,21 @@ async function boot() {
     mochi.say(line('questDone'))
   })
 
+  // ── 日程提醒 ──
+  const reminders = new Reminders(store, (e, min) => {
+    sfx.reminder()
+    const when = min > 0 ? `${min} 分鐘後開始（${e.start}）` : `現在開始（${e.start}）`
+    mochi.say(line('reminder', { event: short(e.title), min }) || `${short(e.title)}，${when}`, 6000)
+    ui.toast({ icon: '鐘', title: e.title, sub: when, ms: 9000 })
+    if (store.selectedDate === store.today) ring.pulse(e.id)
+    if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
+  })
+
   // ── 時間 ──
   let lastMin = -1
   setInterval(() => {
     ui.tickClock()
+    reminders.check()
     if (store.tick()) return
     const minute = Math.floor(Date.now() / 60000)
     if (minute !== lastMin) {

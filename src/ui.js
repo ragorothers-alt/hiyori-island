@@ -1,5 +1,6 @@
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM } from './store.js'
+import { notifySupported } from './reminders.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -308,6 +309,21 @@ export class UI {
       this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
       this._syncPickers()
     })
+    $('#remindLead').addEventListener('change', (e) => {
+      this.store.setSetting('remindLead', +e.target.value)
+      this.renderRemind()
+    })
+    $('#notifyBtn').addEventListener('click', async () => {
+      const st = this.store.state.settings
+      if (st.notify && Notification.permission === 'granted') {
+        this.store.setSetting('notify', false)
+      } else {
+        const perm = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
+        this.store.setSetting('notify', perm === 'granted')
+        if (perm === 'granted') this.toast({ icon: '鐘', title: '系統通知已開啟', sub: '切到別的視窗時也會提醒你' })
+      }
+      this.renderRemind()
+    })
     const list = $('#eventList')
     list.addEventListener('click', (e) => {
       const li = e.target.closest('.tl-item')
@@ -345,6 +361,20 @@ export class UI {
       if (e.key === 'Escape') this.renderSchedule()
       e.stopPropagation()
     })
+  }
+
+  renderRemind() {
+    const st = this.store.state.settings
+    $('#remindLead').value = String(st.remindLead)
+    const btn = $('#notifyBtn')
+    if (!notifySupported()) {
+      btn.hidden = true
+      return
+    }
+    const perm = Notification.permission
+    btn.disabled = perm === 'denied' || st.remindLead < 0
+    btn.classList.toggle('on', st.notify && perm === 'granted')
+    btn.textContent = perm === 'denied' ? '通知已被瀏覽器封鎖' : st.notify && perm === 'granted' ? '系統通知：開' : '開啟系統通知'
   }
 
   renderSchedule(force = true) {
@@ -622,6 +652,7 @@ export class UI {
     this.renderChrome()
     this.renderTasks()
     this.renderSchedule()
+    this.renderRemind()
     this.renderProjects()
     if (this.tab === 'records') this.renderRecords()
   }

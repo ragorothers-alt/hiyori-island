@@ -26,6 +26,9 @@ export const toMin = (hhmm) => {
 }
 export const uid = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7)
 
+// remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
+export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false }
+
 export const QUESTS = [
   { id: 'tasks3', title: '讓三朵花綻放', sub: '完成 3 個任務', goal: 3, val: (d) => d.tasks },
   { id: 'focus2', title: '靜心兩回', sub: '完成 2 個番茄鐘', goal: 2, val: (d) => d.pomodoros },
@@ -76,7 +79,7 @@ function seed() {
     player: { xp: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {} },
     history: {},
     quests: {},
-    settings: { sound: true },
+    settings: { ...DEFAULT_SETTINGS },
     createdAt: Date.now(),
   }
 }
@@ -185,7 +188,15 @@ function migrate(s) {
       for (const q of QUESTS) if (v[q.id]) quests[d][q.id] = true
     }
   }
-  const settings = { sound: isObj(s.settings) && typeof s.settings.sound === 'boolean' ? s.settings.sound : true }
+  const settings = { ...DEFAULT_SETTINGS }
+  if (isObj(s.settings)) {
+    for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
+      const raw = s.settings[k]
+      if (typeof v === 'boolean' && typeof raw === 'boolean') settings[k] = raw
+      if (typeof v === 'number' && Number.isFinite(+raw)) settings[k] = +raw
+    }
+  }
+  settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
   return { version: 1, tasks, events, projects, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
 }
 

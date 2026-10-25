@@ -106,6 +106,18 @@
             <button class="btn-primary" type="submit">加入</button>
           </div>
         </form>
+        <div class="remind-row">
+          <span class="remind-label">提醒</span>
+          <select id="remindLead" aria-label="提醒時間">
+            <option value="-1">不提醒</option>
+            <option value="0">開始時</option>
+            <option value="5">提前 5 分</option>
+            <option value="10">提前 10 分</option>
+            <option value="15">提前 15 分</option>
+            <option value="30">提前 30 分</option>
+          </select>
+          <button type="button" class="chip-toggle" id="notifyBtn">開啟系統通知</button>
+        </div>
         <p class="hint">日程會化成小島外圈的時之環，光點是現在的時刻。</p>
         <ol class="timeline" id="eventList"></ol>
       </section>

@@ -467,6 +467,15 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── 提醒設定 ── */
+.remind-row { display: flex; align-items: center; gap: 8px; margin: -2px 4px 10px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+.remind-row select { border: 0; outline: 0; border-radius: 10px; padding: 4px 8px; font-size: 12px; background: rgba(140, 170, 200, .14); color: var(--ink); cursor: pointer; }
+body.night .remind-row select { color-scheme: dark; }
+.chip-toggle { font-size: 11.5px; padding: 4px 10px; border-radius: 10px; color: var(--ink-soft); border: 1px dashed rgba(120, 150, 190, .45); transition: background .2s, color .2s; }
+.chip-toggle:hover { background: var(--glass-hover); color: var(--ink); }
+.chip-toggle.on { border-style: solid; border-color: transparent; color: #fff; background: linear-gradient(135deg, #8cc6ea, #9fd8c0); }
+.chip-toggle:disabled { opacity: .55; cursor: default; }
+
 /* ── 補充：行內編輯、確認、互動標籤 ── */
 .item-meta button { font-size: 11px; color: inherit; padding: 0; border-radius: 6px; transition: color .2s; }
 .item-meta button:hover { color: var(--ink); }

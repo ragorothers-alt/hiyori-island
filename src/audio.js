@@ -93,6 +93,9 @@ export const sfx = {
   temple() {
     note(196, { dur: 4.5, gain: 0.5, attack: 0.004, partials: [[2.01, 0.4], [2.76, 0.3], [4.1, 0.12], [5.43, 0.06]] })
   },
+  reminder() {
+    ;[9, 7, 9, 11].forEach((d, i) => note(freq(d), { at: i * 0.16, dur: 1.4, gain: 0.26, partials: bell }))
+  },
   chime() {
     ;[7, 9, 11].forEach((d, i) => note(freq(d), { at: i * 0.13, dur: 1.2, gain: 0.2, partials: bell }))
   },
