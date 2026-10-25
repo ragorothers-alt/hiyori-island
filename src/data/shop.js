@@ -1,0 +1,15 @@
+export const SHOP_ITEMS = [
+  { key: 'mushroom', price: 10, name: '小蘑菇', jp: 'きのこ', desc: '幾朵小蘑菇，擠在一起看雲。' },
+  { key: 'lamp', price: 15, name: '小石燈', jp: '石灯籠', desc: '天色暗了，就亮起一點暖光。' },
+  { key: 'teru', price: 20, name: '晴天娃娃', jp: 'てるてる坊主', desc: '掛在小木架上，陪你等晴天。' },
+  { key: 'bench', price: 25, name: '木頭長椅', jp: '木のベンチ', desc: '坐下來晃晃腳，讓風慢慢吹。' },
+  { key: 'pumpkin', price: 25, name: '南瓜燈', jp: 'かぼちゃランプ', desc: '圓圓肚子裡，藏著一盞暖燈。' },
+  { key: 'snowman', price: 30, name: '小雪人', jp: '雪だるま', desc: '笑瞇瞇地站著，等一片雪花。' },
+  { key: 'bamboo', price: 30, name: '青竹叢', jp: '竹やぶ', desc: '竹葉沙沙響，像在小聲聊天。' },
+  { key: 'chime', price: 35, name: '小風鈴', jp: '風鈴', desc: '掛在小木架上，風來就唱歌。' },
+  { key: 'pine', price: 40, name: '松樹盆栽', jp: '松の盆栽', desc: '小小一盆松樹，也有山林的模樣。' },
+  { key: 'fox', price: 45, name: '白狐石像', jp: '白狐の石像', desc: '石頭小白狐，靜靜守著小島。' },
+  { key: 'mailbox', price: 50, name: '紅色圓筒郵筒', jp: '赤い丸型ポスト', desc: '紅通通的圓郵筒，等一封問候。' },
+  { key: 'cat', price: 60, name: '白色小貓', jp: '白い子猫', desc: '曬著暖暖的光，打個小盹。' },
+  { key: 'vending', price: 80, name: '粉彩販賣機', jp: '自動販売機', desc: '粉彩色外衣，藏著一排小飲料。' },
+]
