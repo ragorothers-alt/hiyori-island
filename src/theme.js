@@ -21,7 +21,18 @@ export const XP = {
   pomodoro: 15,
   quest: 30,
   perfectDay: 40,
+  review: 10,
 }
+
+// 晚間回顧的心情：用天氣表示
+export const MOODS = [
+  { key: 'sunny', kanji: '晴', name: '晴朗', desc: '很棒的一天', color: '#f3c46b' },
+  { key: 'rainbow', kanji: '虹', name: '彩虹', desc: '雨過天晴', color: '#e7a3cf' },
+  { key: 'star', kanji: '星', name: '星空', desc: '平靜安穩', color: '#a9a3e6' },
+  { key: 'cloudy', kanji: '曇', name: '多雲', desc: '普普通通', color: '#aab6c8' },
+  { key: 'rain', kanji: '雨', name: '小雨', desc: '有點低落', color: '#8fb6dc' },
+]
+export const moodOf = (key) => MOODS.find((m) => m.key === key)
 
 export const FOCUS_MIN = 25
 export const BREAK_MIN = 5

@@ -477,6 +477,28 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── 晚間回顧 ── */
+.review-card { width: min(420px, calc(100vw - 24px)); padding: 24px 26px 20px; text-align: center; }
+.review-date { font-family: var(--font-display); font-size: 20px; letter-spacing: .12em; margin: 4px 0 8px; }
+.review-sum { display: flex; justify-content: center; gap: 14px; font-size: 12px; color: var(--ink-soft); margin-bottom: 16px; flex-wrap: wrap; }
+.review-sum b { font-family: var(--font-num); font-size: 16px; color: var(--ink); margin-right: 2px; }
+.review-q { font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; }
+.moods { display: flex; justify-content: center; gap: 8px; margin-bottom: 14px; }
+.mood { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 14px; width: 62px; transition: background .2s, transform .2s; }
+.mood:hover { background: var(--glass-hover); transform: translateY(-2px); }
+.mood .stamp-k { width: 40px; height: 40px; font-size: 19px; color: var(--mc); border-color: var(--mc); background: #fff; transform: none; }
+.mood.on .stamp-k { background: var(--mc); color: #fff; transform: rotate(-8deg) scale(1.08); box-shadow: 0 4px 14px color-mix(in srgb, var(--mc) 50%, transparent); }
+.mood span { font-size: 11px; color: var(--ink-soft); }
+.review-card input { width: 100%; border: 0; outline: 0; border-radius: 12px; padding: 10px 12px; font-size: 14px; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); margin-bottom: 14px; }
+.review-actions { display: flex; justify-content: center; gap: 10px; }
+.review-actions .btn-primary { margin: 0; }
+.journal { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.journal li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 14px; background: var(--field); font-size: 13px; line-height: 1.5; }
+.journal .stamp-k { width: 30px; height: 30px; font-size: 14px; flex: none; color: var(--mc); border-color: var(--mc); background: transparent; }
+.journal small { display: block; color: var(--ink-faint); font-family: var(--font-num); font-size: 11px; }
+.journal p { margin: 0; word-break: break-word; }
+.wk-m { font-family: var(--font-display); font-size: 11px; color: var(--mc); height: 14px; }
+
 /* ── 專注任務 ── */
 .focus-task { padding: 0; border-radius: 6px; text-align: left; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; cursor: pointer; }
 .focus-task:hover { color: var(--ink); }

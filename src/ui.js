@@ -1,4 +1,4 @@
-import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS } from './theme.js'
+import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, MOODS, moodOf } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
@@ -141,6 +141,7 @@ export class UI {
       if (e.key === 'Escape') {
         this.toggleShop(false)
         this.closeModal()
+        if (!$('#reviewModal').hidden) $('#reviewLater').click()
         if (typing) document.activeElement.blur()
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return
@@ -645,7 +646,74 @@ export class UI {
   }
 
   // ── 紀錄 ──
+  // ── 晚間回顧 ──
+  _bindReview() {
+    $('#moodPick').innerHTML = MOODS.map(
+      (m) => `<button type="button" class="mood" data-mood="${m.key}" style="--mc:${m.color}" title="${m.desc}"><div class="stamp-k">${m.kanji}</div><span>${m.name}</span></button>`,
+    ).join('')
+    $('#moodPick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mood]')
+      if (!b) return
+      this.mood = b.dataset.mood
+      $$('#moodPick .mood').forEach((x) => x.classList.toggle('on', x === b))
+      $('#reviewSave').disabled = false
+    })
+    $('#reviewForm').addEventListener('submit', (e) => {
+      e.preventDefault()
+      if (!this.mood) return
+      this.store.saveReview(this.reviewDate, this.mood, $('#reviewText').value)
+      this.closeReview()
+    })
+    $('#reviewLater').onclick = () => {
+      try {
+        localStorage.setItem('hiyori-review-later', this.store.today)
+      } catch {}
+      this.closeReview()
+    }
+    $('#reviewModal').addEventListener('click', (e) => {
+      if (e.target.id === 'reviewModal') $('#reviewLater').click()
+    })
+    $('#reviewBtn').onclick = () => this.openReview()
+  }
+
+  openReview(date = this.store.today) {
+    const s = this.store
+    this.reviewDate = date
+    const prev = s.state.journal[date]
+    this.mood = prev?.mood || null
+    const d = parseDate(date)
+    $('#reviewDate').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日・${WEEK_JP[d.getDay()]}`
+    const day = s.peekDay(date)
+    const tasks = s.tasksOn(date)
+    const ev = s.eventsOn(date)
+    $('#reviewSum').innerHTML = `<span><b>${tasks.filter((t) => t.done).length}</b>/ ${tasks.length} 朵花綻放</span><span><b>${day.focus}</b>分鐘專注</span><span><b>${ev.filter((e) => e.done).length}</b>個日程完成</span>`
+    $$('#moodPick .mood').forEach((x) => x.classList.toggle('on', x.dataset.mood === this.mood))
+    $('#reviewText').value = prev?.text || ''
+    $('#reviewSave').disabled = !this.mood
+    $('#reviewSave').textContent = prev ? '更新' : '記下來'
+    $('#reviewModal').hidden = false
+    this.hooks.reviewOpened?.()
+  }
+
+  closeReview() {
+    $('#reviewModal').hidden = true
+  }
+
+  // 晚上 9 點後、今天還沒寫、也沒按「之後再說」時，邀請回顧
+  maybeAskReview() {
+    const s = this.store
+    if (new Date().getHours() < 21 || s.state.journal[s.today]) return false
+    let later = null
+    try {
+      later = localStorage.getItem('hiyori-review-later')
+    } catch {}
+    if (later === s.today || !$('#reviewModal').hidden || !$('#levelModal').hidden) return false
+    this.openReview()
+    return true
+  }
+
   _bindRecords() {
+    this._bindReview()
     $('#exportBtn').onclick = () => {
       const blob = new Blob([this.store.exportJSON()], { type: 'application/json' })
       const a = document.createElement('a')
@@ -687,10 +755,23 @@ export class UI {
         const v = vals[i]
         const h = (v.tasks / max) * 100
         const wd = parseDate(d).getDay()
-        return `<div class="wk ${d === s.today ? 'today' : ''}" title="${d}：任務 ${v.tasks}、番茄鐘 ${v.pomodoros}、+${v.xp} XP">
+        const mood = moodOf(s.state.journal[d]?.mood)
+        return `<div class="wk ${d === s.today ? 'today' : ''}" title="${d}：任務 ${v.tasks}、番茄鐘 ${v.pomodoros}、+${v.xp} XP${mood ? '、心情 ' + mood.name : ''}">
+          <span class="wk-m" style="--mc:${mood?.color || 'transparent'}">${mood?.kanji || ''}</span>
           <span class="wk-n">${v.tasks || ''}</span><div class="wk-bar ${v.tasks ? '' : 'zero'}" style="height:${Math.max(3, h * 0.72)}%"></div><span class="wk-d">${WEEK_ZH[wd]}</span></div>`
       })
       .join('')
+
+    const entries = s.journalList(14)
+    $('#journalTitle').hidden = !entries.length
+    $('#journalList').innerHTML = entries
+      .map(([d, j]) => {
+        const m = moodOf(j.mood)
+        const dd = parseDate(d)
+        return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p></div></li>`
+      })
+      .join('')
+    $('#reviewBtn').textContent = s.state.journal[s.today] ? '修改今天的回顧' : '寫下今天的回顧'
 
     const lv = s.level.level
     $('#unlockList').innerHTML = UNLOCKS.map(

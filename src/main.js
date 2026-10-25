@@ -257,6 +257,7 @@ async function boot() {
       if (p) world.flyTo(p.add(new THREE.Vector3(0, 1.4, 0)), 10)
     },
     resetView: () => world.home(),
+    reviewOpened: () => mochi.say(line('reviewAsk') || '今天過得怎麼樣？', 4200),
     modalClosed: () => world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
     focusStarted: (resumed, taskId) => {
@@ -483,6 +484,11 @@ async function boot() {
     sfx.undo()
     ui.toast({ icon: '糖', title: `收起了${item?.name || '裝飾'}`, sub: `退還 ${refund} 顆金平糖` })
   })
+  store.on('reviewSaved', ({ first }) => {
+    sfx.chime()
+    mochi.say(line('reviewDone') || '謝謝你告訴我今天的事。', 4200)
+    if (first) fx.burst(mochi.headAnchor(), { colors: ['#ffffff', '#fff1b8', '#d9ccff'], count: 30, speed: 1.4 })
+  })
   store.on('shopPoor', () => mochi.say(line('shopPoor') || '金平糖還不太夠，慢慢來就好。'))
   store.on('reload', () => {
     decor.sync(store.level.level)
@@ -609,6 +615,7 @@ async function boot() {
         ui.renderSchedule(false)
         syncNextEvent()
       }
+      if (!placing && mochi.mode !== 'focus') ui.maybeAskReview()
     }
   }, 1000)
   ui.tickClock()
@@ -648,6 +655,7 @@ async function boot() {
         mochi.celebrate()
       }, 900)
       setTimeout(() => {
+        if (ui.maybeAskReview()) return
         const overdue = store.overdue().length
         if (overdue) mochi.say(line('overdue', { count: overdue }), 3800)
         else if (!store.tasksOn(store.today).length) mochi.say(line('emptyDay'), 3800)
@@ -657,7 +665,7 @@ async function boot() {
   )
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fx, decor }
+  window.hiyori = { store, world, sky, mochi, fx, decor, ui, placed }
 }
 
 boot()

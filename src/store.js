@@ -3,7 +3,7 @@
 
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { SHOP_ITEMS } from './data/shop.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH } from './theme.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS } from './theme.js'
 
 const KEY = 'hiyori-daily-v1'
 
@@ -53,7 +53,7 @@ export const QUESTS = [
 const emptyStats = () => ({
   tasksDone: 0, highTasksDone: 0, eventsDone: 0, milestonesDone: 0, projectsDone: 0, projectsCreated: 0,
   pomodoros: 0, focusMinutes: 0, bestStreak: 0, perfectDays: 0, earlyTasks: 0, nightTasks: 0,
-  questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0,
+  questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0, reviews: 0,
 })
 const emptyDay = () => ({ tasks: 0, events: 0, milestones: 0, pomodoros: 0, focus: 0, xp: 0, perfect: false })
 
@@ -94,6 +94,7 @@ function seed() {
     player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {} },
     placed: [],
     routines: [],
+    journal: {},
     history: {},
     quests: {},
     settings: { ...DEFAULT_SETTINGS },
@@ -228,6 +229,14 @@ function migrate(s) {
       history[d] = h
     }
   }
+  const moodKeys = new Set(MOODS.map((m) => m.key))
+  const journal = {}
+  if (isObj(s.journal)) {
+    for (const [d, v] of Object.entries(s.journal)) {
+      if (!DATE_RE.test(d) || !isObj(v) || !moodKeys.has(v.mood)) continue
+      journal[d] = { mood: v.mood, text: str(v.text, 140), at: ts(v.at) || Date.now() }
+    }
+  }
   const quests = {}
   if (isObj(s.quests)) {
     for (const [d, v] of Object.entries(s.quests)) {
@@ -245,7 +254,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, routines, placed, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
+  return { version: 1, tasks, events, projects, routines, placed, journal, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
 }
 
 export class Store {
@@ -402,6 +411,25 @@ export class Store {
     this.emit('change')
     this.emit('dateChanged', this.selectedDate)
     return true
+  }
+
+  // ── 晚間回顧 ──
+  saveReview(date, mood, text) {
+    this._refreshToday()
+    if (!MOODS.some((m) => m.key === mood)) return
+    const first = !this.state.journal[date]
+    this.state.journal[date] = { mood, text: String(text || '').trim().slice(0, 140), at: Date.now() }
+    const fx = [['reviewSaved', { date, mood, first }]]
+    if (first) {
+      this.stats.reviews++
+      this._gain(XP.review, fx, { kind: 'review' })
+    }
+    this._finish(fx)
+  }
+  journalList(n = 14) {
+    return Object.entries(this.state.journal)
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .slice(0, n)
   }
 
   // ── 金平糖商店 ──
