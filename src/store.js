@@ -42,7 +42,7 @@ export function repeatLabel(rep) {
 }
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
-export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false }
+export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true }
 
 export const QUESTS = [
   { id: 'tasks3', title: '讓三朵花綻放', sub: '完成 3 個任務', goal: 3, val: (d) => d.tasks },

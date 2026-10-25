@@ -4,7 +4,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
-import { tween, updateTweens, ease } from './util.js'
+import { tween, updateTweens, tweensActive, ease } from './util.js'
 
 const HOME_POS = new THREE.Vector3(0, 21, 30.5)
 const HOME_TARGET = new THREE.Vector3(0, -0.6, 0)
@@ -59,6 +59,11 @@ export class World {
     this.onClick = null
     this.lastInteract = performance.now()
     this.idleRotate = true
+    // 省電：閒置時降低幀率（powerSave 由設定控制）
+    this.powerSave = true
+    this.renders = 0
+    this._lastRender = 0
+    this.busyUntil = 0
     this.shift = { x: 0, y: 0 }
     this.shiftTarget = { x: 0, y: 0 }
 
@@ -106,9 +111,25 @@ export class World {
     this.renderer.setAnimationLoop((t) => this._frame(t))
   }
 
+  // 閒置程度：0 = 全速、1 = 30fps、2 = 15fps 且停止自動旋轉
+  idleLevel(now = performance.now()) {
+    if (!this.powerSave || this.dragging || this._focusing || tweensActive() || now < this.busyUntil) return 0
+    const quiet = now - this.lastInteract
+    return quiet > 90000 ? 2 : quiet > 15000 ? 1 : 0
+  }
+  // 有特效在播（爆花、煙火、天燈）時呼叫，暫時維持全速
+  keepAwake(ms = 2500) {
+    this.busyUntil = Math.max(this.busyUntil, performance.now() + ms)
+  }
+
   _frame(t) {
+    const level = this.idleLevel()
+    const interval = [0, 1000 / 30, 1000 / 15][level]
+    if (interval && t - this._lastRender < interval - 1) return
+    this._lastRender = t
+    this.renders++
     this.timer.update(t)
-    const dt = Math.min(this.timer.getDelta(), 0.05)
+    const dt = Math.min(this.timer.getDelta(), 0.1)
     const el = this.timer.getElapsed()
     updateTweens(dt)
     const s = this.shift
@@ -121,7 +142,9 @@ export class World {
     }
     for (const fn of this.updaters) fn(dt, el)
     const idle = performance.now() - this.lastInteract > 25000
-    this.controls.autoRotate = this.idleRotate && idle && !this._focusing
+    this.controls.autoRotate = this.idleRotate && idle && !this._focusing && level < 2
+    // 白天的 bloom 幾乎看不出來，直接關掉這個後製 pass 省 GPU
+    this.bloom.enabled = this.bloom.strength > 0.2
     this.controls.update(dt)
     this.composer.render()
   }
@@ -192,6 +215,7 @@ export class World {
       this.onPick(hit?.pick || null, hit)
     })
     canvas.addEventListener('pointermove', (e) => {
+      this.lastInteract = performance.now()
       if (this.dragging) {
         this._setRay(e)
         this.dragHandler.move(this.raycaster.ray, e)
@@ -224,6 +248,9 @@ export class World {
       }
     })
     canvas.addEventListener('wheel', () => this._interacted(), { passive: true })
+    addEventListener('keydown', () => this._interacted())
+    // 面板上的操作也算互動（讓動畫回到全速）
+    addEventListener('pointerdown', () => this._interacted(), { capture: true })
   }
 
   // ── 鏡頭 ──

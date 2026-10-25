@@ -646,6 +646,12 @@ export class UI {
   }
 
   // ── 紀錄 ──
+  renderSettings() {
+    const on = this.store.state.settings.powerSave
+    $('#powerBtn').classList.toggle('on', on)
+    $('#powerBtn').textContent = on ? '開' : '關'
+  }
+
   // ── 晚間回顧 ──
   _bindReview() {
     $('#moodPick').innerHTML = MOODS.map(
@@ -714,6 +720,12 @@ export class UI {
 
   _bindRecords() {
     this._bindReview()
+    $('#powerBtn').onclick = () => {
+      const on = !this.store.state.settings.powerSave
+      this.store.setSetting('powerSave', on)
+      this.hooks.setPowerSave?.(on)
+      this.renderSettings()
+    }
     $('#exportBtn').onclick = () => {
       const blob = new Blob([this.store.exportJSON()], { type: 'application/json' })
       const a = document.createElement('a')
@@ -762,6 +774,7 @@ export class UI {
       })
       .join('')
 
+    this.renderSettings()
     const entries = s.journalList(14)
     $('#journalTitle').hidden = !entries.length
     $('#journalList').innerHTML = entries

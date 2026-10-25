@@ -118,6 +118,7 @@ export class Particles {
     pts.frustumCulled = false
     this.scene.add(pts)
     this.bursts.push({ pts, vel, life, t: 0, gravity })
+    this.world.keepAwake(life * 1000 + 300)
   }
 
   // 地面擴散的光圈
@@ -186,6 +187,7 @@ export class Particles {
     this.scene.add(g)
     const from = pos.clone()
     const drift = new THREE.Vector3((Math.random() - 0.5) * 6, 18, (Math.random() - 0.5) * 6)
+    this.world.keepAwake(9500)
     tween(9, (k) => {
       g.position.copy(from).addScaledVector(drift, k)
       g.position.x += Math.sin(k * 12) * 0.3

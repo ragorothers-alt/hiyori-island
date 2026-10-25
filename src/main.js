@@ -52,6 +52,7 @@ async function boot() {
   const fx = new Particles(world, sky)
   const placed = new Placed(world, sky)
   sfx.setEnabled(store.state.settings.sound)
+  world.powerSave = store.state.settings.powerSave
   decor.sync(store.level.level)
 
   // ── 四季 ──
@@ -260,6 +261,7 @@ async function boot() {
     reviewOpened: () => mochi.say(line('reviewAsk') || '今天過得怎麼樣？', 4200),
     modalClosed: () => world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
+    setPowerSave: (on) => (world.powerSave = on),
     focusStarted: (resumed, taskId) => {
       mochi.setFocus(true)
       garden.setFocus(taskId)

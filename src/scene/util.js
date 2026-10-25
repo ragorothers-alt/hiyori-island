@@ -24,6 +24,7 @@ export function tween(dur, onUpdate, { easing = ease.outCubic, delay = 0, onDone
 export function cancelTween(tw) {
   if (tw) tweens.delete(tw)
 }
+export const tweensActive = () => tweens.size > 0
 export function updateTweens(dt) {
   for (const tw of tweens) {
     tw.t += dt
