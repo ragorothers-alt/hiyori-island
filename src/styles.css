@@ -583,6 +583,9 @@ body.night .coins b { color: #ffb8cb; }
 .shop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .shop-head h3 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 17px; letter-spacing: .12em; flex: 1; display: flex; align-items: baseline; gap: 8px; }
 .shop-head h3 small { font-size: 11px; color: var(--ink-faint); letter-spacing: .14em; }
+.proj-meta .ontime { color: #c99632; }
+.proj-chip .due { font-style: normal; font-size: 10px; margin-left: 5px; padding: 0 5px; border-radius: 6px; color: #fff; background: #f07f86; }
+.proj-chip .due.late { background: #b9aeb5; }
 .shop-item { position: relative; }
 .charm-pill { font-style: normal; font-size: 10px; margin-left: 5px; padding: 0 5px; border-radius: 6px; color: #fff; background: linear-gradient(135deg, #ef8e93, #f3b37f); vertical-align: 1px; }
 .charm-pill b { margin-left: 2px; font-weight: 500; }

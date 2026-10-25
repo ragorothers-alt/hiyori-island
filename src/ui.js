@@ -629,7 +629,10 @@ export class UI {
 
   _deadlineText(p) {
     if (!p.deadline) return ''
-    if (p.completedAt && this.store.progress(p) >= 1) return `<span>已於 ${new Date(p.completedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })} 落成</span>`
+    if (p.completedAt && this.store.progress(p) >= 1) {
+      const day = new Date(p.completedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
+      return p.onTime ? `<span class="ontime">✦ ${day} 準時落成</span>` : `<span>已於 ${day} 落成</span>`
+    }
     const d = daysBetween(this.store.today, p.deadline)
     const md = p.deadline.slice(5).replace('-', '/')
     if (d < 0) return `<span class="warn">已逾期 ${-d} 天（${md}）</span>`

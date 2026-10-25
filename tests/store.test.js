@@ -527,6 +527,37 @@ describe('專案里程碑與落成獎勵', () => {
   })
 })
 
+describe('專案期限', () => {
+  it('在期限當天或之前落成，額外 +60 XP 並記下準時', () => {
+    const p = store.addProject({ name: '準時專案', milestones: ['一'], deadline: TODAY })
+    const onTime = vi.fn()
+    store.on('projectOnTime', onTime)
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    expect(store.player.xp).toBe(25 + 120 + 60)
+    expect(p.onTime).toBe(true)
+    expect(store.stats.projectsOnTime).toBe(1)
+    expect(onTime).toHaveBeenCalledExactlyOnceWith(p)
+  })
+
+  it('過了期限才落成沒有額外獎勵；沒設期限也沒有', () => {
+    const late = store.addProject({ name: '晚了', milestones: ['一'], deadline: '2026-10-20' })
+    const none = store.addProject({ name: '沒期限', milestones: ['一'] })
+    store.toggleMilestone(late.id, late.milestones[0].id)
+    store.toggleMilestone(none.id, none.milestones[0].id)
+    expect(store.player.xp).toBe((25 + 120) * 2)
+    expect(late.onTime).toBeFalsy()
+    expect(store.stats.projectsOnTime).toBe(0)
+  })
+
+  it('列出兩天內到期、還沒落成的專案，最急的在前', () => {
+    const a = store.addProject({ name: '後天', milestones: ['一'], deadline: '2026-10-27' })
+    const b = store.addProject({ name: '今天', milestones: ['一'], deadline: TODAY })
+    store.addProject({ name: '下週', milestones: ['一'], deadline: '2026-11-01' })
+    store.addProject({ name: '已逾期', milestones: ['一'], deadline: '2026-10-20' })
+    expect(store.deadlineSoon().map((x) => [x.project.id, x.days])).toEqual([[b.id, 0], [a.id, 2]])
+  })
+})
+
 describe('例行公事與跨日', () => {
   it('新增每日任務立即生成今天的實例，選明天會生成一次且沿用屬性', () => {
     const routine = store.addRoutine({ title: '澆花', repeat: { type: 'daily' }, priority: 3, tag: 'health' })

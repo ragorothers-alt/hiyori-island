@@ -75,7 +75,7 @@ const emptyStats = () => ({
   tasksDone: 0, highTasksDone: 0, eventsDone: 0, milestonesDone: 0, projectsDone: 0, projectsCreated: 0,
   pomodoros: 0, focusMinutes: 0, bestStreak: 0, perfectDays: 0, earlyTasks: 0, nightTasks: 0,
   questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0, reviews: 0,
-  starsDone: 0, starDays: 0, weeklyClaimed: 0, charmsUsed: 0,
+  starsDone: 0, starDays: 0, weeklyClaimed: 0, charmsUsed: 0, projectsOnTime: 0,
 })
 // 每日紀錄。stars／high／early（中午前）／routines：完成數；tagMask：完成過的分類（位元）；
 // plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數
@@ -223,7 +223,7 @@ function migrate(s) {
     })
     return {
       id: str(p.id), name, color: num(p.color, 0, 99, 0), deadline: ymd(p.deadline, ''), createdAt: ts(p.createdAt) || Date.now(),
-      milestones, completedAt: ts(p.completedAt), archived: !!p.archived, slot: num(p.slot, 0, MAX_PROJECTS - 1, 0),
+      milestones, completedAt: ts(p.completedAt), archived: !!p.archived, slot: num(p.slot, 0, MAX_PROJECTS - 1, 0), onTime: !!p.onTime,
     }
   })
   // 重新分配塔位：重複的換到空地，空地不夠就改為收藏
@@ -422,6 +422,14 @@ export class Store {
   }
   activeProjects() {
     return this.state.projects.filter((p) => !p.archived)
+  }
+  // 期限在兩天內（含今天）還沒落成的專案，最急的在前
+  deadlineSoon() {
+    return this.activeProjects()
+      .filter((p) => p.deadline && !p.completedAt && p.milestones.length)
+      .map((p) => ({ project: p, days: daysBetween(this.today, p.deadline) }))
+      .filter((x) => x.days >= 0 && x.days <= 2)
+      .sort((a, b) => a.days - b.days)
   }
   progress(p) {
     const n = p.milestones.length
@@ -1015,6 +1023,13 @@ export class Store {
     this.stats.projectsDone++
     this._gain(XP.project, fx, { kind: 'project', id: p.id })
     fx.push(['projectDone', p])
+    // 在期限當天或之前落成：額外獎勵
+    if (p.deadline && this.today <= p.deadline) {
+      p.onTime = true
+      this.stats.projectsOnTime++
+      this._gain(XP.onTime, fx, { kind: 'onTime', id: p.id })
+      fx.push(['projectOnTime', p])
+    }
   }
   toggleMilestone(pid, mid) {
     const p = this._find('projects', pid)

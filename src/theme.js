@@ -24,6 +24,7 @@ export const XP = {
   review: 10,
   starAll: 30,
   weekly: 100,
+  onTime: 60,
 }
 
 // 本命：每天最多挑 3 件，完成給雙倍 XP

@@ -1,6 +1,6 @@
 import './styles.css'
 import * as THREE from 'three'
-import { Store, toMin, minToHHMM, repeatLabel } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween } from './store.js'
 import { UI } from './ui.js'
 import { World } from './scene/world.js'
 import { Sky } from './scene/sky.js'
@@ -111,7 +111,9 @@ async function boot() {
       }
       const pct = Math.round(store.progress(p) * 100)
       c.el.style.setProperty('--c', PROJECT_COLORS[p.color % PROJECT_COLORS.length])
-      c.el.innerHTML = `${esc(short(p.name, 10))} <b>${pct === 100 ? '落成' : pct + '%'}</b>`
+      const days = p.deadline && !p.completedAt ? daysBetween(store.today, p.deadline) : null
+      const due = days === null || days > 2 ? '' : days < 0 ? '<i class="due late">逾期</i>' : `<i class="due">${days ? `剩 ${days} 天` : '今天截止'}</i>`
+      c.el.innerHTML = `${esc(short(p.name, 10))} <b>${pct === 100 ? (p.onTime ? '準時落成' : '落成') : pct + '%'}</b>${due}`
     }
   }
 
@@ -135,7 +137,7 @@ async function boot() {
   // ── 場景同步 ──
   function syncScene(animate = true) {
     garden.sync(store.gardenTasks(store.selectedDate), store.selectedDate, store.today)
-    const built = towers.sync(store.activeProjects(), (p) => store.progress(p), animate)
+    const built = towers.sync(store.activeProjects(), (p) => store.progress(p), animate, store.today)
     for (const b of built) {
       const p = store.state.projects.find((x) => x.id === b.id)
       const color = PROJECT_COLORS[(p?.color ?? 0) % PROJECT_COLORS.length]
@@ -603,6 +605,17 @@ async function boot() {
     mochi.say(line('outfit') || '好看嗎？', 3200)
   })
 
+  // ── 專案期限 ──
+  store.on('projectOnTime', (p) => {
+    setTimeout(() => {
+      sfx.chime()
+      const pos = towers.anchor(p.id)
+      if (pos) fx.burst(pos, { colors: ['#ffe08a', '#fff6d6', '#ffffff'], count: 50, speed: 1.6 })
+      ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」準時落成`, sub: `在期限前完成・額外 +${XP.onTime} XP` })
+      mochi.say(line('onTime', { project: short(p.name) }) || '在期限前落成了。', 4200)
+    }, 2600)
+  })
+
   // ── 逾期的花、お守り ──
   store.on('revive', (t) => {
     const pos = garden.anchor(t.id)
@@ -681,9 +694,9 @@ async function boot() {
     let pos = null
     if (kind === 'task' || kind === 'star') pos = garden.anchor(id)
     else if (kind === 'event') pos = ring.anchor(id)
-    else if (kind === 'milestone' || kind === 'project') pos = towers.anchor(id)
+    else if (kind === 'milestone' || kind === 'project' || kind === 'onTime') pos = towers.anchor(id)
     pos ||= mochi.headAnchor()
-    const delay = kind === 'project' ? 900 : kind === 'perfect' || kind === 'starAll' ? 1300 : 150
+    const delay = kind === 'project' ? 900 : kind === 'onTime' ? 1800 : kind === 'perfect' || kind === 'starAll' ? 1300 : 150
     setTimeout(() => floatText(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), `+${amount} XP`, amount >= 40, coins), delay)
   })
   store.on('levelUp', ({ level }) => {
@@ -798,7 +811,9 @@ async function boot() {
         if (ui.maybeAskReview()) return
         const overdue = store.overdue().length
         const todo = store.tasksOn(store.today).filter((t) => !t.done).length
+        const soon = store.deadlineSoon()[0]
         if (overdue) mochi.say(line('wilt', { count: overdue }) || line('overdue', { count: overdue }), 3800)
+        else if (soon) mochi.say(line('deadlineNear', { project: short(soon.project.name), days: soon.days }) || `「${short(soon.project.name)}」快到期囉。`, 4200)
         else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) mochi.say(line('planAsk') || '今天最重要的三件事是什麼？點 ☆ 選起來吧。', 4200)
         else if (!store.tasksOn(store.today).length) mochi.say(line('emptyDay'), 3800)
         else if (LINES.season?.[season]) mochi.say(pick(LINES.season[season]), 3800)
