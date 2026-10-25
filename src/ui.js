@@ -295,6 +295,7 @@ export class UI {
         const i = TAGS.findIndex((x) => x.id === t.tag)
         s.updateTask(id, { tag: TAGS[(i + 1) % TAGS.length].id })
       } else if (act === 'today') s.moveToToday([id])
+      else if (act === 'focus') this.focus.startWith(id)
       else if (!act && !e.target.closest('input')) this.hooks.focusTask(id)
     }
     $('#taskList').addEventListener('click', onList)
@@ -321,6 +322,7 @@ export class UI {
       `<button class="pri pri-${t.priority}" data-act="pri" title="點一下切換優先度">${'◆'.repeat(t.priority)}${'◇'.repeat(3 - t.priority)} ${pri.label}</button>`,
       `<button data-act="tag" title="點一下切換分類">${tag.label}</button>`,
     ]
+    if (t.pomos) meta.push(`<span class="pomo" title="已專注 ${t.pomos} 輪">◷ ${t.pomos}</span>`)
     const rt = this.store.routineOf(t)
     if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
     if (t.done && t.doneAt) meta.push(`<span>${hhmm(t.doneAt)} 綻放</span>`)
@@ -333,6 +335,7 @@ export class UI {
       </div>
       <div class="item-actions">
         ${overdue ? `<button class="mini" data-act="today" title="移到今天">${ICON.today}</button>` : ''}
+        ${!t.done && !overdue && t.date === this.store.today ? `<button class="mini" data-act="focus" title="專注在這件事上">${ICON.play}</button>` : ''}
         <button class="mini" data-act="edit" title="編輯">${ICON.edit}</button>
         <button class="mini" data-act="delete" title="刪除">${ICON.del}</button>
       </div>
@@ -854,19 +857,69 @@ class FocusTimer {
     this.mode = 'idle' // idle | focus | break
     this.endAt = 0
     this.paused = null
+    this.taskId = null
     try {
       const saved = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null')
       if (saved && saved.mode !== 'idle') Object.assign(this, saved)
     } catch {}
     $('#focusBtn').onclick = () => this.toggle()
     $('#focusStop').onclick = () => this.stop()
+    $('#focusLabel').onclick = (e) => {
+      e.stopPropagation()
+      this.togglePicker()
+    }
+    $('#focusPickList').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tid]')
+      if (!b) return
+      this.taskId = b.dataset.tid || null
+      this._save()
+      this.togglePicker(false)
+      this.render()
+      this.hooks.focusTaskChanged?.(this.taskId)
+    })
+    addEventListener('pointerdown', (e) => {
+      if (!$('#focusPick').hidden && !e.target.closest('#focusPick, #focusLabel')) this.togglePicker(false)
+    })
     setInterval(() => this.tick(), 250)
     this.render()
-    if (this.mode === 'focus' && this.paused == null && this.endAt > Date.now()) hooks.focusStarted(true)
+    if (this.mode === 'focus' && this.paused == null && this.endAt > Date.now()) hooks.focusStarted(true, this.task?.id || null)
   }
 
   _save() {
-    localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode: this.mode, endAt: this.endAt, paused: this.paused }))
+    localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode: this.mode, endAt: this.endAt, paused: this.paused, taskId: this.taskId }))
+  }
+
+  // 綁定的任務若已完成或刪除就自動解除
+  get task() {
+    const t = this.taskId && this.ui.store.state.tasks.find((x) => x.id === this.taskId)
+    return t && !t.done ? t : null
+  }
+
+  togglePicker(force) {
+    const open = force ?? $('#focusPick').hidden
+    $('#focusPick').hidden = !open
+    if (!open) return
+    const s = this.ui.store
+    const tasks = s.tasksOn(s.today).filter((t) => !t.done)
+    const cur = this.task?.id
+    $('#focusPickList').innerHTML =
+      `<li><button data-tid="" class="${cur ? '' : 'on'}"><i style="--c:#d8dee8"></i>不指定任務</button></li>` +
+      tasks
+        .map((t) => `<li><button data-tid="${esc(t.id)}" class="${t.id === cur ? 'on' : ''}"><i style="--c:${tagOf(t.tag).color}"></i>${esc(t.title)}${t.pomos ? `<small>◷ ${t.pomos}</small>` : ''}</button></li>`)
+        .join('') +
+      (tasks.length ? '' : '<li class="empty" style="padding:10px">今天沒有待辦的任務</li>')
+  }
+
+  startWith(taskId) {
+    this.taskId = taskId
+    if (this.mode === 'focus') {
+      this._save()
+      this.render()
+      this.hooks.focusTaskChanged?.(taskId)
+      return
+    }
+    if (this.mode === 'break') this.mode = 'idle'
+    this.toggle()
   }
 
   get total() {
@@ -882,7 +935,8 @@ class FocusTimer {
       this.mode = 'focus'
       this.endAt = Date.now() + this.focusMin * 60000
       this.paused = null
-      this.hooks.focusStarted()
+      if (!this.task) this.taskId = null
+      this.hooks.focusStarted(false, this.taskId)
     } else if (this.paused != null) {
       this.endAt = Date.now() + this.paused
       this.paused = null
@@ -909,7 +963,7 @@ class FocusTimer {
         this.mode = 'break'
         this.endAt = Date.now() + this.breakMin * 60000
         this._save()
-        this.hooks.focusFinished(Math.max(1, Math.round(this.focusMin)))
+        this.hooks.focusFinished(Math.max(1, Math.round(this.focusMin)), this.task?.id || null)
       } else {
         this.mode = 'idle'
         this._save()
@@ -928,7 +982,9 @@ class FocusTimer {
     box.classList.toggle('running', this.mode === 'focus')
     box.classList.toggle('break', this.mode === 'break')
     const label = { idle: '專注 · しゅうちゅう', focus: '專注中', break: '休息 · きゅうけい' }[this.mode]
-    $('#focusLabel').textContent = this.paused != null ? '暫停中' : label
+    const t = this.task
+    $('#focusLabel').textContent = this.paused != null ? '暫停中' : t && this.mode !== 'break' ? `◷ ${t.title}` : label
+    $('#focusLabel').classList.toggle('set', !!t && this.mode !== 'break')
     $('#focusIcon').innerHTML = this.mode !== 'idle' && this.paused == null ? ICON.pause : ICON.play
     $('#focusStop').hidden = this.mode === 'idle'
     $('#focusBtn').title = this.mode === 'idle' ? '開始專注 (F)' : this.paused != null ? '繼續' : '暫停'

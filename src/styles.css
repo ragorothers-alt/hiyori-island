@@ -477,6 +477,23 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── 專注任務 ── */
+.focus-task { padding: 0; border-radius: 6px; text-align: left; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; cursor: pointer; }
+.focus-task:hover { color: var(--ink); }
+.focus-task.set { color: #d58a3f; }
+body.night .focus-task.set { color: #ffd38f; }
+.focus-pick { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 41; width: min(340px, calc(100% - 24px)); padding: 12px 12px 8px; background: var(--glass-strong); animation: fadeUp .3s var(--ease); }
+.focus-pick h4 { margin: 0 4px 8px; font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: .08em; display: flex; gap: 8px; align-items: baseline; }
+.focus-pick h4 small { font-size: 10.5px; color: var(--ink-faint); }
+.focus-pick ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 40vh; overflow-y: auto; }
+.focus-pick li button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; font-size: 13px; text-align: left; background: var(--field); }
+.focus-pick li button:hover, .focus-pick li button.on { background: rgba(255, 217, 138, .3); }
+.focus-pick li i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+.focus-pick li small { margin-left: auto; color: var(--ink-faint); font-family: var(--font-num); }
+.pomo { color: #d58a3f; font-family: var(--font-num); }
+body.night .pomo { color: #ffd38f; }
+@media (max-width: 860px) { .focus-pick { bottom: calc(50dvh + 64px); } .focus-task { display: none; } }
+
 /* ── 金平糖 ── */
 .konpeito {
   display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 3px;

@@ -139,6 +139,7 @@ function migrate(s) {
       tag: tags.has(t.tag) ? t.tag : 'life', done, rewarded: !!t.rewarded || done,
       createdAt: ts(t.createdAt) || Date.now(), doneAt: done ? ts(t.doneAt) : null,
       routineId: ID_RE.test(t.routineId) ? t.routineId : null,
+      pomos: num(t.pomos, 0, 99, 0),
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -671,9 +672,11 @@ export class Store {
   }
 
   // ── 專注 / 互動 / 每日任務 ──
-  completePomodoro(minutes) {
+  completePomodoro(minutes, taskId = null) {
     this._refreshToday()
-    const fx = [['pomodoro', { minutes }]]
+    const task = taskId ? this._find('tasks', taskId) : null
+    if (task) task.pomos = (task.pomos || 0) + 1
+    const fx = [['pomodoro', { minutes, task }]]
     this.stats.pomodoros++
     this.stats.focusMinutes += minutes
     const d = this.day()

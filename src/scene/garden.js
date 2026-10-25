@@ -109,7 +109,9 @@ class Plant {
   apply(task, instant = false) {
     this.color = new THREE.Color(tagOf(task.tag).color)
     if (this._priority !== task.priority) this._buildPetals(task.priority)
-    this.group.scale.setScalar(([0.85, 1, 1.25][task.priority - 1] || 1) * 1.65)
+    // 每完成一輪專注，花就長大一點（最多 +40%）
+    const grow = 1 + Math.min(task.pomos || 0, 4) * 0.1
+    this.group.scale.setScalar(([0.85, 1, 1.25][task.priority - 1] || 1) * 1.65 * grow)
     this.baseScale = this.group.scale.x
     const target = task.done ? 1 : 0
     if (instant) {
@@ -159,6 +161,13 @@ export class Garden {
     this.ring.rotation.x = -Math.PI / 2
     this.group.add(this.ring)
     this.highlighted = null
+    this.focusRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.34, 0.46, 48),
+      new THREE.MeshBasicMaterial({ color: '#ffd98a', transparent: true, opacity: 0, depthWrite: false }),
+    )
+    this.focusRing.rotation.x = -Math.PI / 2
+    this.group.add(this.focusRing)
+    this.focusId = null
 
     world.add((dt, t) => {
       for (const p of this.plants.values()) p.update(t, this.sky?.night || 0)
@@ -170,6 +179,15 @@ export class Garden {
         m.opacity += (0.85 - m.opacity) * 0.2
       } else {
         m.opacity *= 0.85
+      }
+      const fp = this.focusId && this.plants.get(this.focusId)
+      const fm = this.focusRing.material
+      if (fp) {
+        this.focusRing.position.set(fp.group.position.x, fp.group.position.y + 0.05, fp.group.position.z)
+        this.focusRing.scale.setScalar(fp.baseScale * (1.25 + Math.sin(t * 2) * 0.12))
+        fm.opacity += (0.75 - fm.opacity) * 0.1
+      } else {
+        fm.opacity *= 0.9
       }
     })
   }
@@ -229,6 +247,10 @@ export class Garden {
 
   highlight(id) {
     this.highlighted = id
+  }
+
+  setFocus(id) {
+    this.focusId = id
   }
 
   anchor(id) {

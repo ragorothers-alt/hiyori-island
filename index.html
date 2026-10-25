@@ -184,7 +184,7 @@
       </button>
       <div class="focus-info">
         <div class="focus-time" id="focusTime">25:00</div>
-        <div class="focus-label" id="focusLabel">專注 · しゅうちゅう</div>
+        <button class="focus-label focus-task" id="focusLabel" title="選一個要專注的任務">專注 · しゅうちゅう</button>
       </div>
       <button class="icon-btn small" id="focusStop" title="結束" hidden><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
     </div>
@@ -210,6 +210,11 @@
     <span id="placeName"></span>
     <button class="chip-toggle" id="placeRotate">旋轉 R</button>
     <button class="chip-toggle" id="placeCancel">取消 Esc</button>
+  </div>
+
+  <div class="focus-pick glass" id="focusPick" hidden>
+    <h4>要專注在哪件事上？<small>しゅうちゅう</small></h4>
+    <ul id="focusPickList"></ul>
   </div>
 
   <div class="toasts" id="toasts"></div>

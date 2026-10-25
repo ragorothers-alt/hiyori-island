@@ -259,21 +259,38 @@ async function boot() {
     resetView: () => world.home(),
     modalClosed: () => world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
-    focusStarted: (resumed) => {
+    focusStarted: (resumed, taskId) => {
       mochi.setFocus(true)
+      garden.setFocus(taskId)
       if (!resumed) {
         sfx.chime()
-        mochi.say(line('focusStart'))
+        const t = taskId && store.state.tasks.find((x) => x.id === taskId)
+        mochi.say(t ? line('focusTask', { task: short(t.title) }) || line('focusStart') : line('focusStart'))
       }
     },
-    focusFinished: (minutes) => {
+    focusTaskChanged: (taskId) => {
+      if (mochi.mode === 'focus') garden.setFocus(taskId)
+      const t = taskId && store.state.tasks.find((x) => x.id === taskId)
+      if (t) {
+        garden.bounce(t.id)
+        if (mochi.mode === 'focus') mochi.say(line('focusTask', { task: short(t.title) }))
+      }
+    },
+    focusFinished: (minutes, taskId) => {
       mochi.setFocus(false)
+      garden.setFocus(null)
       sfx.temple()
       fx.skyLantern(mochi.position.clone().add(new THREE.Vector3(0, 1.4, 0)))
-      store.completePomodoro(minutes)
+      store.completePomodoro(minutes, taskId)
       mochi.celebrate()
       mochi.say(line('focusEnd'))
-      ui.toast({ icon: '灯', title: '專注完成，放一盞天燈', sub: `+${minutes} 分鐘・接著休息一下吧` })
+      const t = taskId && store.state.tasks.find((x) => x.id === taskId)
+      if (t) {
+        const pos = garden.anchor(t.id)
+        if (pos) fx.burst(pos, { colors: ['#fff1b8', '#ffd98a', '#ffffff'], count: 36, speed: 1.4 })
+        garden.bounce(t.id)
+      }
+      ui.toast({ icon: '灯', title: '專注完成，放一盞天燈', sub: t ? `「${short(t.title, 10)}」長大了一點・休息一下吧` : `+${minutes} 分鐘・接著休息一下吧` })
     },
     breakFinished: () => {
       sfx.chime()
@@ -282,6 +299,7 @@ async function boot() {
     },
     focusStopped: () => {
       mochi.setFocus(false)
+      garden.setFocus(null)
       mochi.say('沒關係，下次再一起專注。')
     },
   }
