@@ -20,6 +20,7 @@ import { Reminders, systemNotify } from './reminders.js'
 import { FileSync } from './sync.js'
 import { LINES } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
+import { RARITIES } from './data/flowers.js'
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const short = (s, n = 9) => ([...s].length > n ? [...s].slice(0, n - 1).join('') + '…' : s)
@@ -132,7 +133,7 @@ async function boot() {
 
   // ── 場景同步 ──
   function syncScene(animate = true) {
-    garden.sync(store.tasksOn(store.selectedDate), store.selectedDate)
+    garden.sync(store.gardenTasks(store.selectedDate), store.selectedDate, store.today)
     const built = towers.sync(store.activeProjects(), (p) => store.progress(p), animate)
     for (const b of built) {
       const p = store.state.projects.find((x) => x.id === b.id)
@@ -186,7 +187,7 @@ async function boot() {
   const aimAt = (ray) => {
     const p = ray.intersectPlane(ground, new THREE.Vector3())
     if (!p) return null
-    const ok = spotFree(p.x, p.z, store.state.placed, placing.moveId)
+    const ok = spotFree(p.x, p.z, store.state.placed, placing.moveId, placing.key, decor.footprints())
     placing.x = p.x
     placing.z = p.z
     placing.ok = ok
@@ -506,8 +507,8 @@ async function boot() {
     }, 50)
   })
   store.on('taskDone', (t) => {
-    if (t.date !== store.selectedDate) return
     const pos = garden.anchor(t.id)
+    if (!pos) return
     const color = tagOf(t.tag).color
     sfx.bloom(t.priority)
     if (pos) {
@@ -516,6 +517,58 @@ async function boot() {
       mochi.visit(pos, () => fx.burst(pos.clone().add(new THREE.Vector3(0, 0.3, 0)), { colors: ['#fff6d6', '#ffffff'], count: 16, speed: 1.2, size: 0.16 }))
     }
     mochi.say(line(t.star ? 'starDone' : t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) }))
+  })
+
+  // ── 花の図鑑：新品種或稀有的花 ──
+  store.on('flower', ({ flower, task, isNew }) => {
+    const r = RARITIES[flower.rarity]
+    const rare = flower.rarity === 'rare' || flower.rarity === 'legend'
+    setTimeout(() => {
+      if (rare) {
+        sfx.chime()
+        const pos = task.date === store.selectedDate && garden.anchor(task.id)
+        if (pos) {
+          fx.burst(pos, { colors: ['#fff6d6', r.color, '#ffffff'], count: flower.rarity === 'legend' ? 90 : 60, speed: 1.8 })
+          fx.ripple(pos.clone().setY(0.1), r.color, 2)
+        }
+      }
+      ui.toast({ icon: '花', title: isNew ? `圖鑑新發現：${flower.name}` : `開出了${r.label}的${flower.name}`, sub: `${r.label}・${flower.desc}`, ms: 5200 })
+      if (isNew || rare) mochi.say(line(isNew ? 'newFlower' : 'rareFlower', { flower: flower.name }) || `是${flower.name}呢。`, 4000)
+    }, 1500)
+  })
+
+  // ── 每週挑戰 ──
+  store.on('questProgress', () => ui.renderQuests())
+  store.on('weeklyReady', (w) => {
+    ui.toast({ icon: '週', title: `每週挑戰「${w.title}」達成`, sub: '到左下角領取限定擺飾吧', ms: 5200 })
+    mochi.say(line('weeklyReady') || '這週的挑戰完成了。')
+  })
+  store.on('weeklyClaimed', ({ item }) => {
+    sfx.fanfare()
+    fx.fireworks(new THREE.Vector3(0, 0, 0), 3)
+    if (item) {
+      ui.toast({ icon: '週', title: `拿到每週限定「${item.name}」`, sub: '到商店可以免費擺一件', ms: 5600 })
+      mochi.say(line('weeklyClaimed', { item: item.name }) || `${item.name}，這週的小紀念。`, 4200)
+    } else ui.toast({ icon: '週', title: '每週挑戰完成', sub: '限定擺飾都收齊了，改送 40 顆金平糖' })
+  })
+
+  // ── 逾期的花、お守り ──
+  store.on('revive', (t) => {
+    const pos = garden.anchor(t.id)
+    if (pos) setTimeout(() => fx.burst(pos, { colors: ['#d9f5c8', '#ffffff', '#a8e0b0'], count: 30, speed: 1.2, up: 1.4 }), 300)
+    setTimeout(() => mochi.say(line('revive') || '晚一點也沒關係，花開了。', 3800), 1200)
+  })
+  store.on('charmBought', ({ charms }) => {
+    sfx.chime()
+    ui.toast({ icon: '守', title: '買了一個お守り', sub: `漏掉一天時會自動保住連續天數・身上 ${charms} 個` })
+    mochi.say(line('charmBuy') || 'お守り收好了。')
+  })
+  store.on('charmUsed', ({ used, streak, left }) => {
+    setTimeout(() => {
+      sfx.chime()
+      ui.toast({ icon: '守', title: `お守り保住了連續 ${streak} 天`, sub: `漏掉的 ${used} 天用掉 ${used} 個・還剩 ${left} 個`, ms: 6000 })
+      mochi.say(line('charmUsed', { streak }) || `連續 ${streak} 天，還在喔。`, 4200)
+    }, 2600)
   })
 
   // ── 本命 ──
@@ -592,8 +645,9 @@ async function boot() {
         setTimeout(() => fx.burst(pos, { colors: ['#ffffff', '#ffe3ec', '#d9efff'], count: 60, speed: 2.4 }), 500)
       }
       if (unlock) {
-        const target = decor.anchor(unlock.key)
-        if (target && unlock.key !== 'islet') world.flyTo(target.clone().add(new THREE.Vector3(0, 1, 0)), 13)
+        // 鏡頭對準新景觀的實際位置，距離依大小調整（天空中的大型景觀要拉遠才看得到全貌）
+        const b = decor.bounds(unlock.key)
+        if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, b.size * 1.15)))
       }
       fx.fireworks(new THREE.Vector3(0, 0, 0), 4)
       mochi.celebrate()
@@ -693,7 +747,7 @@ async function boot() {
         if (ui.maybeAskReview()) return
         const overdue = store.overdue().length
         const todo = store.tasksOn(store.today).filter((t) => !t.done).length
-        if (overdue) mochi.say(line('overdue', { count: overdue }), 3800)
+        if (overdue) mochi.say(line('wilt', { count: overdue }) || line('overdue', { count: overdue }), 3800)
         else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) mochi.say(line('planAsk') || '今天最重要的三件事是什麼？點 ☆ 選起來吧。', 4200)
         else if (!store.tasksOn(store.today).length) mochi.say(line('emptyDay'), 3800)
         else if (LINES.season?.[season]) mochi.say(pick(LINES.season[season]), 3800)
@@ -723,6 +777,8 @@ async function boot() {
     installEvt = null
     installRow.hidden = true
   }
+
+  store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
   window.hiyori = { store, world, sky, mochi, fx, decor, ui, placed, fileSync }

@@ -3,7 +3,9 @@
 
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { SHOP_ITEMS } from './data/shop.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP } from './theme.js'
+import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
+import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM } from './theme.js'
 
 const KEY = 'hiyori-daily-v1'
 
@@ -35,6 +37,14 @@ export function repeatMatches(rep, date) {
   if (rep.type === 'weekdays') return d >= 1 && d <= 5
   return rep.days.includes(d)
 }
+// 季節（與 scene/season.js 的 seasonOf 相同規則；store 不依賴場景模組）
+export function seasonKey(date) {
+  const m = parseDate(date).getMonth() + 1
+  return m >= 3 && m <= 5 ? 'spring' : m >= 6 && m <= 8 ? 'summer' : m >= 9 && m <= 11 ? 'autumn' : 'winter'
+}
+export const SEASON_ZH = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }
+export const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000)
+
 export function repeatLabel(rep) {
   if (rep.type === 'daily') return '每天'
   if (rep.type === 'weekdays') return '平日'
@@ -44,17 +54,27 @@ export function repeatLabel(rep) {
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
 export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true }
 
-export const QUESTS = [
-  { id: 'tasks3', title: '讓三朵花綻放', sub: '完成 3 個任務', goal: 3, val: (d) => d.tasks },
-  { id: 'focus2', title: '靜心兩回', sub: '完成 2 個番茄鐘', goal: 2, val: (d) => d.pomodoros },
-  { id: 'step1', title: '向前一步', sub: '完成 1 個日程或里程碑', goal: 1, val: (d) => d.events + d.milestones },
-]
+// 舊版固定的三個每日任務（舊存檔沿用）
+const LEGACY_QUESTS = ['tasks3', 'focus2', 'step1']
+const hash01 = (str) => {
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return ((h >>> 0) % 1000003) / 1000003
+}
+// 一週從星期一開始；回傳那週星期一的日期
+export function weekKey(date) {
+  const d = parseDate(date)
+  return addDays(date, -((d.getDay() + 6) % 7))
+}
 
 const emptyStats = () => ({
   tasksDone: 0, highTasksDone: 0, eventsDone: 0, milestonesDone: 0, projectsDone: 0, projectsCreated: 0,
   pomodoros: 0, focusMinutes: 0, bestStreak: 0, perfectDays: 0, earlyTasks: 0, nightTasks: 0,
   questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0, reviews: 0,
-  starsDone: 0, starDays: 0,
+  starsDone: 0, starDays: 0, weeklyClaimed: 0, charmsUsed: 0,
 })
 // 每日紀錄。stars／high／early（中午前）／routines：完成數；tagMask：完成過的分類（位元）；
 // plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數
@@ -101,10 +121,12 @@ function seed() {
         completedAt: null, archived: false,
       },
     ],
-    player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {} },
+    player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {}, unlocked: {}, freebies: {}, charms: 0 },
     placed: [],
     routines: [],
     journal: {},
+    dex: {},
+    weekly: {},
     history: {},
     quests: {},
     settings: { ...DEFAULT_SETTINGS },
@@ -153,6 +175,7 @@ function migrate(s) {
       routineId: ID_RE.test(t.routineId) ? t.routineId : null,
       pomos: num(t.pomos, 0, 99, 0),
       star: !!t.star,
+      flower: flowerOf(t.flower) ? t.flower : null,
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -223,12 +246,17 @@ function migrate(s) {
     // 舊存檔沒有金平糖：依現有經驗值換算一筆起始金額
     xp, coins: ps.coins === undefined ? Math.round(xp / 5) : num(ps.coins, 0, 1e9, 0), streak: num(ps.streak, 0, 1e6, 0),
     lastActive: DATE_RE.test(ps.lastActive) ? ps.lastActive : null, stats, achievements,
+    unlocked: {}, freebies: {}, charms: num(ps.charms, 0, CHARM.max, 0),
   }
 
   const shopKeys = new Set(SHOP_ITEMS.map((i) => i.key))
+  for (const k of ['unlocked', 'freebies']) {
+    if (!isObj(ps[k])) continue
+    for (const [key, v] of Object.entries(ps[k])) if (shopKeys.has(key)) player[k][key] = k === 'unlocked' ? !!v : num(v, 0, 99, 0)
+  }
   const placed = cleanList(s.placed, (p) => {
     if (!shopKeys.has(p.key) || !Number.isFinite(+p.x) || !Number.isFinite(+p.z)) return null
-    return { id: str(p.id), key: p.key, x: Math.max(-9, Math.min(9, +p.x)), z: Math.max(-9, Math.min(9, +p.z)), rot: Number.isFinite(+p.rot) ? +p.rot : 0 }
+    return { id: str(p.id), key: p.key, x: Math.max(-9, Math.min(9, +p.x)), z: Math.max(-9, Math.min(9, +p.z)), rot: Number.isFinite(+p.rot) ? +p.rot : 0, free: !!p.free }
   })
 
   const history = {}
@@ -239,6 +267,20 @@ function migrate(s) {
       for (const k of DAY_NUMS) h[k] = num(v[k], 0, 1e7, 0)
       for (const k of DAY_FLAGS) h[k] = !!v[k]
       history[d] = h
+    }
+  }
+  // 花の圖鑑：{ 花的 key: { at: 第一次開出的日期, n: 開過幾朵 } }
+  const dex = {}
+  if (isObj(s.dex)) {
+    for (const [k, v] of Object.entries(s.dex)) if (flowerOf(k) && isObj(v)) dex[k] = { at: ymd(v.at, today), n: num(v.n, 1, 1e6, 1) }
+  } else {
+    // 舊存檔：已完成的任務算作開過該分類的常見花
+    for (const t of tasks) {
+      if (!t.done) continue
+      const k = t.flower || COMMON_BY_TAG[t.tag]
+      dex[k] ||= { at: t.date, n: 0 }
+      dex[k].n++
+      if (t.date < dex[k].at) dex[k].at = t.date
     }
   }
   const moodKeys = new Set(MOODS.map((m) => m.key))
@@ -253,9 +295,17 @@ function migrate(s) {
   if (isObj(s.quests)) {
     for (const [d, v] of Object.entries(s.quests)) {
       if (!DATE_RE.test(d) || !isObj(v)) continue
-      quests[d] = {}
-      for (const q of QUESTS) if (v[q.id]) quests[d][q.id] = true
+      const legacy = !Array.isArray(v.ids)
+      const ids = (legacy ? LEGACY_QUESTS : v.ids.filter((id) => questOf(id))).slice(0, 3)
+      const src = legacy ? v : isObj(v.claimed) ? v.claimed : {}
+      const claimed = {}
+      for (const id of ids) if (src[id]) claimed[id] = true
+      if (ids.length) quests[d] = { ids, claimed }
     }
+  }
+  const weekly = {}
+  if (isObj(s.weekly)) {
+    for (const [w, v] of Object.entries(s.weekly)) if (DATE_RE.test(w) && isObj(v) && weeklyOf(v.id)) weekly[w] = { id: v.id, claimed: !!v.claimed }
   }
   const settings = { ...DEFAULT_SETTINGS }
   if (isObj(s.settings)) {
@@ -266,7 +316,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, routines, placed, journal, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0 }
+  return { version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, settings, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0 }
 }
 
 export class Store {
@@ -275,8 +325,12 @@ export class Store {
     this.state = this._load()
     this.today = dateStr()
     this.selectedDate = this.today
-    if (this._ensureRoutines(this.today).length) this.save(false)
+    this._pending = []
+    this._applyCharms()
+    const made = this._ensureRoutines(this.today).length
+    if (this._ensureQuests() || made) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
+    this._weeklyReady = this.weekly()?.ready
   }
 
   // ── 事件 ──
@@ -341,6 +395,16 @@ export class Store {
   overdue() {
     return this.state.tasks.filter((t) => !t.done && t.date < this.today)
   }
+  // 花圃要種的任務：那天的任務；看今天時，再加上最近 7 天還沒完成的（花會垂下）與今天才補完成的逾期任務
+  gardenTasks(date) {
+    const list = this.tasksOn(date)
+    if (date !== this.today) return list
+    const since = addDays(this.today, -7)
+    const late = this.state.tasks.filter(
+      (t) => t.date < this.today && t.date >= since && (!t.done || (t.doneAt && dateStr(new Date(t.doneAt)) === this.today)),
+    )
+    return [...list, ...late]
+  }
   eventsOn(date) {
     return this.state.events.filter((e) => e.date === date).sort((a, b) => toMin(a.start) - toMin(b.start))
   }
@@ -352,15 +416,97 @@ export class Store {
     return n ? p.milestones.filter((m) => m.done).length / n : 0
   }
   statsSnapshot() {
-    return { ...this.stats, level: this.level.level, streak: this.streak }
+    const found = Object.keys(this.state.dex)
+    return {
+      ...this.stats, level: this.level.level, streak: this.streak,
+      flowersFound: found.length, legendFound: found.filter((k) => flowerOf(k)?.rarity === 'legend').length,
+    }
+  }
+  // 任務開的花（舊任務沒有記錄時，用該分類的常見花）
+  flowerOfTask(t) {
+    return flowerOf(t.flower) || flowerOf(COMMON_BY_TAG[t.tag])
   }
   quests() {
     const d = this.peekDay(this.today)
-    const claimed = this.state.quests[this.today] || {}
-    return QUESTS.map((q) => {
+    const entry = this.state.quests[this.today]
+    if (!entry) return []
+    return entry.ids.map((id) => {
+      const q = questOf(id)
       const v = Math.min(q.goal, q.val(d))
-      return { ...q, value: v, ready: v >= q.goal, claimed: !!claimed[q.id] }
+      return { ...q, value: v, ready: v >= q.goal, claimed: !!entry.claimed[id] }
     })
+  }
+  // 依日期抽今天的三個每日任務（簡單／普通／挑戰各一，避開昨天同一格抽過的），抽過就固定
+  _ensureQuests() {
+    const date = this.today
+    if (this.state.quests[date]) return false
+    const ctx = {
+      hour: new Date().getHours(),
+      events: this.eventsOn(date).length,
+      routineTasks: this.tasksOn(date).filter((t) => t.routineId).length,
+      projects: this.activeProjects().filter((p) => !p.completedAt).length,
+    }
+    const yesterday = this.state.quests[addDays(date, -1)]?.ids || []
+    const ids = QUEST_TIERS.map((tier) => {
+      let pool = DAILY_QUESTS.filter((q) => q.tier === tier && (!q.need || q.need(ctx)))
+      if (pool.length > 1) pool = pool.filter((q) => !yesterday.includes(q.id))
+      return pool[Math.floor(hash01(date + tier) * pool.length)].id
+    })
+    this.state.quests[date] = { ids, claimed: {} }
+    return true
+  }
+
+  // ── 每週挑戰 ──
+  // 這週（星期一到今天）的累計
+  weekStats(wk = weekKey(this.today)) {
+    const w = { activeDays: 0, tasks: 0, focus: 0, starAllDays: 0, reviews: 0, perfectDays: 0, questsClaimed: 0, rare: 0 }
+    for (let i = 0; i < 7; i++) {
+      const date = addDays(wk, i)
+      if (date > this.today) break
+      const h = this.peekDay(date)
+      if (h.tasks) w.activeDays++
+      w.tasks += h.tasks
+      w.focus += h.focus
+      w.rare += h.rare
+      if (h.starAll) w.starAllDays++
+      if (h.perfect) w.perfectDays++
+      if (this.state.journal[date]) w.reviews++
+      w.questsClaimed += Object.keys(this.state.quests[date]?.claimed || {}).length
+    }
+    return w
+  }
+  weekly() {
+    const wk = weekKey(this.today)
+    let entry = this.state.weekly[wk]
+    if (!entry) {
+      // 依週次抽一個，避開上週同一個
+      const last = this.state.weekly[addDays(wk, -7)]?.id
+      const pool = WEEKLY_QUESTS.filter((q) => q.id !== last)
+      entry = this.state.weekly[wk] = { id: pool[Math.floor(hash01(wk) * pool.length)].id, claimed: false }
+    }
+    const q = weeklyOf(entry.id)
+    const value = Math.min(q.goal, q.val(this.weekStats(wk)))
+    return { ...q, week: wk, value, ready: value >= q.goal, claimed: entry.claimed, daysLeft: 6 - daysBetween(wk, this.today) }
+  }
+  // 下一件還沒拿到的每週限定擺飾
+  nextExclusive() {
+    return SHOP_ITEMS.find((i) => i.exclusive && !this.state.player.unlocked[i.key]) || null
+  }
+  claimWeekly() {
+    this._refreshToday()
+    const q = this.weekly()
+    if (!q.ready || q.claimed) return
+    this.state.weekly[q.week].claimed = true
+    this.stats.weeklyClaimed++
+    const item = this.nextExclusive()
+    const p = this.state.player
+    const fx = [['weeklyClaimed', { quest: q, item }]]
+    if (item) {
+      p.unlocked[item.key] = true
+      p.freebies[item.key] = (p.freebies[item.key] || 0) + 1
+    } else p.coins += 40 // 限定品都拿過了：改送金平糖
+    this._gain(XP.weekly, fx, { kind: 'weekly' })
+    this._finish(fx)
   }
 
   // ── 內部 ──
@@ -394,6 +540,9 @@ export class Store {
       if (q.ready && !q.claimed && !this._readyQuests.has(q.id)) fx.push(['questReady', q])
       if (q.ready) this._readyQuests.add(q.id)
     }
+    const wq = this.weekly()
+    if (wq.ready && !wq.claimed && !this._weeklyReady) fx.push(['weeklyReady', wq])
+    this._weeklyReady = wq.ready
     this.save()
     this.emit('change')
     if (this._dayChanged) {
@@ -401,6 +550,12 @@ export class Store {
       this.emit('dateChanged', this.selectedDate)
     }
     for (const [type, payload] of fx) this.emit(type, payload)
+    this.flushPending()
+  }
+  // 換日時發生、但當下還沒人聽的事件（例如お守り生效），等介面接好再送
+  flushPending() {
+    const list = this._pending.splice(0)
+    for (const [type, payload] of list) this.emit(type, payload)
   }
   _find(list, id) {
     return this.state[list].find((x) => x.id === id)
@@ -424,6 +579,9 @@ export class Store {
     this._dayChanged = true
     this._ensureRoutines(now)
     if (this.selectedDate !== now) this._ensureRoutines(this.selectedDate)
+    this._ensureQuests()
+    this._applyCharms()
+    this._weeklyReady = this.weekly()?.ready
     return true
   }
   tick() {
@@ -432,6 +590,7 @@ export class Store {
     this.save(false)
     this.emit('change')
     this.emit('dateChanged', this.selectedDate)
+    this.flushPending()
     return true
   }
 
@@ -441,6 +600,7 @@ export class Store {
     if (!MOODS.some((m) => m.key === mood)) return
     const first = !this.state.journal[date]
     this.state.journal[date] = { mood, text: String(text || '').trim().slice(0, 140), at: Date.now() }
+    if (date === this.today) this.day().review = 1
     const fx = [['reviewSaved', { date, mood, first }]]
     if (first) {
       this.stats.reviews++
@@ -454,19 +614,57 @@ export class Store {
       .slice(0, n)
   }
 
+  // ── お守り ──
+  // 換日時：如果昨天（或更早）漏掉了，而お守り夠用，就替漏掉的每一天用掉一個，連續天數保住
+  _applyCharms() {
+    const p = this.state.player
+    if (!p.lastActive || !p.streak || !p.charms) return
+    const missed = daysBetween(p.lastActive, this.today) - 1
+    if (missed < 1 || missed > p.charms) return
+    p.charms -= missed
+    p.stats.charmsUsed += missed
+    p.lastActive = addDays(this.today, -1)
+    this._pending.push(['charmUsed', { used: missed, streak: p.streak, left: p.charms }])
+    this.save(false)
+  }
+  buyCharm() {
+    const p = this.state.player
+    if (p.charms >= CHARM.max) return
+    if (p.coins < CHARM.price) {
+      this.emit('shopPoor', { name: 'お守り', price: CHARM.price })
+      return
+    }
+    p.coins -= CHARM.price
+    p.charms++
+    this._finish([['charmBought', { charms: p.charms }]])
+  }
+
   // ── 金平糖商店 ──
   get coins() {
     return this.state.player.coins
   }
+  // 商品現在能不能買：等級、季節、每週限定（還沒拿到就不顯示）；有免費券時價格為 0
+  shopStatus(item) {
+    const pl = this.state.player
+    const free = (pl.freebies[item.key] || 0) > 0
+    if (item.exclusive && !pl.unlocked[item.key]) return { hidden: true, ok: false, price: item.price }
+    if ((item.level || 1) > this.level.level) return { ok: false, price: item.price, lock: `Lv.${item.level} 上架` }
+    if (item.season && item.season !== seasonKey(this.today) && !free) return { ok: false, price: item.price, lock: `${SEASON_ZH[item.season]}天限定` }
+    const price = free ? 0 : item.price
+    return { ok: this.coins >= price, price, free }
+  }
   placeItem(key, x, z, rot = 0) {
     const item = SHOP_ITEMS.find((i) => i.key === key)
     if (!item) return null
-    if (this.coins < item.price) {
+    const st = this.shopStatus(item)
+    if (st.hidden || st.lock) return null
+    if (this.coins < st.price) {
       this.emit('shopPoor', item)
       return null
     }
-    this.state.player.coins -= item.price
-    const p = { id: uid(), key, x, z, rot }
+    if (st.free) this.state.player.freebies[key]--
+    else this.state.player.coins -= item.price
+    const p = { id: uid(), key, x, z, rot, free: !!st.free }
     this.state.placed.push(p)
     this.stats.itemsBought++
     this._finish([['itemPlaced', { item, placed: p }]])
@@ -482,7 +680,9 @@ export class Store {
     const p = this._find('placed', id)
     if (!p) return
     const item = SHOP_ITEMS.find((i) => i.key === p.key)
-    const refund = Math.floor((item?.price || 0) / 2)
+    // 用免費券擺的：收起來就把券還回去
+    const refund = p.free ? 0 : Math.floor((item?.price || 0) / 2)
+    if (p.free) this.state.player.freebies[p.key] = (this.state.player.freebies[p.key] || 0) + 1
     this.state.placed = this.state.placed.filter((x) => x.id !== id)
     this.state.player.coins += refund
     this._finish([['itemStored', { item, refund }]])
@@ -576,6 +776,7 @@ export class Store {
     const fx = []
     if (t.done) {
       fx.push(['taskDone', t])
+      if (t.date < this.today) fx.push(['revive', t])
       if (!t.rewarded) {
         t.rewarded = true
         const s = this.stats
@@ -603,6 +804,7 @@ export class Store {
         if (tired) xp = Math.ceil(xp / 2)
         if (d.tasks === SOFT_CAP + 1) fx.push(['tired', { count: d.tasks }])
         this._gain(xp, fx, { kind: t.star ? 'star' : 'task', id: t.id, tired })
+        this._bloom(t, d, fx)
         if (t.star) {
           fx.push(['starDone', t])
           const stars = this.starsOn(this.today)
@@ -628,6 +830,25 @@ export class Store {
       fx.push(['taskUndone', t])
     }
     this._finish(fx)
+  }
+  // 決定這個任務開出的花，記進圖鑑
+  _bloom(t, d, fx) {
+    const list = this.tasksOn(t.date)
+    const c = {
+      tag: t.tag, priority: t.priority, star: !!t.star, pomos: t.pomos || 0, routine: !!t.routineId,
+      hour: new Date().getHours(), season: seasonKey(this.today), streak: this.streak,
+      late: t.date < this.today ? daysBetween(t.date, this.today) : 0,
+      perfect: t.date === this.today && !d.perfect && list.length >= 3 && list.every((x) => x.done),
+    }
+    t.flower = rollFlower(c, t.id)
+    const f = flowerOf(t.flower)
+    const e = this.state.dex[f.key]
+    const isNew = !e
+    if (e) e.n++
+    else this.state.dex[f.key] = { at: this.today, n: 1 }
+    const rare = f.rarity === 'rare' || f.rarity === 'legend'
+    if (rare) d.rare++
+    if (isNew || rare) fx.push(['flower', { flower: f, task: t, isNew }])
   }
   updateTask(id, patch) {
     const t = this._find('tasks', id)
@@ -783,18 +1004,24 @@ export class Store {
     this._finish(fx)
   }
   pet() {
+    this._refreshToday()
     this.stats.pets++
-    // 摸摸不需要重繪面板（避免打斷正在輸入的欄位），除非剛好解鎖成就
+    this.day().pets++
+    // 摸摸不需要重繪面板（避免打斷正在輸入的欄位），除非剛好解鎖成就或達成每日任務
     const snap = this.statsSnapshot()
     const unlocked = ACHIEVEMENTS.some((a) => !this.state.player.achievements[a.id] && (snap[a.cond.stat] ?? 0) >= a.cond.gte)
-    if (unlocked) this._finish()
-    else this.save()
+    const quest = this.quests().some((q) => q.ready && !this._readyQuests.has(q.id))
+    if (unlocked || quest) this._finish()
+    else {
+      this.save()
+      this.emit('questProgress')
+    }
   }
   claimQuest(qid) {
     this._refreshToday()
     const q = this.quests().find((x) => x.id === qid)
     if (!q || !q.ready || q.claimed) return
-    ;(this.state.quests[this.today] ||= {})[qid] = true
+    this.state.quests[this.today].claimed[qid] = true
     this.stats.questsClaimed++
     const fx = [['questClaimed', q]]
     this._gain(XP.quest, fx, { kind: 'quest', id: qid })
@@ -827,8 +1054,10 @@ export class Store {
     this.today = dateStr()
     this._ensureRoutines(this.today)
     if (this.selectedDate !== this.today) this._ensureRoutines(this.selectedDate)
+    this._ensureQuests()
     this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
+    this._weeklyReady = this.weekly()?.ready
     this.emit('dirty')
     this.emit('change')
     this.emit('reload')

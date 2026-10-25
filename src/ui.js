@@ -1,9 +1,11 @@
-import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, MOODS, moodOf, MAX_STARS, XP } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel } from './store.js'
+import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { renderThumbnails } from './scene/placed.js'
+import { renderFlowerThumbs } from './scene/garden.js'
+import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -120,6 +122,7 @@ export class UI {
     $('#shopBtn').onclick = () => this.toggleShop()
     $('#shopClose').onclick = () => this.toggleShop(false)
     $('#shopGrid').addEventListener('click', (e) => {
+      if (e.target.closest('[data-charm]:not(:disabled)')) return this.store.buyCharm()
       const b = e.target.closest('[data-key]')
       if (!b || b.disabled) return
       this.toggleShop(false)
@@ -129,6 +132,7 @@ export class UI {
       el.addEventListener('click', (e) => {
         const b = e.target.closest('[data-q]')
         if (b) this.store.claimQuest(b.dataset.q)
+        if (e.target.closest('[data-weekly]')) this.store.claimWeekly()
       })
     }
     $('#modalClose').onclick = () => this.closeModal()
@@ -736,6 +740,48 @@ export class UI {
     $('#syncDot').dataset.state = sy.state
   }
 
+  // ── 花の図鑑 ──
+  renderDex() {
+    const dex = this.store.state.dex
+    const order = (f) => RARITY_ORDER.length - RARITY_ORDER.indexOf(f.rarity)
+    const list = [...FLOWERS].sort((a, b) => order(a) - order(b))
+    const thumbs = renderFlowerThumbs(FLOWERS.map((f) => f.key))
+    const found = list.filter((f) => dex[f.key]).length
+    $('#dexCount').textContent = `${found} / ${FLOWERS.length}`
+    $('#dexGrid').innerHTML = list
+      .map((f) => {
+        const got = dex[f.key]
+        return `<button class="dex-cell ${got ? '' : 'unknown'} ${this.dexSel === f.key ? 'on' : ''}" data-k="${f.key}" style="--rc:${RARITIES[f.rarity].color}">
+          <img src="${thumbs[f.key]}" alt="" draggable="false" /><span>${got ? esc(f.name) : '？？？'}</span></button>`
+      })
+      .join('')
+    this._renderDexDetail()
+  }
+
+  _renderDexDetail() {
+    const f = flowerOf(this.dexSel)
+    if (!f) return
+    const got = this.store.state.dex[f.key]
+    const r = RARITIES[f.rarity]
+    const tag = `<i class="rarity" style="--rc:${r.color}">${r.label}</i>`
+    if (!got) {
+      $('#dexDetail').innerHTML = `<b>？？？</b>${tag}<p>線索：${esc(f.hint)}</p>`
+      return
+    }
+    const d = parseDate(got.at)
+    $('#dexDetail').innerHTML = `<b>${esc(f.name)}</b><small>${esc(f.jp)}</small>${tag}<p>${esc(f.desc)}</p><small>${d.getMonth() + 1}/${d.getDate()} 第一次開花・開過 ${got.n} 朵</small>`
+  }
+
+  _bindDex() {
+    $('#dexGrid').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-k]')
+      if (!b) return
+      this.dexSel = b.dataset.k
+      $$('#dexGrid .dex-cell').forEach((x) => x.classList.toggle('on', x === b))
+      this._renderDexDetail()
+    })
+  }
+
   // ── 晚間回顧 ──
   _bindReview() {
     $('#moodPick').innerHTML = MOODS.map(
@@ -804,6 +850,7 @@ export class UI {
 
   _bindRecords() {
     this._bindReview()
+    this._bindDex()
     $('#powerBtn').onclick = () => {
       const on = !this.store.state.settings.powerSave
       this.store.setSetting('powerSave', on)
@@ -859,6 +906,7 @@ export class UI {
       .join('')
 
     this.renderSettings()
+    this.renderDex()
     const entries = s.journalList(14)
     $('#journalTitle').hidden = !entries.length
     $('#journalList').innerHTML = entries
@@ -897,6 +945,8 @@ export class UI {
     $('#xpFill').style.width = `${(lv.cur / lv.need) * 100}%`
     $('#xpText').textContent = `${lv.cur} / ${lv.need} XP`
     $('#streak').textContent = s.streak
+    $('#charms').textContent = s.player.charms
+    $('#charmPill').hidden = !s.player.charms
     $('#coins').textContent = s.coins
     if (!$('#shop').hidden) this.renderShop()
 
@@ -911,21 +961,30 @@ export class UI {
     $('#soundBtn').classList.toggle('off', !sound)
     $('#soundBtn').title = sound ? '音效：開' : '音效：關'
 
-    $('#questList').innerHTML = $('#questMini').innerHTML = s
-      .quests()
-      .map((q) => {
-        const act = q.claimed
-          ? `<span class="q-done">済</span>`
-          : q.ready
-            ? `<button class="q-claim" data-q="${q.id}">領取</button>`
-            : `<span class="q-xp">+30 XP</span>`
-        return `<li class="quest ${q.claimed ? 'claimed' : ''}" title="${q.sub}">
-          <span>${q.title} <small style="color:var(--ink-faint)">${q.value}/${q.goal}</small></span>
+    this.renderQuests()
+  }
+
+  // 每日任務（每天輪替三個）＋每週挑戰
+  renderQuests() {
+    const s = this.store
+    const row = (q, act, cls = '', badge = '') => `<li class="quest ${cls} ${q.claimed ? 'claimed' : ''}">
+          <span>${badge}${esc(q.title)} <small class="q-n">${q.value}/${q.goal}</small><em class="q-sub">${esc(q.sub)}</em></span>
           <div class="q-act">${act}</div>
           <div class="q-bar"><i style="width:${(q.value / q.goal) * 100}%"></i></div>
         </li>`
-      })
-      .join('')
+    const daily = s.quests().map((q) =>
+      row(q, q.claimed ? `<span class="q-done">済</span>` : q.ready ? `<button class="q-claim" data-q="${q.id}">領取</button>` : `<span class="q-xp">+${XP.quest} XP</span>`),
+    )
+    const w = s.weekly()
+    const item = s.nextExclusive()
+    const prize = item ? `限定「${item.name}」` : '40 顆金平糖'
+    const wAct = w.claimed
+      ? `<span class="q-done">済</span>`
+      : w.ready
+        ? `<button class="q-claim" data-weekly="1">領取</button>`
+        : `<span class="q-xp" title="獎勵：+${XP.weekly} XP＋${esc(prize)}">${w.daysLeft ? `剩 ${w.daysLeft} 天` : '今天截止'}</span>`
+    const weekly = row({ ...w, sub: `${w.sub}・獎勵 ${prize}` }, wAct, 'weekly', '<i class="wk-badge">週</i>')
+    $('#questList').innerHTML = $('#questMini').innerHTML = [...daily, weekly].join('')
   }
 
   render() {
@@ -958,14 +1017,29 @@ export class UI {
     const thumbs = renderThumbnails(SHOP_ITEMS.map((i) => i.key))
     const owned = {}
     for (const p of s.state.placed) owned[p.key] = (owned[p.key] || 0) + 1
-    $('#shopGrid').innerHTML = SHOP_ITEMS.map(
-      (i) => `<button class="shop-item" data-key="${i.key}" title="${esc(i.desc)}" ${s.coins < i.price ? 'disabled' : ''}>
-        <img src="${thumbs[i.key]}" alt="" />
+    // 買得到的排前面；還沒上架的（等級、季節）排後面
+    const list = SHOP_ITEMS.map((i) => ({ i, st: s.shopStatus(i) }))
+      .filter((x) => !x.st.hidden)
+      .sort((a, b) => !!a.st.lock - !!b.st.lock || !!b.st.free - !!a.st.free)
+    const charms = s.player.charms
+    const charm = `<button class="shop-item charm" data-charm="1" title="漏掉一天沒完成任務時，自動用掉一個保住連續天數（最多帶 ${CHARM.max} 個）" ${charms >= CHARM.max || s.coins < CHARM.price ? 'disabled' : ''}>
+        <i class="shop-badge charm-badge">守</i><div class="omamori"><span>御守</span></div>
+        <b>お守り</b><small>保住連續天數</small>
+        ${charms >= CHARM.max ? '<span class="price lock">已帶滿</span>' : `<span class="price"><i class="konpeito"></i>${CHARM.price}</span>`}
+        <span class="owned">身上 ${charms}/${CHARM.max}</span>
+      </button>`
+    $('#shopGrid').innerHTML = charm + list
+      .map(({ i, st }) => {
+        const badge = i.exclusive ? '<i class="shop-badge wk">週限定</i>' : i.season ? `<i class="shop-badge s-${i.season}">${SEASON_ZH[i.season]}</i>` : ''
+        const price = st.lock ? `<span class="price lock">${st.lock}</span>` : st.free ? '<span class="price free">免費</span>' : `<span class="price"><i class="konpeito"></i>${i.price}</span>`
+        return `<button class="shop-item ${st.lock ? 'locked' : ''}" data-key="${i.key}" title="${esc(i.desc)}" ${st.ok ? '' : 'disabled'}>
+        ${badge}<img src="${thumbs[i.key]}" alt="" />
         <b>${esc(i.name)}</b><small>${esc(i.jp)}</small>
-        <span class="price"><i class="konpeito"></i>${i.price}</span>
+        ${price}
         ${owned[i.key] ? `<span class="owned">已擺 ${owned[i.key]}</span>` : ''}
-      </button>`,
-    ).join('')
+      </button>`
+      })
+      .join('')
   }
 
   // ── 3D ↔ 列表聯動 ──

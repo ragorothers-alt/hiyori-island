@@ -23,10 +23,13 @@ export const XP = {
   perfectDay: 40,
   review: 10,
   starAll: 30,
+  weekly: 100,
 }
 
 // 本命：每天最多挑 3 件，完成給雙倍 XP
 export const MAX_STARS = 3
+// お守り：漏掉一天時自動保住連續天數，最多帶 2 個
+export const CHARM = { price: 50, max: 2 }
 // 一天完成超過這個數量後，任務 XP 減半（鼓勵休息，也避免灌任務刷分）
 export const SOFT_CAP = 8
 
@@ -56,6 +59,17 @@ export const UNLOCKS = [
   { level: 8, key: 'chochin', name: '漂浮燈籠', jp: 'ちょうちん' },
   { level: 9, key: 'lilies', name: '睡蓮與錦鯉', jp: 'すいれん' },
   { level: 10, key: 'islet', name: '浮空小島', jp: 'うきしま' },
+  // Lv10 之後：每兩級擴建一次
+  { level: 12, key: 'sakuraGrow', name: '櫻花樹長大了', jp: 'おおざくら' },
+  { level: 14, key: 'waterfall', name: '島緣瀑布', jp: 'たき' },
+  { level: 16, key: 'bonbori', name: '夜櫻雪洞', jp: 'ぼんぼり' },
+  { level: 18, key: 'teahouse', name: '茶屋浮島', jp: 'ちゃや' },
+  { level: 20, key: 'shrineUp', name: '小祠變成神社', jp: 'じんじゃ' },
+  { level: 22, key: 'cranes', name: '紙鶴群', jp: 'つる' },
+  { level: 24, key: 'rainbow', name: '彩虹橋', jp: 'にじ' },
+  { level: 26, key: 'tsukimidai', name: '賞月台', jp: 'つきみだい' },
+  { level: 28, key: 'whale', name: '雲鯨', jp: 'くもくじら' },
+  { level: 30, key: 'skytree', name: '星之大樹', jp: 'ほしのたいじゅ' },
 ]
 
 export const xpNeed = (level) => 80 + (level - 1) * 45

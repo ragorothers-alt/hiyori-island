@@ -354,6 +354,11 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .q-xp { font-family: var(--font-num); font-size: 11px; color: var(--ink-faint); }
 .q-done { font-family: var(--font-display); font-size: 12px; color: var(--mint); letter-spacing: .1em; }
 .quest.claimed { opacity: .6; }
+.quest .q-n { color: var(--ink-faint); }
+.quest .q-sub { display: block; font-style: normal; font-size: 10.5px; color: var(--ink-faint); margin-top: 1px; }
+.quest.weekly { margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.quest.weekly .q-bar i { background: linear-gradient(90deg, #f6c38b, #f2a6bd); }
+.wk-badge { font-style: normal; font-size: 10px; padding: 0 5px; margin-right: 5px; border-radius: 6px; color: #fff; background: linear-gradient(135deg, #f3b37f, #ee9ab5); vertical-align: 1px; }
 
 .quest-mini { display: none; margin: -4px 0 12px; padding: 10px 12px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
 .quest-mini h4 { margin: 0 0 6px; font-family: var(--font-display); font-weight: 400; font-size: 13px; letter-spacing: .1em; }
@@ -477,6 +482,22 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── 花の図鑑 ── */
+.dex { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.dex-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 5px; border-radius: 14px; background: var(--field); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--rc) 45%, transparent); transition: transform .2s, box-shadow .2s; }
+.dex-cell:hover { transform: translateY(-2px); }
+.dex-cell.on { box-shadow: inset 0 0 0 2px var(--rc); }
+.dex-cell img { width: 48px; height: 48px; object-fit: contain; pointer-events: none; }
+.dex-cell span { font-size: 10.5px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dex-cell.unknown img { filter: brightness(0) opacity(.18); }
+body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16); }
+.dex-cell.unknown span { color: var(--ink-faint); }
+.dex-detail { margin-top: 8px; padding: 10px 12px; border-radius: 14px; background: var(--field); font-size: 12px; color: var(--ink-faint); line-height: 1.6; }
+.dex-detail b { font-weight: 500; font-size: 13px; color: var(--ink); margin-right: 6px; }
+.dex-detail small { font-size: 11px; color: var(--ink-faint); margin-right: 6px; }
+.dex-detail p { margin: 4px 0 2px; color: var(--ink-soft); }
+.rarity { font-style: normal; font-size: 10.5px; padding: 1px 7px; border-radius: 8px; color: #fff; background: var(--rc); vertical-align: 1px; }
+
 /* ── 設定 ── */
 .settings { display: grid; gap: 6px; }
 .set-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: var(--field); }
@@ -545,6 +566,22 @@ body.night .coins b { color: #ffb8cb; }
 .shop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .shop-head h3 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 17px; letter-spacing: .12em; flex: 1; display: flex; align-items: baseline; gap: 8px; }
 .shop-head h3 small { font-size: 11px; color: var(--ink-faint); letter-spacing: .14em; }
+.shop-item { position: relative; }
+.charm-pill { font-style: normal; font-size: 10px; margin-left: 5px; padding: 0 5px; border-radius: 6px; color: #fff; background: linear-gradient(135deg, #ef8e93, #f3b37f); vertical-align: 1px; }
+.charm-pill b { margin-left: 2px; font-weight: 500; }
+.omamori { width: 44px; height: 60px; margin: 6px auto 4px; border-radius: 8px 8px 10px 10px; background: linear-gradient(160deg, #f19bb2, #e9707f); display: grid; place-items: center; box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .35), 0 4px 10px rgba(233, 112, 127, .3); position: relative; }
+.omamori::before { content: ''; position: absolute; top: -7px; left: 50%; width: 14px; height: 10px; margin-left: -7px; border: 2px solid #f3d27a; border-bottom: 0; border-radius: 8px 8px 0 0; }
+.omamori span { writing-mode: vertical-rl; font-family: var(--font-display); font-size: 13px; color: #fff; letter-spacing: .2em; }
+.charm-badge { background: linear-gradient(135deg, #ef8e93, #f3b37f) !important; }
+.shop-item.locked img { filter: grayscale(.85) opacity(.55); }
+.shop-badge { position: absolute; top: 6px; left: 6px; font-style: normal; font-size: 10px; padding: 0 6px; border-radius: 7px; color: #fff; background: #b5c4d6; z-index: 1; }
+.shop-badge.wk { background: linear-gradient(135deg, #f3b37f, #ee9ab5); }
+.shop-badge.s-spring { background: #f2a3bd; }
+.shop-badge.s-summer { background: #7fc3e3; }
+.shop-badge.s-autumn { background: #e9a06c; }
+.shop-badge.s-winter { background: #9fb3d8; }
+.price.lock { font-size: 11px; color: var(--ink-faint); }
+.price.free { font-size: 12px; color: #e38aa6; font-weight: 500; }
 .shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; overflow-y: auto; padding: 2px; }
 .shop-item { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 6px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); transition: transform .2s var(--ease), box-shadow .2s; text-align: center; }
 .shop-item:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(80, 120, 170, .16); }

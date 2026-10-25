@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, QUESTS, addDays, dateStr, minToHHMM, repeatLabel, repeatMatches, toMin,
+  Store, addDays, dateStr, minToHHMM, repeatLabel, repeatMatches, toMin, weekKey,
 } from '../src/store.js'
+import { DAILY_QUESTS } from '../src/data/quests.js'
+import { SHOP_ITEMS } from '../src/data/shop.js'
 import { levelFromXp, xpNeed } from '../src/theme.js'
 
 const TODAY = '2026-10-25'
+const QUEST_IDS = DAILY_QUESTS.map((q) => q.id)
 let store
 
 function setDate(day, hour = 12) {
@@ -298,15 +301,45 @@ describe('本命與每日上限', () => {
 })
 
 describe('每日任務', () => {
-  it('每日任務定義包含任務、番茄鐘及日程與里程碑的進度', () => {
-    expect(QUESTS.map(({ id, goal }) => ({ id, goal }))).toEqual([
-      { id: 'tasks3', goal: 3 }, { id: 'focus2', goal: 2 }, { id: 'step1', goal: 1 },
-    ])
-    const day = { tasks: 2, pomodoros: 1, events: 2, milestones: 3 }
-    expect(QUESTS.map((quest) => quest.val(day))).toEqual([2, 1, 5])
+  // 固定今天的三個任務，讓測試不受抽選影響
+  const useQuests = (ids) => (store.state.quests[TODAY] = { ids, claimed: {} })
+
+  it('每天抽簡單、普通、挑戰各一個，同一天固定不變', () => {
+    const ids = store.quests().map((q) => q.id)
+    expect(ids).toHaveLength(3)
+    expect(store.quests().map((q) => q.tier)).toEqual(['easy', 'normal', 'hard'])
+    store.selectDate('2026-10-27')
+    store.selectDate(TODAY)
+    expect(store.quests().map((q) => q.id)).toEqual(ids)
+    expect(QUEST_IDS).toEqual(expect.arrayContaining(ids))
+  })
+
+  it('做不到的任務不會被抽到：沒有日程就不抽「完成 2 個日程」', () => {
+    for (let i = 1; i < 40; i++) {
+      setDate(addDays(TODAY, i), 15)
+      store.tick()
+      const ids = store.quests().map((q) => q.id)
+      expect(ids).not.toContain('event2')
+      expect(ids).not.toContain('routine2')
+      // 下午才打開，中午前的任務也不抽
+      expect(ids).not.toContain('plan')
+      expect(ids).not.toContain('early2')
+    }
+  })
+
+  it('連續兩天同一格不會抽到同一個任務', () => {
+    let prev = store.quests().map((q) => q.id)
+    for (let i = 1; i < 20; i++) {
+      setDate(addDays(TODAY, i))
+      store.tick()
+      const ids = store.quests().map((q) => q.id)
+      ids.forEach((id, k) => expect(id).not.toBe(prev[k]))
+      prev = ids
+    }
   })
 
   it('完成三個任務後可領三十經驗值，重複領取無效', () => {
+    useQuests(['tasks3', 'focus2', 'step1'])
     const onReady = vi.fn()
     const onClaimed = vi.fn()
     store.on('questReady', onReady)
@@ -328,24 +361,109 @@ describe('每日任務', () => {
     expect(onClaimed).toHaveBeenCalledTimes(1)
   })
 
-  it('未達目標或不存在的每日任務無法領取獎勵', () => {
+  it('未達目標、不存在或今天沒抽到的每日任務無法領取獎勵', () => {
+    useQuests(['tasks3', 'focus2', 'step1'])
     const onClaimed = vi.fn()
     store.on('questClaimed', onClaimed)
     completeTask()
     store.claimQuest('tasks3')
     store.claimQuest('不存在')
+    store.claimQuest('star1')
     expect(store.player.xp).toBe(15)
     expect(store.stats.questsClaimed).toBe(0)
     expect(store.quests().find((quest) => quest.id === 'tasks3')).toMatchObject({ value: 1, ready: false, claimed: false })
     expect(onClaimed).not.toHaveBeenCalled()
   })
 
-  it('新的一天會重設每日任務進度與領取狀態', () => {
+  it('摸摸もち三次可以達成「摸摸」任務', () => {
+    useQuests(['pet3', 'focus2', 'tasks5'])
+    const onReady = vi.fn()
+    store.on('questReady', onReady)
+    store.pet()
+    store.pet()
+    expect(onReady).not.toHaveBeenCalled()
+    store.pet()
+    expect(onReady).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'pet3' }))
+  })
+
+  it('寫下今天的回顧會達成回顧任務', () => {
+    useQuests(['tasks3', 'review', 'tasks5'])
+    store.saveReview(TODAY, 'sunny', '')
+    expect(store.quests().find((q) => q.id === 'review').ready).toBe(true)
+  })
+
+  it('新的一天會重新抽任務，進度與領取狀態歸零', () => {
+    useQuests(['tasks3', 'focus2', 'step1'])
     for (const title of ['甲', '乙', '丙']) completeTask(title)
     store.claimQuest('tasks3')
     setDate('2026-10-26')
     store.tick()
     expect(store.quests().every((quest) => quest.value === 0 && !quest.ready && !quest.claimed)).toBe(true)
+  })
+
+  it('舊存檔的固定任務格式會轉成新格式並保留領取紀錄', () => {
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, quests: { [TODAY]: { tasks3: true } } }))
+    expect(store.state.quests[TODAY]).toEqual({ ids: ['tasks3', 'focus2', 'step1'], claimed: { tasks3: true } })
+  })
+})
+
+describe('每週挑戰', () => {
+  const useWeekly = (id) => (store.state.weekly[weekKey(store.today)] = { id, claimed: false })
+
+  it('一週從星期一開始', () => {
+    expect(weekKey('2026-10-25')).toBe('2026-10-19') // 週日
+    expect(weekKey('2026-10-26')).toBe('2026-10-26') // 週一
+    expect(weekKey('2026-10-28')).toBe('2026-10-26')
+  })
+
+  it('每週抽一個挑戰，下週不會跟這週一樣', () => {
+    const a = store.weekly()
+    expect(a.week).toBe('2026-10-19')
+    setDate('2026-10-27')
+    store.tick()
+    const b = store.weekly()
+    expect(b.week).toBe('2026-10-26')
+    expect(b.id).not.toBe(a.id)
+  })
+
+  it('達成後領取：給 XP，並把下一件限定擺飾解鎖、第一件免費', () => {
+    useWeekly('w_tasks20')
+    const onReady = vi.fn()
+    const onClaimed = vi.fn()
+    store.on('weeklyReady', onReady)
+    store.on('weeklyClaimed', onClaimed)
+    store.state.history['2026-10-20'] = { ...store.peekDay('2026-10-20'), tasks: 19 }
+    completeTask()
+    expect(onReady).toHaveBeenCalledTimes(1)
+    const xp = store.player.xp
+    const next = store.nextExclusive()
+    store.claimWeekly()
+    expect(store.player.xp - xp).toBe(100)
+    expect(store.stats.weeklyClaimed).toBe(1)
+    expect(onClaimed.mock.calls[0][0].item).toBe(next)
+    if (next) {
+      expect(store.player.unlocked[next.key]).toBe(true)
+      expect(store.player.freebies[next.key]).toBe(1)
+    }
+    store.claimWeekly()
+    expect(store.stats.weeklyClaimed).toBe(1)
+  })
+
+  it('沒達成不能領', () => {
+    useWeekly('w_tasks20')
+    completeTask()
+    store.claimWeekly()
+    expect(store.stats.weeklyClaimed).toBe(0)
+  })
+
+  it('這週的累計只算星期一到今天', () => {
+    setDate('2026-10-28')
+    store.tick()
+    store.state.history['2026-10-25'] = { ...store.peekDay('2026-10-25'), tasks: 9 } // 上週日
+    store.state.history['2026-10-26'] = { ...store.peekDay('2026-10-26'), tasks: 2, focus: 50 }
+    store.state.history['2026-10-27'] = { ...store.peekDay('2026-10-27'), tasks: 1, starAll: true }
+    store.state.history['2026-10-29'] = { ...store.peekDay('2026-10-29'), tasks: 5 } // 還沒到
+    expect(store.weekStats()).toMatchObject({ activeDays: 2, tasks: 3, focus: 50, starAllDays: 1 })
   })
 })
 
@@ -609,6 +727,111 @@ describe('金平糖商店', () => {
     expect(store.state.placed[0]).toMatchObject({ id: placed.id, x: -3, z: 4, rot: 1.25 })
     expect(store.coins).toBe(10)
     expect(onMoved).toHaveBeenCalledExactlyOnceWith(placed)
+  })
+})
+
+describe('お守り與逾期的花', () => {
+  it('金平糖夠就能買，最多帶 2 個', () => {
+    store.player.coins = 200
+    store.buyCharm()
+    store.buyCharm()
+    store.buyCharm()
+    expect(store.player.charms).toBe(2)
+    expect(store.coins).toBe(100)
+  })
+
+  it('漏掉一天時自動用掉一個，連續天數保住', () => {
+    completeTask()
+    setDate('2026-10-26')
+    store.tick()
+    completeTask()
+    expect(store.streak).toBe(2)
+    store.player.charms = 1
+    const onUsed = vi.fn()
+    store.on('charmUsed', onUsed)
+    // 10/27 沒有完成任何任務，10/28 打開 App
+    setDate('2026-10-28')
+    store.tick()
+    expect(store.player.charms).toBe(0)
+    expect(store.stats.charmsUsed).toBe(1)
+    expect(store.streak).toBe(2)
+    expect(onUsed).toHaveBeenCalledWith({ used: 1, streak: 2, left: 0 })
+    completeTask()
+    expect(store.streak).toBe(3)
+  })
+
+  it('漏掉的天數比お守り多就不用，連續天數照常中斷', () => {
+    completeTask()
+    store.player.charms = 1
+    setDate('2026-10-28')
+    store.tick()
+    expect(store.player.charms).toBe(1)
+    expect(store.streak).toBe(0)
+  })
+
+  it('打開 App 時就會套用（換日時 App 沒開著）', () => {
+    completeTask()
+    store.player.charms = 2
+    store.saveNow()
+    setDate('2026-10-28')
+    const next = new Store()
+    expect(next.player.charms).toBe(0)
+    expect(next.streak).toBe(1)
+  })
+
+  it('看今天的花圃時，會多種上最近 7 天沒完成的任務與今天才補完成的', () => {
+    const late = store.addTask({ title: '前天的', date: '2026-10-23' })
+    const old = store.addTask({ title: '很久以前的', date: '2026-10-10' })
+    const doneEarly = store.addTask({ title: '昨天就完成的', date: '2026-10-24' })
+    store.toggleTask(doneEarly.id)
+    vi.setSystemTime(new Date(2026, 9, 26, 9))
+    store.tick()
+    const today = store.addTask({ title: '今天的' })
+    const ids = () => store.gardenTasks(store.today).map((t) => t.id)
+    expect(ids()).toEqual(expect.arrayContaining([today.id, late.id]))
+    expect(ids()).not.toContain(old.id)
+    expect(ids()).not.toContain(doneEarly.id)
+    const onRevive = vi.fn()
+    store.on('revive', onRevive)
+    store.toggleTask(late.id)
+    expect(onRevive).toHaveBeenCalledTimes(1)
+    expect(ids()).toContain(late.id)
+    expect(store.gardenTasks('2026-10-23').map((t) => t.id)).toEqual([late.id])
+  })
+})
+
+describe('商店上架條件', () => {
+  const item = (key) => SHOP_ITEMS.find((i) => i.key === key)
+
+  it('等級不夠的商品還沒上架，買不了', () => {
+    store.player.coins = 999
+    expect(store.shopStatus(item('tanuki'))).toMatchObject({ ok: false, lock: 'Lv.6 上架' })
+    expect(store.placeItem('tanuki', 1, 1)).toBeNull()
+    store.player.xp = 2000
+    expect(store.shopStatus(item('tanuki')).ok).toBe(true)
+  })
+
+  it('季節限定只在那個季節買得到（今天是秋天）', () => {
+    store.player.coins = 999
+    expect(store.shopStatus(item('koinobori')).lock).toBe('春天限定')
+    expect(store.shopStatus(item('tsukimi')).ok).toBe(true)
+  })
+
+  it('每週限定在拿到之前不顯示；拿到後第一件免費，收起來會把免費券還回去', () => {
+    const ex = store.nextExclusive()
+    expect(ex.exclusive).toBe(true)
+    expect(store.shopStatus(ex).hidden).toBe(true)
+    store.player.unlocked[ex.key] = true
+    store.player.freebies[ex.key] = 1
+    store.player.coins = 0
+    expect(store.shopStatus(ex)).toMatchObject({ ok: true, free: true, price: 0 })
+    const placed = store.placeItem(ex.key, 1, 1)
+    expect(placed.free).toBe(true)
+    expect(store.player.freebies[ex.key]).toBe(0)
+    expect(store.shopStatus(ex)).toMatchObject({ ok: false, price: ex.price })
+    store.storeItem(placed.id)
+    expect(store.coins).toBe(0)
+    expect(store.player.freebies[ex.key]).toBe(1)
   })
 })
 
