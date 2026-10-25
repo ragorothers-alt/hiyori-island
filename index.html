@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#cfe8f5" />
+  <title>ひより日和 · 日程小島</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div class="haze" aria-hidden="true"></div>
+  <div id="labels" aria-hidden="true"></div>
+
+  <div id="loader">
+    <div class="loader-mochi"><i></i><i></i></div>
+    <p>小島甦醒中…</p>
+  </div>
+
+  <!-- ── 左上：玩家資訊 ── -->
+  <header class="hud">
+    <div class="brand">
+      <span class="brand-jp">ひより</span><span class="brand-zh">日和</span>
+      <small>days on a little island</small>
+    </div>
+    <div class="player glass">
+      <div class="lv-badge"><small>Lv</small><b id="lv">1</b></div>
+      <div class="player-info">
+        <div class="player-title" id="lvTitle">見習庭師</div>
+        <div class="xpbar"><i id="xpFill"></i></div>
+        <div class="xptext">
+          <span id="xpText">0 / 80 XP</span>
+          <span class="dot">·</span>
+          <span class="streak" title="每天完成至少一個任務即可延續">連續 <b id="streak">0</b> 日</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── 上方中央：日期 ── -->
+  <div class="datebar glass">
+    <button class="icon-btn" id="prevDay" title="前一天" aria-label="前一天">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <div class="date-main">
+      <div class="date-num" id="dateNum">10.25</div>
+      <div class="date-sub"><span id="dateWeek">日曜日</span><span id="dateRel" class="date-rel"></span></div>
+    </div>
+    <div class="date-clock" id="clock">00:00</div>
+    <button class="icon-btn" id="nextDay" title="後一天" aria-label="後一天">
+      <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+    </button>
+    <button class="chip-btn" id="todayBtn" hidden>回到今天</button>
+  </div>
+
+  <!-- ── 右側：主面板 ── -->
+  <aside class="panel glass" id="panel">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="tasks" role="tab"><span>任務</span><small>きょう</small></button>
+      <button class="tab" data-tab="schedule" role="tab"><span>日程</span><small>よてい</small></button>
+      <button class="tab" data-tab="projects" role="tab"><span>專案</span><small>しごと</small></button>
+      <button class="tab" data-tab="records" role="tab"><span>紀錄</span><small>きろく</small></button>
+    </nav>
+
+    <div class="panel-body">
+      <!-- 任務 -->
+      <section class="tab-page active" data-page="tasks">
+        <div class="bloom-summary">
+          <div class="bloom-ring" id="bloomRing"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16"/><circle cx="20" cy="20" r="16" class="fg" id="bloomArc"/></svg><b id="bloomPct">0%</b></div>
+          <div>
+            <div class="bloom-title" id="bloomTitle">今天還沒有花苞</div>
+            <div class="bloom-sub" id="bloomSub">種下第一個任務吧</div>
+          </div>
+        </div>
+
+        <form class="add-form" id="taskForm" autocomplete="off">
+          <input id="taskTitle" maxlength="60" placeholder="種下一個任務…" />
+          <div class="form-row">
+            <div class="seg" id="taskPriority">
+              <button type="button" data-v="1">低</button>
+              <button type="button" data-v="2" class="on">中</button>
+              <button type="button" data-v="3">高</button>
+            </div>
+            <div class="tag-pick" id="taskTag"></div>
+            <button class="btn-primary" type="submit">種下</button>
+          </div>
+        </form>
+
+        <div class="quest-mini"><h4>今日のおつとめ</h4><ul id="questMini"></ul></div>
+        <div id="overdueBox"></div>
+        <ul class="list" id="taskList"></ul>
+      </section>
+
+      <!-- 日程 -->
+      <section class="tab-page" data-page="schedule">
+        <form class="add-form" id="eventForm" autocomplete="off">
+          <input id="eventTitle" maxlength="60" placeholder="新增日程，例如：設計週會" />
+          <div class="form-row">
+            <label class="time-field"><input type="time" id="eventStart" value="09:00" /></label>
+            <span class="tilde">〜</span>
+            <label class="time-field"><input type="time" id="eventEnd" value="10:00" /></label>
+            <div class="swatches" id="eventColor"></div>
+            <button class="btn-primary" type="submit">加入</button>
+          </div>
+        </form>
+        <p class="hint">日程會化成小島外圈的時之環，光點是現在的時刻。</p>
+        <ol class="timeline" id="eventList"></ol>
+      </section>
+
+      <!-- 專案 -->
+      <section class="tab-page" data-page="projects">
+        <button class="btn-ghost wide" id="newProjectBtn">＋ 新專案 · 在島上蓋一座塔</button>
+        <form class="add-form project-form" id="projectForm" hidden autocomplete="off">
+          <input id="projectName" maxlength="40" placeholder="專案名稱" required />
+          <div class="form-row">
+            <label class="date-field">截止 <input type="date" id="projectDeadline" /></label>
+            <div class="swatches" id="projectColor"></div>
+          </div>
+          <textarea id="projectMilestones" rows="4" placeholder="里程碑，一行一個（每完成一個，塔就蓋高一層）"></textarea>
+          <div class="form-row end">
+            <button type="button" class="btn-ghost" id="cancelProject">取消</button>
+            <button class="btn-primary" type="submit">開始建造</button>
+          </div>
+        </form>
+        <div id="projectList"></div>
+        <details class="archive" id="archiveBox" hidden>
+          <summary>已收藏的專案</summary>
+          <div id="archiveList"></div>
+        </details>
+      </section>
+
+      <!-- 紀錄 -->
+      <section class="tab-page" data-page="records">
+        <div class="stats-grid" id="statsGrid"></div>
+        <h3 class="sec-title">最近七天<small>なのかかん</small></h3>
+        <div class="week-chart" id="weekChart"></div>
+        <h3 class="sec-title">小島的成長<small>しまのきろく</small></h3>
+        <ol class="unlocks" id="unlockList"></ol>
+        <h3 class="sec-title">成就印章<small>いんしょう</small><span class="count" id="achCount"></span></h3>
+        <div class="stamps" id="achGrid"></div>
+        <div class="data-tools">
+          <button class="btn-ghost" id="exportBtn">匯出資料</button>
+          <label class="btn-ghost">匯入資料<input type="file" id="importInput" accept="application/json" hidden /></label>
+          <button class="btn-ghost danger" id="resetBtn">重置小島</button>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <!-- ── 左下：每日任務 ── -->
+  <section class="quests glass" id="quests">
+    <h3>今日のおつとめ<small>每日任務</small></h3>
+    <ul id="questList"></ul>
+  </section>
+
+  <!-- ── 下方：Dock ── -->
+  <div class="dock glass">
+    <div class="focus" id="focusBox">
+      <button class="focus-btn" id="focusBtn" title="開始專注">
+        <svg viewBox="0 0 44 44" class="focus-ring"><circle cx="22" cy="22" r="19"/><circle cx="22" cy="22" r="19" class="fg" id="focusArc"/></svg>
+        <span class="focus-icon" id="focusIcon"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
+      </button>
+      <div class="focus-info">
+        <div class="focus-time" id="focusTime">25:00</div>
+        <div class="focus-label" id="focusLabel">專注 · しゅうちゅう</div>
+      </div>
+      <button class="icon-btn small" id="focusStop" title="結束" hidden><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+    </div>
+    <div class="dock-sep"></div>
+    <button class="icon-btn" id="viewBtn" title="回到全景 (V)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
+    <button class="icon-btn" id="soundBtn" title="音效"><svg viewBox="0 0 24 24" id="soundIcon"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    <button class="icon-btn" id="panelBtn" title="收合面板"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M14 4v16"/></svg></button>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <div class="modal" id="levelModal" hidden>
+    <div class="modal-card glass">
+      <div class="modal-kicker">レベルアップ</div>
+      <div class="modal-lv">Lv.<b id="modalLv">2</b></div>
+      <div class="modal-title" id="modalTitle"></div>
+      <div class="modal-unlock" id="modalUnlock"></div>
+      <button class="btn-primary" id="modalClose">好的！</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
