@@ -1,6 +1,7 @@
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel } from './store.js'
 import { notifySupported } from './reminders.js'
+import { parseQuick, describeQuick } from './parse.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -160,6 +161,16 @@ export class UI {
   }
 
   // ── 任務 ──
+  _renderQuickPreview() {
+    const box = $('#quickPreview')
+    const v = $('#taskTitle').value
+    const p = v.trim() ? parseQuick(v, { today: this.store.today }) : null
+    const chips = p ? describeQuick(p, this.store.today) : []
+    if (p?.tag && p.kind === 'task') chips.push(tagOf(p.tag).label)
+    box.hidden = !chips.length
+    box.innerHTML = chips.map((c, i) => `<span class="${i === 0 && p.kind === 'event' ? 'kind' : ''}">${esc(c)}</span>`).join('')
+  }
+
   _repeatValue(sel) {
     const v = $(sel).value
     if (v === 'none') return null
@@ -220,19 +231,36 @@ export class UI {
       this.tag = b.dataset.tag
       this._syncPickers()
     })
+    $('#taskTitle').addEventListener('input', () => this._renderQuickPreview())
     $('#taskForm').addEventListener('submit', (e) => {
       e.preventDefault()
       const input = $('#taskTitle')
-      if (!input.value.trim()) {
+      const s = this.store
+      const p = parseQuick(input.value, { today: s.today })
+      if (!p.title) {
         input.focus()
         return
       }
-      const repeat = this._repeatValue('#taskRepeat')
-      if (repeat) this.store.addRoutine({ kind: 'task', title: input.value, priority: this.priority, tag: this.tag, repeat })
-      else this.store.addTask({ title: input.value, priority: this.priority, tag: this.tag })
+      const date = p.date || s.selectedDate
+      const repeat = p.repeat || this._repeatValue('#taskRepeat')
+      const md = date.slice(5).replace('-', '/')
+      if (p.kind === 'event') {
+        const ev = { title: p.title, start: p.start, end: p.end, color: this.eventColor, date }
+        if (repeat) s.addRoutine({ kind: 'event', ...ev, repeat })
+        else s.addEvent(ev)
+        this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
+        this._syncPickers()
+        this.toast({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${p.start}–${p.end}` })
+      } else {
+        const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date }
+        if (repeat) s.addRoutine({ kind: 'task', ...t, repeat })
+        else s.addTask(t)
+        if (date !== s.selectedDate) this.toast({ icon: '種', title: `已種在 ${md}`, sub: p.title })
+      }
       $('#taskRepeat').value = 'none'
       $('#taskRepeat').classList.remove('on')
       input.value = ''
+      this._renderQuickPreview()
       input.focus()
     })
 
@@ -321,8 +349,7 @@ export class UI {
       $('#bloomTitle').textContent = `${k} / ${n} 朵花已綻放`
       $('#bloomSub').textContent = `還有 ${n - k} 個花苞等著你`
     }
-    const hint = matchMedia('(pointer: fine)').matches ? '（按 N 快速輸入）' : ''
-    $('#taskTitle').placeholder = isToday ? `種下一個任務…${hint}` : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
+    $('#taskTitle').placeholder = isToday ? '種下任務，或打「明天 15:00 開會 #工作」' : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
 
     const overdue = isToday ? s.overdue() : []
     $('#overdueBox').innerHTML = overdue.length

@@ -474,6 +474,12 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── 快速輸入預覽 ── */
+.quick-preview { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 4px; margin-top: -4px; }
+.quick-preview span { font-size: 11px; padding: 2px 8px; border-radius: 8px; background: rgba(143, 197, 232, .2); color: var(--sky-deep); }
+.quick-preview span.kind { background: linear-gradient(135deg, #8cc6ea, #b9a7e6); color: #fff; }
+body.night .quick-preview span { color: #bfe0f7; }
+
 /* ── 例行公事 ── */
 .repeat-pick { border: 0; outline: 0; border-radius: 10px; padding: 4px 6px; font-size: 12px; background: rgba(140, 170, 200, .14); color: var(--ink-soft); cursor: pointer; max-width: 92px; }
 .repeat-pick.on { color: #fff; background: linear-gradient(135deg, #9fcbe8, #b9a7e6); }
