@@ -51,6 +51,9 @@ export class World {
     this.hovered = null
     this.onPick = () => {}
     this.onHover = () => {}
+    // dragHandler: { start(hit, e) → boolean, move(ray, e), end(e) }；start 回傳 true 就接管這次拖曳（不旋轉鏡頭）
+    this.dragHandler = null
+    this.dragging = false
     this.lastInteract = performance.now()
     this.idleRotate = true
     this.shift = { x: 0, y: 0 }
@@ -125,10 +128,14 @@ export class World {
   }
 
   // ── 拾取 ──
-  _raycast(e) {
+  _setRay(e) {
     const r = this.renderer.domElement.getBoundingClientRect()
     this.pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
     this.raycaster.setFromCamera(this.pointer, this.camera)
+  }
+
+  _raycast(e) {
+    this._setRay(e)
     const hits = this.raycaster.intersectObjects(this.pickRoots, true)
     for (const h of hits) {
       let o = h.object
@@ -143,11 +150,34 @@ export class World {
     let down = null
     let raf = 0
     let lastMove = null
+    // capture 階段先檢查是否要拖曳 3D 物件；接管時阻止 OrbitControls 收到事件
+    canvas.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.button !== 0 || !this.dragHandler) return
+        const hit = this._raycast(e)
+        if (hit && this.dragHandler.start(hit, e)) {
+          this.dragging = true
+          e.stopImmediatePropagation()
+          canvas.setPointerCapture(e.pointerId)
+          this._interacted()
+        }
+      },
+      { capture: true },
+    )
+    const endDrag = (e) => {
+      if (!this.dragging) return false
+      this.dragging = false
+      this.dragHandler.end(e)
+      return true
+    }
+    canvas.addEventListener('pointercancel', endDrag)
     canvas.addEventListener('pointerdown', (e) => {
       down = { x: e.clientX, y: e.clientY, t: performance.now() }
       this._interacted()
     })
     canvas.addEventListener('pointerup', (e) => {
+      if (endDrag(e)) return
       if (!down) return
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y)
       const quick = performance.now() - down.t < 600
@@ -157,6 +187,11 @@ export class World {
       this.onPick(hit?.pick || null, hit)
     })
     canvas.addEventListener('pointermove', (e) => {
+      if (this.dragging) {
+        this._setRay(e)
+        this.dragHandler.move(this.raycaster.ray, e)
+        return
+      }
       lastMove = e
       if (e.pointerType === 'touch') return
       if (raf) return

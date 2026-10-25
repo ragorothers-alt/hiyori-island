@@ -132,15 +132,7 @@ export class TimeRing {
       let lane = lanes.findIndex((end) => end <= m0)
       if (lane < 0) lane = lanes.length
       lanes[lane] = m1
-      const geo = new THREE.ExtrudeGeometry(arcShape(m0 + 1.5, m1 - 1.5, R_IN + 0.14, R_OUT - 0.14), {
-        depth: 0.14,
-        bevelEnabled: true,
-        bevelThickness: 0.04,
-        bevelSize: 0.05,
-        bevelSegments: 2,
-        curveSegments: 4,
-      })
-      geo.rotateX(-Math.PI / 2)
+      const geo = this._arcGeo(m0, m1)
       const color = new THREE.Color(EVENT_COLORS[e.color % EVENT_COLORS.length])
       const material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.25, roughness: 0.35, transparent: true, opacity: 0.92 })
       const mesh = new THREE.Mesh(geo, material)
@@ -151,6 +143,47 @@ export class TimeRing {
       this.arcs.set(e.id, { mesh, e, m0, m1, lane, color })
     }
     this._styleArcs()
+  }
+
+  _arcGeo(m0, m1) {
+    const geo = new THREE.ExtrudeGeometry(arcShape(m0 + 1.5, m1 - 1.5, R_IN + 0.14, R_OUT - 0.14), {
+      depth: 0.14,
+      bevelEnabled: true,
+      bevelThickness: 0.04,
+      bevelSize: 0.05,
+      bevelSegments: 2,
+      curveSegments: 4,
+    })
+    geo.rotateX(-Math.PI / 2)
+    return geo
+  }
+
+  // ── 拖曳 ──
+  arc(id) {
+    return this.arcs.get(id)
+  }
+  // 射線與某條光帶所在水平面的交點 → 分鐘數（0～1440）
+  minutesOnRay(ray, y) {
+    const hit = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), new THREE.Vector3())
+    if (!hit) return null
+    let phi = Math.atan2(hit.x, -hit.z)
+    if (phi < 0) phi += Math.PI * 2
+    return (phi / (Math.PI * 2)) * 1440
+  }
+  // 依指到的位置決定拖曳模式：兩端調整長度、中段整段移動
+  dragMode(id, minutes) {
+    const a = this.arcs.get(id)
+    if (!a || minutes == null) return 'move'
+    const edge = Math.min(14, (a.m1 - a.m0) * 0.28)
+    if (Math.abs(minutes - a.m0) < edge) return 'start'
+    if (Math.abs(minutes - a.m1) < edge) return 'end'
+    return 'move'
+  }
+  previewArc(id, m0, m1) {
+    const a = this.arcs.get(id)
+    if (!a) return
+    a.mesh.geometry.dispose()
+    a.mesh.geometry = this._arcGeo(m0, m1)
   }
 
   _styleArcs() {

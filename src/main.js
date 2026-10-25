@@ -1,6 +1,6 @@
 import './styles.css'
 import * as THREE from 'three'
-import { Store, toMin, repeatLabel } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel } from './store.js'
 import { UI } from './ui.js'
 import { World } from './scene/world.js'
 import { Sky } from './scene/sky.js'
@@ -215,6 +215,7 @@ async function boot() {
   document.body.append(tip)
 
   world.onHover = (p, hit, ev) => {
+    hoverCursor(p, hit)
     garden.highlight(p?.type === 'task' ? p.id : null)
     ring.highlight(p?.type === 'event' ? p.id : null)
     ui.highlight(p?.type, p?.id)
@@ -238,6 +239,89 @@ async function boot() {
     tip.style.display = ''
     tip.style.left = ev.clientX + 'px'
     tip.style.top = ev.clientY + 'px'
+  }
+
+  // ── 在時之環上拖曳日程 ──
+  const dragTip = document.createElement('div')
+  dragTip.className = 'tooltip3d drag-tip'
+  Object.assign(dragTip.style, { position: 'fixed', zIndex: 7, pointerEvents: 'none', display: 'none' })
+  document.body.append(dragTip)
+  let drag = null
+  const snapMin = (m, e) => {
+    const step = e.shiftKey ? 5 : 15
+    return Math.round(m / step) * step
+  }
+  world.dragHandler = {
+    start(hit, e) {
+      if (hit.pick.type !== 'event') return false
+      const a = ring.arc(hit.pick.id)
+      if (!a) return false
+      const y = a.mesh.position.y + 0.1
+      const m = ring.minutesOnRay(world.raycaster.ray, y)
+      if (m == null) return false
+      drag = { id: a.e.id, a, y, mode: ring.dragMode(a.e.id, m), from: m, last: m, acc: m, m0: a.m0, m1: a.m1, x: e.clientX, yPx: e.clientY, moved: false }
+      ring.highlight(a.e.id)
+      return true
+    },
+    move(ray, e) {
+      if (!drag) return
+      const m = ring.minutesOnRay(ray, drag.y)
+      if (m == null) return
+      // 跨過 0 點時用最短角度差累積，避免跳一整圈
+      let d = m - drag.last
+      if (d > 720) d -= 1440
+      if (d < -720) d += 1440
+      drag.last = m
+      drag.acc += d
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.yPx) > 5) drag.moved = true
+      if (!drag.moved) return
+      const len = drag.a.m1 - drag.a.m0
+      let m0 = drag.a.m0
+      let m1 = drag.a.m1
+      if (drag.mode === 'move') {
+        m0 = Math.min(Math.max(0, snapMin(drag.a.m0 + drag.acc - drag.from, e)), 1440 - len)
+        m1 = m0 + len
+      } else if (drag.mode === 'start') {
+        m0 = Math.min(Math.max(0, snapMin(drag.acc, e)), drag.a.m1 - 15)
+      } else {
+        m1 = Math.max(Math.min(1439, snapMin(drag.acc, e)), drag.a.m0 + 15)
+      }
+      if (m0 !== drag.m0 || m1 !== drag.m1) {
+        drag.m0 = m0
+        drag.m1 = m1
+        ring.previewArc(drag.id, m0, m1)
+        sfx.pop()
+      }
+      dragTip.style.display = ''
+      dragTip.style.left = e.clientX + 'px'
+      dragTip.style.top = e.clientY - 28 + 'px'
+      dragTip.innerHTML = `${esc(short(drag.a.e.title, 12))}<small>${minToHHMM(m0)} – ${minToHHMM(Math.min(m1, 1439))}</small>`
+    },
+    end() {
+      dragTip.style.display = 'none'
+      if (!drag) return
+      const d = drag
+      drag = null
+      ring.highlight(null)
+      if (!d.moved) {
+        world.onPick({ type: 'event', id: d.id })
+        return
+      }
+      if (d.m0 === d.a.m0 && d.m1 === d.a.m1) return
+      const ev = store.state.events.find((x) => x.id === d.id)
+      store.updateEvent(d.id, { start: minToHHMM(d.m0), end: minToHHMM(Math.min(d.m1, 1439)) })
+      if (ev) mochi.say(line('reschedule', { event: short(ev.title) }) || `${short(ev.title)} 改到 ${minToHHMM(d.m0)} 了。`)
+      sfx.chime()
+    },
+  }
+  // 懸停時提示可以拖曳
+  const canvasEl = world.renderer.domElement
+  const hoverCursor = (p, hit) => {
+    if (p?.type !== 'event' || !hit) return
+    const a = ring.arc(p.id)
+    const m = a && ring.minutesOnRay(world.raycaster.ray, a.mesh.position.y + 0.1)
+    const mode = ring.dragMode(p.id, m)
+    canvasEl.style.cursor = mode === 'move' ? 'grab' : 'ew-resize'
   }
 
   world.onPick = (p) => {
