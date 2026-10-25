@@ -131,6 +131,7 @@ function seed() {
     journal: {},
     dex: {},
     weekly: {},
+    weekCard: '',
     history: {},
     quests: {},
     settings: { ...DEFAULT_SETTINGS },
@@ -327,7 +328,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, settings, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0 }
+  return { version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0 }
 }
 
 export class Store {
@@ -498,6 +499,42 @@ export class Store {
     }
     return w
   }
+  // 上週回顧卡：那一週（星期一 wk 開始）的總結
+  weekSummary(wk = addDays(weekKey(this.today), -7)) {
+    const days = Array.from({ length: 7 }, (_, i) => addDays(wk, i))
+    const w = this.weekStats(wk)
+    let best = null
+    let stars = 0
+    for (const d of days) {
+      const h = this.peekDay(d)
+      stars += h.stars
+      if (h.tasks && (!best || h.tasks > best.tasks)) best = { date: d, tasks: h.tasks }
+    }
+    const end = days[6]
+    const flowers = Object.entries(this.state.dex)
+      .filter(([, v]) => v.at >= wk && v.at <= end)
+      .map(([k]) => flowerOf(k))
+    const entry = this.state.weekly[wk]
+    const challenge = entry && weeklyOf(entry.id)
+    return {
+      week: wk, end, days, ...w, stars, best, flowers,
+      moods: days.map((d) => this.state.journal[d]?.mood || null),
+      challenge: challenge ? { ...challenge, value: Math.min(challenge.goal, challenge.val(w)), claimed: entry.claimed } : null,
+      tier: w.activeDays >= 5 || w.tasks >= 20 ? 'great' : w.activeDays >= 3 ? 'good' : 'gentle',
+    }
+  }
+  // 這週一還沒看過上週的回顧卡、上週也有在用 → 要顯示
+  weekCardDue() {
+    const last = addDays(weekKey(this.today), -7)
+    if (this.state.weekCard >= last) return false
+    const s = this.weekSummary(last)
+    return s.activeDays > 0 || s.focus > 0 || s.moods.some(Boolean)
+  }
+  seenWeekCard() {
+    this.state.weekCard = addDays(weekKey(this.today), -7)
+    this.save(false)
+  }
+
   weekly() {
     const wk = weekKey(this.today)
     let entry = this.state.weekly[wk]

@@ -7,6 +7,7 @@ import { renderThumbnails } from './scene/placed.js'
 import { renderFlowerThumbs } from './scene/garden.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
+import { LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -147,6 +148,7 @@ export class UI {
         this.toggleShop(false)
         this.closeModal()
         if (!$('#reviewModal').hidden) $('#reviewLater').click()
+        this.closeWeekCard()
         if (typing) document.activeElement.blur()
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return
@@ -812,6 +814,50 @@ export class UI {
     })
   }
 
+  // ── 上週回顧卡 ──
+  openWeekCard() {
+    const s = this.store
+    const w = s.weekSummary()
+    const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+    $('#weekRange').textContent = `${md(w.week)} – ${md(w.end)}`
+    $('#weekMoods').innerHTML = w.days
+      .map((d, i) => {
+        const m = moodOf(w.moods[i])
+        return `<div class="wm ${m ? '' : 'none'}" style="--mc:${m?.color || 'transparent'}"><span class="stamp-k">${m?.kanji || '・'}</span><small>${WEEK_ZH[parseDate(d).getDay()]}</small></div>`
+      })
+      .join('')
+    const stats = [
+      [w.tasks, '朵花綻放'],
+      [w.focus, '分鐘專注'],
+      [w.stars, '件本命完成'],
+      [w.activeDays, '天有前進'],
+    ]
+    $('#weekStats').innerHTML = stats.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')
+    const notes = []
+    if (w.best) notes.push(`最充實的一天：${md(w.best.date)}（${WEEK_ZH[parseDate(w.best.date).getDay()]}），開了 ${w.best.tasks} 朵花`)
+    if (w.perfectDays) notes.push(`完美的一天 ${w.perfectDays} 次`)
+    if (w.flowers.length) notes.push(`圖鑑新朋友：${w.flowers.slice(0, 4).map((f) => esc(f.name)).join('、')}${w.flowers.length > 4 ? ` 等 ${w.flowers.length} 種` : ''}`)
+    if (w.challenge) notes.push(`每週挑戰「${esc(w.challenge.title)}」：${w.challenge.value >= w.challenge.goal ? '達成 ✓' : `${w.challenge.value} / ${w.challenge.goal}`}`)
+    $('#weekNotes').innerHTML = notes.map((n) => `<li>${n}</li>`).join('')
+    const pool = LINES.weekCard?.[w.tier] || []
+    $('#weekMochi').textContent = pool.length ? `もち：「${pool[Math.floor(Math.random() * pool.length)]}」` : ''
+    $('#weekModal').hidden = false
+  }
+
+  closeWeekCard() {
+    if ($('#weekModal').hidden) return
+    $('#weekModal').hidden = true
+    this.store.seenWeekCard()
+    this.hooks.modalClosed?.()
+  }
+
+  // 新的一週第一次打開：如果上週有在用，就給一張回顧卡（其他視窗開著時先不打擾）
+  maybeShowWeekCard() {
+    if (!this.store.weekCardDue() || !$('#levelModal').hidden || !$('#reviewModal').hidden) return false
+    this.openWeekCard()
+    return true
+  }
+
   // ── 晚間回顧 ──
   _bindReview() {
     $('#moodPick').innerHTML = MOODS.map(
@@ -881,6 +927,11 @@ export class UI {
   _bindRecords() {
     this._bindReview()
     this._bindDex()
+    $('#weekBtn').onclick = () => this.openWeekCard()
+    $('#weekClose').onclick = () => this.closeWeekCard()
+    $('#weekModal').addEventListener('click', (e) => {
+      if (e.target.id === 'weekModal') this.closeWeekCard()
+    })
     $('#bondBox').addEventListener('click', (e) => {
       const b = e.target.closest('[data-outfit]:not(:disabled)')
       if (b) this.store.setOutfit(b.dataset.outfit)

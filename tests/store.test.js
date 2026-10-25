@@ -831,6 +831,39 @@ describe('お守り與逾期的花', () => {
   })
 })
 
+describe('上週回顧卡', () => {
+  // 今天 10/25 是週日，所以「上週」是 10/12–10/18
+  const fill = (date, patch) => (store.state.history[date] = { ...store.peekDay(date), ...patch })
+
+  it('彙整上週七天：開花、專注、本命、最充實的一天、心情與新發現的花', () => {
+    fill('2026-10-13', { tasks: 3, focus: 50, stars: 2 })
+    fill('2026-10-15', { tasks: 6, perfect: true })
+    fill('2026-10-19', { tasks: 9 }) // 這週，不算
+    store.state.journal['2026-10-14'] = { mood: 'sunny', text: '', at: 1 }
+    store.state.dex.kikyo = { at: '2026-10-15', n: 1 }
+    store.state.dex.sumire = { at: '2026-10-20', n: 1 }
+    const w = store.weekSummary()
+    expect(w).toMatchObject({ week: '2026-10-12', end: '2026-10-18', tasks: 9, focus: 50, stars: 2, activeDays: 2, perfectDays: 1, tier: 'gentle' })
+    expect(w.best).toEqual({ date: '2026-10-15', tasks: 6 })
+    expect(w.moods).toEqual([null, null, 'sunny', null, null, null, null])
+    expect(w.flowers.map((f) => f.key)).toEqual(['kikyo'])
+  })
+
+  it('上週很充實就是 great', () => {
+    for (const d of ['12', '13', '14', '15', '16']) fill(`2026-10-${d}`, { tasks: 1 })
+    expect(store.weekSummary().tier).toBe('great')
+  })
+
+  it('上週有在用、還沒看過才顯示，看過就不再出現', () => {
+    expect(store.weekCardDue()).toBe(false)
+    fill('2026-10-16', { tasks: 1 })
+    expect(store.weekCardDue()).toBe(true)
+    store.seenWeekCard()
+    expect(store.weekCardDue()).toBe(false)
+    expect(store.state.weekCard).toBe('2026-10-12')
+  })
+})
+
 describe('もち的好感度', () => {
   it('摸摸一天最多算 5 次', () => {
     const before = store.player.bond.pts

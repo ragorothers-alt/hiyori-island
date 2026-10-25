@@ -163,6 +163,7 @@
       <section class="tab-page" data-page="records">
         <div class="stats-grid" id="statsGrid"></div>
         <button class="btn-ghost wide" id="reviewBtn">寫下今天的回顧</button>
+        <button class="btn-ghost wide" id="weekBtn">看看上週的小結</button>
         <h3 class="sec-title">もちとの絆<small>きずな</small><span class="count" id="bondCount"></span></h3>
         <div class="bond" id="bondBox"></div>
         <h3 class="sec-title">最近七天<small>なのかかん</small></h3>
@@ -230,6 +231,18 @@
         <button type="submit" class="btn-primary" id="reviewSave" disabled>記下來</button>
       </div>
     </form>
+  </div>
+
+  <div class="modal" id="weekModal" hidden>
+    <div class="modal-card week-card glass">
+      <div class="modal-kicker">先週のふりかえり</div>
+      <div class="review-date" id="weekRange"></div>
+      <div class="week-moods" id="weekMoods"></div>
+      <div class="week-stats" id="weekStats"></div>
+      <ul class="week-notes" id="weekNotes"></ul>
+      <p class="week-mochi" id="weekMochi"></p>
+      <button class="btn-primary" id="weekClose">收下，開始新的一週</button>
+    </div>
   </div>
 
   <div class="shop" id="shop" hidden>

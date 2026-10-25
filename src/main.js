@@ -74,6 +74,8 @@ async function boot() {
   }
   applySeason()
   store.on('dateChanged', applySeason)
+  // App 開著跨到新的一週：等一下再給回顧卡
+  store.on('dateChanged', () => setTimeout(() => ui.maybeShowWeekCard(), 3000))
 
   // ── 浮動經驗值 ──
   const floatText = (pos, text, big = false, coins = 0) => {
@@ -808,6 +810,7 @@ async function boot() {
         mochi.celebrate()
       }, 900)
       setTimeout(() => {
+        if (ui.maybeShowWeekCard()) return
         if (ui.maybeAskReview()) return
         const overdue = store.overdue().length
         const todo = store.tasksOn(store.today).filter((t) => !t.done).length
