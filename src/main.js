@@ -21,6 +21,7 @@ import { FileSync } from './sync.js'
 import { LINES } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
 import { RARITIES } from './data/flowers.js'
+import { BOND_ACTS, actLevel, outfitOf } from './data/bond.js'
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const short = (s, n = 9) => ([...s].length > n ? [...s].slice(0, n - 1).join('') + '…' : s)
@@ -265,7 +266,7 @@ async function boot() {
     setSound: (on) => sfx.setEnabled(on),
     setPowerSave: (on) => (world.powerSave = on),
     focusStarted: (resumed, taskId) => {
-      mochi.setFocus(true)
+      mochi.setFocus(true, taskId && garden.anchor(taskId))
       garden.setFocus(taskId)
       if (!resumed) {
         sfx.chime()
@@ -274,7 +275,10 @@ async function boot() {
       }
     },
     focusTaskChanged: (taskId) => {
-      if (mochi.mode === 'focus') garden.setFocus(taskId)
+      if (mochi.mode === 'focus') {
+        garden.setFocus(taskId)
+        mochi.sitBy(taskId && garden.anchor(taskId))
+      }
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
       if (t) {
         garden.bounce(t.id)
@@ -550,6 +554,53 @@ async function boot() {
       ui.toast({ icon: '週', title: `拿到每週限定「${item.name}」`, sub: '到商店可以免費擺一件', ms: 5600 })
       mochi.say(line('weeklyClaimed', { item: item.name }) || `${item.name}，這週的小紀念。`, 4200)
     } else ui.toast({ icon: '週', title: '每週挑戰完成', sub: '限定擺飾都收齊了，改送 40 顆金平糖' })
+  })
+
+  // ── もち的好感度 ──
+  const syncBond = () => {
+    const lv = store.bond.level
+    mochi.abilities.water = lv >= actLevel('water')
+    mochi.abilities.sit = lv >= actLevel('sit')
+    mochi.setOutfit(store.player.bond.outfit)
+  }
+  syncBond()
+  store.on('change', syncBond)
+  mochi.onWater = {
+    // 找今天還沒開的花苞
+    target: () => {
+      if (store.selectedDate !== store.today) return null
+      const buds = store.gardenTasks(store.today).filter((t) => !t.done)
+      const t = buds[Math.floor(Math.random() * buds.length)]
+      const pos = t && garden.anchor(t.id)
+      return pos ? { id: t.id, pos } : null
+    },
+    sprinkle: ({ id, pos }) => {
+      fx.burst(pos.clone().add(new THREE.Vector3(0, 0.6, 0)), { colors: ['#bfe6ff', '#e6f6ff', '#9fd4f5'], count: 26, speed: 0.7, up: 0.6, gravity: -5, size: 0.14, life: 1 })
+      garden.bounce(id)
+      mochi.say(line('water') || '喝口水吧。', 2800)
+    },
+  }
+  store.on('bondUp', (lv) => {
+    const r = lv.reward
+    const sub = r?.outfit ? `解鎖衣裝「${outfitOf(r.outfit)?.name}」，到紀錄頁換上吧` : r?.act ? `新動作「${BOND_ACTS[r.act]?.name}」：${BOND_ACTS[r.act]?.desc}` : ''
+    setTimeout(() => {
+      sfx.chime()
+      fx.hearts(mochi.headAnchor())
+      ui.toast({ icon: '絆', title: `もちとの絆 Lv.${lv.level}「${lv.name}」`, sub, ms: 6000 })
+      mochi.say(line('bondUp', { level: lv.level }) || '我們更熟了一點。', 4000)
+    }, 1800)
+  })
+  store.on('gift', ({ coins }) => {
+    setTimeout(() => {
+      sfx.chime()
+      fx.burst(mochi.headAnchor(), { colors: ['#ffd1dc', '#fff1b8', '#bfe3ff'], count: 20, speed: 1, size: 0.16 })
+      ui.toast({ icon: '糖', title: `もち送你 ${coins} 顆金平糖`, sub: '每天第一次來看牠都有' })
+      mochi.say(line('gift', { coins }) || `${coins} 顆金平糖，給你。`, 3800)
+    }, 7000)
+  })
+  store.on('outfit', () => {
+    mochi.celebrate()
+    mochi.say(line('outfit') || '好看嗎？', 3200)
   })
 
   // ── 逾期的花、お守り ──

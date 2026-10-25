@@ -5,6 +5,7 @@ import { ACHIEVEMENTS } from './data/achievements.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
 import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
+import { BOND_POINTS, actLevel, bondLevel, outfitLevel, outfitOf } from './data/bond.js'
 import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM } from './theme.js'
 
 const KEY = 'hiyori-daily-v1'
@@ -87,6 +88,9 @@ const emptyDay = () => {
   return d
 }
 
+// もち的好感度：pts 累計點數、outfit 目前衣裝、visit 最近一次來訪、petDay/petN 今天摸了幾次（有上限）、gift 最近一次收到禮物
+const emptyBond = () => ({ pts: 0, outfit: 'none', visit: '', petDay: '', petN: 0, gift: '' })
+
 const ms = (title, done = false) => ({ id: uid(), title, done, rewarded: done })
 
 function seed() {
@@ -121,7 +125,7 @@ function seed() {
         completedAt: null, archived: false,
       },
     ],
-    player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {}, unlocked: {}, freebies: {}, charms: 0 },
+    player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {}, unlocked: {}, freebies: {}, charms: 0, bond: emptyBond() },
     placed: [],
     routines: [],
     journal: {},
@@ -246,7 +250,14 @@ function migrate(s) {
     // 舊存檔沒有金平糖：依現有經驗值換算一筆起始金額
     xp, coins: ps.coins === undefined ? Math.round(xp / 5) : num(ps.coins, 0, 1e9, 0), streak: num(ps.streak, 0, 1e6, 0),
     lastActive: DATE_RE.test(ps.lastActive) ? ps.lastActive : null, stats, achievements,
-    unlocked: {}, freebies: {}, charms: num(ps.charms, 0, CHARM.max, 0),
+    unlocked: {}, freebies: {}, charms: num(ps.charms, 0, CHARM.max, 0), bond: emptyBond(),
+  }
+  if (isObj(ps.bond)) {
+    const b = ps.bond
+    Object.assign(player.bond, {
+      pts: num(b.pts, 0, 1e7, 0), outfit: outfitOf(b.outfit) ? b.outfit : 'none',
+      visit: ymd(b.visit, ''), petDay: ymd(b.petDay, ''), petN: num(b.petN, 0, 99, 0), gift: ymd(b.gift, ''),
+    })
   }
 
   const shopKeys = new Set(SHOP_ITEMS.map((i) => i.key))
@@ -327,6 +338,7 @@ export class Store {
     this.selectedDate = this.today
     this._pending = []
     this._applyCharms()
+    this._visit()
     const made = this._ensureRoutines(this.today).length
     if (this._ensureQuests() || made) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
@@ -415,10 +427,13 @@ export class Store {
     const n = p.milestones.length
     return n ? p.milestones.filter((m) => m.done).length / n : 0
   }
+  get bond() {
+    return bondLevel(this.state.player.bond.pts)
+  }
   statsSnapshot() {
     const found = Object.keys(this.state.dex)
     return {
-      ...this.stats, level: this.level.level, streak: this.streak,
+      ...this.stats, level: this.level.level, streak: this.streak, bondLevel: this.bond.level,
       flowersFound: found.length, legendFound: found.filter((k) => flowerOf(k)?.rarity === 'legend').length,
     }
   }
@@ -581,6 +596,7 @@ export class Store {
     if (this.selectedDate !== now) this._ensureRoutines(this.selectedDate)
     this._ensureQuests()
     this._applyCharms()
+    this._visit()
     this._weeklyReady = this.weekly()?.ready
     return true
   }
@@ -605,6 +621,7 @@ export class Store {
     if (first) {
       this.stats.reviews++
       this._gain(XP.review, fx, { kind: 'review' })
+      this._bondGain(BOND_POINTS.review, fx)
     }
     this._finish(fx)
   }
@@ -612,6 +629,37 @@ export class Store {
     return Object.entries(this.state.journal)
       .sort((a, b) => (a[0] < b[0] ? 1 : -1))
       .slice(0, n)
+  }
+
+  // ── もち的好感度 ──
+  _bondGain(n, fx) {
+    const b = this.state.player.bond
+    const before = bondLevel(b.pts).level
+    b.pts += n
+    const after = bondLevel(b.pts)
+    if (after.level > before) fx.push(['bondUp', after])
+  }
+  // 每天第一次打開：好感度 +2；好感度夠高時もち會送幾顆金平糖
+  _visit() {
+    const b = this.state.player.bond
+    if (b.visit === this.today) return
+    b.visit = this.today
+    this._bondGain(BOND_POINTS.visit, this._pending)
+    if (this.bond.level >= actLevel('gift') && b.gift !== this.today) {
+      b.gift = this.today
+      const coins = 3 + Math.floor(hash01(this.today + ':gift') * 4)
+      this.state.player.coins += coins
+      this._pending.push(['gift', { coins }])
+    }
+    this.save(false)
+  }
+  outfitUnlocked(key) {
+    return !!outfitOf(key) && this.bond.level >= outfitLevel(key)
+  }
+  setOutfit(key) {
+    if (!this.outfitUnlocked(key) || this.state.player.bond.outfit === key) return
+    this.state.player.bond.outfit = key
+    this._finish([['outfit', key]])
   }
 
   // ── お守り ──
@@ -812,6 +860,7 @@ export class Store {
             d.starAll = true
             s.starDays++
             this._gain(XP.starAll, fx, { kind: 'starAll' })
+            this._bondGain(BOND_POINTS.starAll, fx)
             fx.push(['starAll', stars])
           }
         }
@@ -1001,12 +1050,24 @@ export class Store {
     d.pomodoros++
     d.focus += minutes
     this._gain(XP.pomodoro, fx, { kind: 'focus' })
+    this._bondGain(BOND_POINTS.pomodoro, fx)
     this._finish(fx)
   }
   pet() {
     this._refreshToday()
     this.stats.pets++
     this.day().pets++
+    const b = this.state.player.bond
+    if (b.petDay !== this.today) {
+      b.petDay = this.today
+      b.petN = 0
+    }
+    const fx = []
+    if (b.petN < BOND_POINTS.petDailyMax) {
+      b.petN++
+      this._bondGain(BOND_POINTS.pet, fx)
+    }
+    if (fx.length) return this._finish(fx)
     // 摸摸不需要重繪面板（避免打斷正在輸入的欄位），除非剛好解鎖成就或達成每日任務
     const snap = this.statsSnapshot()
     const unlocked = ACHIEVEMENTS.some((a) => !this.state.player.achievements[a.id] && (snap[a.cond.stat] ?? 0) >= a.cond.gte)

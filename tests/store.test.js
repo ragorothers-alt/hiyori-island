@@ -800,6 +800,71 @@ describe('お守り與逾期的花', () => {
   })
 })
 
+describe('もち的好感度', () => {
+  it('摸摸一天最多算 5 次', () => {
+    const before = store.player.bond.pts
+    for (let i = 0; i < 8; i++) store.pet()
+    expect(store.player.bond.pts - before).toBe(5)
+    expect(store.stats.pets).toBe(8)
+  })
+
+  it('每天第一次打開 +2，專注 +3，第一次回顧 +4', () => {
+    const b = store.player.bond
+    const p0 = b.pts
+    setDate('2026-10-26')
+    store.tick()
+    expect(b.pts - p0).toBe(2)
+    store.tick()
+    expect(b.pts - p0).toBe(2)
+    store.completePomodoro(25)
+    expect(b.pts - p0).toBe(5)
+    store.saveReview(store.today, 'sunny', '')
+    store.saveReview(store.today, 'rain', '')
+    expect(b.pts - p0).toBe(9)
+  })
+
+  it('升級會發事件並帶上解鎖內容', () => {
+    const onUp = vi.fn()
+    store.on('bondUp', onUp)
+    store.player.bond.pts = 9
+    store.completePomodoro(25)
+    expect(onUp).toHaveBeenCalledWith(expect.objectContaining({ level: 2, reward: { outfit: 'crown' } }))
+  })
+
+  it('衣裝要到好感度等級才能換', () => {
+    store.setOutfit('crown')
+    expect(store.player.bond.outfit).toBe('none')
+    store.player.bond.pts = 12
+    store.setOutfit('crown')
+    expect(store.player.bond.outfit).toBe('crown')
+    store.setOutfit('wagasa')
+    expect(store.player.bond.outfit).toBe('crown')
+  })
+
+  it('好感度 7 級起，每天第一次打開會收到 3–6 顆金平糖', () => {
+    store.player.bond.pts = 240
+    const onGift = vi.fn()
+    store.on('gift', onGift)
+    const coins = store.coins
+    setDate('2026-10-26')
+    store.tick()
+    expect(onGift).toHaveBeenCalledTimes(1)
+    const got = onGift.mock.calls[0][0].coins
+    expect(got).toBeGreaterThanOrEqual(3)
+    expect(got).toBeLessThanOrEqual(6)
+    expect(store.coins - coins).toBe(got)
+    store.tick()
+    expect(onGift).toHaveBeenCalledTimes(1)
+  })
+
+  it('舊存檔沒有好感度時從 0 開始，壞掉的衣裝改回預設', () => {
+    store.importJSON(JSON.stringify({ tasks: [], player: { bond: { pts: 40, outfit: '不存在' } } }))
+    expect(store.player.bond).toMatchObject({ pts: 40, outfit: 'none' })
+    store.importJSON(JSON.stringify({ tasks: [], player: {} }))
+    expect(store.player.bond.pts).toBeGreaterThanOrEqual(0)
+  })
+})
+
 describe('商店上架條件', () => {
   const item = (key) => SHOP_ITEMS.find((i) => i.key === key)
 

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { LAYOUT } from './island.js'
 import { tween, ease, rng } from './util.js'
 import { SEASONS } from './season.js'
+import { buildOutfit, disposeOutfit, OUTFIT_META } from './outfits.js'
 
 // もち：白色麻糬小精靈。會呼吸、眨眼、閒晃，完成任務時跳過去慶祝。
 const HOME = new THREE.Vector3(LAYOUT.home.x, 0, LAYOUT.home.z)
@@ -80,6 +81,13 @@ export class Mochi {
     clip.position.set(0.24, 0.92, 0.12)
     clip.rotation.set(0.3, 0, -0.5)
     this.body.add(clip)
+    this.clip = clip
+    this.outfit = null
+    this.outfitKey = 'none'
+    // 好感度解鎖的動作（由 main 依好感度設定）；onWater 由 main 提供澆水目標與效果
+    this.abilities = { water: false, sit: false }
+    this.onWater = null
+    this._lastWater = 0
 
     // 冬天的小圍巾
     const scarfMat = new THREE.MeshStandardMaterial({ color: '#ef8e93', roughness: 0.85 })
@@ -111,6 +119,22 @@ export class Mochi {
     this.clipMat.color.set(s.clip)
     this.clipMat.emissive.set(s.clip)
     this.scarf.visible = !!s.scarf
+  }
+
+  setOutfit(key = 'none') {
+    if (key === this.outfitKey) return
+    this.outfitKey = key
+    if (this.outfit) {
+      this.body.remove(this.outfit)
+      disposeOutfit(this.outfit)
+      this.outfit = null
+    }
+    const g = key !== 'none' ? buildOutfit(key) : null
+    if (g) {
+      this.body.add(g)
+      this.outfit = g
+    }
+    this.clip.visible = !OUTFIT_META[key]?.hideClip
   }
 
   get position() {
@@ -248,14 +272,18 @@ export class Mochi {
     this._squint = 0.9
   }
 
-  setFocus(on) {
+  // seat：專注綁定的那朵花（好感度夠時，もち會坐到花旁陪你）
+  setFocus(on, seat = null) {
     const mode = on ? 'focus' : 'idle'
-    if (this.mode === mode) return
+    if (this.mode === mode) {
+      if (on) this.sitBy(seat)
+      return
+    }
     this.mode = mode
     if (on) {
       this._enqueue(async () => {
         this.busy = true
-        await this._travel(HOME, 1.1)
+        await this._travel(this._seatSpot(seat) || HOME, 1.1)
         this.busy = false
       })
       const el = document.createElement('div')
@@ -266,6 +294,43 @@ export class Mochi {
       this.labels.remove(this.focusTag)
       this.focusTag = null
     }
+  }
+
+  _seatSpot(pos) {
+    if (!pos || !this.abilities.sit) return null
+    // 坐在花朝鏡頭那一側一點點
+    const cam = this.world.camera.position
+    const dir = new THREE.Vector3(cam.x - pos.x, 0, cam.z - pos.z).normalize()
+    return pos.clone().setY(0).add(dir.multiplyScalar(0.85)).add(new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(0.55))
+  }
+  sitBy(pos) {
+    const spot = this._seatSpot(pos)
+    if (!spot || this.mode !== 'focus') return
+    this._enqueue(async () => {
+      this.busy = true
+      await this._travel(spot, 0.9)
+      this.busy = false
+    })
+  }
+
+  // 替花澆水：跳到花旁、往前傾、灑水，再回家
+  async _water(target) {
+    this.busy = true
+    const here = this.root.position.clone()
+    const dir = here.clone().sub(target.pos).setY(0)
+    if (dir.lengthSq() < 0.01) dir.set(0, 0, 1)
+    const near = target.pos.clone().setY(0).add(dir.normalize().multiplyScalar(0.95))
+    await this._travel(near, 0.9)
+    this.faceAngle = Math.atan2(target.pos.x - near.x, target.pos.z - near.z)
+    await play(0.3, (k) => (this.body.rotation.x = k * 0.32), { easing: ease.inOutSine })
+    this.onWater?.sprinkle(target)
+    await play(1.2, (k) => (this.body.rotation.z = Math.sin(k * Math.PI * 4) * 0.08 * (1 - k)), { easing: ease.linear })
+    await play(0.3, (k) => (this.body.rotation.x = (1 - k) * 0.32), { easing: ease.inOutSine })
+    this.body.rotation.set(0, 0, 0)
+    await new Promise((r) => setTimeout(r, 500))
+    if (this.mode !== 'focus') await this._travel(HOME, 1.1)
+    this.busy = false
+    this.wanderT = 10
   }
 
   update(dt, t) {
@@ -298,6 +363,16 @@ export class Mochi {
       this.wanderT -= dt
       if (this.wanderT < 0) {
         this.wanderT = 7 + this.rand() * 9
+        // 好感度夠的話，偶爾去花圃替花澆水（至少隔 2.5 分鐘）
+        const now = performance.now()
+        if (this.abilities.water && this.onWater && now - this._lastWater > 150000 && this.rand() < 0.35) {
+          const target = this.onWater.target()
+          if (target) {
+            this._lastWater = now
+            this._enqueue(() => this._water(target))
+            return
+          }
+        }
         const a = this.rand() * Math.PI * 2
         const d = 0.4 + this.rand() * 1.1
         const target = HOME.clone().add(new THREE.Vector3(Math.cos(a) * d, 0, Math.sin(a) * d * 0.6))

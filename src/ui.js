@@ -6,6 +6,7 @@ import { SHOP_ITEMS } from './data/shop.js'
 import { renderThumbnails } from './scene/placed.js'
 import { renderFlowerThumbs } from './scene/garden.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
+import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -740,6 +741,32 @@ export class UI {
     $('#syncDot').dataset.state = sy.state
   }
 
+  // ── もち的好感度 ──
+  renderBond() {
+    const s = this.store
+    const b = s.bond
+    const cur = BOND_LEVELS[b.level - 1]
+    const pct = b.next ? ((b.pts - cur.need) / (b.next - cur.need)) * 100 : 100
+    const nextLv = BOND_LEVELS[b.level]
+    const r = nextLv?.reward
+    const nextText = !nextLv ? '已經是最好的朋友了' : r?.outfit ? `Lv.${nextLv.level} 解鎖衣裝「${outfitOf(r.outfit).name}」` : `Lv.${nextLv.level} 解鎖「${BOND_ACTS[r.act].name}」`
+    const acts = Object.entries(BOND_ACTS)
+      .filter(([k]) => BOND_LEVELS.some((l) => l.reward?.act === k && l.level <= b.level))
+      .map(([, a]) => `<span title="${esc(a.desc)}">${esc(a.name)}</span>`)
+    const current = s.player.bond.outfit
+    $('#bondCount').textContent = `Lv.${b.level}`
+    $('#bondBox').innerHTML = `
+      <div class="bond-head"><b>${esc(b.name)}</b><small>${b.next ? `${b.pts} / ${b.next}` : b.pts}</small></div>
+      <div class="bond-bar"><i style="width:${pct}%"></i></div>
+      <p class="bond-next">${nextText}${acts.length ? `・已學會 ${acts.join('、')}` : ''}</p>
+      <div class="outfits">${OUTFITS.map((o) => {
+        const lv = outfitLevel(o.key)
+        const locked = lv > b.level
+        return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" ${locked ? 'disabled' : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
+      }).join('')}</div>
+      <p class="hint">摸摸もち、專注、寫回顧、清完本命、每天來看看牠，都會讓牠更親近你。</p>`
+  }
+
   // ── 花の図鑑 ──
   renderDex() {
     const dex = this.store.state.dex
@@ -851,6 +878,10 @@ export class UI {
   _bindRecords() {
     this._bindReview()
     this._bindDex()
+    $('#bondBox').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-outfit]:not(:disabled)')
+      if (b) this.store.setOutfit(b.dataset.outfit)
+    })
     $('#powerBtn').onclick = () => {
       const on = !this.store.state.settings.powerSave
       this.store.setSetting('powerSave', on)
@@ -906,6 +937,7 @@ export class UI {
       .join('')
 
     this.renderSettings()
+    this.renderBond()
     this.renderDex()
     const entries = s.journalList(14)
     $('#journalTitle').hidden = !entries.length

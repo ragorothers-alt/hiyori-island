@@ -482,6 +482,23 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── もち的好感度 ── */
+.bond { padding: 12px 14px; border-radius: 16px; background: var(--field); }
+.bond-head { display: flex; align-items: baseline; justify-content: space-between; }
+.bond-head b { font-family: var(--font-display); font-weight: 400; font-size: 15px; letter-spacing: .1em; }
+.bond-head small { font-family: var(--font-num); font-size: 11px; color: var(--ink-faint); }
+.bond-bar { height: 6px; margin: 6px 0; border-radius: 4px; background: rgba(240, 160, 185, .18); overflow: hidden; }
+.bond-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #f7b6cb, #f39bb5); transition: width .8s var(--ease); }
+.bond-next { margin: 0 0 8px; font-size: 11.5px; color: var(--ink-soft); }
+.bond-next span { color: #d9799a; border-bottom: 1px dotted currentColor; cursor: help; }
+.outfits { display: flex; flex-wrap: wrap; gap: 6px; }
+.outfit { font-size: 11.5px; padding: 4px 10px; border-radius: 10px; border: 1px dashed rgba(240, 150, 180, .5); color: var(--ink-soft); }
+.outfit:hover:not(:disabled) { background: var(--glass-hover); color: var(--ink); }
+.outfit.on { border-style: solid; border-color: transparent; color: #fff; background: linear-gradient(135deg, #f6b0c4, #f3a3bd); }
+.outfit:disabled { opacity: .5; cursor: default; }
+.outfit small { font-family: var(--font-num); font-size: 10.5px; }
+.bond .hint { margin: 8px 0 0; font-size: 10.5px; color: var(--ink-faint); }
+
 /* ── 花の図鑑 ── */
 .dex { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
 .dex-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 5px; border-radius: 14px; background: var(--field); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--rc) 45%, transparent); transition: transform .2s, box-shadow .2s; }
