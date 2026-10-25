@@ -13,6 +13,8 @@ import { TimeRing } from './scene/timeRing.js'
 import { Mochi } from './scene/mochi.js'
 import { Particles } from './scene/particles.js'
 import { Labels } from './scene/labels.js'
+import { Placed, spotFree } from './scene/placed.js'
+import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
 import { LINES } from './data/lines.js'
@@ -48,6 +50,7 @@ async function boot() {
   const labels = new Labels(world)
   const mochi = new Mochi(world, labels, sky)
   const fx = new Particles(world, sky)
+  const placed = new Placed(world, sky)
   sfx.setEnabled(store.state.settings.sound)
   decor.sync(store.level.level)
 
@@ -69,11 +72,16 @@ async function boot() {
   store.on('dateChanged', applySeason)
 
   // ── 浮動經驗值 ──
-  const floatText = (pos, text, big = false) => {
+  const floatText = (pos, text, big = false, coins = 0) => {
     if (!pos) return
     const el = document.createElement('div')
     el.className = 'floaty' + (big ? ' big' : '')
     el.textContent = text
+    if (coins) {
+      const c = document.createElement('small')
+      c.innerHTML = `<i class="konpeito"></i>+${coins}`
+      el.append(c)
+    }
     const p = pos.clone()
     labels.flash(el, () => p, 1700)
   }
@@ -140,8 +148,95 @@ async function boot() {
     syncNextEvent()
   }
 
+  // ── 擺放裝飾 ──
+  const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+  const placeBar = document.getElementById('placeBar')
+  let placing = null // { key, moveId?, rot, x, z, ok }
+  let itemMenu = null
+  const closeItemMenu = () => {
+    if (itemMenu) labels.remove(itemMenu)
+    itemMenu = null
+  }
+  const stopPlacing = () => {
+    if (!placing) return
+    placed.endGhost()
+    placed.hiddenId = null
+    placing = null
+    placeBar.hidden = true
+    placed.sync(store.state.placed)
+  }
+  const startPlacing = (key, moveId = null) => {
+    stopPlacing()
+    closeItemMenu()
+    const item = SHOP_ITEMS.find((i) => i.key === key)
+    if (!item) return
+    const from = moveId && store.state.placed.find((p) => p.id === moveId)
+    placing = { key, moveId, rot: from?.rot ?? 0, ok: false }
+    placed.startGhost(key, placing.rot)
+    if (from) {
+      placed.hiddenId = moveId
+      placed.sync(store.state.placed)
+    }
+    document.getElementById('placeName').textContent = moveId ? `移動「${item.name}」：點島上的空地` : `擺放「${item.name}」：點島上的空地`
+    placeBar.hidden = false
+    if (!moveId) mochi.say(line('shopBuy', { item: item.name }) || `${item.name}，要放哪裡呢？`)
+  }
+  const aimAt = (ray) => {
+    const p = ray.intersectPlane(ground, new THREE.Vector3())
+    if (!p) return null
+    const ok = spotFree(p.x, p.z, store.state.placed, placing.moveId)
+    placing.x = p.x
+    placing.z = p.z
+    placing.ok = ok
+    placed.moveGhost(p.x, p.z, ok)
+    return p
+  }
+  world.onPointerMove = (ray) => {
+    if (placing) aimAt(ray)
+  }
+  world.onClick = (ray) => {
+    if (!placing) return false
+    if (!aimAt(ray) || !placing.ok) {
+      sfx.undo()
+      return true
+    }
+    const { key, moveId, x, z, rot } = placing
+    stopPlacing()
+    if (moveId) store.moveItem(moveId, x, z, rot)
+    else store.placeItem(key, x, z, rot)
+    return true
+  }
+  document.getElementById('placeRotate').onclick = () => {
+    if (placing) placing.rot = placed.rotateGhost()
+  }
+  document.getElementById('placeCancel').onclick = () => stopPlacing()
+  addEventListener('keydown', (e) => {
+    if (!placing || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return
+    if (e.key === 'Escape') stopPlacing()
+    if (e.key === 'r' || e.key === 'R') placing.rot = placed.rotateGhost()
+  })
+  const openItemMenu = (id) => {
+    closeItemMenu()
+    const p = store.state.placed.find((x) => x.id === id)
+    const item = p && SHOP_ITEMS.find((i) => i.key === p.key)
+    if (!item) return
+    const el = document.createElement('div')
+    el.className = 'item-menu'
+    el.innerHTML = `<button data-a="move">移動</button><button data-a="store">收起 +${Math.floor(item.price / 2)}</button><button data-a="close">×</button>`
+    el.addEventListener('click', (e) => {
+      const a = e.target.closest('[data-a]')?.dataset.a
+      if (a === 'move') startPlacing(p.key, p.id)
+      else if (a === 'store') {
+        closeItemMenu()
+        store.storeItem(p.id)
+      } else closeItemMenu()
+    })
+    itemMenu = labels.add(el, () => placed.anchor(id))
+  }
+
   // ── UI 掛鉤 ──
   const hooks = {
+    startPlacing: (key) => startPlacing(key),
     hoverTask: (id) => garden.highlight(id),
     hoverEvent: (id) => ring.highlight(id),
     hoverProject: (id) => {
@@ -234,6 +329,10 @@ async function boot() {
       const pr = store.state.projects.find((x) => x.id === p.id)
       if (pr) html = `${esc(pr.name)}<small>${Math.round(store.progress(pr) * 100)}%・${pr.milestones.filter((m) => m.done).length}/${pr.milestones.length} 層</small>`
     } else if (p.type === 'mochi') html = `もち<small>點一下摸摸牠</small>`
+    else if (p.type === 'placed') {
+      const it = SHOP_ITEMS.find((i) => i.key === store.state.placed.find((x) => x.id === p.id)?.key)
+      if (it) html = `${esc(it.name)}<small>點一下移動或收起</small>`
+    }
     if (!html) return
     tip.innerHTML = html
     tip.style.display = ''
@@ -326,7 +425,13 @@ async function boot() {
 
   world.onPick = (p) => {
     tip.style.display = 'none'
+    if (p?.type !== 'placed') closeItemMenu()
     if (!p) return
+    if (p.type === 'placed') {
+      sfx.pop()
+      openItemMenu(p.id)
+      return
+    }
     if (p.type === 'mochi') {
       store.pet()
       mochi.pet()
@@ -346,7 +451,21 @@ async function boot() {
   store.on('change', () => {
     ui.render()
     syncScene()
+    if (!placing) placed.sync(store.state.placed)
   })
+  store.on('itemPlaced', ({ item, placed: p }) => {
+    sfx.plant()
+    const pos = new THREE.Vector3(p.x, 0.3, p.z)
+    fx.burst(pos, { colors: ['#ffffff', '#ffd1dc', '#fff1b8'], count: 30, speed: 1.6 })
+    fx.ripple(pos.clone().setY(0.05), '#ffd1dc', 1.6)
+    mochi.say(line('shopPlace', { item: item.name }) || `${item.name}擺好了！`)
+  })
+  store.on('itemMoved', () => sfx.pop())
+  store.on('itemStored', ({ item, refund }) => {
+    sfx.undo()
+    ui.toast({ icon: '糖', title: `收起了${item?.name || '裝飾'}`, sub: `退還 ${refund} 顆金平糖` })
+  })
+  store.on('shopPoor', () => mochi.say(line('shopPoor') || '金平糖還不太夠，慢慢來就好。'))
   store.on('reload', () => {
     decor.sync(store.level.level)
     world.home()
@@ -404,14 +523,14 @@ async function boot() {
       ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」落成！`, sub: '整座塔都蓋好了，+120 XP' })
     }, 1100)
   })
-  store.on('xp', ({ amount, kind, id }) => {
+  store.on('xp', ({ amount, coins, kind, id }) => {
     let pos = null
     if (kind === 'task') pos = garden.anchor(id)
     else if (kind === 'event') pos = ring.anchor(id)
     else if (kind === 'milestone' || kind === 'project') pos = towers.anchor(id)
     pos ||= mochi.headAnchor()
     const delay = kind === 'project' ? 900 : kind === 'perfect' ? 1300 : 150
-    setTimeout(() => floatText(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), `+${amount} XP`, amount >= 40), delay)
+    setTimeout(() => floatText(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), `+${amount} XP`, amount >= 40, coins), delay)
   })
   store.on('levelUp', ({ level }) => {
     const unlock = UNLOCKS.find((u) => u.level === level)
@@ -452,7 +571,8 @@ async function boot() {
   const reminders = new Reminders(store, (e, min) => {
     sfx.reminder()
     const when = min > 0 ? `${min} 分鐘後開始（${e.start}）` : `現在開始（${e.start}）`
-    mochi.say(line('reminder', { event: short(e.title), min }) || `${short(e.title)}，${when}`, 6000)
+    const say = min > 0 ? line('reminder', { event: short(e.title), min }) : `「${short(e.title)}」開始囉！`
+    mochi.say(say || `${short(e.title)}，${when}`, 6000)
     ui.toast({ icon: '鐘', title: e.title, sub: when, ms: 9000 })
     if (store.selectedDate === store.today) ring.pulse(e.id)
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
@@ -500,6 +620,7 @@ async function boot() {
   // ── 開場 ──
   ui.render()
   syncScene(false)
+  placed.sync(store.state.placed)
   world.start()
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {

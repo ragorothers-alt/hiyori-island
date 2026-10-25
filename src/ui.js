@@ -2,6 +2,8 @@ import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
+import { SHOP_ITEMS } from './data/shop.js'
+import { renderThumbnails } from './scene/placed.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -115,6 +117,14 @@ export class UI {
       this.renderChrome()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
+    $('#shopBtn').onclick = () => this.toggleShop()
+    $('#shopClose').onclick = () => this.toggleShop(false)
+    $('#shopGrid').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-key]')
+      if (!b || b.disabled) return
+      this.toggleShop(false)
+      this.hooks.startPlacing(b.dataset.key)
+    })
     for (const el of [$('#questList'), $('#questMini')]) {
       el.addEventListener('click', (e) => {
         const b = e.target.closest('[data-q]')
@@ -129,6 +139,7 @@ export class UI {
     addEventListener('keydown', (e) => {
       const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)
       if (e.key === 'Escape') {
+        this.toggleShop(false)
         this.closeModal()
         if (typing) document.activeElement.blur()
       }
@@ -138,6 +149,7 @@ export class UI {
         this.setTab('tasks')
         $('#taskTitle').focus()
       } else if (e.key === 'v' || e.key === 'V') this.hooks.resetView()
+      else if (e.key === 's' || e.key === 'S') this.toggleShop()
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
       else if (e.key === 'ArrowRight') $('#nextDay').click()
@@ -704,6 +716,8 @@ export class UI {
     $('#xpFill').style.width = `${(lv.cur / lv.need) * 100}%`
     $('#xpText').textContent = `${lv.cur} / ${lv.need} XP`
     $('#streak').textContent = s.streak
+    $('#coins').textContent = s.coins
+    if (!$('#shop').hidden) this.renderShop()
 
     const d = parseDate(s.selectedDate)
     $('#dateNum').textContent = `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`
@@ -747,6 +761,30 @@ export class UI {
   tickClock() {
     const n = new Date()
     $('#clock').textContent = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+  }
+
+  // ── 金平糖商店 ──
+  toggleShop(force) {
+    const open = force ?? $('#shop').hidden
+    $('#shop').hidden = !open
+    $('#shopBtn').classList.toggle('on', open)
+    if (open) this.renderShop()
+  }
+
+  renderShop() {
+    const s = this.store
+    $('#shopCoins').textContent = s.coins
+    const thumbs = renderThumbnails(SHOP_ITEMS.map((i) => i.key))
+    const owned = {}
+    for (const p of s.state.placed) owned[p.key] = (owned[p.key] || 0) + 1
+    $('#shopGrid').innerHTML = SHOP_ITEMS.map(
+      (i) => `<button class="shop-item" data-key="${i.key}" title="${esc(i.desc)}" ${s.coins < i.price ? 'disabled' : ''}>
+        <img src="${thumbs[i.key]}" alt="" />
+        <b>${esc(i.name)}</b><small>${esc(i.jp)}</small>
+        <span class="price"><i class="konpeito"></i>${i.price}</span>
+        ${owned[i.key] ? `<span class="owned">已擺 ${owned[i.key]}</span>` : ''}
+      </button>`,
+    ).join('')
   }
 
   // ── 3D ↔ 列表聯動 ──

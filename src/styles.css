@@ -421,6 +421,7 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
 @keyframes bubbleOut { to { opacity: 0; transform: translate(-50%, -110%) scale(.95); } }
 .floaty { transform: translate(-50%, -50%); font-family: var(--font-num); font-weight: 700; font-size: 17px; color: #fff; text-shadow: 0 1px 2px rgba(200, 90, 130, .6), 0 0 12px rgba(255, 160, 190, .9); white-space: nowrap; animation: floatUp 1.6s var(--ease) forwards; }
 .floaty.big { font-size: 22px; }
+.floaty small { display: block; text-align: center; font-size: 12px; margin-top: 1px; }
 @keyframes floatUp { 0% { opacity: 0; margin-top: 10px; } 15% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; margin-top: -60px; } }
 .proj-chip {
   transform: translate(-50%, -100%); padding: 3px 9px; border-radius: 10px; font-size: 11.5px; white-space: nowrap;
@@ -476,6 +477,43 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
 }
+/* ── 金平糖 ── */
+.konpeito {
+  display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 3px;
+  background: radial-gradient(circle at 35% 30%, #fff, #ffd1df 45%, #f7a8c0);
+  clip-path: polygon(50% 0, 61% 26%, 90% 14%, 77% 42%, 100% 55%, 72% 64%, 80% 95%, 52% 78%, 25% 96%, 30% 66%, 0 56%, 24% 42%, 10% 13%, 39% 26%);
+}
+.coins b { color: #e07a9b; font-size: 13px; }
+body.night .coins b { color: #ffb8cb; }
+.coin-pill { font-family: var(--font-num); font-weight: 600; padding: 3px 10px; border-radius: 10px; background: rgba(247, 168, 192, .16); }
+.shop { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 40; width: min(620px, calc(100% - 24px)); animation: fadeUp .35s var(--ease); }
+.shop-card { padding: 14px 16px 10px; background: var(--glass-strong); max-height: min(70vh, 560px); display: flex; flex-direction: column; }
+.shop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.shop-head h3 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 17px; letter-spacing: .12em; flex: 1; display: flex; align-items: baseline; gap: 8px; }
+.shop-head h3 small { font-size: 11px; color: var(--ink-faint); letter-spacing: .14em; }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; overflow-y: auto; padding: 2px; }
+.shop-item { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 6px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); transition: transform .2s var(--ease), box-shadow .2s; text-align: center; }
+.shop-item:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(80, 120, 170, .16); }
+.shop-item img { width: 72px; height: 72px; object-fit: contain; }
+.shop-item b { font-family: var(--font-display); font-weight: 400; font-size: 13.5px; letter-spacing: .04em; }
+.shop-item small { font-size: 10.5px; color: var(--ink-faint); }
+.shop-item .price { font-family: var(--font-num); font-weight: 600; font-size: 12.5px; color: #e07a9b; margin-top: 2px; }
+.shop-item .owned { font-size: 10px; color: var(--mint); }
+.shop-item:disabled { opacity: .5; cursor: not-allowed; }
+.shop-hint { margin: 10px 2px 2px; }
+.place-bar { position: fixed; left: 50%; top: 92px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; border-radius: 16px; }
+.place-bar span { font-family: var(--font-display); letter-spacing: .08em; }
+.item-menu { transform: translate(-50%, -100%); display: flex; gap: 4px; padding: 5px; border-radius: 12px; background: rgba(255, 255, 255, .94); box-shadow: 0 6px 20px rgba(70, 110, 160, .2); pointer-events: auto; }
+.item-menu button { font-size: 12px; padding: 4px 10px; border-radius: 9px; color: #3e4a5c; background: rgba(140, 170, 200, .14); }
+.item-menu button:hover { background: rgba(140, 170, 200, .28); }
+body.night .item-menu { background: rgba(40, 52, 94, .94); }
+body.night .item-menu button { color: #eef2fb; }
+@media (max-width: 860px) {
+  .shop { bottom: calc(50dvh + 64px); }
+  .shop-card { max-height: 44dvh; }
+  .place-bar { top: 64px; }
+}
+
 /* ── 快速輸入預覽 ── */
 .quick-preview { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 4px; margin-top: -4px; }
 .quick-preview span { font-size: 11px; padding: 2px 8px; border-radius: 8px; background: rgba(143, 197, 232, .2); color: var(--sky-deep); }

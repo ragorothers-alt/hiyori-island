@@ -54,6 +54,9 @@ export class World {
     // dragHandler: { start(hit, e) → boolean, move(ray, e), end(e) }；start 回傳 true 就接管這次拖曳（不旋轉鏡頭）
     this.dragHandler = null
     this.dragging = false
+    // 擺放模式等需要原始射線的功能：onPointerMove(ray, e)、onClick(ray, e) 回傳 true 表示已處理
+    this.onPointerMove = null
+    this.onClick = null
     this.lastInteract = performance.now()
     this.idleRotate = true
     this.shift = { x: 0, y: 0 }
@@ -183,6 +186,8 @@ export class World {
       const quick = performance.now() - down.t < 600
       down = null
       if (moved > 6 || !quick) return
+      this._setRay(e)
+      if (this.onClick?.(this.raycaster.ray, e)) return
       const hit = this._raycast(e)
       this.onPick(hit?.pick || null, hit)
     })
@@ -197,6 +202,10 @@ export class World {
       if (raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
+        if (this.onPointerMove) {
+          this._setRay(lastMove)
+          this.onPointerMove(this.raycaster.ray, lastMove)
+        }
         const hit = this._raycast(lastMove)
         const key = hit ? hit.pick.type + ':' + hit.pick.id : null
         canvas.style.cursor = hit ? 'pointer' : ''

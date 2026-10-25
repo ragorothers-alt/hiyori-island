@@ -2,6 +2,7 @@
 // 所有變更都經過 action → _finish(fx)：先存檔、發出 'change' 讓 UI/場景同步，再依序發出特效事件。
 
 import { ACHIEVEMENTS } from './data/achievements.js'
+import { SHOP_ITEMS } from './data/shop.js'
 import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH } from './theme.js'
 
 const KEY = 'hiyori-daily-v1'
@@ -52,7 +53,7 @@ export const QUESTS = [
 const emptyStats = () => ({
   tasksDone: 0, highTasksDone: 0, eventsDone: 0, milestonesDone: 0, projectsDone: 0, projectsCreated: 0,
   pomodoros: 0, focusMinutes: 0, bestStreak: 0, perfectDays: 0, earlyTasks: 0, nightTasks: 0,
-  questsClaimed: 0, pets: 0, bestDayTasks: 0,
+  questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0,
 })
 const emptyDay = () => ({ tasks: 0, events: 0, milestones: 0, pomodoros: 0, focus: 0, xp: 0, perfect: false })
 
@@ -90,7 +91,8 @@ function seed() {
         completedAt: null, archived: false,
       },
     ],
-    player: { xp: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {} },
+    player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {} },
+    placed: [],
     routines: [],
     history: {},
     quests: {},
@@ -202,10 +204,18 @@ function migrate(s) {
   for (const k of Object.keys(stats)) stats[k] = num(rawStats[k], 0, 1e9, 0)
   const achievements = {}
   if (isObj(ps.achievements)) for (const [k, v] of Object.entries(ps.achievements)) if (ID_RE.test(k) && ts(v)) achievements[k] = +v
+  const xp = num(ps.xp, 0, 1e9, 0)
   const player = {
-    xp: num(ps.xp, 0, 1e9, 0), streak: num(ps.streak, 0, 1e6, 0),
+    // 舊存檔沒有金平糖：依現有經驗值換算一筆起始金額
+    xp, coins: ps.coins === undefined ? Math.round(xp / 5) : num(ps.coins, 0, 1e9, 0), streak: num(ps.streak, 0, 1e6, 0),
     lastActive: DATE_RE.test(ps.lastActive) ? ps.lastActive : null, stats, achievements,
   }
+
+  const shopKeys = new Set(SHOP_ITEMS.map((i) => i.key))
+  const placed = cleanList(s.placed, (p) => {
+    if (!shopKeys.has(p.key) || !Number.isFinite(+p.x) || !Number.isFinite(+p.z)) return null
+    return { id: str(p.id), key: p.key, x: Math.max(-9, Math.min(9, +p.x)), z: Math.max(-9, Math.min(9, +p.z)), rot: Number.isFinite(+p.rot) ? +p.rot : 0 }
+  })
 
   const history = {}
   if (isObj(s.history)) {
@@ -234,7 +244,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, routines, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
+  return { version: 1, tasks, events, projects, routines, placed, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
 }
 
 export class Store {
@@ -324,9 +334,11 @@ export class Store {
   // ── 內部 ──
   _gain(amount, fx, meta = {}) {
     const before = this.level.level
+    const coins = Math.max(1, Math.round(amount / 5))
     this.state.player.xp += amount
+    this.state.player.coins += coins
     this.day().xp += amount
-    fx.push(['xp', { amount, ...meta }])
+    fx.push(['xp', { amount, coins, ...meta }])
     const after = this.level.level
     if (after > before) fx.push(['levelUp', { level: after, from: before }])
   }
@@ -389,6 +401,40 @@ export class Store {
     this.emit('change')
     this.emit('dateChanged', this.selectedDate)
     return true
+  }
+
+  // ── 金平糖商店 ──
+  get coins() {
+    return this.state.player.coins
+  }
+  placeItem(key, x, z, rot = 0) {
+    const item = SHOP_ITEMS.find((i) => i.key === key)
+    if (!item) return null
+    if (this.coins < item.price) {
+      this.emit('shopPoor', item)
+      return null
+    }
+    this.state.player.coins -= item.price
+    const p = { id: uid(), key, x, z, rot }
+    this.state.placed.push(p)
+    this.stats.itemsBought++
+    this._finish([['itemPlaced', { item, placed: p }]])
+    return p
+  }
+  moveItem(id, x, z, rot) {
+    const p = this._find('placed', id)
+    if (!p) return
+    Object.assign(p, { x, z, rot })
+    this._finish([['itemMoved', p]])
+  }
+  storeItem(id) {
+    const p = this._find('placed', id)
+    if (!p) return
+    const item = SHOP_ITEMS.find((i) => i.key === p.key)
+    const refund = Math.floor((item?.price || 0) / 2)
+    this.state.placed = this.state.placed.filter((x) => x.id !== id)
+    this.state.player.coins += refund
+    this._finish([['itemStored', { item, refund }]])
   }
 
   // ── 例行公事 ──
