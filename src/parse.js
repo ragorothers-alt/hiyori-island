@@ -61,7 +61,7 @@ function readTime(match, offset, evening = false) {
 
 export function parseQuick(input, { today = dateStr() } = {}) {
   let text = ` ${input} `
-  const out = { title: '', kind: 'task', date: null, start: null, end: null, priority: null, tag: null, repeat: null, chips: [] }
+  const out = { title: '', kind: 'task', date: null, start: null, end: null, priority: null, tag: null, repeat: null, star: false, chips: [] }
   const take = (re, fn) => {
     text = text.replace(re, (...m) => {
       const r = fn(...m)
@@ -74,6 +74,10 @@ export function parseQuick(input, { today = dateStr() } = {}) {
     const key = Object.keys(TAG_ALIASES).find((k) => TAG_ALIASES[k].includes(name.toLowerCase()))
     if (!key) return false
     out.tag = key
+  })
+  // 本命 ★ 或 !本命
+  take(/★|[!！]\s*本命/g, () => {
+    out.star = true
   })
   // 優先度 !高 !! ！
   take(/[!！]\s*(高|中|低)|([!！]{1,3})(?=\s)/g, (_, word, bangs) => {
@@ -177,5 +181,6 @@ export function describeQuick(p, today) {
   if (p.start) chips.push(`${p.start}–${p.end}`)
   if (p.repeat) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
   if (p.priority && p.kind === 'task') chips.push(['', '低', '中', '高'][p.priority] + '優先')
+  if (p.star && p.kind === 'task') chips.push('★ 本命')
   return chips
 }

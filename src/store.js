@@ -3,7 +3,7 @@
 
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { SHOP_ITEMS } from './data/shop.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS } from './theme.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP } from './theme.js'
 
 const KEY = 'hiyori-daily-v1'
 
@@ -54,8 +54,18 @@ const emptyStats = () => ({
   tasksDone: 0, highTasksDone: 0, eventsDone: 0, milestonesDone: 0, projectsDone: 0, projectsCreated: 0,
   pomodoros: 0, focusMinutes: 0, bestStreak: 0, perfectDays: 0, earlyTasks: 0, nightTasks: 0,
   questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0, reviews: 0,
+  starsDone: 0, starDays: 0,
 })
-const emptyDay = () => ({ tasks: 0, events: 0, milestones: 0, pomodoros: 0, focus: 0, xp: 0, perfect: false })
+// 每日紀錄。stars／high／early（中午前）／routines：完成數；tagMask：完成過的分類（位元）；
+// plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數
+const DAY_NUMS = ['tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare']
+const DAY_FLAGS = ['perfect', 'starAll']
+const emptyDay = () => {
+  const d = {}
+  for (const k of DAY_NUMS) d[k] = 0
+  for (const k of DAY_FLAGS) d[k] = false
+  return d
+}
 
 const ms = (title, done = false) => ({ id: uid(), title, done, rewarded: done })
 
@@ -142,6 +152,7 @@ function migrate(s) {
       createdAt: ts(t.createdAt) || Date.now(), doneAt: done ? ts(t.doneAt) : null,
       routineId: ID_RE.test(t.routineId) ? t.routineId : null,
       pomos: num(t.pomos, 0, 99, 0),
+      star: !!t.star,
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -225,8 +236,8 @@ function migrate(s) {
     for (const [d, v] of Object.entries(s.history)) {
       if (!DATE_RE.test(d) || !isObj(v)) continue
       const h = emptyDay()
-      for (const k of ['tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp']) h[k] = num(v[k], 0, 1e7, 0)
-      h.perfect = !!v.perfect
+      for (const k of DAY_NUMS) h[k] = num(v[k], 0, 1e7, 0)
+      for (const k of DAY_FLAGS) h[k] = !!v[k]
       history[d] = h
     }
   }
@@ -533,6 +544,29 @@ export class Store {
     this._finish([['taskAdded', t]])
     return t
   }
+  // 本命：每天最多 3 件；已完成的不能改，過去日期的不能新選
+  starsOn(date) {
+    return this.tasksOn(date).filter((t) => t.star)
+  }
+  toggleStar(id) {
+    const t = this._find('tasks', id)
+    if (!t || t.done) return
+    this._refreshToday()
+    if (t.star) {
+      t.star = false
+      this._finish()
+      return
+    }
+    if (t.date < this.today) return
+    const n = this.starsOn(t.date).length
+    if (n >= MAX_STARS) {
+      this.emit('starFull', t)
+      return
+    }
+    t.star = true
+    if (t.date === this.today && n + 1 === MAX_STARS && new Date().getHours() < 12) this.day().plan = 1
+    this._finish([['starPicked', t]])
+  }
   toggleTask(id) {
     const t = this._find('tasks', id)
     if (!t) return
@@ -552,9 +586,33 @@ export class Store {
         if (h >= 22) s.nightTasks++
         const d = this.day()
         d.tasks++
+        if (t.priority === 3) d.high++
+        if (h < 12) d.early++
+        d.tagMask |= 1 << Math.max(0, TAGS.findIndex((x) => x.id === t.tag))
+        if (t.routineId) d.routines++
         s.bestDayTasks = Math.max(s.bestDayTasks, d.tasks)
         this._touchStreak()
-        this._gain(PRIORITIES[t.priority]?.xp ?? 10, fx, { kind: 'task', id: t.id })
+        let xp = PRIORITIES[t.priority]?.xp ?? 10
+        if (t.star) {
+          xp *= 2
+          d.stars++
+          s.starsDone++
+        }
+        // 今天已經開了很多花：之後的任務 XP 減半
+        const tired = d.tasks > SOFT_CAP
+        if (tired) xp = Math.ceil(xp / 2)
+        if (d.tasks === SOFT_CAP + 1) fx.push(['tired', { count: d.tasks }])
+        this._gain(xp, fx, { kind: t.star ? 'star' : 'task', id: t.id, tired })
+        if (t.star) {
+          fx.push(['starDone', t])
+          const stars = this.starsOn(this.today)
+          if (t.date === this.today && !d.starAll && stars.length === MAX_STARS && stars.every((x) => x.done)) {
+            d.starAll = true
+            s.starDays++
+            this._gain(XP.starAll, fx, { kind: 'starAll' })
+            fx.push(['starAll', stars])
+          }
+        }
       }
       const list = this.tasksOn(t.date)
       if (t.date === this.today && list.every((x) => x.done)) {

@@ -92,7 +92,7 @@ describe('任務經驗值與升級', () => {
     expect(store.stats.tasksDone).toBe(1)
     expect(store.stats.highTasksDone).toBe(priority === 3 ? 1 : 0)
     expect(store.peekDay(TODAY)).toMatchObject({ tasks: 1, xp })
-    expect(onXp).toHaveBeenCalledExactlyOnceWith({ amount: xp, coins, kind: 'task', id: task.id })
+    expect(onXp).toHaveBeenCalledExactlyOnceWith({ amount: xp, coins, kind: 'task', id: task.id, tired: false })
   })
 
   it('任務取消後再次完成不重複增加經驗值、金平糖與完成數', () => {
@@ -212,6 +212,88 @@ describe('連續天數與完美的一天', () => {
     expect(store.player.xp).toBe(20)
     expect(store.stats.perfectDays).toBe(0)
     expect(store.peekDay(TODAY).perfect).toBe(false)
+  })
+})
+
+describe('本命與每日上限', () => {
+  it('每天最多 3 件本命，第 4 件會發出已滿事件', () => {
+    const tasks = ['甲', '乙', '丙', '丁'].map((title) => store.addTask({ title }))
+    const onFull = vi.fn()
+    store.on('starFull', onFull)
+    tasks.forEach((t) => store.toggleStar(t.id))
+    expect(store.starsOn(TODAY).map((t) => t.title)).toEqual(['甲', '乙', '丙'])
+    expect(onFull).toHaveBeenCalledTimes(1)
+    store.toggleStar(tasks[0].id)
+    expect(tasks[0].star).toBe(false)
+    store.toggleStar(tasks[3].id)
+    expect(tasks[3].star).toBe(true)
+  })
+
+  it('已完成或過去日期的任務不能新選為本命', () => {
+    const done = completeTask('已完成')
+    store.toggleStar(done.id)
+    expect(done.star).toBeFalsy()
+    const past = store.addTask({ title: '昨天的', date: '2026-10-24' })
+    store.toggleStar(past.id)
+    expect(past.star).toBeFalsy()
+  })
+
+  it('完成本命給雙倍 XP，三件全清再加 30 XP 並記一天', () => {
+    const tasks = ['甲', '乙', '丙', '待辦'].map((title) => store.addTask({ title, priority: 2 }))
+    tasks.slice(0, 3).forEach((t) => store.toggleStar(t.id))
+    const onAll = vi.fn()
+    store.on('starAll', onAll)
+    store.toggleTask(tasks[0].id)
+    expect(store.player.xp).toBe(30)
+    store.toggleTask(tasks[1].id)
+    store.toggleTask(tasks[2].id)
+    expect(store.player.xp).toBe(30 * 3 + 30)
+    expect(store.stats.starsDone).toBe(3)
+    expect(store.stats.starDays).toBe(1)
+    expect(store.peekDay(TODAY)).toMatchObject({ stars: 3, starAll: true })
+    expect(onAll).toHaveBeenCalledTimes(1)
+    // 取消再完成不會重複給
+    store.toggleTask(tasks[2].id)
+    store.toggleTask(tasks[2].id)
+    expect(store.player.xp).toBe(120)
+  })
+
+  it('中午前選滿 3 件本命會記下「有計畫」', () => {
+    vi.setSystemTime(new Date(2026, 9, 25, 9))
+    const tasks = ['甲', '乙', '丙'].map((title) => store.addTask({ title }))
+    tasks.forEach((t) => store.toggleStar(t.id))
+    expect(store.peekDay(TODAY).plan).toBe(1)
+  })
+
+  it('下午才選滿不算有計畫', () => {
+    vi.setSystemTime(new Date(2026, 9, 25, 15))
+    const tasks = ['甲', '乙', '丙'].map((title) => store.addTask({ title }))
+    tasks.forEach((t) => store.toggleStar(t.id))
+    expect(store.peekDay(TODAY).plan).toBe(0)
+  })
+
+  it('同一天完成超過 8 個任務後，XP 減半並提醒一次', () => {
+    const onTired = vi.fn()
+    store.on('tired', onTired)
+    for (let i = 0; i < 8; i++) completeTask(`第${i}件`, { priority: 2 })
+    // 第 3 件之後就是完美日（每次都全部完成），先記下目前 XP
+    const before = store.player.xp
+    completeTask('第九件', { priority: 2 })
+    expect(store.player.xp - before).toBe(8)
+    completeTask('第十件', { priority: 2 })
+    expect(onTired).toHaveBeenCalledTimes(1)
+    expect(onTired).toHaveBeenCalledWith({ count: 9 })
+  })
+
+  it('完成任務會記下分類、高優先、中午前與例行的次數', () => {
+    vi.setSystemTime(new Date(2026, 9, 25, 10))
+    completeTask('工作', { tag: 'work', priority: 3 })
+    completeTask('學習', { tag: 'study' })
+    completeTask('又是工作', { tag: 'work' })
+    const d = store.peekDay(TODAY)
+    expect(d.tagMask).toBe(0b11)
+    expect(d.high).toBe(1)
+    expect(d.early).toBe(3)
   })
 })
 

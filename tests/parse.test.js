@@ -132,6 +132,16 @@ describe('快速輸入解析', () => {
       expected: { title: '買禮物 #生日' },
     },
     {
+      name: '★ 或 !本命 會標成本命，不影響優先度',
+      input: '★ 寫企劃 !高',
+      expected: { title: '寫企劃', priority: 3, star: true },
+    },
+    {
+      name: '!本命 也能標成本命',
+      input: '整理信箱 !本命',
+      expected: { title: '整理信箱', star: true },
+    },
+    {
       name: '空白輸入回傳空任務且不產生日期或時間',
       input: '   ',
       expected: { title: '' },
@@ -141,7 +151,7 @@ describe('快速輸入解析', () => {
   it.each(cases)('$name', ({ input, expected }) => {
     expect(parseQuick(input, { today: TODAY })).toEqual({
       title: '', kind: 'task', date: null, start: null, end: null,
-      priority: null, tag: null, repeat: null, chips: [], ...expected,
+      priority: null, tag: null, repeat: null, star: false, chips: [], ...expected,
     })
   })
 })

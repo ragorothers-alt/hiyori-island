@@ -19,7 +19,7 @@ import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
 import { FileSync } from './sync.js'
 import { LINES } from './data/lines.js'
-import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS } from './theme.js'
+import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const short = (s, n = 9) => ([...s].length > n ? [...s].slice(0, n - 1).join('') + '…' : s)
@@ -511,11 +511,34 @@ async function boot() {
     const color = tagOf(t.tag).color
     sfx.bloom(t.priority)
     if (pos) {
-      fx.burst(pos, { colors: ['#ffffff', color, '#ffe1ea'], count: t.priority === 3 ? 60 : 40 })
+      fx.burst(pos, { colors: t.star ? ['#fff3c4', '#ffd76e', color] : ['#ffffff', color, '#ffe1ea'], count: t.priority === 3 || t.star ? 60 : 40 })
       fx.ripple(pos.clone().setY(0.1), color, 1.4)
       mochi.visit(pos, () => fx.burst(pos.clone().add(new THREE.Vector3(0, 0.3, 0)), { colors: ['#fff6d6', '#ffffff'], count: 16, speed: 1.2, size: 0.16 }))
     }
-    mochi.say(line(t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) }))
+    mochi.say(line(t.star ? 'starDone' : t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) }))
+  })
+
+  // ── 本命 ──
+  store.on('starPicked', (t) => {
+    sfx.chime()
+    if (t.date === store.selectedDate) garden.bounce(t.id)
+    mochi.say(line('starPick', { task: short(t.title) }) || `「${short(t.title)}」是今天的本命。`)
+  })
+  store.on('starFull', () => {
+    ui.toast({ icon: '★', title: `本命已經選滿 ${MAX_STARS} 件`, sub: '先取消其中一件，再選這件' })
+    mochi.say(line('starFull') || '三件就好，太多會累的。')
+  })
+  store.on('starAll', () => {
+    setTimeout(() => {
+      sfx.fanfare()
+      fx.fireworks(new THREE.Vector3(3.4, 0, 3.2), 2)
+      ui.toast({ icon: '★', title: '本命全清', sub: `最重要的三件事都完成了・+${XP.starAll} XP` })
+      mochi.say(line('starAll') || '最重要的三件，全部完成了。', 4200)
+    }, 1100)
+  })
+  store.on('tired', ({ count }) => {
+    ui.toast({ icon: '茶', title: `今天已經完成 ${count} 件了`, sub: `超過 ${SOFT_CAP} 件後任務 XP 減半，記得休息一下`, ms: 5200 })
+    setTimeout(() => mochi.say(line('tired') || '今天開了好多花，剩下的慢慢來。', 4200), 1600)
   })
   store.on('taskUndone', () => sfx.undo())
   store.on('routineAdded', (r) => {
@@ -552,11 +575,11 @@ async function boot() {
   })
   store.on('xp', ({ amount, coins, kind, id }) => {
     let pos = null
-    if (kind === 'task') pos = garden.anchor(id)
+    if (kind === 'task' || kind === 'star') pos = garden.anchor(id)
     else if (kind === 'event') pos = ring.anchor(id)
     else if (kind === 'milestone' || kind === 'project') pos = towers.anchor(id)
     pos ||= mochi.headAnchor()
-    const delay = kind === 'project' ? 900 : kind === 'perfect' ? 1300 : 150
+    const delay = kind === 'project' ? 900 : kind === 'perfect' || kind === 'starAll' ? 1300 : 150
     setTimeout(() => floatText(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), `+${amount} XP`, amount >= 40, coins), delay)
   })
   store.on('levelUp', ({ level }) => {
@@ -669,7 +692,9 @@ async function boot() {
       setTimeout(() => {
         if (ui.maybeAskReview()) return
         const overdue = store.overdue().length
+        const todo = store.tasksOn(store.today).filter((t) => !t.done).length
         if (overdue) mochi.say(line('overdue', { count: overdue }), 3800)
+        else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) mochi.say(line('planAsk') || '今天最重要的三件事是什麼？點 ☆ 選起來吧。', 4200)
         else if (!store.tasksOn(store.today).length) mochi.say(line('emptyDay'), 3800)
         else if (LINES.season?.[season]) mochi.say(pick(LINES.season[season]), 3800)
       }, 5600)

@@ -1,4 +1,4 @@
-import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, MOODS, moodOf } from './theme.js'
+import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, MOODS, moodOf, MAX_STARS, XP } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
@@ -267,7 +267,10 @@ export class UI {
       } else {
         const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date }
         if (repeat) s.addRoutine({ kind: 'task', ...t, repeat })
-        else s.addTask(t)
+        else {
+          const added = s.addTask(t)
+          if (added && p.star) s.toggleStar(added.id)
+        }
         if (date !== s.selectedDate) this.toast({ icon: '種', title: `已種在 ${md}`, sub: p.title })
       }
       $('#taskRepeat').value = 'none'
@@ -284,6 +287,7 @@ export class UI {
       const act = e.target.closest('[data-act]')?.dataset.act
       const s = this.store
       if (act === 'toggle') s.toggleTask(id)
+      else if (act === 'star') s.toggleStar(id)
       else if (act === 'delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteTask(id))
       else if (act === 'edit') {
         const t = s.state.tasks.find((x) => x.id === id)
@@ -323,12 +327,14 @@ export class UI {
       `<button class="pri pri-${t.priority}" data-act="pri" title="點一下切換優先度">${'◆'.repeat(t.priority)}${'◇'.repeat(3 - t.priority)} ${pri.label}</button>`,
       `<button data-act="tag" title="點一下切換分類">${tag.label}</button>`,
     ]
+    if (t.star) meta.unshift(`<button class="star on" data-act="star" ${t.done ? 'disabled title="本命・已完成"' : 'title="取消本命"'}>★ 本命</button>`)
+    else if (!t.done && t.date >= this.store.today) meta.unshift(`<button class="star" data-act="star" title="設為本命：完成給雙倍 XP（每天最多 ${MAX_STARS} 件）">☆</button>`)
     if (t.pomos) meta.push(`<span class="pomo" title="已專注 ${t.pomos} 輪">◷ ${t.pomos}</span>`)
     const rt = this.store.routineOf(t)
     if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
     if (t.done && t.doneAt) meta.push(`<span>${hhmm(t.doneAt)} 綻放</span>`)
     if (overdue) meta.push(`<span>${esc(t.date.slice(5).replace('-', '/'))}</span>`)
-    return `<li class="item ${t.done ? 'done' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
+    return `<li class="item ${t.done ? 'done' : ''} ${t.star ? 'starred' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
       <button class="check" data-act="toggle" aria-label="完成">${ICON.check}</button>
       <div class="item-main">
         <div class="item-title">${esc(t.title)}</div>
@@ -346,7 +352,7 @@ export class UI {
   renderTasks() {
     const s = this.store
     const tasks = s.tasksOn(s.selectedDate)
-    const todo = tasks.filter((t) => !t.done).sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt)
+    const todo = tasks.filter((t) => !t.done).sort((a, b) => b.star - a.star || b.priority - a.priority || a.createdAt - b.createdAt)
     const done = tasks.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
     const n = tasks.length
     const k = done.length
@@ -365,6 +371,7 @@ export class UI {
       $('#bloomTitle').textContent = `${k} / ${n} 朵花已綻放`
       $('#bloomSub').textContent = `還有 ${n - k} 個花苞等著你`
     }
+    this._renderStarBar(tasks)
     $('#taskTitle').placeholder = isToday ? '種下任務，或打「明天 15:00 開會 #工作」' : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
 
     const overdue = isToday ? s.overdue() : []
@@ -375,6 +382,30 @@ export class UI {
     $('#taskList').innerHTML = n
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
       : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち也會跑來慶祝。</li>`
+  }
+
+  // 本命狀態列：三個星位，選了是空心金星、完成是實心金星
+  _renderStarBar(tasks) {
+    const s = this.store
+    const bar = $('#starBar')
+    if (s.selectedDate < s.today || !tasks.length) {
+      bar.hidden = true
+      return
+    }
+    const stars = tasks.filter((t) => t.star)
+    const done = stars.filter((t) => t.done).length
+    const slots = Array.from({ length: MAX_STARS }, (_, i) => {
+      const t = stars[i]
+      const cls = !t ? 's-empty' : t.done ? 's-done' : 's-set'
+      return `<i class="slot ${cls}" title="${t ? esc(t.title) : '還沒選'}">${t?.done ? '★' : t ? '★' : '☆'}</i>`
+    }).join('')
+    let msg
+    if (s.selectedDate === s.today && s.peekDay(s.today).starAll) msg = '本命全清，今天很棒'
+    else if (stars.length < MAX_STARS) msg = `按任務旁的 ☆ 選出最重要的 ${MAX_STARS} 件・完成雙倍 XP`
+    else if (done < MAX_STARS) msg = `全部完成再 +${XP.starAll} XP`
+    else msg = '本命全清'
+    bar.hidden = false
+    bar.innerHTML = `<b>今日の本命</b><span class="slots">${slots}</span><small>${msg}</small>`
   }
 
   // ── 日程 ──

@@ -22,7 +22,13 @@ export const XP = {
   quest: 30,
   perfectDay: 40,
   review: 10,
+  starAll: 30,
 }
+
+// 本命：每天最多挑 3 件，完成給雙倍 XP
+export const MAX_STARS = 3
+// 一天完成超過這個數量後，任務 XP 減半（鼓勵休息，也避免灌任務刷分）
+export const SOFT_CAP = 8
 
 // 晚間回顧的心情：用天氣表示
 export const MOODS = [

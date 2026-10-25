@@ -20,6 +20,18 @@ const coreGeo = new THREE.SphereGeometry(0.065, 10, 8)
 const moundGeo = new THREE.SphereGeometry(0.17, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2)
 moundGeo.scale(1, 0.4, 1)
 
+// 本命：花苞上方飄著一顆小金星
+const starShape = new THREE.Shape()
+for (let i = 0; i < 10; i++) {
+  const r = i % 2 ? 0.045 : 0.11
+  const a = (i / 10) * Math.PI * 2 + Math.PI / 2
+  if (i) starShape.lineTo(Math.cos(a) * r, Math.sin(a) * r)
+  else starShape.moveTo(Math.cos(a) * r, Math.sin(a) * r)
+}
+const starGeo = new THREE.ExtrudeGeometry(starShape, { depth: 0.035, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 1 })
+starGeo.center()
+const starMat = new THREE.MeshStandardMaterial({ color: '#ffd76e', emissive: '#ffbf3c', emissiveIntensity: 0.55, roughness: 0.35, metalness: 0.2 })
+
 function plotPosition(i) {
   const { bed } = LAYOUT
   const max = 13
@@ -63,6 +75,11 @@ class Plant {
     this.head.add(this.core)
     this.pivots = []
     this.phase = hash(task.id + 'p') * 6
+    this.starMark = new THREE.Mesh(starGeo, starMat)
+    this.starMark.position.y = 0.95
+    this.starMark.scale.setScalar(0.001)
+    this.starMark.visible = false
+    g.add(this.starMark)
     this.apply(task, true)
     this.group.traverse((o) => {
       if (o.isMesh) o.castShadow = true
@@ -113,6 +130,7 @@ class Plant {
     const grow = 1 + Math.min(task.pomos || 0, 4) * 0.1
     this.group.scale.setScalar(([0.85, 1, 1.25][task.priority - 1] || 1) * 1.65 * grow)
     this.baseScale = this.group.scale.x
+    this._setStar(task.star && !task.done, instant)
     const target = task.done ? 1 : 0
     if (instant) {
       this._setOpen(target)
@@ -126,7 +144,30 @@ class Plant {
     this._target = target
   }
 
+  _setStar(on, instant) {
+    if (on === this._star) return
+    this._star = on
+    cancelTween(this._starTw)
+    const m = this.starMark
+    const from = m.scale.x
+    const to = on ? 1 : 0.001
+    m.visible = true
+    if (instant) {
+      m.scale.setScalar(to)
+      m.visible = on
+      return
+    }
+    this._starTw = tween(on ? 0.6 : 0.35, (k) => m.scale.setScalar(Math.max(0.001, from + (to - from) * k)), {
+      easing: on ? ease.outBack : ease.inOutCubic,
+      onDone: () => (m.visible = on),
+    })
+  }
+
   update(t, night = 0) {
+    if (this.starMark.visible) {
+      this.starMark.rotation.y = t * 1.6 + this.phase
+      this.starMark.position.y = 0.95 + Math.sin(t * 2 + this.phase) * 0.04
+    }
     this.petalMat.emissiveIntensity = 0.16 + night * 0.5 * this.open
     this.innerMat.emissiveIntensity = 0.2 + night * 0.6 * this.open
     const sway = Math.sin(t * 1.4 + this.phase) * 0.06
