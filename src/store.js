@@ -2,7 +2,7 @@
 // 所有變更都經過 action → _finish(fx)：先存檔、發出 'change' 讓 UI/場景同步，再依序發出特效事件。
 
 import { ACHIEVEMENTS } from './data/achievements.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS } from './theme.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH } from './theme.js'
 
 const KEY = 'hiyori-daily-v1'
 
@@ -25,6 +25,20 @@ export const toMin = (hhmm) => {
   return (h || 0) * 60 + (m || 0)
 }
 export const uid = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7)
+
+// ── 例行公事（重複任務／日程） ──
+export const REPEAT_TYPES = ['daily', 'weekdays', 'weekly']
+export function repeatMatches(rep, date) {
+  const d = parseDate(date).getDay()
+  if (rep.type === 'daily') return true
+  if (rep.type === 'weekdays') return d >= 1 && d <= 5
+  return rep.days.includes(d)
+}
+export function repeatLabel(rep) {
+  if (rep.type === 'daily') return '每天'
+  if (rep.type === 'weekdays') return '平日'
+  return '每週' + [...rep.days].sort().map((d) => WEEK_ZH[d]).join('、')
+}
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
 export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false }
@@ -77,6 +91,7 @@ function seed() {
       },
     ],
     player: { xp: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {} },
+    routines: [],
     history: {},
     quests: {},
     settings: { ...DEFAULT_SETTINGS },
@@ -121,6 +136,7 @@ function migrate(s) {
       id: str(t.id), title, date: ymd(t.date, today), priority: num(t.priority, 1, 3, 2),
       tag: tags.has(t.tag) ? t.tag : 'life', done, rewarded: !!t.rewarded || done,
       createdAt: ts(t.createdAt) || Date.now(), doneAt: done ? ts(t.doneAt) : null,
+      routineId: ID_RE.test(t.routineId) ? t.routineId : null,
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -130,7 +146,28 @@ function migrate(s) {
     let end = TIME_RE.test(e.end) ? e.end : '10:00'
     if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const done = !!e.done
-    return { id: str(e.id), title, date: ymd(e.date, today), start, end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done }
+    return {
+      id: str(e.id), title, date: ymd(e.date, today), start, end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done,
+      routineId: ID_RE.test(e.routineId) ? e.routineId : null,
+    }
+  })
+  const routines = cleanList(s.routines, (r) => {
+    const title = str(r.title).trim()
+    if (!title) return null
+    const rep = isObj(r.repeat) ? r.repeat : {}
+    const type = REPEAT_TYPES.includes(rep.type) ? rep.type : 'daily'
+    const days = Array.isArray(rep.days) ? [...new Set(rep.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))] : []
+    if (type === 'weekly' && !days.length) return null
+    const start = TIME_RE.test(r.start) ? r.start : '09:00'
+    let end = TIME_RE.test(r.end) ? r.end : '10:00'
+    if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
+    const made = {}
+    if (isObj(r.made)) for (const d of Object.keys(r.made)) if (DATE_RE.test(d)) made[d] = true
+    return {
+      id: str(r.id), kind: r.kind === 'event' ? 'event' : 'task', title, repeat: { type, days },
+      priority: num(r.priority, 1, 3, 2), tag: tags.has(r.tag) ? r.tag : 'life', start, end, color: num(r.color, 0, 99, 0),
+      startDate: ymd(r.startDate, today), made, createdAt: ts(r.createdAt) || Date.now(),
+    }
   })
   const projects = cleanList(s.projects, (p) => {
     const name = str(p.name, 60).trim()
@@ -197,7 +234,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
+  return { version: 1, tasks, events, projects, routines, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
 }
 
 export class Store {
@@ -206,6 +243,7 @@ export class Store {
     this.state = this._load()
     this.today = dateStr()
     this.selectedDate = this.today
+    if (this._ensureRoutines(this.today).length) this.save()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
   }
 
@@ -327,6 +365,7 @@ export class Store {
   // ── 日期 ──
   selectDate(date) {
     this.selectedDate = date
+    if (this._ensureRoutines(date).length) this.save()
     this.emit('change')
     this.emit('dateChanged', date)
   }
@@ -339,14 +378,65 @@ export class Store {
     this._readyQuests = new Set()
     if (wasToday) this.selectedDate = now
     this._dayChanged = true
+    this._ensureRoutines(now)
+    if (this.selectedDate !== now) this._ensureRoutines(this.selectedDate)
     return true
   }
   tick() {
     if (!this._refreshToday()) return false
     this._dayChanged = false
+    this.save()
     this.emit('change')
     this.emit('dateChanged', this.selectedDate)
     return true
+  }
+
+  // ── 例行公事 ──
+  // 只為「今天或之後」且尚未生成過的日期建立實例；使用者刪掉的實例不會再長回來
+  _ensureRoutines(date) {
+    const created = []
+    if (date < this.today) return created
+    for (const r of this.state.routines) {
+      if (r.startDate > date || r.made[date] || !repeatMatches(r.repeat, date)) continue
+      r.made[date] = true
+      if (r.kind === 'task') {
+        const t = { id: uid(), title: r.title, date, priority: r.priority, tag: r.tag, done: false, rewarded: false, createdAt: Date.now(), routineId: r.id }
+        this.state.tasks.push(t)
+        created.push(t)
+      } else {
+        const e = { id: uid(), title: r.title, date, start: r.start, end: r.end, color: r.color, done: false, rewarded: false, routineId: r.id }
+        this.state.events.push(e)
+        created.push(e)
+      }
+    }
+    for (const r of this.state.routines) for (const d of Object.keys(r.made)) if (d < this.today) delete r.made[d]
+    return created
+  }
+  routineOf(item) {
+    return item?.routineId ? this.state.routines.find((r) => r.id === item.routineId) : null
+  }
+  addRoutine({ kind = 'task', title, repeat, priority = 2, tag = 'life', start = '09:00', end = '10:00', color = 0, date = this.selectedDate }) {
+    title = title.trim()
+    if (!title || !REPEAT_TYPES.includes(repeat?.type)) return null
+    const days = repeat.type === 'weekly' ? (repeat.days?.length ? repeat.days : [parseDate(date).getDay()]) : []
+    if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
+    const r = {
+      id: uid(), kind, title, repeat: { type: repeat.type, days }, priority, tag, start, end, color,
+      startDate: date < this.today ? this.today : date, made: {}, createdAt: Date.now(),
+    }
+    this.state.routines.push(r)
+    const fx = [['routineAdded', r]]
+    for (const item of this._ensureRoutines(r.startDate)) fx.push([kind === 'task' ? 'taskAdded' : 'eventAdded', item])
+    this._finish(fx)
+    return r
+  }
+  deleteRoutine(id) {
+    this.state.routines = this.state.routines.filter((r) => r.id !== id)
+    // 已完成的保留當紀錄，未來還沒做的一併移除
+    const keep = (x) => x.routineId !== id || x.done || x.date < this.today
+    this.state.tasks = this.state.tasks.filter(keep)
+    this.state.events = this.state.events.filter(keep)
+    this._finish()
   }
 
   // ── 任務 ──

@@ -84,14 +84,16 @@
               <button type="button" data-v="2" class="on">中</button>
               <button type="button" data-v="3">高</button>
             </div>
-            <div class="tag-pick" id="taskTag"></div>
+            <select class="repeat-pick" id="taskRepeat" aria-label="重複"></select>
             <button class="btn-primary" type="submit">種下</button>
           </div>
+          <div class="tag-pick" id="taskTag"></div>
         </form>
 
         <div class="quest-mini"><h4>今日のおつとめ</h4><ul id="questMini"></ul></div>
         <div id="overdueBox"></div>
         <ul class="list" id="taskList"></ul>
+        <details class="routines" id="taskRoutines" hidden><summary></summary><ul></ul></details>
       </section>
 
       <!-- 日程 -->
@@ -102,6 +104,7 @@
             <label class="time-field"><input type="time" id="eventStart" value="09:00" /></label>
             <span class="tilde">〜</span>
             <label class="time-field"><input type="time" id="eventEnd" value="10:00" /></label>
+            <select class="repeat-pick" id="eventRepeat" aria-label="重複"></select>
             <div class="swatches" id="eventColor"></div>
             <button class="btn-primary" type="submit">加入</button>
           </div>
@@ -120,6 +123,7 @@
         </div>
         <p class="hint">日程會化成小島外圈的時之環，光點是現在的時刻。</p>
         <ol class="timeline" id="eventList"></ol>
+        <details class="routines" id="eventRoutines" hidden><summary></summary><ul></ul></details>
       </section>
 
       <!-- 專案 -->

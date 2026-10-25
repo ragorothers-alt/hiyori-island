@@ -1,5 +1,5 @@
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM } from './store.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel } from './store.js'
 import { notifySupported } from './reminders.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
@@ -160,7 +160,54 @@ export class UI {
   }
 
   // ── 任務 ──
+  _repeatValue(sel) {
+    const v = $(sel).value
+    if (v === 'none') return null
+    if (v === 'weekly') return { type: 'weekly', days: [parseDate(this.store.selectedDate).getDay()] }
+    return { type: v }
+  }
+
+  _renderRepeatOptions() {
+    const wd = WEEK_ZH[parseDate(this.store.selectedDate).getDay()]
+    for (const sel of [$('#taskRepeat'), $('#eventRepeat')]) {
+      const v = sel.value || 'none'
+      sel.innerHTML = `<option value="none">不重複</option><option value="daily">每天</option><option value="weekdays">平日</option><option value="weekly">每週${wd}</option>`
+      sel.value = v
+    }
+  }
+
+  renderRoutines() {
+    const s = this.store
+    for (const [kind, box] of [['task', $('#taskRoutines')], ['event', $('#eventRoutines')]]) {
+      const list = s.state.routines.filter((r) => r.kind === kind)
+      box.hidden = !list.length
+      $('summary', box).textContent = `↻ 例行${kind === 'task' ? '任務' : '日程'} · ${list.length}`
+      $('ul', box).innerHTML = list
+        .map((r) => {
+          const c = kind === 'task' ? tagOf(r.tag).color : EVENT_COLORS[r.color % EVENT_COLORS.length]
+          const when = kind === 'event' ? ` ${esc(r.start)}–${esc(r.end)}` : ''
+          return `<li data-rid="${esc(r.id)}" style="--rc:${c}"><span>${esc(r.title)}</span><small>${esc(repeatLabel(r.repeat))}${when}</small>
+            <button class="mini" data-act="del-routine" title="停止這個例行公事">${ICON.del}</button></li>`
+        })
+        .join('')
+    }
+  }
+
   _bindTasks() {
+    for (const sel of ['#taskRepeat', '#eventRepeat']) {
+      $(sel).addEventListener('change', (e) => e.target.classList.toggle('on', e.target.value !== 'none'))
+    }
+    for (const box of ['#taskRoutines', '#eventRoutines']) {
+      $(box).addEventListener('click', (e) => {
+        const b = e.target.closest('[data-act="del-routine"]')
+        if (!b) return
+        const id = b.closest('li').dataset.rid
+        armConfirm(b, ICON.check, () => {
+          this.store.deleteRoutine(id)
+          this.toast({ icon: '↻', title: '已停止這個例行公事', sub: '已完成的紀錄會保留' })
+        })
+      })
+    }
     $('#taskPriority').addEventListener('click', (e) => {
       const b = e.target.closest('button')
       if (!b) return
@@ -180,7 +227,11 @@ export class UI {
         input.focus()
         return
       }
-      this.store.addTask({ title: input.value, priority: this.priority, tag: this.tag })
+      const repeat = this._repeatValue('#taskRepeat')
+      if (repeat) this.store.addRoutine({ kind: 'task', title: input.value, priority: this.priority, tag: this.tag, repeat })
+      else this.store.addTask({ title: input.value, priority: this.priority, tag: this.tag })
+      $('#taskRepeat').value = 'none'
+      $('#taskRepeat').classList.remove('on')
       input.value = ''
       input.focus()
     })
@@ -230,6 +281,8 @@ export class UI {
       `<button class="pri pri-${t.priority}" data-act="pri" title="點一下切換優先度">${'◆'.repeat(t.priority)}${'◇'.repeat(3 - t.priority)} ${pri.label}</button>`,
       `<button data-act="tag" title="點一下切換分類">${tag.label}</button>`,
     ]
+    const rt = this.store.routineOf(t)
+    if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
     if (t.done && t.doneAt) meta.push(`<span>${hhmm(t.doneAt)} 綻放</span>`)
     if (overdue) meta.push(`<span>${esc(t.date.slice(5).replace('-', '/'))}</span>`)
     return `<li class="item ${t.done ? 'done' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
@@ -300,7 +353,12 @@ export class UI {
         $('#eventTitle').focus()
         return
       }
-      this.store.addEvent({ title, start: $('#eventStart').value || '09:00', end: $('#eventEnd').value || '10:00', color: this.eventColor })
+      const ev = { title, start: $('#eventStart').value || '09:00', end: $('#eventEnd').value || '10:00', color: this.eventColor }
+      const repeat = this._repeatValue('#eventRepeat')
+      if (repeat) this.store.addRoutine({ kind: 'event', ...ev, repeat })
+      else this.store.addEvent(ev)
+      $('#eventRepeat').value = 'none'
+      $('#eventRepeat').classList.remove('on')
       $('#eventTitle').value = ''
       // 下一個預設時段接在後面
       const end = toMin($('#eventEnd').value)
@@ -402,7 +460,7 @@ export class UI {
       html += `<li class="tl-item ${past ? 'past' : ''} ${current ? 'now' : ''} ${e.done ? 'done' : ''}" data-id="${esc(e.id)}" style="--c:${c}">
         <div class="item ${e.done ? 'done' : ''} ${this.hlKey === 'event:' + e.id ? 'hl' : ''}">
           <div class="tl-time">${esc(e.start)}<small>〜 ${esc(e.end)} · ${dur >= 60 ? (dur / 60).toFixed(dur % 60 ? 1 : 0) + 'h' : dur + 'm'}</small></div>
-          <div class="item-main"><div class="item-title">${esc(e.title)} ${current ? '<span class="badge-now">進行中</span>' : ''}</div></div>
+          <div class="item-main"><div class="item-title">${esc(e.title)} ${current ? '<span class="badge-now">進行中</span>' : ''}</div>${this.store.routineOf(e) ? `<div class="item-meta"><span class="rep">↻ ${esc(repeatLabel(this.store.routineOf(e).repeat))}</span></div>` : ''}</div>
           <div class="item-actions">
             <button class="mini" data-act="edit" title="編輯">${ICON.edit}</button>
             <button class="mini" data-act="delete" title="刪除">${ICON.del}</button>
@@ -650,9 +708,11 @@ export class UI {
 
   render() {
     this.renderChrome()
+    this._renderRepeatOptions()
     this.renderTasks()
     this.renderSchedule()
     this.renderRemind()
+    this.renderRoutines()
     this.renderProjects()
     if (this.tab === 'records') this.renderRecords()
   }

@@ -1,6 +1,6 @@
 import './styles.css'
 import * as THREE from 'three'
-import { Store, toMin } from './store.js'
+import { Store, toMin, repeatLabel } from './store.js'
 import { UI } from './ui.js'
 import { World } from './scene/world.js'
 import { Sky } from './scene/sky.js'
@@ -270,6 +270,11 @@ async function boot() {
     mochi.say(line(t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) }))
   })
   store.on('taskUndone', () => sfx.undo())
+  store.on('routineAdded', (r) => {
+    const msg = line('routine') || '以後我會記得幫你準備好。'
+    mochi.say(msg)
+    ui.toast({ icon: '↻', title: `已設為例行${r.kind === 'task' ? '任務' : '日程'}`, sub: `「${short(r.title, 12)}」・${repeatLabel(r.repeat)}` })
+  })
   store.on('allDone', () => {
     setTimeout(() => {
       sfx.fanfare()
