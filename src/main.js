@@ -17,6 +17,7 @@ import { Placed, spotFree } from './scene/placed.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
+import { FileSync } from './sync.js'
 import { LINES } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS } from './theme.js'
 
@@ -604,6 +605,15 @@ async function boot() {
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
   })
 
+  // ── 雲端同步（不需後端：資料寫進使用者選的檔案，放在雲端資料夾即可跨裝置） ──
+  const fileSync = new FileSync(store, {
+    onStatus: () => ui.renderSync(),
+    onPulled: () => ui.toast({ icon: '雲', title: '已載入雲端的新資料', sub: '別台裝置的變更同步過來了' }),
+    onConflict: () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「紀錄 → 設定」選要保留哪一邊', ms: 7000 }),
+  })
+  ui.attachSync(fileSync)
+  fileSync.init()
+
   // ── 時間 ──
   let lastMin = -1
   setInterval(() => {
@@ -690,7 +700,7 @@ async function boot() {
   }
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fx, decor, ui, placed }
+  window.hiyori = { store, world, sky, mochi, fx, decor, ui, placed, fileSync }
 }
 
 boot()

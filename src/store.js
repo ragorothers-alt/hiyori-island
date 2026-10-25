@@ -99,6 +99,7 @@ function seed() {
     quests: {},
     settings: { ...DEFAULT_SETTINGS },
     createdAt: Date.now(),
+    updatedAt: 0,
   }
 }
 
@@ -254,7 +255,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, routines, placed, journal, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now() }
+  return { version: 1, tasks, events, projects, routines, placed, journal, player, history, quests, settings, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0 }
 }
 
 export class Store {
@@ -263,7 +264,7 @@ export class Store {
     this.state = this._load()
     this.today = dateStr()
     this.selectedDate = this.today
-    if (this._ensureRoutines(this.today).length) this.save()
+    if (this._ensureRoutines(this.today).length) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
   }
 
@@ -286,7 +287,13 @@ export class Store {
     }
     return seed()
   }
-  save() {
+  // touch：這次存檔是否算「使用者改了資料」。同步靠 updatedAt 判斷哪一邊比較新，
+  // 例行實例生成、跨日這類每台裝置各自推導的變化不算，避免剛打開的裝置蓋掉雲端的新資料
+  save(touch = true) {
+    if (touch) {
+      this.state.updatedAt = Date.now()
+      this.emit('dirty')
+    }
     clearTimeout(this._saveTimer)
     this._saveTimer = setTimeout(() => this.saveNow(), 120)
   }
@@ -387,7 +394,7 @@ export class Store {
   // ── 日期 ──
   selectDate(date) {
     this.selectedDate = date
-    if (this._ensureRoutines(date).length) this.save()
+    if (this._ensureRoutines(date).length) this.save(false)
     this.emit('change')
     this.emit('dateChanged', date)
   }
@@ -407,7 +414,7 @@ export class Store {
   tick() {
     if (!this._refreshToday()) return false
     this._dayChanged = false
-    this.save()
+    this.save(false)
     this.emit('change')
     this.emit('dateChanged', this.selectedDate)
     return true
@@ -747,20 +754,30 @@ export class Store {
     } catch {
       throw new Error('檔案不是 JSON 格式')
     }
+    this.replaceState(obj, Date.now())
+  }
+  // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
+  replaceState(obj, updatedAt = Date.now()) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
-    // 先完整清洗成功，才替換現有狀態
     const next = migrate(obj)
+    next.updatedAt = updatedAt
     this.state = next
+    this.today = dateStr()
+    this._ensureRoutines(this.today)
+    if (this.selectedDate !== this.today) this._ensureRoutines(this.selectedDate)
     this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
+    this.emit('dirty')
     this.emit('change')
     this.emit('reload')
   }
   reset() {
     localStorage.removeItem(KEY)
     this.state = seed()
+    this.state.updatedAt = Date.now()
     this._readyQuests = new Set()
     this.saveNow()
+    this.emit('dirty')
     this.emit('change')
     this.emit('reload')
   }
