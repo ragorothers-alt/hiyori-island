@@ -713,7 +713,7 @@ async function boot() {
       if (unlock) {
         // 鏡頭對準新景觀的實際位置，距離依大小調整（天空中的大型景觀要拉遠才看得到全貌）
         const b = decor.bounds(unlock.key)
-        if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, b.size * 1.15)))
+        if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, world.fitDistance(b.size / 2) * 0.85)))
       }
       fx.fireworks(new THREE.Vector3(0, 0, 0), 4)
       mochi.celebrate()

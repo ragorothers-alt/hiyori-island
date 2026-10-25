@@ -3,6 +3,8 @@ import { mat, rng, shadowed, tween, ease } from './util.js'
 import { LAYOUT } from './island.js'
 import { UNLOCKS } from '../theme.js'
 import { SEASONS } from './season.js'
+import { buildCloudWhale } from './models/cloudWhale.js'
+import { buildStarTree } from './models/starTree.js'
 
 // 依等級解鎖的島嶼裝飾
 const VERMILION = '#ef8e83'
@@ -687,111 +689,38 @@ function tsukimidai() {
   return shadowed(at(g, 7.05, 6.65))
 }
 
+// 雲鯨模型（models/cloudWhale.js）頭朝 +x；這裡只負責繞島游
 function whale() {
   const g = new THREE.Group()
-  const white = mat('#f5f4fc', { roughness: 0.95 })
-  const puff = new THREE.IcosahedronGeometry(1, 2)
-  for (const [x, y, z, sx, sy, sz] of [
-    [0, 0, 0, 2.35, 1.18, 1.2], [1.35, 0.08, 0, 1.3, 1.1, 1.16],
-    [-1.45, 0.1, 0, 1.25, 0.92, 0.96], [0.3, 0.6, 0.15, 1.5, 0.78, 1.08],
-    [0.8, -0.5, 0, 1.5, 0.68, 0.92],
-  ]) piece(g, puff, white, x, y, z).scale.set(sx, sy, sz)
-  for (const side of [-1, 1]) {
-    const fin = piece(g, puff, white, 0.15, -0.66, side * 1.17)
-    fin.scale.set(0.67, 0.15, 0.48)
-    fin.rotation.x = side * 0.3
-    piece(g, new THREE.SphereGeometry(0.075, 8, 6), mat('#646174'), 1.85, 0.16, side * 1.13)
-    piece(g, new THREE.SphereGeometry(0.025, 6, 4), mat('#ffffff'), 1.87, 0.18, side * 1.19)
-    piece(g, puff, mat('#f3d4e2'), 1.54, -0.14, side * 1.18).scale.set(0.23, 0.1, 0.045)
-    const tail = piece(g, puff, white, -3.2, 0.9, side * 0.48)
-    tail.scale.set(0.65, 0.18, 0.72)
-    tail.rotation.set(side * 0.3, side * 0.35, -0.28)
-  }
-  limb(g, [-1.9, 0.1, 0], [-3, 0.85, 0], 0.4, white)
-  const spout = new THREE.Group()
-  const mistMat = new THREE.MeshStandardMaterial({ color: '#e3f5ff', transparent: true, opacity: 0.45, roughness: 1, flatShading: true, depthWrite: false })
-  const mist = []
-  for (let i = 0; i < 6; i++) mist.push(piece(spout, puff, mistMat))
-  spout.position.set(1.15, 1.05, 0)
-  g.add(spout)
-  g.userData.ownedMaterials = [mistMat]
-  g.userData.anim = (t) => {
+  const body = buildCloudWhale()
+  g.add(body)
+  g.userData.ownedMaterials = body.userData.ownedMaterials ?? []
+  g.userData.ownedTextures = body.userData.ownedTextures ?? []
+  g.userData.anim = (t, dt, night) => {
     const a = t * Math.PI * 2 / 240 + 3.8
     g.position.set(Math.cos(a) * 22, 7 + Math.sin(t * 0.045) * 0.8, Math.sin(a) * 22)
     g.rotation.set(0, -a - Math.PI / 2, Math.sin(t * 0.3) * 0.035)
-    const cycle = t % 24
-    const u = Math.min(cycle / 3.6, 1)
-    spout.visible = cycle < 3.6
-    mistMat.opacity = 0.45 * Math.max(0, 1 - u)
-    mist.forEach((m, i) => {
-      const a = i * 2.4
-      const spread = u * 0.5
-      m.position.set(Math.cos(a) * spread, 0.2 + u * 1.8 + i * 0.15, Math.sin(a) * spread)
-      m.scale.setScalar(0.12 + Math.min(u, 1) * 0.24 + i * 0.022)
-    })
+    body.userData.anim(t, dt, night)
   }
-  g.userData.anim(0)
+  g.userData.anim(0, 0, 0)
   return g
 }
 
+// 星之大樹模型（models/starTree.js）原點在浮島草地頂面；這裡只負責擺位與上下漂浮
 function skytree() {
   const g = new THREE.Group()
-  const rock = piece(g, new THREE.ConeGeometry(3.1, 5.2, 10, 2), mat('#c8c5e6'), 0, -2.8)
-  rock.rotation.x = Math.PI
-  piece(g, new THREE.CylinderGeometry(3.2, 3.1, 0.4, 12), mat('#d9e5e7'), 0, -0.2)
-  const wood = mat('#b5a4bd')
-  limb(g, [0, 0, 0], [0.12, 4.8, 0], 0.46, wood)
-  for (const end of [[-2, 5.3, 0.2], [2, 5.5, -0.3], [-0.5, 5.8, -1.4], [0.4, 5.7, 1.6]]) limb(g, [0, 2.7, 0], end, 0.23, wood)
-  for (let i = 0; i < 5; i++) {
-    const a = i / 5 * Math.PI * 2
-    limb(g, [Math.cos(a) * 1.0, 0.06, Math.sin(a) * 0.9], [0, 0.65, 0], 0.18, wood)
-  }
-  const crystals = ['#c4e7fa', '#d7cdf5', '#cbdafa', '#e5dafa'].map((color) => new THREE.MeshStandardMaterial({
-    color, transparent: true, opacity: 0.7, roughness: 0.28, metalness: 0.06, flatShading: true,
-    emissive: color, emissiveIntensity: 0.16, depthWrite: false,
-  }))
-  const puff = new THREE.IcosahedronGeometry(1, 1)
-  const crowns = [
-    [0, 6.0, 0, 2], [-2, 5.2, 0.1, 1.55], [2, 5.25, -0.2, 1.5],
-    [-0.9, 6.5, -1.1, 1.35], [1, 6.65, 0.8, 1.45], [-0.9, 5.4, 1.65, 1.3],
-    [1.3, 5.35, -1.5, 1.25], [-1.5, 6.5, 0.75, 1.1], [0, 7.25, -0.15, 1.05],
-  ]
-  crowns.forEach(([x, y, z, s], i) => {
-    const m = piece(g, puff, crystals[i % crystals.length], x, y, z)
-    m.scale.set(s, s * (i % 2 ? 1.12 : 0.85), s)
-    m.rotation.set(i * 0.7, i * 1.1, i * 0.3)
-  })
-  const r = rng(3030)
-  const seeds = Array.from({ length: 64 }, () => [r() * Math.PI * 2, 0.6 + r() * 2.6, r() * 5.8])
-  const positions = new Float32Array(seeds.length * 3)
-  const colors = new Float32Array(seeds.length * 3)
-  const c = new THREE.Color()
-  seeds.forEach((seed, i) => {
-    c.set(i % 2 ? '#e7d4ff' : '#c8f3ff').toArray(colors, i * 3)
-  })
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-  const sparkle = new THREE.PointsMaterial({ size: 0.075, transparent: true, opacity: 0.3, vertexColors: true, depthWrite: false, blending: THREE.AdditiveBlending })
-  const points = new THREE.Points(geo, sparkle)
-  // 光點一直在此範圍內上升，不必每幀重算包圍球
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 5, 0), 5.5)
-  g.add(points)
+  const tree = buildStarTree()
+  g.add(tree)
   g.position.set(0, 12, -16)
-  g.userData.glow = { mats: crystals, lights: [], base: 0.16 }
-  g.userData.ownedMaterials = [...crystals, sparkle]
+  g.userData.glow = tree.userData.glow
+  g.userData.ownedMaterials = tree.userData.ownedMaterials ?? []
+  g.userData.ownedTextures = tree.userData.ownedTextures ?? []
   g.userData.anim = (t, dt, night) => {
     g.position.y = 12 + Math.sin(t * 0.24) * 0.22
-    seeds.forEach(([a, radius, phase], i) => {
-      positions[i * 3] = Math.cos(a + t * 0.035) * radius
-      positions[i * 3 + 1] = 2.1 + (phase + t * 0.22) % 5.8
-      positions[i * 3 + 2] = Math.sin(a + t * 0.035) * radius * 0.8
-    })
-    geo.attributes.position.needsUpdate = true
-    sparkle.opacity = 0.2 + night * 0.7
+    tree.userData.anim(t, dt, night)
   }
   g.userData.anim(0, 0, 0)
-  return shadowed(g)
+  return g
 }
 
 const at = (obj, x, z) => {
@@ -868,6 +797,7 @@ export class Decor {
         this._applySeason(obj)
         if (animate) {
           const targets = COLLECTIONS.has(u.key) ? obj.children : [obj]
+          obj.userData.popScales = targets.map((o) => [o, o.scale.clone()])
           targets.forEach((o, i) => {
             const s0 = o.scale.clone()
             o.scale.setScalar(0.001)
@@ -883,6 +813,7 @@ export class Decor {
         })
         for (const g of geometries) g.dispose()
         for (const m of have.userData.ownedMaterials ?? []) m.dispose()
+        for (const tex of have.userData.ownedTextures ?? []) tex.dispose()
         this.group.remove(have)
         delete this.items[u.key]
       }
@@ -894,7 +825,12 @@ export class Decor {
   bounds(key) {
     const o = this.items[key]
     if (!o) return null
+    // 剛解鎖時還在彈出動畫（縮放接近 0），暫時換回最終大小再量
+    const pop = o.userData.popScales ?? []
+    const now = pop.map(([t]) => t.scale.clone())
+    for (const [t, s] of pop) t.scale.copy(s)
     const box = new THREE.Box3().setFromObject(o)
+    pop.forEach(([t], i) => t.scale.copy(now[i]))
     return { center: box.getCenter(new THREE.Vector3()), size: box.getSize(new THREE.Vector3()).length() }
   }
 

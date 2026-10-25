@@ -254,6 +254,12 @@ export class World {
   }
 
   // ── 鏡頭 ──
+  // 讓半徑 r 的球完整入鏡所需的距離（取垂直、水平視角中較窄的一邊）
+  fitDistance(r) {
+    const half = THREE.MathUtils.degToRad(this.camera.fov / 2)
+    const narrow = Math.min(half, Math.atan(Math.tan(half) * this.camera.aspect))
+    return r / Math.sin(narrow)
+  }
   flyTo(target, distance = 13, { elevation = 0.62, duration = 1.1 } = {}) {
     const c = this.controls
     const fromT = c.target.clone()
