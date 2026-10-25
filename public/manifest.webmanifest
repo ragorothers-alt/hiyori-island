@@ -1,0 +1,18 @@
+{
+  "name": "ひより日和 · 日程小島",
+  "short_name": "ひより日和",
+  "description": "把一天種在漂浮小島上：任務會開花、專案會蓋成塔、日程化成時之環。",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eaf5fc",
+  "theme_color": "#cfe8f6",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

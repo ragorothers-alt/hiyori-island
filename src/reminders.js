@@ -59,7 +59,8 @@ export class Reminders {
 // 系統通知：有 Service Worker 時用 showNotification（手機必需），否則用 Notification
 export async function systemNotify(title, body, tag) {
   if (!notifySupported() || Notification.permission !== 'granted') return false
-  const opts = { body, tag, icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', renotify: true }
+  const icon = new URL('icons/icon-192.png', document.baseURI).href
+  const opts = { body, tag, icon, badge: icon, renotify: true }
   try {
     const reg = await navigator.serviceWorker?.getRegistration()
     if (reg) {

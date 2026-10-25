@@ -666,6 +666,29 @@ async function boot() {
     }),
   )
 
+  // ── PWA：正式版註冊 Service Worker（開發時不註冊，避免快取干擾） ──
+  if ('serviceWorker' in navigator && import.meta.env.PROD) {
+    navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[hiyori] SW 註冊失敗', e))
+  }
+  let installEvt = null
+  const installRow = document.getElementById('installRow')
+  addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    installEvt = e
+    installRow.hidden = false
+  })
+  addEventListener('appinstalled', () => {
+    installRow.hidden = true
+    ui.toast({ icon: '島', title: '已安裝到桌面', sub: '之後可以像 App 一樣直接打開小島' })
+  })
+  document.getElementById('installBtn').onclick = async () => {
+    if (!installEvt) return
+    installEvt.prompt()
+    await installEvt.userChoice.catch(() => {})
+    installEvt = null
+    installRow.hidden = true
+  }
+
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
   window.hiyori = { store, world, sky, mochi, fx, decor, ui, placed }
 }

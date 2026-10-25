@@ -6,6 +6,13 @@
   <meta name="theme-color" content="#cfe8f5" />
   <title>ひより日和 · 日程小島</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="ひより日和" />
+  <meta name="description" content="用 three.js 打造的遊戲化日程與專案管理小島：任務會開花、專案會蓋成塔、日程化成時之環。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -165,6 +172,7 @@
         <div class="stamps" id="achGrid"></div>
         <h3 class="sec-title">設定<small>せってい</small></h3>
         <div class="settings" id="settingsBox">
+          <div class="set-row" id="installRow" hidden><div><b>安裝到桌面</b><small>像 App 一樣從桌面或主畫面打開，離線也能用</small></div><button class="chip-toggle on" id="installBtn">安裝</button></div>
           <div class="set-row"><div><b>省電模式</b><small>閒置時降低畫面更新率，筆電整天開著也不耗電</small></div><button class="chip-toggle" id="powerBtn"></button></div>
         </div>
         <div class="data-tools">
