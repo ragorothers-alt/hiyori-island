@@ -240,7 +240,7 @@ export class FileSync {
   restoreBackup() {
     const b = readBackup()
     if (!b) return false
-    this.store.replaceState(b.state, Date.now()) // 當成一次新的變更，會再同步出去
+    this.store.replaceState(b.state) // 當成一次新的變更，會再同步出去
     localStorage.removeItem(BACKUP_KEY)
     this.onStatus(this)
     return true

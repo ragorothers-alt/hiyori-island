@@ -202,6 +202,20 @@ describe('雲端資料夾同步', () => {
     expect(titles(a.store)).toContain('B 改的')
   })
 
+  it('這台時鐘比別台慢時，拉回資料後的新變更仍會寫出去', async () => {
+    const a = device()
+    const b = device()
+    await link(a, file)
+    later(10 * 60000) // A 的時鐘快十分鐘
+    await a.run(async (s, sync) => (s.addTask({ title: 'A 改的' }), sync.sync()))
+    vi.setSystemTime(Date.now() - 10 * 60000) // 換到 B：時鐘慢十分鐘
+    await link(b, file)
+    expect(titles(b.store)).toContain('A 改的')
+    await b.run(async (s, sync) => (s.addTask({ title: 'B 接著改' }), sync.sync()))
+    expect(b.sync.state).toBe('linked')
+    expect(titles(JSON.parse(file.content).state)).toContain('B 接著改')
+  })
+
   it('檔案不是ひより的同步檔時顯示錯誤，資料不動', async () => {
     file.content = '{"hello":1}'
     const a = device()

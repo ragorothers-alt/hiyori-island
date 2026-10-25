@@ -291,11 +291,15 @@ export class Store {
   // 例行實例生成、跨日這類每台裝置各自推導的變化不算，避免剛打開的裝置蓋掉雲端的新資料
   save(touch = true) {
     if (touch) {
-      this.state.updatedAt = Date.now()
+      this.state.updatedAt = this._nextVersion()
       this.emit('dirty')
     }
     clearTimeout(this._saveTimer)
     this._saveTimer = setTimeout(() => this.saveNow(), 120)
+  }
+  // 版本號一定比上一版大：就算這台電腦的時鐘比別台慢，新的變更也不會被當成舊的
+  _nextVersion() {
+    return Math.max(Date.now(), (this.state.updatedAt || 0) + 1)
   }
   saveNow() {
     try {
@@ -754,10 +758,10 @@ export class Store {
     } catch {
       throw new Error('檔案不是 JSON 格式')
     }
-    this.replaceState(obj, Date.now())
+    this.replaceState(obj)
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
-  replaceState(obj, updatedAt = Date.now()) {
+  replaceState(obj, updatedAt = this._nextVersion()) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     const next = migrate(obj)
     next.updatedAt = updatedAt
@@ -773,8 +777,9 @@ export class Store {
   }
   reset() {
     localStorage.removeItem(KEY)
+    const version = this._nextVersion()
     this.state = seed()
-    this.state.updatedAt = Date.now()
+    this.state.updatedAt = version
     this._readyQuests = new Set()
     this.saveNow()
     this.emit('dirty')
