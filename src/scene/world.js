@@ -254,6 +254,17 @@ export class World {
   }
 
   // ── 鏡頭 ──
+  // 預設視角的相機（不受目前拖曳影響），shift 是要套用的畫面偏移
+  homeCamera(shift = this.shiftTarget) {
+    const cam = (this._homeCam ??= new THREE.PerspectiveCamera())
+    cam.copy(this.camera, false)
+    cam.position.copy(this._homePos())
+    cam.lookAt(HOME_TARGET)
+    if (Math.abs(shift.x) < 0.5 && Math.abs(shift.y) < 0.5) cam.clearViewOffset()
+    else cam.setViewOffset(innerWidth, innerHeight, shift.x, shift.y, innerWidth, innerHeight)
+    cam.updateMatrixWorld()
+    return cam
+  }
   // 讓半徑 r 的球完整入鏡所需的距離（取垂直、水平視角中較窄的一邊）
   fitDistance(r) {
     const half = THREE.MathUtils.degToRad(this.camera.fov / 2)

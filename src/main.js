@@ -320,14 +320,25 @@ async function boot() {
 
   // 小島置中在面板以外的區域
   const panel = document.getElementById('panel')
+  const wide = () => innerWidth > 860
+  const panelShift = (collapsed) => wide()
+    ? { x: collapsed ? 0 : (panel.offsetWidth + 20) / 2, y: 0 }
+    : { x: 0, y: collapsed ? 30 : innerHeight * 0.25 - 36 }
   const updateShift = () => {
-    const collapsed = panel.classList.contains('collapsed')
-    if (innerWidth > 860) world.setViewShift(collapsed ? 0 : (panel.offsetWidth + 20) / 2, 0)
-    else world.setViewShift(0, collapsed ? 30 : innerHeight * 0.25 - 36)
+    const { x, y } = panelShift(panel.classList.contains('collapsed'))
+    world.setViewShift(x, y)
+  }
+  // 星之大樹放在預設視角（面板展開時）看得到的右上角：日期列下方、面板左側
+  const placeSky = () => {
+    const right = (wide() ? innerWidth - panel.offsetWidth - 20 : innerWidth) - 14
+    const top = document.querySelector('.datebar').getBoundingClientRect().bottom + 14
+    decor.placeSky(world.homeCamera(panelShift(false)), { right, top })
   }
   new MutationObserver(updateShift).observe(panel, { attributes: true, attributeFilter: ['class'] })
   addEventListener('resize', updateShift)
+  addEventListener('resize', placeSky)
   updateShift()
+  placeSky()
   world.shift = { ...world.shiftTarget }
   world._applyShift()
 
@@ -711,9 +722,11 @@ async function boot() {
         setTimeout(() => fx.burst(pos, { colors: ['#ffffff', '#ffe3ec', '#d9efff'], count: 60, speed: 2.4 }), 500)
       }
       if (unlock) {
-        // 鏡頭對準新景觀的實際位置，距離依大小調整（天空中的大型景觀要拉遠才看得到全貌）
+        // 鏡頭對準新景觀的實際位置，距離依大小調整（天空中的大型景觀要拉遠才看得到全貌）；
+        // 星之大樹本來就擺在預設視角看得到的右上角，回到預設視角最完整
         const b = decor.bounds(unlock.key)
-        if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, world.fitDistance(b.size / 2) * 0.85)))
+        if (unlock.key === 'skytree') world.home()
+        else if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, world.fitDistance(b.size / 2) * 0.85)))
       }
       fx.fireworks(new THREE.Vector3(0, 0, 0), 4)
       mochi.celebrate()

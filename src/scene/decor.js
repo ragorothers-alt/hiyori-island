@@ -706,21 +706,38 @@ function whale() {
   return g
 }
 
-// 星之大樹模型（models/starTree.js）原點在浮島草地頂面；這裡只負責擺位與上下漂浮
+// 星之大樹：離島中心水平 ring 遠（樹冠內緣也在雲鯨軌道半徑 22 外側，不論高度都不會相撞），
+// 樹冠中心在草地上方 canopy、樹冠頂再高 above、半寬 radius（皆為模型原尺寸）
+const SKY = { ring: 29.5, scale: 1.3, canopy: 6, above: 2.5, radius: 3.9 }
+
+// 星之大樹模型（models/starTree.js）原點在浮島草地頂面；位置由 Decor.placeSky 依畫面決定，這裡只負責上下漂浮
 function skytree() {
   const g = new THREE.Group()
   const tree = buildStarTree()
+  tree.scale.setScalar(SKY.scale)
   g.add(tree)
-  g.position.set(0, 12, -16)
+  g.userData.base = new THREE.Vector3(16.6, -10.5, -22.5)
   g.userData.glow = tree.userData.glow
   g.userData.ownedMaterials = tree.userData.ownedMaterials ?? []
   g.userData.ownedTextures = tree.userData.ownedTextures ?? []
   g.userData.anim = (t, dt, night) => {
-    g.position.y = 12 + Math.sin(t * 0.24) * 0.22
+    g.position.copy(g.userData.base)
+    g.position.y += Math.sin(t * 0.24) * 0.22
     tree.userData.anim(t, dt, night)
   }
   g.userData.anim(0, 0, 0)
   return g
+}
+
+// 穿過畫面點 px 的視線，與「離島中心水平距離 d」圓柱遠側的交點
+function ringPoint(cam, px, d) {
+  const o = cam.position
+  const dir = new THREE.Vector3(px.x / innerWidth * 2 - 1, 1 - px.y / innerHeight * 2, 0.5).unproject(cam).sub(o).normalize()
+  const a = dir.x ** 2 + dir.z ** 2
+  const b = 2 * (o.x * dir.x + o.z * dir.z)
+  const c = o.x ** 2 + o.z ** 2 - d * d
+  const t = (-b + Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a)
+  return o.clone().addScaledVector(dir, t)
 }
 
 const at = (obj, x, z) => {
@@ -795,6 +812,7 @@ export class Decor {
         this.group.add(obj)
         this.items[u.key] = obj
         this._applySeason(obj)
+        this._applySky()
         if (animate) {
           const targets = COLLECTIONS.has(u.key) ? obj.children : [obj]
           obj.userData.popScales = targets.map((o) => [o, o.scale.clone()])
@@ -819,6 +837,34 @@ export class Decor {
       }
     }
     return spawned
+  }
+
+  // 星之大樹擺在預設視角可見範圍的右上角：cam 是預設視角的相機，area 是可見範圍的右緣與上緣（像素）
+  placeSky(cam, area) {
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion)
+    const lift = new THREE.Vector3(0, SKY.above * SKY.scale, 0)
+    const screen = (v) => {
+      const p = v.clone().project(cam)
+      return new THREE.Vector2((p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight)
+    }
+    // 先猜樹冠中心的畫面位置，量出樹冠在畫面上的半寬與上緣後修正，幾次就收斂
+    const target = new THREE.Vector2(area.right - 150, area.top + 110)
+    let center
+    for (let i = 0; i < 4; i++) {
+      center = ringPoint(cam, target, SKY.ring)
+      const c = screen(center)
+      const halfW = screen(center.clone().addScaledVector(right, SKY.radius * SKY.scale)).x - c.x
+      const up = c.y - screen(center.clone().add(lift)).y
+      target.set(area.right - halfW, area.top + up)
+    }
+    this.skyBase = center.setY(center.y - SKY.canopy * SKY.scale)
+    this._applySky()
+  }
+  _applySky() {
+    const o = this.items.skytree
+    if (!o || !this.skyBase) return
+    o.userData.base.copy(this.skyBase)
+    o.position.copy(this.skyBase)
   }
 
   // 物件的包圍盒中心與大小（天空中的景觀原點不在模型上，升級時鏡頭要對準實際的位置）
