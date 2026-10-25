@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { LAYOUT } from './island.js'
 import { tween, ease, rng } from './util.js'
+import { SEASONS } from './season.js'
 
 // もち：白色麻糬小精靈。會呼吸、眨眼、閒晃，完成任務時跳過去慶祝。
 const HOME = new THREE.Vector3(LAYOUT.home.x, 0, LAYOUT.home.z)
@@ -65,7 +66,7 @@ export class Mochi {
 
     // 頭上的小櫻花髮飾
     const clip = new THREE.Group()
-    const petalMat = new THREE.MeshStandardMaterial({ color: '#f7b3c6', roughness: 0.5, emissive: '#ffc9d6', emissiveIntensity: 0.2 })
+    const petalMat = (this.clipMat = new THREE.MeshStandardMaterial({ color: '#f7b3c6', roughness: 0.5, emissive: '#ffc9d6', emissiveIntensity: 0.2 }))
     for (let i = 0; i < 5; i++) {
       const p = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), petalMat)
       const a = (i / 5) * Math.PI * 2
@@ -80,6 +81,20 @@ export class Mochi {
     clip.rotation.set(0.3, 0, -0.5)
     this.body.add(clip)
 
+    // 冬天的小圍巾
+    const scarfMat = new THREE.MeshStandardMaterial({ color: '#ef8e93', roughness: 0.85 })
+    this.scarf = new THREE.Group()
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.075, 8, 40), scarfMat)
+    ring.rotation.x = Math.PI / 2
+    ring.scale.set(1.13, 1.13, 0.85)
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.28, 0.05), scarfMat)
+    tail.position.set(0.24, -0.13, 0.5)
+    tail.rotation.z = 0.25
+    this.scarf.add(ring, tail)
+    this.scarf.position.y = 0.37
+    this.scarf.visible = false
+    this.body.add(this.scarf)
+
     this.busy = false
     this.mode = 'idle'
     this.chain = Promise.resolve()
@@ -89,6 +104,13 @@ export class Mochi {
     this.faceAngle = 0
     this.bubble = null
     world.add((dt, t) => this.update(dt, t))
+  }
+
+  setSeason(key) {
+    const s = SEASONS[key]
+    this.clipMat.color.set(s.clip)
+    this.clipMat.emissive.set(s.clip)
+    this.scarf.visible = !!s.scarf
   }
 
   get position() {

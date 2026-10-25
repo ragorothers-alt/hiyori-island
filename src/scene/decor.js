@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mat, rng, shadowed, tween, ease } from './util.js'
 import { LAYOUT } from './island.js'
 import { UNLOCKS } from '../theme.js'
+import { SEASONS } from './season.js'
 
 // 依等級解鎖的島嶼裝飾
 const VERMILION = '#ef8e83'
@@ -27,21 +28,23 @@ function sakuraTree(seed, scale = 1) {
     b.rotation.set(z * 0.8, 0, rz)
     g.add(b)
   }
-  const pinks = ['#f9c9d6', '#f5b5c8', '#fbd8e2', '#f7bfd0', '#fde6ec']
+  const pinks = SEASONS.spring.canopy
+  const canopyMats = pinks.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, flatShading: true, emissive: '#ffd6e2', emissiveIntensity: 0.12 }))
   const blob = new THREE.IcosahedronGeometry(1, 1)
   const puffs = [
     [0, 2.9, 0, 1.25], [1.0, 2.6, 0.2, 0.95], [-1.0, 2.65, -0.1, 1.0], [0.3, 2.5, 0.9, 0.85],
     [-0.4, 2.55, -0.85, 0.9], [0.6, 3.35, -0.3, 0.8], [-0.55, 3.3, 0.35, 0.8], [1.35, 2.25, -0.6, 0.6], [-1.3, 2.2, 0.7, 0.62],
   ]
   for (const [x, y, z, s] of puffs) {
-    const m = new THREE.Mesh(blob, mat(pinks[Math.floor(r() * pinks.length)], { emissive: '#ffd6e2', emissiveIntensity: 0.12 }))
+    const m = new THREE.Mesh(blob, canopyMats[Math.floor(r() * pinks.length)])
     m.position.set(x, y, z)
     m.scale.setScalar(s * (0.9 + r() * 0.2))
     m.rotation.set(r() * 3, r() * 3, r() * 3)
     g.add(m)
   }
   // 樹下落花
-  const petals = new THREE.InstancedMesh(new THREE.CircleGeometry(0.06, 5), mat('#f8c3d1', { side: THREE.DoubleSide }), 40)
+  const fallenMat = new THREE.MeshStandardMaterial({ color: '#f8c3d1', roughness: 0.82, side: THREE.DoubleSide })
+  const petals = new THREE.InstancedMesh(new THREE.CircleGeometry(0.06, 5), fallenMat, 40)
   const o = new THREE.Object3D()
   for (let i = 0; i < 40; i++) {
     const a = r() * Math.PI * 2
@@ -53,6 +56,8 @@ function sakuraTree(seed, scale = 1) {
   }
   g.add(petals)
   g.scale.setScalar(scale)
+  g.userData.seasonal = { canopyMats, fallenMat }
+  g.userData.ownedMaterials = [...canopyMats, fallenMat]
   return shadowed(g)
 }
 
@@ -290,6 +295,7 @@ function islet() {
   const tree = sakuraTree(99, 0.45)
   tree.position.set(-0.4, 0, -0.2)
   g.add(tree)
+  g.userData.seasonal = tree.userData.seasonal
   const t = torii()
   t.scale.setScalar(0.32)
   t.position.set(0.6, 0, 0.6)
@@ -304,7 +310,7 @@ function islet() {
   g.add(fall)
   g.position.set(13.5, 4.5, -10)
   g.userData.orbit = true
-  g.userData.ownedMaterials = [fall.material]
+  g.userData.ownedMaterials = [fall.material, ...tree.userData.ownedMaterials]
   return shadowed(g)
 }
 
@@ -337,6 +343,21 @@ export class Decor {
     world.add((dt, t) => this.update(dt, t))
   }
 
+  setSeason(key) {
+    this.season = key
+    for (const o of Object.values(this.items)) this._applySeason(o)
+  }
+  _applySeason(o) {
+    const sea = o.userData.seasonal
+    if (!sea || !this.season) return
+    const s = SEASONS[this.season]
+    sea.canopyMats.forEach((m, i) => {
+      m.color.set(s.canopy[i % s.canopy.length])
+      m.emissive.set(s.glow)
+    })
+    sea.fallenMat.color.set(s.fallen)
+  }
+
   // 依等級同步；animate=true 時新物件以彈出動畫出現
   sync(level, animate = false) {
     const spawned = []
@@ -347,6 +368,7 @@ export class Decor {
         const obj = BUILDERS[u.key]()
         this.group.add(obj)
         this.items[u.key] = obj
+        this._applySeason(obj)
         if (animate) {
           const targets = COLLECTIONS.has(u.key) ? obj.children : [obj]
           targets.forEach((o, i) => {

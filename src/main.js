@@ -5,6 +5,7 @@ import { UI } from './ui.js'
 import { World } from './scene/world.js'
 import { Sky } from './scene/sky.js'
 import { Island } from './scene/island.js'
+import { SEASONS, seasonOf } from './scene/season.js'
 import { Decor } from './scene/decor.js'
 import { Garden } from './scene/garden.js'
 import { Towers } from './scene/towers.js'
@@ -39,7 +40,7 @@ async function boot() {
   const world = new World(document.getElementById('scene'))
   const sky = new Sky(world)
   if (params.has('hour')) sky.hourOverride = parseFloat(params.get('hour'))
-  new Island(world)
+  const island = new Island(world)
   const decor = new Decor(world, sky)
   const garden = new Garden(world, sky)
   const towers = new Towers(world, sky)
@@ -49,6 +50,23 @@ async function boot() {
   const fx = new Particles(world, sky)
   sfx.setEnabled(store.state.settings.sound)
   decor.sync(store.level.level)
+
+  // ── 四季 ──
+  let season = null
+  const applySeason = () => {
+    const next = SEASONS[params.get('season')] ? params.get('season') : seasonOf(store.today)
+    if (next === season) return
+    season = next
+    island.setSeason(season)
+    decor.setSeason(season)
+    fx.setSeason(season)
+    mochi.setSeason(season)
+    const el = document.getElementById('dateSeason')
+    el.textContent = `${SEASONS[season].name} · ${SEASONS[season].jp}`
+    el.dataset.season = season
+  }
+  applySeason()
+  store.on('dateChanged', applySeason)
 
   // ── 浮動經驗值 ──
   const floatText = (pos, text, big = false) => {
@@ -410,6 +428,7 @@ async function boot() {
         const overdue = store.overdue().length
         if (overdue) mochi.say(line('overdue', { count: overdue }), 3800)
         else if (!store.tasksOn(store.today).length) mochi.say(line('emptyDay'), 3800)
+        else if (LINES.season?.[season]) mochi.say(pick(LINES.season[season]), 3800)
       }, 5600)
     }),
   )

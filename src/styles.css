@@ -126,6 +126,13 @@ body.night .brand { text-shadow: 0 1px 12px rgba(0, 0, 0, .3); }
 .date-num { font-family: var(--font-num); font-size: 22px; font-weight: 600; letter-spacing: .06em; line-height: 1.1; }
 .date-sub { font-family: var(--font-display); font-size: 11px; color: var(--ink-soft); letter-spacing: .2em; display: flex; justify-content: center; gap: 6px; }
 .date-rel { color: var(--sakura); }
+.date-season { color: var(--ink-faint); }
+.date-season[data-season="spring"] { color: #e58aa6; }
+.date-season[data-season="summer"] { color: #5fae7c; }
+.date-season[data-season="autumn"] { color: #e0855f; }
+.date-season[data-season="winter"] { color: #7f9ec4; }
+body.night .date-season[data-season] { filter: brightness(1.35); }
+@media (max-width: 860px) { .date-season { display: none; } }
 .date-clock { font-family: var(--font-num); font-size: 15px; font-weight: 500; color: var(--ink-soft); padding: 4px 10px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); letter-spacing: .08em; }
 .chip-btn { font-size: 12px; padding: 6px 12px; border-radius: 12px; background: var(--sakura-soft); color: #c0607c; white-space: nowrap; }
 body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }

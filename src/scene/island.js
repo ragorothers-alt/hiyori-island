@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { mat, rng, wobble, shadowed } from './util.js'
+import { SEASONS } from './season.js'
 
 // 島嶼配置（俯視座標 x, z；鏡頭在 +z 方向）
 export const LAYOUT = {
@@ -30,6 +31,10 @@ const occupied = (x, z) => {
 export class Island {
   constructor(world) {
     this.world = world
+    // 會隨季節變色的材質：不走 mat() 快取，避免影響其他物件
+    this.grassMat = new THREE.MeshStandardMaterial({ color: '#bde5b6', roughness: 0.95, flatShading: true })
+    this.rimMat = new THREE.MeshStandardMaterial({ color: '#addb9d', roughness: 0.95, flatShading: true, side: THREE.DoubleSide })
+    this.topMat = new THREE.MeshStandardMaterial({ color: '#c5e6b4', roughness: 0.82, flatShading: true })
     this.group = new THREE.Group()
     world.scene.add(this.group)
     this._terrain()
@@ -63,13 +68,13 @@ export class Island {
     // 草地
     const grass = new THREE.Mesh(
       jitter(new THREE.CylinderGeometry(R, R * 0.985, 0.7, 72, 1), 0.035, 0),
-      mat('#bde5b6', { roughness: 0.95 }),
+      this.grassMat,
     )
     grass.position.y = -0.35
     // 草地邊緣一圈稍深的草
     const rim = new THREE.Mesh(
       jitter(new THREE.CylinderGeometry(R * 1.005, R * 0.99, 0.18, 72, 1, true), 0.035, 0),
-      mat('#addb9d', { roughness: 0.95, side: THREE.DoubleSide }),
+      this.rimMat,
     )
     rim.position.y = -0.62
     // 土層
@@ -204,6 +209,7 @@ export class Island {
     const r = rng(42)
     const R = LAYOUT.radius - 0.7
     const tufts = []
+    this.tuftMix = []
     while (tufts.length < 170) {
       const a = r() * Math.PI * 2
       const d = Math.sqrt(r()) * R
@@ -226,12 +232,15 @@ export class Island {
         o.scale.set(s, s, s)
         o.updateMatrix()
         grass.setMatrixAt(i, o.matrix)
-        grass.setColorAt(i, c.set('#9fd38f').lerp(new THREE.Color('#d6efb4'), r()))
+        const k = r()
+        this.tuftMix.push(k)
+        grass.setColorAt(i, c.set('#9fd38f').lerp(new THREE.Color('#d6efb4'), k))
         i++
       }
     }
     grass.receiveShadow = true
     this.group.add(grass)
+    this.tufts = grass
 
     // 野花小點
     const flowers = []
@@ -254,6 +263,7 @@ export class Island {
       fm.setColorAt(k, c.set(palette[Math.floor(r() * palette.length)]))
     })
     this.group.add(fm)
+    this.wildflowers = fm
   }
 
   _floaters() {
@@ -266,7 +276,7 @@ export class Island {
       const rock = new THREE.Mesh(new THREE.ConeGeometry(s, s * 1.8, 6, 1), mat('#e2cfd2'))
       rock.rotation.x = Math.PI
       rock.position.y = -s * 0.9
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(s * 1.02, s, 0.16, 6), mat('#c5e6b4'))
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(s * 1.02, s, 0.16, 6), this.topMat)
       g.add(rock, top)
       const a = (i / 7) * Math.PI * 2 + r()
       const d = 11.5 + r() * 4
@@ -275,6 +285,22 @@ export class Island {
       this.group.add(g)
       this.floaters.push(g)
     }
+  }
+
+  setSeason(key) {
+    const s = SEASONS[key]
+    this.grassMat.color.set(s.grass)
+    this.rimMat.color.set(s.rim)
+    this.topMat.color.set(s.top)
+    const a = new THREE.Color(s.tuft[0])
+    const b = new THREE.Color(s.tuft[1])
+    const c = new THREE.Color()
+    this.tuftMix.forEach((k, i) => this.tufts.setColorAt(i, c.copy(a).lerp(b, k)))
+    this.tufts.instanceColor.needsUpdate = true
+    this.wildflowers.visible = s.flowers
+    this.water.material.color.set(s.water)
+    this.water.material.emissive.set(s.water)
+    this.water.material.opacity = key === 'winter' ? 0.78 : 0.55
   }
 
   update(dt, t) {

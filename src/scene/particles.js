@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { glowTexture, rng, tween, ease } from './util.js'
+import { SEASONS } from './season.js'
 
 // 飄落的櫻花瓣、夜晚螢火蟲、各種慶祝特效
 export class Particles {
@@ -14,17 +15,32 @@ export class Particles {
   }
 
   _petals() {
-    const n = 180
-    const shape = new THREE.Shape()
-    shape.moveTo(0, 0)
-    shape.bezierCurveTo(0.06, 0.04, 0.07, 0.11, 0.025, 0.14)
-    shape.lineTo(0, 0.12)
-    shape.lineTo(-0.025, 0.14)
-    shape.bezierCurveTo(-0.07, 0.11, -0.06, 0.04, 0, 0)
-    const geo = new THREE.ShapeGeometry(shape, 3)
-    geo.center()
-    const m = new THREE.MeshStandardMaterial({ color: '#f9c3d2', emissive: '#ffd3df', emissiveIntensity: 0.25, side: THREE.DoubleSide, roughness: 0.6 })
-    this.petals = new THREE.InstancedMesh(geo, m, n)
+    const n = 280
+    // 四種飄落物的形狀：花瓣、葉子、楓葉、雪花
+    const petal = new THREE.Shape()
+    petal.moveTo(0, 0)
+    petal.bezierCurveTo(0.06, 0.04, 0.07, 0.11, 0.025, 0.14)
+    petal.lineTo(0, 0.12)
+    petal.lineTo(-0.025, 0.14)
+    petal.bezierCurveTo(-0.07, 0.11, -0.06, 0.04, 0, 0)
+    const leaf = new THREE.Shape()
+    leaf.moveTo(0, 0)
+    leaf.quadraticCurveTo(0.07, 0.07, 0, 0.17)
+    leaf.quadraticCurveTo(-0.07, 0.07, 0, 0)
+    // 五裂楓葉＋葉柄（右半邊，左半邊鏡像）
+    const half = [[0, 0.1], [0.02, 0.05], [0.075, 0.07], [0.05, 0.02], [0.092, -0.008], [0.04, -0.02], [0.036, -0.062], [0.007, -0.034], [0.004, -0.09]]
+    const outline = [...half, ...half.slice(1).reverse().map(([x, y]) => [-x, y])]
+    const maple = new THREE.Shape(outline.map(([x, y]) => new THREE.Vector2(x * 1.15, y * 1.15)))
+    this.shapes = {
+      petal: new THREE.ShapeGeometry(petal, 3).center(),
+      leaf: new THREE.ShapeGeometry(leaf, 3).center(),
+      maple: new THREE.ShapeGeometry(maple).center(),
+      snow: new THREE.CircleGeometry(0.035, 8),
+    }
+    const m = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffd3df', emissiveIntensity: 0.25, side: THREE.DoubleSide, roughness: 0.6 })
+    this.petals = new THREE.InstancedMesh(this.shapes.petal, m, n)
+    this.petals.count = 180
+    this.pfx = SEASONS.spring.particle
     this.petals.frustumCulled = false
     const r = rng(13)
     this.petalData = []
@@ -40,6 +56,24 @@ export class Particles {
     }
     this._o = new THREE.Object3D()
     this.scene.add(this.petals)
+    this._colorParticles(SEASONS.spring)
+  }
+
+  _colorParticles(s) {
+    const c = new THREE.Color()
+    const n = this.petalData.length
+    for (let i = 0; i < n; i++) this.petals.setColorAt(i, c.set(s.particle.colors[i % s.particle.colors.length]))
+    this.petals.instanceColor.needsUpdate = true
+  }
+
+  setSeason(key) {
+    const s = SEASONS[key]
+    this.pfx = s.particle
+    this.petals.geometry = this.shapes[s.particle.kind]
+    this.petals.count = s.particle.count
+    this.petals.material.emissive.set(key === 'winter' ? '#ffffff' : s.particle.colors[0])
+    this.petals.material.emissiveIntensity = key === 'winter' ? 0.5 : 0.22
+    this._colorParticles(s)
   }
 
   _fireflies() {
@@ -175,10 +209,11 @@ export class Particles {
   update(dt, t) {
     // 櫻花瓣
     const o = this._o
-    const wind = Math.sin(t * 0.13) * 0.4 + 0.5
-    for (let i = 0; i < this.petalData.length; i++) {
+    const wind = (Math.sin(t * 0.13) * 0.4 + 0.5) * (this.pfx.kind === 'snow' ? 0.4 : 1)
+    const pf = this.pfx
+    for (let i = 0; i < this.petals.count; i++) {
       const d = this.petalData[i]
-      d.p.y -= d.fall * dt
+      d.p.y -= d.fall * pf.fall * dt
       d.p.x += (Math.sin(t * 0.9 + d.sway) * 0.35 + wind) * dt
       d.p.z += Math.cos(t * 0.7 + d.sway) * 0.25 * dt
       if (d.p.y < -9 || d.p.x > 20) {
@@ -186,12 +221,12 @@ export class Particles {
         d.p.x = -18 + Math.random() * 20
         d.p.z = (Math.random() - 0.5) * 34
       }
-      d.rot.x += d.spin.x * dt
-      d.rot.y += d.spin.y * dt
-      d.rot.z += d.spin.z * dt
+      d.rot.x += d.spin.x * pf.spin * dt
+      d.rot.y += d.spin.y * pf.spin * dt
+      d.rot.z += d.spin.z * pf.spin * dt
       o.position.copy(d.p)
       o.rotation.copy(d.rot)
-      o.scale.setScalar(d.s)
+      o.scale.setScalar(d.s * pf.size)
       o.updateMatrix()
       this.petals.setMatrixAt(i, o.matrix)
     }
