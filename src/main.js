@@ -15,6 +15,7 @@ import { Particles } from './scene/particles.js'
 import { Labels } from './scene/labels.js'
 import { Placed, spotFree, radiusOf } from './scene/placed.js'
 import { Cabin } from './scene/cabin.js'
+import { Room } from './scene/room.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
@@ -53,7 +54,9 @@ async function boot() {
   const ring = new TimeRing(world, sky)
   const labels = new Labels(world)
   const cabin = new Cabin(world, sky)
-  const mochi = new Mochi(world, labels, sky, cabin)
+  const room = new Room(world, sky)
+  const mochi = new Mochi(world, labels, sky, cabin, room)
+  room.pickRoots.push(mochi.root)
   const fx = new Particles(world, sky)
   const placed = new Placed(world, sky)
   sfx.setEnabled(store.state.settings.sound)
@@ -181,6 +184,8 @@ async function boot() {
     const item = SHOP_ITEMS.find((i) => i.key === key)
     if (!item) return
     const from = moveId && store.state.placed.find((p) => p.id === moveId)
+    // 擺設要看著小島放
+    if (room.active) world.setStage(null)
     placing = { key, moveId, rot: from?.rot ?? 0, ok: false }
     placed.startGhost(key, placing.rot)
     if (from) {
@@ -266,9 +271,9 @@ async function boot() {
       const p = towers.anchor(id, false)
       if (p) world.flyTo(p.add(new THREE.Vector3(0, 1.4, 0)), 10)
     },
-    resetView: () => world.home(),
+    resetView: () => (room.active ? room.exit() : world.home()),
     reviewOpened: () => mochi.say(line('reviewAsk') || '今天過得怎麼樣？', 4200),
-    modalClosed: () => world.home(1.6),
+    modalClosed: () => !room.active && world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
     setPowerSave: (on) => (world.powerSave = on),
     focusStarted: (resumed, taskId) => {
@@ -337,6 +342,15 @@ async function boot() {
     decor.placeSky(cam, { right, top })
     const bottom = wide() ? innerHeight : innerHeight - panel.offsetHeight - 60
     decor.placeWhale(cam, { left: 0, right: right + 14, top, bottom })
+    // 小木屋室內的取景：可見範圍（手機扣掉上方日期列）佔整個畫面的比例，以及它的中心離畫面中心（含面板偏移）多遠
+    const { x, y } = panelShift(false)
+    const roomTop = wide() ? 0 : top - 8
+    room.area = {
+      w: (right + 14) / innerWidth,
+      h: (bottom - roomTop) / innerHeight,
+      dx: (right + 14) / 2 - (innerWidth / 2 - x),
+      dy: (roomTop + bottom) / 2 - (innerHeight / 2 - y),
+    }
   }
   new MutationObserver(updateShift).observe(panel, { attributes: true, attributeFilter: ['class'] })
   addEventListener('resize', updateShift)
@@ -375,7 +389,7 @@ async function boot() {
       const pr = store.state.projects.find((x) => x.id === p.id)
       if (pr) html = `${esc(pr.name)}<small>${Math.round(store.progress(pr) * 100)}%・${pr.milestones.filter((m) => m.done).length}/${pr.milestones.length} 層</small>`
     } else if (p.type === 'mochi') html = `もち<small>點一下摸摸牠</small>`
-    else if (p.type === 'cabin') html = `もち的小木屋<small>${mochi.inside ? 'もち正在屋裡陪你專注' : '專注時もち會回到這裡'}</small>`
+    else if (p.type === 'cabin') html = `もち的小木屋<small>${mochi.inside ? 'もち正在屋裡陪你專注・點一下進屋看看' : '專注時もち會回到這裡'}</small>`
     else if (p.type === 'placed') {
       const it = SHOP_ITEMS.find((i) => i.key === store.state.placed.find((x) => x.id === p.id)?.key)
       if (it) html = `${esc(it.name)}<small>點一下移動或收起</small>`
@@ -489,6 +503,7 @@ async function boot() {
     }
     if (p.type === 'cabin') {
       sfx.pop()
+      if (mochi.inside) room.enter()
       mochi.say(line(mochi.inside ? 'cabinFocus' : 'cabin'), 3200)
       return
     }
@@ -820,6 +835,17 @@ async function boot() {
     }
   }, 15000)
 
+  // 專注時才出現的「屋內／小島」切換鈕
+  const roomBtn = document.getElementById('roomBtn')
+  roomBtn.onclick = () => (room.active ? room.exit() : room.enter())
+  world.add(() => {
+    if (roomBtn.hidden === mochi.inside) roomBtn.hidden = !mochi.inside
+    if (roomBtn.classList.contains('on') !== room.active) {
+      roomBtn.classList.toggle('on', room.active)
+      roomBtn.title = room.active ? '回到小島 (V)' : '看看小木屋裡'
+    }
+  })
+
   // 小木屋蓋好之前擺在那塊地上的裝飾，挪到附近的空地
   const { cabin: lot } = LAYOUT
   for (const p of store.state.placed) {
@@ -891,7 +917,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, cabin, fx, decor, ui, placed, fileSync }
+  window.hiyori = { store, world, sky, mochi, cabin, room, fx, decor, ui, placed, fileSync }
 }
 
 boot()

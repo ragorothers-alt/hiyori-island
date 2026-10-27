@@ -414,6 +414,10 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
 
 /* ── 3D 錨點標籤 ── */
 #labels { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+/* 小島與小木屋室內切換時的淡入淡出（蓋過 3D 與標籤，不蓋面板） */
+.stage-fade { position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0; background: #fff6ec; transition: opacity .45s ease; }
+body.night .stage-fade { background: #1d1a2a; }
+#roomBtn.on { color: #d58a3f; background: rgba(255, 217, 138, .28); }
 .lbl { position: absolute; left: 0; top: 0; will-change: transform; }
 .bubble {
   transform: translate(-50%, -100%); padding: 8px 14px; border-radius: 16px; font-size: 13px; white-space: nowrap; max-width: 280px;

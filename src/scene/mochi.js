@@ -9,12 +9,13 @@ const HOME = new THREE.Vector3(LAYOUT.home.x, 0, LAYOUT.home.z)
 const play = (dur, fn, opts = {}) => new Promise((res) => tween(dur, fn, { ...opts, onDone: res }))
 
 export class Mochi {
-  constructor(world, labels, sky, cabin) {
+  constructor(world, labels, sky, cabin, room) {
     this.world = world
     this.sky = sky
     this.labels = labels
     this.cabin = cabin
-    // 專注時待在小木屋裡（身體隱藏）
+    this.room = room
+    // 專注時待在小木屋裡：身體移到室內場景的坐墊上
     this.inside = false
     this.rand = rng(Date.now() % 100000)
     const root = (this.root = new THREE.Group())
@@ -145,7 +146,7 @@ export class Mochi {
   }
 
   headAnchor() {
-    if (this.inside) return this.cabin.point('roofTop')
+    if (this.inside && !this.room.active) return this.cabin.point('roofTop')
     return this.root.position.clone().add(new THREE.Vector3(0, 1.75 + this.body.position.y * 1.3, 0))
   }
 
@@ -277,22 +278,23 @@ export class Mochi {
     this._squint = 0.9
   }
 
-  // 專注時跳回小木屋、開門擠進去；結束時再開門出來。instant：重新整理後接著專注，直接待在屋裡
+  // 專注時跳回小木屋、開門擠進去，畫面跟著進到屋裡；結束時回到小島再開門出來。
+  // instant：重新整理後接著專注，直接待在屋裡
   setFocus(on, instant = false) {
     const mode = on ? 'focus' : 'idle'
     if (this.mode === mode) return
     this.mode = mode
     if (on) {
       if (instant && this.pending === 0) {
-        this.root.position.copy(this.cabin.point('inside'))
-        this.root.visible = false
-        this.inside = true
+        this._toRoom()
         this.cabin.setLit(true, true)
+        this.room.enter(true)
       } else this._enqueue(() => this._enter())
       const el = document.createElement('div')
       el.className = 'focus-tag'
       el.textContent = 'しゅうちゅう'
-      this.focusTag = this.labels.add(el, () => this.headAnchor().add(new THREE.Vector3(0, 0.45, 0)))
+      // 進到屋內就不用標籤了，整個畫面就是專注中
+      this.focusTag = this.labels.add(el, () => (this.room.active ? null : this.headAnchor().add(new THREE.Vector3(0, 0.45, 0))))
     } else {
       if (this.focusTag) {
         this.labels.remove(this.focusTag)
@@ -318,27 +320,35 @@ export class Mochi {
       const s = Math.min(1, k * 2.5)
       b.scale.set(1 - 0.6 * s, 1 - 0.38 * s, 1 - 0.2 * s)
     }, { easing: ease.linear })
-    this.root.visible = false
-    this.inside = true
-    b.scale.set(1, 1, 1)
+    this._toRoom()
     c.setLit(true)
-    await c.swing(0)
+    c.swing(0)
+    await this.room.enter()
     this.busy = false
   }
 
   async _leave() {
     if (!this.inside) return
     const c = this.cabin
+    const b = this.body
+    this.busy = true
+    // 在屋裡伸個懶腰，再回到小島
+    if (this.room.active) {
+      b.rotation.set(0, 0, 0)
+      await play(0.7, (k) => {
+        const s = Math.sin(k * Math.PI)
+        b.scale.set(1 - 0.08 * s, 1 + 0.16 * s, 1 - 0.08 * s)
+        for (const n of this.nubs) n.position.y = 0.24 + s * 0.3
+      }, { easing: ease.inOutSine })
+      for (const n of this.nubs) n.position.y = 0.24
+      await this.room.exit()
+    }
     const door = c.point('doorway')
     const inside = c.point('inside')
-    this.busy = true
     c.setLit(false)
     await c.swing(1)
-    this.root.position.copy(inside)
+    this._toIsland(inside)
     this.root.rotation.y = this.faceAngle = Math.atan2(door.x - inside.x, door.z - inside.z)
-    this.root.visible = true
-    this.inside = false
-    const b = this.body
     await play(0.45, (k) => {
       this.root.position.lerpVectors(inside, door, ease.inOutSine(k))
       const s = 1 - Math.max(0, k * 2.5 - 1.5)
@@ -353,6 +363,22 @@ export class Mochi {
     c.swing(0)
     this.busy = false
     this.wanderT = 3
+  }
+
+  // 坐到室內的坐墊上（身體換到室內場景，小島上就看不到了）
+  _toRoom() {
+    const { position, facing } = this.room.seat()
+    this.room.scene.add(this.root)
+    this.root.position.copy(position)
+    this.root.rotation.y = this.faceAngle = facing
+    this.body.scale.set(1, 1, 1)
+    this.inside = true
+  }
+  _toIsland(at) {
+    this.world.scene.add(this.root)
+    this.root.position.copy(at)
+    this.body.rotation.set(0, 0, 0)
+    this.inside = false
   }
 
   // 替花澆水：跳到花旁、往前傾、灑水，再回家
@@ -381,17 +407,17 @@ export class Mochi {
     const focus = this.mode === 'focus'
     // 「並肩專注」：待在屋裡時，紙窗上映著もち的影子
     this.cabin.shadow = this.inside && this.abilities.sit ? 1 : 0
-    if (this.inside) return
 
-    // 呼吸
+    // 呼吸；在屋裡讀書時慢一點、身體微微前傾，偶爾看得太入迷往前點一下頭
     if (!this.busy) {
-      const s = Math.sin(t * 2.4) * 0.03
+      const s = this.inside ? Math.sin(t * 1.3) * 0.02 : Math.sin(t * 2.4) * 0.03
       this.body.scale.set(1 - s * 0.5, 1 + s, 1 - s * 0.5)
+      if (this.inside) this.body.rotation.x = 0.1 + Math.sin(t * 0.4) * 0.025 + Math.max(0, Math.sin(t * 0.23)) ** 16 * 0.14
     }
 
-    // 眨眼 / 被摸時瞇眼
+    // 眨眼 / 讀書時眼睛半垂 / 被摸時瞇眼
     this.blinkT -= dt
-    let eyeY = 1.25
+    let eyeY = this.inside ? 0.7 : 1.25
     if (this._squint > 0) {
       this._squint -= dt
       eyeY = 0.18
@@ -400,6 +426,7 @@ export class Mochi {
       if (this.blinkT < -0.12) this.blinkT = 2.4 + this.rand() * 3.5
     }
     for (const e of this.eyes) e.scale.y += (eyeY - e.scale.y) * 0.45
+    if (this.inside) return
 
     // 閒晃
     if (!focus && !this.busy && this.pending === 0) {

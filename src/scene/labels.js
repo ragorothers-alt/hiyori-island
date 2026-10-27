@@ -43,7 +43,8 @@ export class Labels {
       return
     }
     v.copy(p).project(this.world.camera)
-    if (v.z > 1 || v.z < -1) {
+    // 在鏡頭後面、或遠在畫面外（例如在小木屋室內時小島上的標籤）就藏起來
+    if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.6 || Math.abs(v.y) > 1.6) {
       item.wrap.style.display = 'none'
       return
     }

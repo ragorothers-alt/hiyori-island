@@ -37,7 +37,8 @@ export class World {
     controls.addEventListener('start', () => this._interacted())
 
     this.composer = new EffectComposer(renderer)
-    this.composer.addPass(new RenderPass(this.scene, this.camera))
+    this.renderPass = new RenderPass(this.scene, this.camera)
+    this.composer.addPass(this.renderPass)
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 0.86)
     this.composer.addPass(this.bloom)
     this.composer.addPass(new OutputPass())
@@ -66,6 +67,8 @@ export class World {
     this.busyUntil = 0
     this.shift = { x: 0, y: 0 }
     this.shiftTarget = { x: 0, y: 0 }
+    // 另一個場景（小木屋室內）：{ scene, pickRoots, frame(dt, t), onLeave() }；null 時是小島
+    this.stage = null
 
     this._bindPointer(canvas)
     addEventListener('resize', () => this.resize())
@@ -145,7 +148,8 @@ export class World {
     this.controls.autoRotate = this.idleRotate && idle && !this._focusing && level < 2
     // 白天的 bloom 幾乎看不出來，直接關掉這個後製 pass 省 GPU
     this.bloom.enabled = this.bloom.strength > 0.2
-    this.controls.update(dt)
+    if (this.stage) this.stage.frame(dt, el)
+    else this.controls.update(dt)
     this.composer.render()
   }
 
@@ -162,13 +166,18 @@ export class World {
 
   _raycast(e) {
     this._setRay(e)
-    const hits = this.raycaster.intersectObjects(this.pickRoots, true)
+    const scene = this.stage?.scene ?? this.scene
+    const hits = this.raycaster.intersectObjects(this.stage?.pickRoots ?? this.pickRoots, true)
     for (const h of hits) {
       let o = h.object
-      // 自己或上層被隱藏（例如躲進小木屋的もち）就不算點到
+      // 自己或上層被隱藏、或不在目前顯示的場景裡（例如待在小木屋室內的もち）就不算點到
       let shown = true
-      for (let p = o; p && shown; p = p.parent) shown = p.visible
-      if (!shown) continue
+      let top = o
+      for (let p = o; p; p = p.parent) {
+        shown &&= p.visible
+        top = p
+      }
+      if (!shown || top !== scene) continue
       while (o && !o.userData.pick) o = o.parent
       if (o) return { pick: o.userData.pick, object: o, point: h.point }
     }
@@ -257,6 +266,23 @@ export class World {
   }
 
   // ── 鏡頭 ──
+  // 換到另一個場景；設成 null 回到小島，鏡頭回到進去之前的位置
+  setStage(stage) {
+    const prev = this.stage
+    if (stage === prev) return
+    if (stage && !prev) this._islandView = { pos: this.camera.position.clone(), target: this.controls.target.clone() }
+    this.stage = stage
+    this.renderPass.scene = stage?.scene ?? this.scene
+    this.controls.enabled = !stage
+    if (!stage && this._islandView) {
+      this.camera.position.copy(this._islandView.pos)
+      this.controls.target.copy(this._islandView.target)
+      this.camera.lookAt(this.controls.target)
+      this._islandView = null
+    }
+    this._interacted()
+    prev?.onLeave?.()
+  }
   // 預設視角的相機（不受目前拖曳影響），shift 是要套用的畫面偏移
   homeCamera(shift = this.shiftTarget) {
     const cam = (this._homeCam ??= new THREE.PerspectiveCamera())
@@ -275,6 +301,7 @@ export class World {
     return r / Math.sin(narrow)
   }
   flyTo(target, distance = 13, { elevation = 0.62, duration = 1.1 } = {}) {
+    this.setStage(null)
     const c = this.controls
     const fromT = c.target.clone()
     const fromP = this.camera.position.clone()
@@ -299,6 +326,7 @@ export class World {
     return HOME_POS.clone().sub(HOME_TARGET).multiplyScalar(this.distFactor || 1).add(HOME_TARGET)
   }
   home(duration = 1.3) {
+    this.setStage(null)
     const c = this.controls
     const fromT = c.target.clone()
     const fromP = this.camera.position.clone()
