@@ -4,7 +4,7 @@ import { Store, toMin, minToHHMM, repeatLabel, daysBetween } from './store.js'
 import { UI } from './ui.js'
 import { World } from './scene/world.js'
 import { Sky } from './scene/sky.js'
-import { Island } from './scene/island.js'
+import { Island, LAYOUT } from './scene/island.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { Decor } from './scene/decor.js'
 import { Garden } from './scene/garden.js'
@@ -13,7 +13,8 @@ import { TimeRing } from './scene/timeRing.js'
 import { Mochi } from './scene/mochi.js'
 import { Particles } from './scene/particles.js'
 import { Labels } from './scene/labels.js'
-import { Placed, spotFree } from './scene/placed.js'
+import { Placed, spotFree, radiusOf } from './scene/placed.js'
+import { Cabin } from './scene/cabin.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
@@ -51,7 +52,8 @@ async function boot() {
   const towers = new Towers(world, sky)
   const ring = new TimeRing(world, sky)
   const labels = new Labels(world)
-  const mochi = new Mochi(world, labels, sky)
+  const cabin = new Cabin(world, sky)
+  const mochi = new Mochi(world, labels, sky, cabin)
   const fx = new Particles(world, sky)
   const placed = new Placed(world, sky)
   sfx.setEnabled(store.state.settings.sound)
@@ -270,7 +272,7 @@ async function boot() {
     setSound: (on) => sfx.setEnabled(on),
     setPowerSave: (on) => (world.powerSave = on),
     focusStarted: (resumed, taskId) => {
-      mochi.setFocus(true, taskId && garden.anchor(taskId))
+      mochi.setFocus(true, resumed)
       garden.setFocus(taskId)
       if (!resumed) {
         sfx.chime()
@@ -279,10 +281,7 @@ async function boot() {
       }
     },
     focusTaskChanged: (taskId) => {
-      if (mochi.mode === 'focus') {
-        garden.setFocus(taskId)
-        mochi.sitBy(taskId && garden.anchor(taskId))
-      }
+      if (mochi.mode === 'focus') garden.setFocus(taskId)
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
       if (t) {
         garden.bounce(t.id)
@@ -293,7 +292,8 @@ async function boot() {
       mochi.setFocus(false)
       garden.setFocus(null)
       sfx.temple()
-      fx.skyLantern(mochi.position.clone().add(new THREE.Vector3(0, 1.4, 0)))
+      // 天燈從小木屋屋頂升起（もち還在屋裡）
+      fx.skyLantern(mochi.inside ? cabin.point('roofTop') : mochi.position.clone().add(new THREE.Vector3(0, 1.4, 0)))
       store.completePomodoro(minutes, taskId)
       mochi.celebrate()
       mochi.say(line('focusEnd'))
@@ -328,11 +328,15 @@ async function boot() {
     const { x, y } = panelShift(panel.classList.contains('collapsed'))
     world.setViewShift(x, y)
   }
-  // 星之大樹放在預設視角（面板展開時）看得到的右上角：日期列下方、面板左側
+  // 星之大樹放在預設視角（面板展開時）看得到的右上角：日期列下方、面板左側；
+  // 雲鯨的弧線也依同一個可見範圍決定高度
   const placeSky = () => {
+    const cam = world.homeCamera(panelShift(false))
     const right = (wide() ? innerWidth - panel.offsetWidth - 20 : innerWidth) - 14
     const top = document.querySelector('.datebar').getBoundingClientRect().bottom + 14
-    decor.placeSky(world.homeCamera(panelShift(false)), { right, top })
+    decor.placeSky(cam, { right, top })
+    const bottom = wide() ? innerHeight : innerHeight - panel.offsetHeight - 60
+    decor.placeWhale(cam, { left: 0, right: right + 14, top, bottom })
   }
   new MutationObserver(updateShift).observe(panel, { attributes: true, attributeFilter: ['class'] })
   addEventListener('resize', updateShift)
@@ -371,6 +375,7 @@ async function boot() {
       const pr = store.state.projects.find((x) => x.id === p.id)
       if (pr) html = `${esc(pr.name)}<small>${Math.round(store.progress(pr) * 100)}%・${pr.milestones.filter((m) => m.done).length}/${pr.milestones.length} 層</small>`
     } else if (p.type === 'mochi') html = `もち<small>點一下摸摸牠</small>`
+    else if (p.type === 'cabin') html = `もち的小木屋<small>${mochi.inside ? 'もち正在屋裡陪你專注' : '專注時もち會回到這裡'}</small>`
     else if (p.type === 'placed') {
       const it = SHOP_ITEMS.find((i) => i.key === store.state.placed.find((x) => x.id === p.id)?.key)
       if (it) html = `${esc(it.name)}<small>點一下移動或收起</small>`
@@ -480,6 +485,11 @@ async function boot() {
       sfx.squish()
       fx.hearts(mochi.headAnchor())
       mochi.say(line('pat'), 2600)
+      return
+    }
+    if (p.type === 'cabin') {
+      sfx.pop()
+      mochi.say(line(mochi.inside ? 'cabinFocus' : 'cabin'), 3200)
       return
     }
     sfx.pop()
@@ -723,9 +733,9 @@ async function boot() {
       }
       if (unlock) {
         // 鏡頭對準新景觀的實際位置，距離依大小調整（天空中的大型景觀要拉遠才看得到全貌）；
-        // 星之大樹本來就擺在預設視角看得到的右上角，回到預設視角最完整
+        // 星之大樹和雲鯨本來就擺在預設視角看得到的地方，回到預設視角最完整
         const b = decor.bounds(unlock.key)
-        if (unlock.key === 'skytree') world.home()
+        if (unlock.key === 'skytree' || unlock.key === 'whale') world.home()
         else if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, world.fitDistance(b.size / 2) * 0.85)))
       }
       fx.fireworks(new THREE.Vector3(0, 0, 0), 4)
@@ -810,6 +820,24 @@ async function boot() {
     }
   }, 15000)
 
+  // 小木屋蓋好之前擺在那塊地上的裝飾，挪到附近的空地
+  const { cabin: lot } = LAYOUT
+  for (const p of store.state.placed) {
+    const a0 = Math.atan2(p.z - lot.z, p.x - lot.x)
+    const r0 = lot.r + radiusOf(p.key)
+    if (Math.hypot(p.x - lot.x, p.z - lot.z) >= r0) continue
+    search: for (let d = r0 + 0.05; d < r0 + 6; d += 0.25) {
+      for (let i = 0; i < 24; i++) {
+        const a = a0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.26
+        const x = lot.x + Math.cos(a) * d
+        const z = lot.z + Math.sin(a) * d
+        if (!spotFree(x, z, store.state.placed, p.id, p.key, decor.footprints())) continue
+        store.moveItem(p.id, +x.toFixed(2), +z.toFixed(2), p.rot)
+        break search
+      }
+    }
+  }
+
   // ── 開場 ──
   ui.render()
   syncScene(false)
@@ -863,7 +891,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fx, decor, ui, placed, fileSync }
+  window.hiyori = { store, world, sky, mochi, cabin, fx, decor, ui, placed, fileSync }
 }
 
 boot()

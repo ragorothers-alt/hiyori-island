@@ -9,10 +9,13 @@ const HOME = new THREE.Vector3(LAYOUT.home.x, 0, LAYOUT.home.z)
 const play = (dur, fn, opts = {}) => new Promise((res) => tween(dur, fn, { ...opts, onDone: res }))
 
 export class Mochi {
-  constructor(world, labels, sky) {
+  constructor(world, labels, sky, cabin) {
     this.world = world
     this.sky = sky
     this.labels = labels
+    this.cabin = cabin
+    // 專注時待在小木屋裡（身體隱藏）
+    this.inside = false
     this.rand = rng(Date.now() % 100000)
     const root = (this.root = new THREE.Group())
     root.position.copy(HOME)
@@ -142,6 +145,7 @@ export class Mochi {
   }
 
   headAnchor() {
+    if (this.inside) return this.cabin.point('roofTop')
     return this.root.position.clone().add(new THREE.Vector3(0, 1.75 + this.body.position.y * 1.3, 0))
   }
 
@@ -249,7 +253,7 @@ export class Mochi {
       onArrive?.()
       await this._celebrate()
       await new Promise((r) => setTimeout(r, 500))
-      if (this.pending <= 1) await this._travel(HOME, 1.1)
+      if (this.pending <= 1 && this.mode !== 'focus') await this._travel(HOME, 1.1)
       this.busy = false
       this.wanderT = 8
     })
@@ -257,6 +261,7 @@ export class Mochi {
 
   celebrate() {
     return this._enqueue(async () => {
+      if (this.inside) return
       this.busy = true
       await this._celebrate()
       this.busy = false
@@ -272,45 +277,82 @@ export class Mochi {
     this._squint = 0.9
   }
 
-  // seat：專注綁定的那朵花（好感度夠時，もち會坐到花旁陪你）
-  setFocus(on, seat = null) {
+  // 專注時跳回小木屋、開門擠進去；結束時再開門出來。instant：重新整理後接著專注，直接待在屋裡
+  setFocus(on, instant = false) {
     const mode = on ? 'focus' : 'idle'
-    if (this.mode === mode) {
-      if (on) this.sitBy(seat)
-      return
-    }
+    if (this.mode === mode) return
     this.mode = mode
     if (on) {
-      this._enqueue(async () => {
-        this.busy = true
-        await this._travel(this._seatSpot(seat) || HOME, 1.1)
-        this.busy = false
-      })
+      if (instant && this.pending === 0) {
+        this.root.position.copy(this.cabin.point('inside'))
+        this.root.visible = false
+        this.inside = true
+        this.cabin.setLit(true, true)
+      } else this._enqueue(() => this._enter())
       const el = document.createElement('div')
       el.className = 'focus-tag'
       el.textContent = 'しゅうちゅう'
-      this.focusTag = this.labels.add(el, () => this.root.position.clone().add(new THREE.Vector3(0, 2.2, 0)))
-    } else if (this.focusTag) {
-      this.labels.remove(this.focusTag)
-      this.focusTag = null
+      this.focusTag = this.labels.add(el, () => this.headAnchor().add(new THREE.Vector3(0, 0.45, 0)))
+    } else {
+      if (this.focusTag) {
+        this.labels.remove(this.focusTag)
+        this.focusTag = null
+      }
+      this._enqueue(() => this._leave())
     }
   }
 
-  _seatSpot(pos) {
-    if (!pos || !this.abilities.sit) return null
-    // 坐在花朝鏡頭那一側一點點
-    const cam = this.world.camera.position
-    const dir = new THREE.Vector3(cam.x - pos.x, 0, cam.z - pos.z).normalize()
-    return pos.clone().setY(0).add(dir.multiplyScalar(0.85)).add(new THREE.Vector3(dir.z, 0, -dir.x).multiplyScalar(0.55))
+  // 圓滾滾的もち要壓扁變窄才擠得過小門
+  async _enter() {
+    if (this.mode !== 'focus' || this.inside) return
+    const c = this.cabin
+    const door = c.point('doorway')
+    const inside = c.point('inside')
+    this.busy = true
+    await this._travel(door, 1.0)
+    this.faceAngle = Math.atan2(inside.x - door.x, inside.z - door.z)
+    await c.swing(1)
+    const b = this.body
+    await play(0.5, (k) => {
+      this.root.position.lerpVectors(door, inside, ease.inOutSine(k))
+      const s = Math.min(1, k * 2.5)
+      b.scale.set(1 - 0.6 * s, 1 - 0.38 * s, 1 - 0.2 * s)
+    }, { easing: ease.linear })
+    this.root.visible = false
+    this.inside = true
+    b.scale.set(1, 1, 1)
+    c.setLit(true)
+    await c.swing(0)
+    this.busy = false
   }
-  sitBy(pos) {
-    const spot = this._seatSpot(pos)
-    if (!spot || this.mode !== 'focus') return
-    this._enqueue(async () => {
-      this.busy = true
-      await this._travel(spot, 0.9)
-      this.busy = false
-    })
+
+  async _leave() {
+    if (!this.inside) return
+    const c = this.cabin
+    const door = c.point('doorway')
+    const inside = c.point('inside')
+    this.busy = true
+    c.setLit(false)
+    await c.swing(1)
+    this.root.position.copy(inside)
+    this.root.rotation.y = this.faceAngle = Math.atan2(door.x - inside.x, door.z - inside.z)
+    this.root.visible = true
+    this.inside = false
+    const b = this.body
+    await play(0.45, (k) => {
+      this.root.position.lerpVectors(inside, door, ease.inOutSine(k))
+      const s = 1 - Math.max(0, k * 2.5 - 1.5)
+      b.scale.set(1 - 0.6 * s, 1 - 0.38 * s, 1 - 0.2 * s)
+    }, { easing: ease.linear })
+    // 擠出門後彈回原形
+    await play(0.3, (k) => {
+      const s = Math.sin(k * Math.PI) * (1 - k)
+      b.scale.set(1 + 0.2 * s, 1 - 0.25 * s, 1 + 0.2 * s)
+    }, { easing: ease.linear })
+    b.scale.set(1, 1, 1)
+    c.swing(0)
+    this.busy = false
+    this.wanderT = 3
   }
 
   // 替花澆水：跳到花旁、往前傾、灑水，再回家
@@ -337,19 +379,20 @@ export class Mochi {
     const cam = this.world.camera.position
     if (this.sky) this.skin.emissiveIntensity = 0.08 + this.sky.night * 0.3
     const focus = this.mode === 'focus'
+    // 「並肩專注」：待在屋裡時，紙窗上映著もち的影子
+    this.cabin.shadow = this.inside && this.abilities.sit ? 1 : 0
+    if (this.inside) return
 
     // 呼吸
     if (!this.busy) {
-      const s = Math.sin(t * (focus ? 1.2 : 2.4)) * (focus ? 0.02 : 0.03)
+      const s = Math.sin(t * 2.4) * 0.03
       this.body.scale.set(1 - s * 0.5, 1 + s, 1 - s * 0.5)
-      this.body.position.y += ((focus ? 0.18 + Math.sin(t * 1.2) * 0.06 : 0) - this.body.position.y) * 0.08
     }
 
-    // 眨眼 / 專注閉眼 / 被摸時瞇眼
+    // 眨眼 / 被摸時瞇眼
     this.blinkT -= dt
     let eyeY = 1.25
-    if (focus) eyeY = 0.14
-    else if (this._squint > 0) {
+    if (this._squint > 0) {
       this._squint -= dt
       eyeY = 0.18
     } else if (this.blinkT < 0) {
@@ -386,7 +429,6 @@ export class Mochi {
         this.faceAngle = Math.atan2(cam.x - this.root.position.x, cam.z - this.root.position.z)
       }
     }
-    if (focus && !this.busy) this.faceAngle = Math.atan2(cam.x - this.root.position.x, cam.z - this.root.position.z)
 
     // 平滑轉向（慶祝旋轉時跳過）
     if (!this.busy || this.root.position.y < 0.05) {

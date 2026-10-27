@@ -31,7 +31,7 @@ export const outfitOf = (key) => OUTFITS.find((o) => o.key === key)
 // 解鎖的新動作
 export const BOND_ACTS = {
   water: { name: '花間澆水', desc: '偶爾跳進花圃，替你的花澆上一點清水。' },
-  sit: { name: '並肩專注', desc: '專注時坐到那件任務的花旁，安靜陪著你。' },
+  sit: { name: '並肩專注', desc: '專注時待在小木屋的紙窗邊，影子映在窗上陪著你。' },
   gift: { name: '每日小禮', desc: '每天初次來訪，送你幾顆收在掌心的金平糖。' },
 }
 

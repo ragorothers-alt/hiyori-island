@@ -890,17 +890,18 @@ export const buildItem = (key) => shadowed(BUILD[key]?.() || BUILD.mushroom())
 
 // 每件裝飾的佔地半徑（大型的東屋、溫泉、雪屋比較寬）
 const BASE_R = 0.42
-const radiusOf = (key) => SHOP_ITEMS.find((i) => i.key === key)?.r || BASE_R
+export const radiusOf = (key) => SHOP_ITEMS.find((i) => i.key === key)?.r || BASE_R
 
-// 擺放位置是否空著（島內、避開池塘花圃小徑塔位裝飾與其他擺設）；blocked：升級景觀的佔地 [x, z, r]
+// 擺放位置是否空著（島內、避開池塘花圃小徑小木屋塔位裝飾與其他擺設）；blocked：升級景觀的佔地 [x, z, r]
 export function spotFree(x, z, placed = [], ignoreId = null, key = null, blocked = []) {
-  const { pond, bed, home, slots, decor, radius } = LAYOUT
+  const { pond, bed, home, cabin, slots, decor, radius } = LAYOUT
   const r = radiusOf(key)
   const e = r - BASE_R
   if (Math.hypot(x, z) > radius - 0.8 - e) return false
   if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.45 + e) return false
   if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.4 + e) return false
   if (Math.hypot(x - home.x, z - home.z) < 1.1 + e) return false
+  if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + r) return false
   if (Math.abs(x) < 0.8 + e && z > 2.1) return false
   for (const [sx, sz] of slots) if (Math.hypot(x - sx, z - sz) < 1.5 + e) return false
   for (const [dx, dz] of decor) if (Math.hypot(x - dx, z - dz) < 1.15 + e) return false

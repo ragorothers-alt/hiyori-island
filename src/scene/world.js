@@ -165,7 +165,10 @@ export class World {
     const hits = this.raycaster.intersectObjects(this.pickRoots, true)
     for (const h of hits) {
       let o = h.object
-      if (!o.visible) continue
+      // 自己或上層被隱藏（例如躲進小木屋的もち）就不算點到
+      let shown = true
+      for (let p = o; p && shown; p = p.parent) shown = p.visible
+      if (!shown) continue
       while (o && !o.userData.pick) o = o.parent
       if (o) return { pick: o.userData.pick, object: o, point: h.point }
     }

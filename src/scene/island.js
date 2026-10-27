@@ -8,6 +8,8 @@ export const LAYOUT = {
   pond: { x: -3.3, z: 4.0, r: 1.9 },
   bed: { x: 3.4, z: 3.2, r: 2.5 },
   home: { x: 0, z: 1.4 },
+  // もち的小木屋：中心、佔地半徑、朝向（門朝 +z 轉 rot）、模型放大倍率（讓壓扁的もち擠得過門）
+  cabin: { x: -2.55, z: -0.2, r: 1.5, rot: 0.35, scale: 1.25 },
   path: { z0: 8.8, z1: 2.4 },
   slots: [
     [-1.3, -4.2], [1.3, -4.2], [-3.9, -3.4], [3.9, -3.4],
@@ -18,10 +20,11 @@ export const LAYOUT = {
 }
 
 const occupied = (x, z) => {
-  const { pond, bed, home, slots, decor } = LAYOUT
+  const { pond, bed, home, cabin, slots, decor } = LAYOUT
   if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.5) return true
   if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.3) return true
   if (Math.hypot(x - home.x, z - home.z) < 1.2) return true
+  if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + 0.1) return true
   if (Math.abs(x) < 0.9 && z > 1.8) return true
   for (const [sx, sz] of slots) if (Math.hypot(x - sx, z - sz) < 1.35) return true
   for (const [dx, dz] of decor) if (Math.hypot(x - dx, z - dz) < 1.1) return true

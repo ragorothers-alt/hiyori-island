@@ -334,11 +334,12 @@ function limb(g, from, to, radius, material) {
 }
 
 function openGround(x, z, pad = 0, avoidDecor = false) {
-  const { radius, pond, bed, home, slots, decor } = LAYOUT
+  const { radius, pond, bed, home, cabin, slots, decor } = LAYOUT
   if (Math.hypot(x, z) > radius - pad) return false
   if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.5 + pad) return false
   if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.3 + pad) return false
   if (Math.hypot(x - home.x, z - home.z) < 1.2 + pad) return false
+  if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + pad) return false
   if (Math.abs(x) < 0.9 + pad && z > 1.8 - pad) return false
   if (slots.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < 1.35 + pad)) return false
   if (avoidDecor && decor.some(([dx, dz]) => Math.hypot(x - dx, z - dz) < 1.1 + pad)) return false
@@ -689,20 +690,70 @@ function tsukimidai() {
   return shadowed(at(g, 7.05, 6.65))
 }
 
-// 雲鯨模型（models/cloudWhale.js）頭朝 +x；這裡只負責繞島游
+// 雲鯨繞島一圈：水平半徑 ring（身體內外緣都在茶屋浮島與星之大樹之間），角度 φ = 0 在島正後方。
+// 島後方是弧頂，往兩側一路下潛 dive 到前方的雲海裡；弧頂高度與畫面上看得到的角度由 Decor.placeWhale 依預設視角決定。
+// 看得到的那段用 speed 慢慢游，看不到的地方加速到 fast 倍，大部分時間都在畫面裡
+const WHALE = { ring: 22, scale: 1.15, dive: 26, speed: 0.027, fast: 6 }
+
+// φ（-π..π）與時間的對照表：ts[i] 是從 -π 游到第 i 格要花的秒數
+function whaleClock(seen) {
+  const n = 720
+  const step = Math.PI * 2 / n
+  const ts = new Float32Array(n + 1)
+  for (let i = 0; i < n; i++) {
+    const k = THREE.MathUtils.smoothstep(Math.abs(-Math.PI + (i + 0.5) * step), seen, seen + 0.4)
+    ts[i + 1] = ts[i] + step / (WHALE.speed * (1 + (WHALE.fast - 1) * k))
+  }
+  return {
+    period: ts[n],
+    time: (f) => {
+      const x = (THREE.MathUtils.euclideanModulo(f + Math.PI, Math.PI * 2)) / step
+      const i = Math.min(n - 1, Math.floor(x))
+      return ts[i] + (ts[i + 1] - ts[i]) * (x - i)
+    },
+    angle: (s) => {
+      const u = THREE.MathUtils.euclideanModulo(s, ts[n])
+      let lo = 0
+      let hi = n
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1
+        if (ts[mid] <= u) lo = mid
+        else hi = mid
+      }
+      return -Math.PI + (lo + (u - ts[lo]) / (ts[lo + 1] - ts[lo])) * step
+    },
+  }
+}
+
+// 雲鯨模型（models/cloudWhale.js）頭朝 +x；這裡負責沿著弧線游
 function whale() {
   const g = new THREE.Group()
   const body = buildCloudWhale()
+  body.scale.setScalar(WHALE.scale)
   g.add(body)
   g.userData.ownedMaterials = body.userData.ownedMaterials ?? []
   g.userData.ownedTextures = body.userData.ownedTextures ?? []
+  // top：弧頂高度；seen：畫面上看得到的半角；t0：角度 -π 對應的時間（還沒開始游時是 null）
+  const path = (g.userData.path = { top: 1, seen: 1, clock: null, t0: null, f: 0 })
+  const pose = (f, t) => {
+    path.f = f
+    g.position.set(Math.sin(f) * WHALE.ring, path.top - WHALE.dive * (1 - Math.cos(f)) / 2, -Math.cos(f) * WHALE.ring)
+    // 頭朝前進方向，順著弧線抬頭或俯衝
+    g.rotation.set(0, -f, Math.atan2(-WHALE.dive * Math.sin(f) / 2, WHALE.ring) + Math.sin(t * 0.3) * 0.035)
+  }
+  // 剛出現時從左側看得到的地方游進來；換新的對照表時保持目前的角度接著游
+  g.userData.setPath = (top, seen) => {
+    const clock = whaleClock(seen)
+    if (path.t0 != null) path.t0 += path.clock.time(path.f) - clock.time(path.f)
+    Object.assign(path, { top, seen, clock })
+    if (path.t0 == null) pose(-seen * 0.75, 0)
+  }
+  g.userData.setPath(1, 1)
   g.userData.anim = (t, dt, night) => {
-    const a = t * Math.PI * 2 / 240 + 3.8
-    g.position.set(Math.cos(a) * 22, 7 + Math.sin(t * 0.045) * 0.8, Math.sin(a) * 22)
-    g.rotation.set(0, -a - Math.PI / 2, Math.sin(t * 0.3) * 0.035)
+    path.t0 ??= t - path.clock.time(path.f)
+    pose(path.clock.angle(t - path.t0), t)
     body.userData.anim(t, dt, night)
   }
-  g.userData.anim(0, 0, 0)
   return g
 }
 
@@ -729,10 +780,19 @@ function skytree() {
   return g
 }
 
+// 世界座標點在畫面上的像素位置
+function toScreen(cam, v) {
+  const p = v.clone().project(cam)
+  return new THREE.Vector2((p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight)
+}
+// 穿過畫面點 px 的視線方向
+function viewRay(cam, px) {
+  return new THREE.Vector3(px.x / innerWidth * 2 - 1, 1 - px.y / innerHeight * 2, 0.5).unproject(cam).sub(cam.position).normalize()
+}
 // 穿過畫面點 px 的視線，與「離島中心水平距離 d」圓柱遠側的交點
 function ringPoint(cam, px, d) {
   const o = cam.position
-  const dir = new THREE.Vector3(px.x / innerWidth * 2 - 1, 1 - px.y / innerHeight * 2, 0.5).unproject(cam).sub(o).normalize()
+  const dir = viewRay(cam, px)
   const a = dir.x ** 2 + dir.z ** 2
   const b = 2 * (o.x * dir.x + o.z * dir.z)
   const c = o.x ** 2 + o.z ** 2 - d * d
@@ -843,10 +903,7 @@ export class Decor {
   placeSky(cam, area) {
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion)
     const lift = new THREE.Vector3(0, SKY.above * SKY.scale, 0)
-    const screen = (v) => {
-      const p = v.clone().project(cam)
-      return new THREE.Vector2((p.x + 1) / 2 * innerWidth, (1 - p.y) / 2 * innerHeight)
-    }
+    const screen = (v) => toScreen(cam, v)
     // 先猜樹冠中心的畫面位置，量出樹冠在畫面上的半寬與上緣後修正，幾次就收斂
     const target = new THREE.Vector2(area.right - 150, area.top + 110)
     let center
@@ -860,11 +917,45 @@ export class Decor {
     this.skyBase = center.setY(center.y - SKY.canopy * SKY.scale)
     this._applySky()
   }
+
+  // 雲鯨的弧頂放在可見範圍上緣（area.top）下方，並量出弧線在可見範圍（left／right／bottom）裡的半角
+  placeWhale(cam, area) {
+    const { ring, dive, scale } = WHALE
+    const half = 1.25 * scale
+    const at = (f, top) => new THREE.Vector3(Math.sin(f) * ring, top - dive * (1 - Math.cos(f)) / 2, -Math.cos(f) * ring)
+    // 弧頂在島正後方 (0, top, -ring)：沿著視線找鯨魚背剛好在上緣下方 16px 的高度
+    let top = 0
+    for (let i = 0; i < 3; i++) {
+      const c = toScreen(cam, at(0, top))
+      const up = c.y - toScreen(cam, at(0, top + half)).y
+      const dir = viewRay(cam, new THREE.Vector2(c.x, area.top + up + 16))
+      top = cam.position.y + dir.y * (-ring - cam.position.z) / dir.z
+    }
+    // 由弧頂往兩側找：鯨魚大半個身子離開左右緣或沉到下緣以下的角度
+    let seen = Math.PI * 0.6
+    for (let f = 0.05; f < Math.PI * 0.6; f += 0.02) {
+      const out = [-1, 1].every((s) => {
+        const c = toScreen(cam, at(s * f, top))
+        const len = c.distanceTo(toScreen(cam, at(s * (f + 0.17), top)))
+        return c.x < area.left - len / 2 || c.x > area.right + len / 2 || c.y > area.bottom + len / 4
+      })
+      if (out) {
+        seen = f
+        break
+      }
+    }
+    this.whalePath = { top, seen }
+    this._applySky()
+  }
+
   _applySky() {
     const o = this.items.skytree
-    if (!o || !this.skyBase) return
-    o.userData.base.copy(this.skyBase)
-    o.position.copy(this.skyBase)
+    if (o && this.skyBase) {
+      o.userData.base.copy(this.skyBase)
+      o.position.copy(this.skyBase)
+    }
+    const w = this.items.whale
+    if (w && this.whalePath) w.userData.setPath(this.whalePath.top, this.whalePath.seen)
   }
 
   // 物件的包圍盒中心與大小（天空中的景觀原點不在模型上，升級時鏡頭要對準實際的位置）
