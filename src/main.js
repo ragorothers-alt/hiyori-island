@@ -12,8 +12,7 @@ import { Towers } from './scene/towers.js'
 import { TimeRing } from './scene/timeRing.js'
 import { Character } from './scene/character.js'
 import { Duo } from './scene/duo.js'
-import { buildCatMochi } from './scene/models/catMochi.js'
-import { buildCatFuji } from './scene/models/catFuji.js'
+import { preloadCats, buildCat } from './scene/models/cats.js'
 import { Particles } from './scene/particles.js'
 import { Labels } from './scene/labels.js'
 import { Placed, spotFree, radiusOf } from './scene/placed.js'
@@ -46,6 +45,8 @@ function greetKey() {
 }
 
 async function boot() {
+  // 兩位主角的模型和字型一起載
+  const catsReady = preloadCats()
   // 等字型載入，3D 刻度文字才會用對字體（最多等 2.5 秒）
   await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 2500))])
   const params = new URLSearchParams(location.search)
@@ -64,8 +65,9 @@ async function boot() {
   const room = new Room(world, sky)
   // ── もち和ふじ ──
   const homeAt = (p) => new THREE.Vector3(p.x, 0, p.z)
-  const mochi = new Character(world, labels, sky, { id: 'mochi', name: 'もち', build: buildCatMochi, home: homeAt(LAYOUT.home), seat: 0, study: 'read' })
-  const fuji = new Character(world, labels, sky, { id: 'fuji', name: 'ふじ', build: buildCatFuji, home: homeAt(LAYOUT.home2), seat: 1, study: 'write' })
+  await catsReady
+  const mochi = new Character(world, labels, sky, { id: 'mochi', name: 'もち', build: () => buildCat('mochi'), home: homeAt(LAYOUT.home), seat: 0, study: 'read' })
+  const fuji = new Character(world, labels, sky, { id: 'fuji', name: 'ふじ', build: () => buildCat('fuji'), home: homeAt(LAYOUT.home2), seat: 1, study: 'write' })
   const cast = { mochi, fuji }
   const duo = new Duo(world, labels, { list: [mochi, fuji], cabin, room })
   // 誰來說：花圃與慶祝交給もち，時間、日程、提醒與照顧步調交給ふじ，其他兩人輪流

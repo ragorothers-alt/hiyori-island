@@ -43,8 +43,9 @@ export class Character {
     this.glow = new Map()
     this.nightNow = -1
     this._glow(model, model.getObjectByName('head-volume')?.material)
-    // 舉手時往外的方向（左右手相反）
+    // 舉手時往外的方向（左右手相反）；舉多高由模型決定（Tripo 模型肩膀較窄，舉太高手會穿進頭髮）
     this.armOut = { L: Math.sign(this.joints.armL.position.x) || 1, R: Math.sign(this.joints.armR.position.x) || -1 }
+    this.lift = { cheer: 2.3, stretch: 2.6, ...this.ui.lift }
 
     this.pose = Object.fromEntries(POSES.map((k) => [k, 0]))
     this.stride = 0
@@ -86,9 +87,18 @@ export class Character {
       if (!o.isMesh) return
       o.receiveShadow = false
       const m = o.material
-      if (!m.emissive || m.map || this.glow.has(m)) return
-      m.emissive.copy(m.color)
-      this.glow.set(m, m === skin ? 0.4 : 0.16)
+      if (!m.emissive || this.glow.has(m)) return
+      // Tripo 模型整身一張貼圖：用貼圖本身發光，強度由模型指定
+      if (m.map && m.userData.glow !== undefined) {
+        m.emissive.set(0xffffff)
+        m.emissiveMap = m.map
+        m.needsUpdate = true
+        this.glow.set(m, m.userData.glow)
+      } else if (m.map) return
+      else {
+        m.emissive.copy(m.color)
+        this.glow.set(m, m === skin ? 0.4 : 0.16)
+      }
       m.emissiveIntensity = this.glow.get(m) + Math.max(0, this.nightNow) * 0.05
     })
   }
@@ -445,7 +455,7 @@ export class Character {
       const right = side === 'R'
       const study = P.study * (this.study === 'write' && right ? 1.05 : 0.9) + (right ? scribble + page : 0)
       arm.rotation.x = r.r.x + swing - study - (right ? P.reach * 1.2 : 0) - P.shy * 0.5
-      arm.rotation.z = r.r.z + this.armOut[side] * (P.cheer * 2.3 + P.stretch * 2.6 + P.walk * 0.1)
+      arm.rotation.z = r.r.z + this.armOut[side] * (P.cheer * this.lift.cheer + P.stretch * this.lift.stretch + P.walk * 0.1)
     }
 
     for (const side of ['L', 'R']) {

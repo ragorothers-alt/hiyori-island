@@ -110,6 +110,10 @@ src/
     placed.js      商店擺飾的模型、放置預覽、縮圖
     outfits.js     兩人的衣裝
     models/        細緻模型：もち、ふじ、雲鯨、星之大樹、小木屋與室內
+      cats.js      兩位主角的載入入口：Tripo 模型為主，載入失敗（或網址加 ?classic）退回程序化模型
+      rigged.js    把綁好骨架的 GLB 組成和程序化模型相同的介面（關節、表情貼片、季節髮飾、配件掛點）
+      mochiRig.js、fujiRig.js  兩人的對位設定（表情位置、掛點、髮飾、圍巾、舉手角度）
+  assets/cats/     もち、ふじ的 Tripo 模型（照設計圖三視圖生成，Blender 減面、塗掉五官、綁骨）
 public/
   sw.js            Service Worker（離線快取、通知點擊）
   manifest.webmanifest
