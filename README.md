@@ -2,6 +2,8 @@
 
 用 three.js 打造的遊戲化日程／生活管理 App。你的一天是一座漂浮在雲海上的小島，風格走日系清透路線。島上住著兩位貓娘：活潑、照顧花圃的もち，和沉穩、幫你看時間與日程的ふじ，她們陪你一起努力、一起成長。
 
+**線上玩：<https://ragorothers-alt.github.io/hiyori-island/>**（推上 `main` 就會自動跑測試、建置並發布到 GitHub Pages）
+
 ```bash
 npm install
 npm run dev      # http://localhost:5199

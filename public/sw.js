@@ -22,7 +22,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      for (const key of await caches.keys()) if (key !== VERSION) await caches.delete(key)
+      // 同一個網域可能還有別的網站（例如 GitHub Pages），只清自己的舊快取
+      for (const key of await caches.keys()) if (key.startsWith('hiyori-') && key !== VERSION) await caches.delete(key)
       await self.clients.claim()
     })(),
   )
