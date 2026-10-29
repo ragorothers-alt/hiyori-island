@@ -10,20 +10,13 @@ import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/b
 import { LINES, FUJI_LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
+import { $, $$, esc, ICON, armConfirm } from './ui/dom.js'
+import { ScheduleView } from './ui/schedule.js'
+import { HabitsView } from './ui/habits.js'
+import { LifeView } from './ui/life.js'
+import { CalendarView } from './ui/calendar.js'
 
-const $ = (s, el = document) => el.querySelector(s)
-const $$ = (s, el = document) => [...el.querySelectorAll(s)]
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-
-const ICON = {
-  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.2 4L19 7"/></svg>',
-  edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>',
-  del: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-  play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
-  pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
-  plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-  today: '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
-}
+const TAB_ORDER = ['tasks', 'schedule', 'habits', 'projects', 'records']
 
 export const levelTitle = (lv) => LEVEL_TITLES[Math.min(lv, LEVEL_TITLES.length) - 1] || LEVEL_TITLES[0]
 const hhmm = (ts) => {
@@ -31,24 +24,6 @@ const hhmm = (ts) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000)
-
-// 二段式確認：第一次點擊變成「確定？」，3 秒內再點才執行
-function armConfirm(btn, label, fn) {
-  if (btn.dataset.armed) {
-    fn()
-    return
-  }
-  const orig = btn.innerHTML
-  btn.dataset.armed = '1'
-  btn.innerHTML = label
-  btn.classList.add('armed')
-  setTimeout(() => {
-    if (!btn.isConnected) return
-    delete btn.dataset.armed
-    btn.innerHTML = orig
-    btn.classList.remove('armed')
-  }, 3000)
-}
 
 // 把元素就地換成輸入框
 function inlineEdit(el, value, onSave) {
@@ -91,6 +66,26 @@ export class UI {
     this._bindRecords()
     this._bindChrome()
     this.focus = new FocusTimer(this, hooks)
+    // 時段安排、習慣、生活記錄、日曆：各自是一個模組，透過 viewHooks 和外面溝通
+    const viewHooks = {
+      toast: (o) => this.toast(o),
+      selectDate: (date) => this.store.selectDate(date),
+      setTab: (tab) => this.setTab(tab),
+      openEdit: (type, id) => this.schedule.openEdit(type, id),
+      openReview: (date) => this.openReview(date),
+      openCalendar: (date) => this.calendar.open(date),
+      closeCalendar: () => this.calendar.close(),
+      focusEvent: (id) => hooks.focusEvent(id),
+      hoverEvent: (id) => hooks.hoverEvent(id),
+    }
+    this.schedule = new ScheduleView(store, viewHooks)
+    this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
+    this.life = new LifeView($('#lifeRoot'), store, viewHooks)
+    this.calendar = new CalendarView($('#calendar'), store, viewHooks)
+    // 開發與截圖用：?tab=habits、?calendar
+    const q = new URLSearchParams(location.search)
+    if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
+    if (q.has('calendar')) this.calendar.open()
   }
 
   // ── 靜態元件 ──
@@ -121,6 +116,14 @@ export class UI {
       this.renderChrome()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
+    $('#calBtn').onclick = () => this.calendar.toggle()
+    $('#dateMain').onclick = () => this.calendar.open()
+    $('#dateMain').onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        this.calendar.open()
+      }
+    }
     $('#shopBtn').onclick = () => this.toggleShop()
     $('#shopClose').onclick = () => this.toggleShop(false)
     $('#shopGrid').addEventListener('click', (e) => {
@@ -145,8 +148,12 @@ export class UI {
     addEventListener('keydown', (e) => {
       const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)
       if (e.key === 'Escape') {
+        // 一次關一層：日曆上面還開著對話框（編輯、回顧…）時，只關對話框
+        const modal = $$('.modal').some((m) => !m.hidden)
         this.toggleShop(false)
         this.closeModal()
+        if (!modal) this.calendar.close()
+        this.schedule.closeEdit()
         if (!$('#reviewModal').hidden) $('#reviewLater').click()
         this.closeWeekCard()
         if (typing) document.activeElement.blur()
@@ -158,10 +165,11 @@ export class UI {
         $('#taskTitle').focus()
       } else if (e.key === 'v' || e.key === 'V') this.hooks.resetView()
       else if (e.key === 's' || e.key === 'S') this.toggleShop()
+      else if (e.key === 'c' || e.key === 'C') this.calendar.toggle()
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
       else if (e.key === 'ArrowRight') $('#nextDay').click()
-      else if (['1', '2', '3', '4'].includes(e.key)) this.setTab(['tasks', 'schedule', 'projects', 'records'][+e.key - 1])
+      else if (['1', '2', '3', '4', '5'].includes(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
     })
   }
 
@@ -171,6 +179,8 @@ export class UI {
     $$('.tab-page').forEach((p) => p.classList.toggle('active', p.dataset.page === tab))
     if ($('#panel').classList.contains('collapsed')) this.togglePanel(false)
     if (tab === 'records') this.renderRecords()
+    if (tab === 'habits') this.habits.render()
+    if (tab === 'schedule') this.schedule.render()
   }
 
   togglePanel(force) {
@@ -272,7 +282,7 @@ export class UI {
         this._syncPickers()
         this.toast({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${p.start}–${p.end}` })
       } else {
-        const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date }
+        const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur }
         if (repeat) s.addRoutine({ kind: 'task', ...t, repeat })
         else {
           const added = s.addTask(t)
@@ -463,43 +473,6 @@ export class UI {
       }
       this.renderRemind()
     })
-    const list = $('#eventList')
-    list.addEventListener('click', (e) => {
-      const li = e.target.closest('.tl-item')
-      if (!li) return
-      const id = li.dataset.id
-      const act = e.target.closest('[data-act]')?.dataset.act
-      const s = this.store
-      if (act === 'toggle') s.toggleEvent(id)
-      else if (act === 'delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteEvent(id))
-      else if (act === 'edit') this._editEvent(li, id)
-      else if (!act && !e.target.closest('input')) this.hooks.focusEvent(id)
-    })
-    list.addEventListener('mouseover', (e) => this.hooks.hoverEvent(e.target.closest('.tl-item')?.dataset.id || null))
-    list.addEventListener('mouseleave', () => this.hooks.hoverEvent(null))
-  }
-
-  _editEvent(li, id) {
-    const ev = this.store.state.events.find((x) => x.id === id)
-    const box = $('.item', li)
-    box.innerHTML = `<form class="event-edit">
-      <input class="inline-input" name="title" value="${esc(ev.title)}" maxlength="60" />
-      <div class="form-row"><label class="time-field"><input type="time" name="start" value="${ev.start}"></label><span class="tilde">〜</span>
-      <label class="time-field"><input type="time" name="end" value="${ev.end}"></label>
-      <button class="btn-primary" type="submit">儲存</button></div></form>`
-    const form = $('form', box)
-    form.title.focus()
-    form.addEventListener('submit', (e) => {
-      e.preventDefault()
-      let start = form.start.value || ev.start
-      let end = form.end.value || ev.end
-      if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 30, 1439))
-      this.store.updateEvent(id, { title: form.title.value.trim() || ev.title, start, end })
-    })
-    form.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.renderSchedule()
-      e.stopPropagation()
-    })
   }
 
   renderRemind() {
@@ -517,43 +490,7 @@ export class UI {
   }
 
   renderSchedule(force = true) {
-    const s = this.store
-    const events = s.eventsOn(s.selectedDate)
-    // 背景的每分鐘刷新不要打斷正在編輯的日程
-    const editing = $('#eventList .event-edit')?.closest('.tl-item')
-    if (!force && editing && events.some((e) => e.id === editing.dataset.id)) return
-    const isToday = s.selectedDate === s.today
-    const now = new Date().getHours() * 60 + new Date().getMinutes()
-    let html = ''
-    let nowPlaced = !isToday
-    const nowLine = `<li class="now-line"><span>現在 ${minToHHMM(now)}</span></li>`
-    for (const e of events) {
-      const m0 = toMin(e.start)
-      const m1 = toMin(e.end)
-      if (!nowPlaced && m0 > now) {
-        html += nowLine
-        nowPlaced = true
-      }
-      const c = EVENT_COLORS[e.color % EVENT_COLORS.length]
-      const past = isToday ? m1 <= now : s.selectedDate < s.today
-      const current = isToday && m0 <= now && now < m1
-      const dur = m1 - m0
-      html += `<li class="tl-item ${past ? 'past' : ''} ${current ? 'now' : ''} ${e.done ? 'done' : ''}" data-id="${esc(e.id)}" style="--c:${c}">
-        <div class="item ${e.done ? 'done' : ''} ${this.hlKey === 'event:' + e.id ? 'hl' : ''}">
-          <div class="tl-time">${esc(e.start)}<small>〜 ${esc(e.end)} · ${dur >= 60 ? (dur / 60).toFixed(dur % 60 ? 1 : 0) + 'h' : dur + 'm'}</small></div>
-          <div class="item-main"><div class="item-title">${esc(e.title)} ${current ? '<span class="badge-now">進行中</span>' : ''}</div>${this.store.routineOf(e) ? `<div class="item-meta"><span class="rep">↻ ${esc(repeatLabel(this.store.routineOf(e).repeat))}</span></div>` : ''}</div>
-          <div class="item-actions">
-            <button class="mini" data-act="edit" title="編輯">${ICON.edit}</button>
-            <button class="mini" data-act="delete" title="刪除">${ICON.del}</button>
-          </div>
-          <button class="check" data-act="toggle" aria-label="完成" style="--c:${c}">${ICON.check}</button>
-        </div>
-      </li>`
-    }
-    if (!nowPlaced && events.length) html += nowLine
-    $('#eventList').innerHTML = events.length
-      ? html
-      : `<li class="empty"><span class="em">よていなし</span>這天還沒有日程。<br>加入後會在小島外圈的時之環上亮起一段光帶。</li>`
+    this.schedule.render(force)
   }
 
   // ── 專案 ──
@@ -967,6 +904,7 @@ export class UI {
   }
 
   renderRecords() {
+    this.life.render()
     const s = this.store
     const st = s.stats
     const stats = [
@@ -1084,6 +1022,8 @@ export class UI {
     this.renderRoutines()
     this.renderProjects()
     if (this.tab === 'records') this.renderRecords()
+    if (this.tab === 'habits') this.habits.render()
+    if (this.calendar.isOpen) this.calendar.render()
   }
 
   tickClock() {
@@ -1135,10 +1075,10 @@ export class UI {
     const key = id ? `${type}:${id}` : null
     if (key === this.hlKey) return
     this.hlKey = key
-    $$('.item.hl, .proj.hl').forEach((el) => el.classList.remove('hl'))
+    $$('.item.hl, .proj.hl, .blk.hl').forEach((el) => el.classList.remove('hl'))
     if (!id) return
     const el =
-      type === 'task' ? $(`.item[data-id="${CSS.escape(id)}"]`) : type === 'event' ? $(`.tl-item[data-id="${CSS.escape(id)}"] .item`) : $(`.proj[data-id="${CSS.escape(id)}"]`)
+      type === 'task' ? $(`.item[data-id="${CSS.escape(id)}"]`) : type === 'event' ? $(`.blk[data-id="${CSS.escape(id)}"]`) : $(`.proj[data-id="${CSS.escape(id)}"]`)
     el?.classList.add('hl')
   }
 
@@ -1146,7 +1086,7 @@ export class UI {
     this.setTab({ task: 'tasks', event: 'schedule', project: 'projects' }[type])
     this.highlight(type, id)
     const el =
-      type === 'task' ? $(`.item[data-id="${CSS.escape(id)}"]`) : type === 'event' ? $(`.tl-item[data-id="${CSS.escape(id)}"]`) : $(`.proj[data-id="${CSS.escape(id)}"]`)
+      type === 'task' ? $(`.item[data-id="${CSS.escape(id)}"]`) : type === 'event' ? $(`.blk[data-id="${CSS.escape(id)}"]`) : $(`.proj[data-id="${CSS.escape(id)}"]`)
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     setTimeout(() => this.highlight(null), 2200)
   }

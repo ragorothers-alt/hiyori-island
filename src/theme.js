@@ -25,6 +25,14 @@ export const XP = {
   starAll: 30,
   weekly: 100,
   onTime: 60,
+  // 習慣打卡、今天的習慣全做完、忍住一次衝動、戒除里程碑、生活記錄（每天前 3 筆）、記錄睡眠、排好今天的時段
+  habit: 5,
+  habitAll: 15,
+  urge: 3,
+  quitMilestone: 20,
+  life: 3,
+  sleep: 5,
+  plan: 10,
 }
 
 // 本命：每天最多挑 3 件，完成給雙倍 XP

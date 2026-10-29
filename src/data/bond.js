@@ -1,7 +1,7 @@
 // もち和ふじ共同的好感度：摸摸、專注、回顧、每天來看看她們都會累積。每升一級解鎖一件衣裝（兩人都能穿）或一個新動作。
 
 // 每次加多少（摸摸一天最多算 petDailyMax 次）
-export const BOND_POINTS = { visit: 2, pet: 1, petDailyMax: 5, pomodoro: 3, review: 4, starAll: 3 }
+export const BOND_POINTS = { visit: 2, pet: 1, petDailyMax: 5, pomodoro: 3, review: 4, starAll: 3, habitAll: 2 }
 
 export const BOND_LEVELS = [
   { level: 1, need: 0, name: '初次見面', reward: null },

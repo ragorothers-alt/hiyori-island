@@ -38,4 +38,13 @@ export const ACHIEVEMENTS = [
   { id: 'bond_10', name: 'いちばんの友だち', title: '最好的朋友', desc: '和もち的好感度，已經達到第10級', kanji: '友', cond: { stat: 'bondLevel', gte: 10 } },
   { id: 'on_time_3', name: '約束の塔', title: '花塔如約落成', desc: '累計已有3座專案花塔在期限前落成', kanji: '築', cond: { stat: 'projectsOnTime', gte: 3 } },
   { id: 'level_thirty', name: '雲海の庭師', title: '雲海盡頭的庭師', desc: '在小島累積經驗，玩家等級達到30級', kanji: '穹', cond: { stat: 'level', gte: 30 } },
+  { id: 'habit_seed', name: '習慣の芽', title: '習慣萌芽', desc: '累計10次養成習慣達成當日目標', kanji: '芽', cond: { stat: 'habitChecks', gte: 10 } },
+  { id: 'habit_week', name: '七日の糸', title: '七日之線', desc: '任一養成習慣最長連續達標7天（休息日不計）', kanji: '糸', cond: { stat: 'bestHabit', gte: 7 } },
+  { id: 'habit_month', name: '三十日の環', title: '三十日之環', desc: '任一養成習慣最長連續達標30天（休息日不計）', kanji: '環', cond: { stat: 'bestHabit', gte: 30 } },
+  { id: 'quit_week', name: 'ひと区切り', title: '告別一週', desc: '任一戒除習慣的最長紀錄達7天', kanji: '断', cond: { stat: 'bestClean', gte: 7 } },
+  { id: 'quit_month', name: '三十日の小道', title: '三十日小徑', desc: '任一戒除習慣的最長紀錄達30天', kanji: '新', cond: { stat: 'bestClean', gte: 30 } },
+  { id: 'urge_10', name: 'ひと呼吸', title: '留一口氣', desc: '累計記錄10次「忍住了」', kanji: '忍', cond: { stat: 'urgesResisted', gte: 10 } },
+  { id: 'life_30', name: '暮らしの手帖', title: '生活手帖', desc: '累計寫下30筆生活記錄', kanji: '帖', cond: { stat: 'lifeEntries', gte: 30 } },
+  { id: 'sleep_7', name: 'おやすみ日誌', title: '晚安日誌', desc: '累計新增7筆睡眠記錄', kanji: '眠', cond: { stat: 'sleepLogs', gte: 7 } },
+  { id: 'planner_10', name: '時の設計士', title: '時光設計師', desc: '累計套用10次最佳化時程（每次至少排入1件任務）', kanji: '時', cond: { stat: 'plansApplied', gte: 10 } },
 ]

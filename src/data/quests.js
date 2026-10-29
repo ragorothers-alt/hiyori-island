@@ -1,6 +1,6 @@
 // 每日任務池：每天依日期抽 3 個（簡單、普通、挑戰各一），同一天固定不變。
 // val(d)：從當天紀錄算進度。need(ctx)：抽選當下這個任務是否做得到（例如今天沒有日程就不抽「完成 2 個日程」）。
-// ctx = { hour, events, routineTasks, projects }
+// ctx = { hour, events, routineTasks, projects, habits }
 
 const bits = (n) => {
   let c = 0
@@ -14,6 +14,8 @@ export const DAILY_QUESTS = [
   { id: 'star1', tier: 'easy', goal: 1, val: (d) => d.stars, title: '讓本命開花', sub: '完成 1 件本命' },
   { id: 'pet3', tier: 'easy', goal: 3, val: (d) => d.pets, title: '輕碰三回', sub: '摸摸もち 3 次' },
   { id: 'step1', tier: 'easy', goal: 1, val: (d) => d.events + d.milestones, title: '向前一步', sub: '完成 1 個日程或里程碑', need: (x) => x.events > 0 || x.projects > 0 },
+  { id: 'habit2', tier: 'easy', goal: 2, val: (d) => d.habits, title: '兩個小習慣', sub: '今天完成 2 個養成習慣', need: (x) => x.habits >= 2 },
+  { id: 'life1', tier: 'easy', goal: 1, val: (d) => d.life, title: '記下生活一筆', sub: '今天新增 1 筆生活記錄' },
   { id: 'early2', tier: 'easy', goal: 2, val: (d) => d.early, title: '晨光裡的兩朵花', sub: '中午前完成 2 個任務', need: (x) => x.hour < 10 },
   // 普通
   { id: 'focus2', tier: 'normal', goal: 2, val: (d) => d.pomodoros, title: '靜心兩回', sub: '完成 2 個番茄鐘' },
@@ -22,6 +24,7 @@ export const DAILY_QUESTS = [
   { id: 'plan', tier: 'normal', goal: 1, val: (d) => d.plan, title: '晨間選三朵', sub: '中午前選好 3 件本命', need: (x) => x.hour < 10 },
   { id: 'review', tier: 'normal', goal: 1, val: (d) => d.review, title: '收好今日微光', sub: '留下今天的回顧' },
   { id: 'event2', tier: 'normal', goal: 2, val: (d) => d.events, title: '走過兩段時光', sub: '完成 2 個日程', need: (x) => x.events >= 2 },
+  { id: 'timebox', tier: 'normal', goal: 1, val: (d) => d.timebox, title: '替今天安排時段', sub: '為今天套用最佳化時程，排入至少 1 件任務', need: (x) => x.hour < 16 },
   { id: 'routine2', tier: 'normal', goal: 2, val: (d) => d.routines, title: '熟悉的小節奏', sub: '完成 2 個例行任務', need: (x) => x.routineTasks >= 2 },
   // 挑戰
   { id: 'tasks5', tier: 'hard', goal: 5, val: (d) => d.tasks, title: '五朵花的風景', sub: '完成 5 個任務' },

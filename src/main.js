@@ -25,6 +25,8 @@ import { FileSync } from './sync.js'
 import { LINES, FUJI_LINES, DUETS } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
 import { RARITIES } from './data/flowers.js'
+import { lifeKindOf } from './data/life.js'
+import { taskDur } from './planner.js'
 import { BOND_ACTS, actLevel, outfitOf } from './data/bond.js'
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
@@ -71,8 +73,8 @@ async function boot() {
   const cast = { mochi, fuji }
   const duo = new Duo(world, labels, { list: [mochi, fuji], cabin, room })
   // 誰來說：花圃與慶祝交給もち，時間、日程、提醒與照顧步調交給ふじ，其他兩人輪流
-  const FUJI_KEYS = new Set(['reviewAsk', 'reviewDone', 'reschedule', 'reminder', 'eventDone', 'deadlineNear', 'onTime', 'routine', 'overdue', 'wilt', 'planAsk', 'starPick', 'starFull', 'questDone', 'weeklyReady', 'weeklyClaimed', 'charmBuy', 'charmUsed', 'breakEnd', 'tired', 'gift'])
-  const MOCHI_KEYS = new Set(['shopBuy', 'shopPlace', 'shopPoor', 'taskDone', 'highTaskDone', 'starDone', 'starAll', 'newFlower', 'rareFlower', 'water', 'revive', 'milestone'])
+  const FUJI_KEYS = new Set(['reviewAsk', 'reviewDone', 'reschedule', 'reminder', 'eventDone', 'deadlineNear', 'onTime', 'routine', 'overdue', 'wilt', 'planAsk', 'starPick', 'starFull', 'questDone', 'weeklyReady', 'weeklyClaimed', 'charmBuy', 'charmUsed', 'breakEnd', 'tired', 'gift', 'planApplied', 'planFull', 'sleepGood', 'sleepShort', 'bedtime', 'habitSlip', 'quitMilestone'])
+  const MOCHI_KEYS = new Set(['shopBuy', 'shopPlace', 'shopPoor', 'taskDone', 'highTaskDone', 'starDone', 'starAll', 'newFlower', 'rareFlower', 'water', 'revive', 'milestone', 'habitDone', 'habitAll', 'urgeResisted', 'lifeLogged'])
   const voice = (key) => (FUJI_KEYS.has(key) ? fuji : MOCHI_KEYS.has(key) ? mochi : pick([mochi, fuji]))
   const talk = (key, vars = {}, ms, fallback = '', who = voice(key)) => {
     who.say(line(key, vars, who.id) || fallback, ms)
@@ -773,6 +775,8 @@ async function boot() {
     if (kind === 'task' || kind === 'star') pos = garden.anchor(id)
     else if (kind === 'event') pos = ring.anchor(id)
     else if (kind === 'milestone' || kind === 'project' || kind === 'onTime') pos = towers.anchor(id)
+    // 時間、作息與戒除是ふじ在照顧，經驗值從她頭上冒出來
+    else if (kind === 'plan' || kind === 'sleep' || kind === 'quit' || kind === 'urge') pos = fuji.headAnchor()
     pos ||= mochi.headAnchor()
     const delay = kind === 'project' ? 900 : kind === 'onTime' ? 1800 : kind === 'perfect' || kind === 'starAll' ? 1300 : 150
     setTimeout(() => floatText(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), `+${amount} XP`, amount >= 40, coins), delay)
@@ -815,15 +819,68 @@ async function boot() {
     fx.burst(c.headAnchor(), { colors: ['#fff1b8', '#ffd1dc', '#ffffff'], count: 30, speed: 1.4 })
   })
 
-  // ── 日程提醒 ──
-  const reminders = new Reminders(store, (e, min) => {
+  // ── 時段安排、作息與睡眠、習慣、生活記錄 ──
+  const planEnd = (date) => {
+    const ends = store.tasksOn(date).filter((t) => t.at && !t.done).map((t) => toMin(t.at) + taskDur(t))
+    return ends.length ? minToHHMM(Math.min(1439, Math.max(...ends))) : ''
+  }
+  store.on('planApplied', ({ date, count, left }) => {
+    sfx.chime()
+    if (left) talk('planFull', { count: left }, 4800, '空檔有點滿，改天安排也沒關係。')
+    else talk('planApplied', { count, end: planEnd(date) }, 4200, '時段排好了，照自己的步調來。')
+  })
+  store.on('sleepLogged', ({ date, min, first }) => {
+    if (date !== store.today || !first) return
+    talk(min < 360 ? 'sleepShort' : 'sleepGood', { hours: Math.round(min / 6) / 10 }, 4200)
+  })
+  store.on('habitDone', ({ habit, streak }) => {
+    sfx.bloom(2)
+    mochi.cheer(fuji.position)
+    talk('habitDone', { habit: short(habit.name), streak }, 3800)
+  })
+  store.on('habitAll', () => {
+    setTimeout(() => {
+      sfx.fanfare()
+      for (const c of duo.list) c.celebrate()
+      ui.toast({ icon: '習', title: '今天的養成習慣全部完成', sub: `+${XP.habitAll} XP・一起收好今天的小累積` })
+      if (!duet('habitAll')) talk('habitAll', {}, 4200)
+    }, 900)
+  })
+  store.on('urgeResisted', ({ habit, days }) => {
+    sfx.pop()
+    talk('urgeResisted', { habit: short(habit.name), days }, 3800)
+  })
+  store.on('habitSlip', ({ habit, days }) => talk('habitSlip', { habit: short(habit.name), days }, 5200, '沒關係，我會陪你慢慢來。'))
+  store.on('quitMilestone', ({ habit, days }) => {
+    setTimeout(() => {
+      sfx.fanfare()
+      for (const c of duo.list) c.celebrate()
+      ui.toast({ icon: '断', title: `「${short(habit.name, 10)}」戒除滿 ${days} 天`, sub: `走到一個里程碑了・+${XP.quitMilestone} XP`, ms: 5200 })
+      if (!duet('quitMilestone', { habit: short(habit.name), days })) talk('quitMilestone', { habit: short(habit.name), days }, 4800)
+    }, 1200)
+  })
+  store.on('lifeLogged', ({ item, count }) => {
+    sfx.pop()
+    // 不要每筆都說話：第一筆之後每 3 筆說一次
+    if (count === 1 || count % 3 === 0) talk('lifeLogged', { kind: lifeKindOf(item.kind).label }, 3400)
+  })
+
+  // ── 提醒：日程、排進時段的任務、就寢 ──
+  const reminders = new Reminders(store, (e, min, kind = 'event') => {
+    if (kind === 'bed') {
+      sfx.chime()
+      talk('bedtime', { time: e.start }, 6000, '就寢時間快到了，今天辛苦了。')
+      ui.toast({ icon: '眠', title: '就寢時間快到了', sub: `預定 ${e.start} 就寢・今天辛苦了`, ms: 9000 })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 就寢提醒', `預定 ${e.start} 就寢`, 'bedtime')
+      return
+    }
     sfx.reminder()
     const when = min > 0 ? `${min} 分鐘後開始（${e.start}）` : `現在開始（${e.start}）`
     // 看時間的是ふじ
-    const say = min > 0 ? line('reminder', { event: short(e.title), min }, 'fuji') : `「${short(e.title)}」開始囉！`
+    const say = min > 0 ? line('reminder', { event: short(e.title), min }, 'fuji') : `「${short(e.title)}」開始囉。`
     fuji.say(say || `${short(e.title)}，${when}`, 6000)
-    ui.toast({ icon: '鐘', title: e.title, sub: when, ms: 9000 })
-    if (store.selectedDate === store.today) ring.pulse(e.id)
+    ui.toast({ icon: kind === 'task' ? '時' : '鐘', title: e.title, sub: kind === 'task' ? `排定的任務・${when}` : when, ms: 9000 })
+    if (kind === 'event' && store.selectedDate === store.today) ring.pulse(e.id)
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
   })
 

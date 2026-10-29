@@ -161,6 +161,12 @@ export function parseQuick(input, { today = dateStr() } = {}) {
     out.end = Math.min(out.start + Math.max(5, dur), 1439)
   }
 
+  // 沒有時間的任務：「寫報告 1.5小時」「回信 20分鐘」當作預估時間（排時段用）
+  if (out.start == null) {
+    take(/(\d+(?:\.\d+)?)\s*(?:個)?\s*(?:小時|hr|h)(?![a-z])/gi, (_, n) => (out.dur = Math.min(600, Math.round(parseFloat(n) * 60)) || null))
+    take(/(\d+)\s*(?:分鐘|分钟|min)(?![a-z])/gi, (_, n) => (out.dur = Math.min(600, +n) || null))
+  }
+
   if (out.start != null) {
     out.kind = 'event'
     out.start = minToHHMM(out.start)
@@ -181,6 +187,7 @@ export function describeQuick(p, today) {
   if (p.start) chips.push(`${p.start}–${p.end}`)
   if (p.repeat) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
   if (p.priority && p.kind === 'task') chips.push(['', '低', '中', '高'][p.priority] + '優先')
+  if (p.dur && p.kind === 'task') chips.push(`預估 ${p.dur >= 60 ? `${+(p.dur / 60).toFixed(1)} 小時` : `${p.dur} 分鐘`}`)
   if (p.star && p.kind === 'task') chips.push('★ 本命')
   return chips
 }

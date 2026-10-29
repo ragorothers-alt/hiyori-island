@@ -179,3 +179,14 @@ describe('快速輸入預覽', () => {
     expect(describeQuick(parseQuick('讀 20 頁書 #學習', { today: TODAY }), TODAY)).toEqual([])
   })
 })
+
+describe('任務的預估時間', () => {
+  it('沒有時間時，時長當作任務的預估時間', () => {
+    const a = parseQuick('寫報告 1.5小時 #工作', { today: '2026-10-29' })
+    expect([a.kind, a.title, a.dur, a.tag]).toEqual(['task', '寫報告', 90, 'work'])
+    expect(parseQuick('回信 20分鐘', { today: '2026-10-29' }).dur).toBe(20)
+    expect(parseQuick('讀 20 頁書', { today: '2026-10-29' }).dur).toBeUndefined()
+    const ev = parseQuick('下午3點 開會 2小時', { today: '2026-10-29' })
+    expect([ev.kind, ev.start, ev.end, ev.dur]).toEqual(['event', '15:00', '17:00', undefined])
+  })
+})

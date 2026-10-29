@@ -7,6 +7,9 @@ import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
 import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
 import { BOND_POINTS, actLevel, bondLevel, outfitLevel, outfitOf } from './data/bond.js'
 import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM } from './theme.js'
+import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
+import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
+import { LIFE_KINDS } from './data/life.js'
 
 const KEY = 'hiyori-daily-v1'
 
@@ -76,11 +79,13 @@ const emptyStats = () => ({
   pomodoros: 0, focusMinutes: 0, bestStreak: 0, perfectDays: 0, earlyTasks: 0, nightTasks: 0,
   questsClaimed: 0, pets: 0, bestDayTasks: 0, itemsBought: 0, reviews: 0,
   starsDone: 0, starDays: 0, weeklyClaimed: 0, charmsUsed: 0, projectsOnTime: 0,
+  habitChecks: 0, urgesResisted: 0, lifeEntries: 0, sleepLogs: 0, plansApplied: 0,
 })
 // 每日紀錄。stars／high／early（中午前）／routines：完成數；tagMask：完成過的分類（位元）；
-// plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數
-const DAY_NUMS = ['tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare']
-const DAY_FLAGS = ['perfect', 'starAll']
+// plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數；
+// habits：習慣完成數；life：生活記錄筆數；urges：忍住的衝動；timebox：排好了時段；habitAll：今天的習慣全做完
+const DAY_NUMS = ['tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox']
+const DAY_FLAGS = ['perfect', 'starAll', 'habitAll']
 const emptyDay = () => {
   const d = {}
   for (const k of DAY_NUMS) d[k] = 0
@@ -128,6 +133,10 @@ function seed() {
     player: { xp: 0, coins: 0, streak: 0, lastActive: null, stats: emptyStats(), achievements: {}, unlocked: {}, freebies: {}, charms: 0, bond: emptyBond() },
     placed: [],
     routines: [],
+    rhythm: cleanRhythm(),
+    sleep: {},
+    habits: [],
+    life: {},
     journal: {},
     dex: {},
     weekly: {},
@@ -181,6 +190,9 @@ function migrate(s) {
       pomos: num(t.pomos, 0, 99, 0),
       star: !!t.star,
       flower: flowerOf(t.flower) ? t.flower : null,
+      // 時段安排：預估分鐘數、排進時間軸的開始時間
+      dur: t.dur ? num(t.dur, 5, 600, 30) : null,
+      at: TIME_RE.test(t.at) ? t.at : null,
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -192,7 +204,7 @@ function migrate(s) {
     const done = !!e.done
     return {
       id: str(e.id), title, date: ymd(e.date, today), start, end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done,
-      routineId: ID_RE.test(e.routineId) ? e.routineId : null,
+      routineId: ID_RE.test(e.routineId) ? e.routineId : null, note: str(e.note, 200),
     }
   })
   const routines = cleanList(s.routines, (r) => {
@@ -328,7 +340,79 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  return { version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0 }
+
+  // 睡眠：{ 醒來那天: { bed, wake, q } }
+  const sleep = {}
+  if (isObj(s.sleep)) {
+    for (const [d, v] of Object.entries(s.sleep)) {
+      if (DATE_RE.test(d) && isObj(v) && TIME_RE.test(v.bed) && TIME_RE.test(v.wake)) sleep[d] = { bed: v.bed, wake: v.wake, q: num(v.q, 0, 5, 0) }
+    }
+  }
+  const counts = (o) => {
+    const out = {}
+    if (isObj(o)) for (const [d, v] of Object.entries(o)) if (DATE_RE.test(d) && num(v, 0, 999, 0) > 0) out[d] = num(v, 0, 999, 0)
+    return out
+  }
+  const habits = cleanList(s.habits, (h) => {
+    const name = str(h.name, 30).trim()
+    if (!name) return null
+    const kind = h.kind === 'quit' ? 'quit' : 'build'
+    const slips = (Array.isArray(h.slips) ? h.slips : [])
+      .map((x) => (isObj(x) ? { at: ts(x.at), note: str(x.note, 80) } : { at: ts(x), note: '' }))
+      .filter((x) => x.at)
+      .sort((a, b) => a.at - b.at)
+      .slice(-500)
+    return {
+      id: str(h.id), name, kind, icon: str(h.icon, 2) || (kind === 'quit' ? '禁' : '習'), color: num(h.color, 0, 99, 0),
+      target: num(h.target, 1, 99, 1), unit: str(h.unit, 6).trim() || '次', days: weekdays(h.days),
+      start: ymd(h.start, today), createdAt: ts(h.createdAt) || Date.now(), archived: !!h.archived,
+      log: counts(h.log), urges: counts(h.urges), slips, ms: num(h.ms, 0, 9999, 0), paid: ymd(h.paid, ''),
+    }
+  })
+  // 生活記錄：{ 日期: { items: [{ id, t, kind, text, amount }], energy } }
+  const kinds = new Set(LIFE_KINDS.map((k) => k.key))
+  const life = {}
+  if (isObj(s.life)) {
+    for (const [d, v] of Object.entries(s.life)) {
+      if (!DATE_RE.test(d) || !isObj(v)) continue
+      const items = cleanList(v.items, (x) => {
+        const text = str(x.text, 120).trim()
+        const amount = num(x.amount, 0, 1e7, 0)
+        if (!text && !amount) return null
+        return { id: str(x.id), t: TIME_RE.test(x.t) ? x.t : '12:00', kind: kinds.has(x.kind) ? x.kind : 'note', text, amount }
+      }).sort((a, b) => toMin(a.t) - toMin(b.t))
+      const energy = num(v.energy, 0, 5, 0)
+      if (items.length || energy) life[d] = { items, energy }
+    }
+  }
+  return {
+    version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
+    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0,
+  }
+}
+
+const weekdays = (v) => (Array.isArray(v) ? [...new Set(v.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [])
+
+// 作息設定：缺的欄位用預設值補上；work 為 null 表示沒有固定的工作時段
+export function cleanRhythm(r) {
+  const d = DEFAULT_RHYTHM
+  const time = (v, dflt) => (TIME_RE.test(v) ? v : dflt)
+  if (!isObj(r)) r = {}
+  const meals = Array.isArray(r.meals)
+    ? r.meals
+        .filter(isObj)
+        .slice(0, 6)
+        .map((m) => ({ label: str(m.label, 12).trim() || '用餐', start: time(m.start, '12:00'), end: time(m.end, '13:00') }))
+        .filter((m) => toMin(m.end) > toMin(m.start))
+    : d.meals.map((m) => ({ ...m }))
+  const w = r.work === undefined ? d.work : r.work
+  const work = isObj(w) ? { start: time(w.start, d.work.start), end: time(w.end, d.work.end), days: weekdays(w.days) } : null
+  if (work && toMin(work.end) <= toMin(work.start)) work.end = minToHHMM(Math.min(toMin(work.start) + 60, 1439))
+  return {
+    wake: time(r.wake, d.wake), sleep: time(r.sleep, d.sleep), meals, work,
+    peak: PEAKS[r.peak] ? r.peak : d.peak, buffer: num(r.buffer, 0, 60, d.buffer),
+    bedRemind: typeof r.bedRemind === 'boolean' ? r.bedRemind : d.bedRemind,
+  }
 }
 
 export class Store {
@@ -340,6 +424,7 @@ export class Store {
     this._pending = []
     this._applyCharms()
     this._visit()
+    this._quitMilestones(this._pending)
     const made = this._ensureRoutines(this.today).length
     if (this._ensureQuests() || made) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
@@ -444,6 +529,8 @@ export class Store {
     return {
       ...this.stats, level: this.level.level, streak: this.streak, bondLevel: this.bond.level,
       flowersFound: found.length, legendFound: found.filter((k) => flowerOf(k)?.rarity === 'legend').length,
+      bestHabit: Math.max(0, ...this.state.habits.filter((h) => h.kind === 'build').map((h) => bestStreak(h, this.today))),
+      bestClean: Math.max(0, ...this.state.habits.filter((h) => h.kind === 'quit').map((h) => bestClean(h, this.today))),
     }
   }
   // 任務開的花（舊任務沒有記錄時，用該分類的常見花）
@@ -469,6 +556,7 @@ export class Store {
       events: this.eventsOn(date).length,
       routineTasks: this.tasksOn(date).filter((t) => t.routineId).length,
       projects: this.activeProjects().filter((p) => !p.completedAt).length,
+      habits: todayProgress(this.state.habits, date).total,
     }
     const yesterday = this.state.quests[addDays(date, -1)]?.ids || []
     const ids = QUEST_TIERS.map((tier) => {
@@ -642,6 +730,7 @@ export class Store {
     this._ensureQuests()
     this._applyCharms()
     this._visit()
+    this._quitMilestones(this._pending)
     this._weeklyReady = this.weekly()?.ready
     return true
   }
@@ -832,8 +921,11 @@ export class Store {
   }
 
   // ── 任務 ──
-  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate }) {
-    const t = { id: uid(), title: title.trim(), date, priority, tag, done: false, rewarded: false, createdAt: Date.now() }
+  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null }) {
+    const t = {
+      id: uid(), title: title.trim(), date, priority, tag, done: false, rewarded: false, createdAt: Date.now(),
+      dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: TIME_RE.test(at) ? at : null,
+    }
     if (!t.title) return null
     this.state.tasks.push(t)
     this._finish([['taskAdded', t]])
@@ -965,10 +1057,10 @@ export class Store {
   }
 
   // ── 日程 ──
-  addEvent({ title, start, end, color = 0, date = this.selectedDate }) {
+  addEvent({ title, start, end, color = 0, date = this.selectedDate, note = '' }) {
     if (!title.trim()) return null
     if (toMin(end) <= toMin(start)) end = start === '23:30' ? '23:59' : minToHHMM(Math.min(toMin(start) + 60, 1439))
-    const e = { id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false }
+    const e = { id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false, note: String(note || '').trim().slice(0, 200) }
     this.state.events.push(e)
     this._finish([['eventAdded', e]])
     return e
@@ -999,6 +1091,275 @@ export class Store {
   deleteEvent(id) {
     this.state.events = this.state.events.filter((e) => e.id !== id)
     this._finish()
+  }
+
+  // ── 時段安排 ──
+  // 把任務排進時間軸（at 為 null 就收回未排區）；dur 是預估分鐘數
+  scheduleTask(id, at, dur) {
+    const t = this._find('tasks', id)
+    if (!t) return
+    t.at = TIME_RE.test(at) ? at : null
+    if (dur !== undefined) t.dur = dur ? Math.max(5, Math.min(600, Math.round(dur))) : null
+    this._finish([['taskScheduled', t]])
+  }
+  // 排程要考慮的任務：那天的任務；看今天時再加上還沒完成的逾期任務
+  planTasks(date = this.selectedDate) {
+    const list = this.tasksOn(date)
+    return date === this.today ? [...list, ...this.overdue()] : list
+  }
+  // 最佳化時程的預覽（不會改資料）
+  planDay(date = this.selectedDate, { replan = false } = {}) {
+    const n = new Date()
+    return optimizeDay({
+      tasks: this.planTasks(date), events: this.eventsOn(date), rhythm: this.state.rhythm, date, today: this.today,
+      nowMin: date === this.today ? n.getHours() * 60 + n.getMinutes() : null, replan,
+    })
+  }
+  // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數
+  applyPlan(date, plan, left = 0) {
+    this._refreshToday()
+    const fx = []
+    let n = 0
+    for (const p of plan) {
+      const t = this._find('tasks', p.id)
+      if (!t || t.done || !TIME_RE.test(p.at)) continue
+      t.date = date
+      t.at = p.at
+      t.dur ||= p.dur
+      n++
+    }
+    if (!n) return
+    this.stats.plansApplied++
+    if (date === this.today && !this.day().timebox) {
+      this.day().timebox = 1
+      this._gain(XP.plan, fx, { kind: 'plan' })
+    }
+    fx.push(['planApplied', { date, count: n, left }])
+    this._finish(fx)
+  }
+  // 清空這天任務的時段（已完成的保留）
+  clearPlan(date = this.selectedDate) {
+    for (const t of this.tasksOn(date)) if (!t.done) t.at = null
+    this._finish()
+  }
+
+  // ── 作息 ──
+  setRhythm(patch) {
+    this.state.rhythm = cleanRhythm({ ...this.state.rhythm, ...patch })
+    this._finish([['rhythmChanged', this.state.rhythm]])
+  }
+  // 睡眠記在醒來那天
+  logSleep(date, { bed, wake, q = 0 }) {
+    this._refreshToday()
+    if (!TIME_RE.test(bed) || !TIME_RE.test(wake) || date > this.today) return
+    const first = !this.state.sleep[date]
+    const entry = { bed, wake, q: num(q, 0, 5, 0) }
+    this.state.sleep[date] = entry
+    const fx = [['sleepLogged', { date, first, min: sleepMinutes(entry) }]]
+    if (first) {
+      this.stats.sleepLogs++
+      if (date === this.today) this._gain(XP.sleep, fx, { kind: 'sleep' })
+    }
+    this._finish(fx)
+  }
+  deleteSleep(date) {
+    delete this.state.sleep[date]
+    this._finish()
+  }
+
+  // ── 習慣 ──
+  habit(id) {
+    return this.state.habits.find((h) => h.id === id)
+  }
+  activeHabits() {
+    return this.state.habits.filter((h) => !h.archived)
+  }
+  addHabit({ name, kind = 'build', icon = '', color = 0, target = 1, unit = '次', days = [] }) {
+    name = String(name || '').trim().slice(0, 30)
+    if (!name) return null
+    const h = {
+      id: uid(), name, kind: kind === 'quit' ? 'quit' : 'build', icon: String(icon || '').slice(0, 2) || (kind === 'quit' ? '禁' : '習'),
+      color: num(color, 0, 99, 0), target: num(target, 1, 99, 1), unit: String(unit || '次').trim().slice(0, 6) || '次', days: weekdays(days),
+      start: this.today, createdAt: Date.now(), archived: false, log: {}, urges: {}, slips: [], ms: 0, paid: '',
+    }
+    this.state.habits.push(h)
+    this._finish([['habitAdded', h]])
+    return h
+  }
+  updateHabit(id, patch) {
+    const h = this.habit(id)
+    if (!h) return
+    if (patch.name !== undefined) h.name = String(patch.name).trim().slice(0, 30) || h.name
+    if (patch.icon !== undefined) h.icon = String(patch.icon).slice(0, 2) || h.icon
+    if (patch.color !== undefined) h.color = num(patch.color, 0, 99, h.color)
+    if (patch.target !== undefined) h.target = num(patch.target, 1, 99, h.target)
+    if (patch.unit !== undefined) h.unit = String(patch.unit).trim().slice(0, 6) || h.unit
+    if (patch.days !== undefined) h.days = weekdays(patch.days)
+    if (patch.archived !== undefined) h.archived = !!patch.archived
+    this._finish()
+  }
+  deleteHabit(id) {
+    this.state.habits = this.state.habits.filter((h) => h.id !== id)
+    this._finish()
+  }
+  // 養成：打卡（delta 可以是 -1 收回一次）。過去的日子也能補打卡，但只有今天第一次完成有獎勵
+  checkHabit(id, date = this.today, delta = 1) {
+    const h = this.habit(id)
+    if (!h || h.kind !== 'build' || h.archived) return
+    this._refreshToday()
+    if (date > this.today) return
+    if (date < h.start) {
+      // 補開始日以前的卡（剛開始記、但其實已經做了幾天）：開始日往前移，最多 12 週
+      if (delta <= 0 || daysBetween(date, this.today) > 84) return
+      h.start = date
+    }
+    const before = doneOn(h, date)
+    const n = Math.max(0, Math.min(99, countOn(h, date) + delta))
+    if (n) h.log[date] = n
+    else delete h.log[date]
+    const fx = [['habitCheck', { habit: h, date, count: n, delta }]]
+    // 獎勵只給今天該做的習慣；休息日多做也能記，但不算進完成與連續天數
+    if (!before && doneOn(h, date) && date === this.today && h.paid !== this.today && applies(h, date)) {
+      h.paid = this.today
+      const d = this.day()
+      d.habits++
+      this.stats.habitChecks++
+      this._touchStreak()
+      this._gain(XP.habit, fx, { kind: 'habit', id: h.id })
+      fx.push(['habitDone', { habit: h, streak: habitStreak(h, this.today) }])
+      const prog = todayProgress(this.state.habits, this.today)
+      if (prog.total >= 2 && prog.done === prog.total && !d.habitAll) {
+        d.habitAll = true
+        this._gain(XP.habitAll, fx, { kind: 'habitAll' })
+        this._bondGain(BOND_POINTS.habitAll, fx)
+        fx.push(['habitAll', prog])
+      }
+    }
+    this._finish(fx)
+  }
+  // 戒除：忍住了一次（每個習慣每天前 3 次有獎勵）
+  resistUrge(id) {
+    const h = this.habit(id)
+    if (!h || h.kind !== 'quit' || h.archived) return
+    this._refreshToday()
+    const n = (h.urges[this.today] || 0) + 1
+    h.urges[this.today] = n
+    this.stats.urgesResisted++
+    this.day().urges++
+    const fx = [['urgeResisted', { habit: h, count: n, days: cleanDays(h, this.today) }]]
+    if (n <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: h.id })
+    this._finish(fx)
+  }
+  // 戒除：破戒了。沒有懲罰，只是重新起算
+  slipHabit(id, note = '') {
+    const h = this.habit(id)
+    if (!h || h.kind !== 'quit' || h.archived) return
+    this._refreshToday()
+    const days = cleanDays(h, this.today)
+    h.slips.push({ at: Date.now(), note: String(note || '').trim().slice(0, 80) })
+    h.slips = h.slips.slice(-500)
+    h.ms = 0
+    this._finish([['habitSlip', { habit: h, days }]])
+  }
+  // 撤銷最後一次破戒（按錯時用）
+  undoSlip(id) {
+    const h = this.habit(id)
+    if (!h || h.kind !== 'quit' || !h.slips.length) return
+    h.slips.pop()
+    // 已經領過的里程碑不再重發
+    const days = cleanDays(h, this.today)
+    h.ms = Math.max(h.ms, ...QUIT_MILESTONES.filter((m) => m <= days))
+    this._finish()
+  }
+  // 戒除里程碑（1、3、7、14…天）：跨日時檢查，每段乾淨期每個里程碑只發一次
+  _quitMilestones(fx) {
+    for (const h of this.state.habits) {
+      if (h.kind !== 'quit' || h.archived) continue
+      const days = cleanDays(h, this.today)
+      const m = Math.max(0, ...QUIT_MILESTONES.filter((x) => x <= days))
+      if (m > h.ms) {
+        h.ms = m
+        this._gain(XP.quitMilestone, fx, { kind: 'quit', id: h.id })
+        fx.push(['quitMilestone', { habit: h, days: m }])
+      }
+    }
+  }
+  habitsDueToday() {
+    return this.activeHabits().filter((h) => h.kind === 'build' && applies(h, this.today))
+  }
+
+  // ── 生活記錄 ──
+  lifeOn(date) {
+    return this.state.life[date] || { items: [], energy: 0 }
+  }
+  addLife(date, { kind = 'note', text = '', amount = 0, t } = {}) {
+    this._refreshToday()
+    if (date > this.today) return null
+    text = String(text || '').trim().slice(0, 120)
+    amount = num(amount, 0, 1e7, 0)
+    if (!text && !amount) return null
+    const now = new Date()
+    const item = {
+      id: uid(), kind: LIFE_KINDS.some((k) => k.key === kind) ? kind : 'note', text, amount,
+      t: TIME_RE.test(t) ? t : date === this.today ? minToHHMM(now.getHours() * 60 + now.getMinutes()) : '12:00',
+    }
+    const day = (this.state.life[date] ||= { items: [], energy: 0 })
+    day.items.push(item)
+    day.items.sort((a, b) => toMin(a.t) - toMin(b.t))
+    this.stats.lifeEntries++
+    const fx = [['lifeLogged', { date, item, count: day.items.length }]]
+    if (date === this.today) {
+      const d = this.day()
+      d.life++
+      if (d.life <= 3) this._gain(XP.life, fx, { kind: 'life' })
+    }
+    this._finish(fx)
+    return item
+  }
+  updateLife(date, id, patch) {
+    const item = this.lifeOn(date).items.find((x) => x.id === id)
+    if (!item) return
+    if (patch.text !== undefined) item.text = String(patch.text).trim().slice(0, 120)
+    if (patch.amount !== undefined) item.amount = num(patch.amount, 0, 1e7, 0)
+    if (patch.t !== undefined && TIME_RE.test(patch.t)) item.t = patch.t
+    if (patch.kind !== undefined && LIFE_KINDS.some((k) => k.key === patch.kind)) item.kind = patch.kind
+    if (!item.text && !item.amount) return this.deleteLife(date, id)
+    this.state.life[date].items.sort((a, b) => toMin(a.t) - toMin(b.t))
+    this._finish()
+  }
+  deleteLife(date, id) {
+    const day = this.state.life[date]
+    if (!day) return
+    day.items = day.items.filter((x) => x.id !== id)
+    if (!day.items.length && !day.energy) delete this.state.life[date]
+    this._finish()
+  }
+  setEnergy(date, energy) {
+    this._refreshToday()
+    if (date > this.today) return
+    const day = (this.state.life[date] ||= { items: [], energy: 0 })
+    day.energy = num(energy, 0, 5, 0)
+    if (!day.items.length && !day.energy) delete this.state.life[date]
+    this._finish()
+  }
+
+  // ── 日曆：一天的摘要 ──
+  daySummary(date) {
+    const tasks = this.tasksOn(date)
+    const events = this.eventsOn(date)
+    const habits = this.state.habits.filter((h) => !h.archived && h.kind === 'build' && applies(h, date))
+    const life = this.lifeOn(date)
+    return {
+      date, tasks, events,
+      tasksDone: tasks.filter((t) => t.done).length,
+      habits: { total: habits.length, done: habits.filter((h) => doneOn(h, date)).length },
+      slips: this.state.habits.filter((h) => h.kind === 'quit' && h.slips.some((x) => dateStr(new Date(x.at)) === date)).length,
+      mood: this.state.journal[date] || null,
+      sleep: this.state.sleep[date] || null,
+      life,
+      spend: life.items.reduce((a, x) => a + (x.kind === 'spend' ? x.amount : 0), 0),
+      focus: this.peekDay(date).focus,
+    }
   }
 
   // ── 專案 ──
