@@ -7,7 +7,7 @@ import { renderThumbnails } from './scene/placed.js'
 import { renderFlowerThumbs } from './scene/garden.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
-import { LINES } from './data/lines.js'
+import { LINES, FUJI_LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 
@@ -388,7 +388,7 @@ export class UI {
 
     $('#taskList').innerHTML = n
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
-      : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち也會跑來慶祝。</li>`
+      : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。</li>`
   }
 
   // 本命狀態列：三個星位，選了是空心金星、完成是實心金星
@@ -746,7 +746,7 @@ export class UI {
     $('#syncDot').dataset.state = sy.state
   }
 
-  // ── もち的好感度 ──
+  // ── もち和ふじ共同的好感度 ──
   renderBond() {
     const s = this.store
     const b = s.bond
@@ -758,18 +758,18 @@ export class UI {
     const acts = Object.entries(BOND_ACTS)
       .filter(([k]) => BOND_LEVELS.some((l) => l.reward?.act === k && l.level <= b.level))
       .map(([, a]) => `<span title="${esc(a.desc)}">${esc(a.name)}</span>`)
-    const current = s.player.bond.outfit
+    const wardrobe = (who, current) => `<div class="outfit-row"><span class="outfit-who">${who === 'fuji' ? 'ふじ' : 'もち'}</span><div class="outfits">${OUTFITS.map((o) => {
+      const lv = outfitLevel(o.key)
+      const locked = lv > b.level
+      return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" data-who="${who}" ${locked ? 'disabled' : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
+    }).join('')}</div></div>`
     $('#bondCount').textContent = `Lv.${b.level}`
     $('#bondBox').innerHTML = `
       <div class="bond-head"><b>${esc(b.name)}</b><small>${b.next ? `${b.pts} / ${b.next}` : b.pts}</small></div>
       <div class="bond-bar"><i style="width:${pct}%"></i></div>
       <p class="bond-next">${nextText}${acts.length ? `・已學會 ${acts.join('、')}` : ''}</p>
-      <div class="outfits">${OUTFITS.map((o) => {
-        const lv = outfitLevel(o.key)
-        const locked = lv > b.level
-        return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" ${locked ? 'disabled' : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
-      }).join('')}</div>
-      <p class="hint">摸摸もち、專注、寫回顧、清完本命、每天來看看牠，都會讓牠更親近你。</p>`
+      ${wardrobe('mochi', s.player.bond.outfit)}${wardrobe('fuji', s.player.bond.outfitFuji)}
+      <p class="hint">摸摸もち和ふじ、專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近。</p>`
   }
 
   // ── 花の図鑑 ──
@@ -839,8 +839,10 @@ export class UI {
     if (w.flowers.length) notes.push(`圖鑑新朋友：${w.flowers.slice(0, 4).map((f) => esc(f.name)).join('、')}${w.flowers.length > 4 ? ` 等 ${w.flowers.length} 種` : ''}`)
     if (w.challenge) notes.push(`每週挑戰「${esc(w.challenge.title)}」：${w.challenge.value >= w.challenge.goal ? '達成 ✓' : `${w.challenge.value} / ${w.challenge.goal}`}`)
     $('#weekNotes').innerHTML = notes.map((n) => `<li>${n}</li>`).join('')
-    const pool = LINES.weekCard?.[w.tier] || []
-    $('#weekMochi').textContent = pool.length ? `もち：「${pool[Math.floor(Math.random() * pool.length)]}」` : ''
+    // 回顧卡上的一句話，もち和ふじ輪流說
+    const fuji = Math.random() < 0.5
+    const pool = (fuji ? FUJI_LINES : LINES).weekCard?.[w.tier] || []
+    $('#weekMochi').textContent = pool.length ? `${fuji ? 'ふじ' : 'もち'}：「${pool[Math.floor(Math.random() * pool.length)]}」` : ''
     $('#weekModal').hidden = false
   }
 
@@ -934,7 +936,7 @@ export class UI {
     })
     $('#bondBox').addEventListener('click', (e) => {
       const b = e.target.closest('[data-outfit]:not(:disabled)')
-      if (b) this.store.setOutfit(b.dataset.outfit)
+      if (b) this.store.setOutfit(b.dataset.outfit, b.dataset.who)
     })
     $('#powerBtn').onclick = () => {
       const on = !this.store.state.settings.powerSave

@@ -33,9 +33,10 @@ export class Room {
     world.add((dt, t) => this.update(dt, t))
   }
 
-  // もち坐的位置（世界座標）與面向
-  seat() {
-    const s = this.group.userData.seat
+  // 第 i 個坐墊的位置（世界座標）與面向（0 給もち、1 給ふじ）
+  seat(i = 0) {
+    const u = this.group.userData
+    const s = u.seats?.[i] ?? u.seat
     return { position: this.group.localToWorld(s.position.clone()), facing: s.facing }
   }
 

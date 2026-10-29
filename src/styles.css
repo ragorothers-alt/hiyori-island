@@ -426,6 +426,9 @@ body.night .stage-fade { background: #1d1a2a; }
 }
 .bubble::after { content: ""; position: absolute; left: 50%; bottom: -6px; margin-left: -6px; border: 6px solid transparent; border-bottom: 0; border-top-color: rgba(255, 255, 255, .92); }
 .bubble.out { animation: bubbleOut .3s forwards; }
+/* ふじ的泡泡帶一點藤紫，一眼分得出是誰在說話 */
+.bubble.fuji { background: rgba(243, 236, 255, .94); color: #4a3f66; }
+.bubble.fuji::after { border-top-color: rgba(243, 236, 255, .94); }
 @keyframes bubbleIn { from { opacity: 0; transform: translate(-50%, -80%) scale(.85); } }
 @keyframes bubbleOut { to { opacity: 0; transform: translate(-50%, -110%) scale(.95); } }
 .floaty { transform: translate(-50%, -50%); font-family: var(--font-num); font-weight: 700; font-size: 17px; color: #fff; text-shadow: 0 1px 2px rgba(200, 90, 130, .6), 0 0 12px rgba(255, 160, 190, .9); white-space: nowrap; animation: floatUp 1.6s var(--ease) forwards; }
@@ -496,6 +499,8 @@ body.night .stage-fade { background: #1d1a2a; }
 .bond-next { margin: 0 0 8px; font-size: 11.5px; color: var(--ink-soft); }
 .bond-next span { color: #d9799a; border-bottom: 1px dotted currentColor; cursor: help; }
 .outfits { display: flex; flex-wrap: wrap; gap: 6px; }
+.outfit-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; }
+.outfit-who { flex: none; width: 30px; padding-top: 4px; font-size: 11.5px; color: var(--ink-faint); letter-spacing: .06em; }
 .outfit { font-size: 11.5px; padding: 4px 10px; border-radius: 10px; border: 1px dashed rgba(240, 150, 180, .5); color: var(--ink-soft); }
 .outfit:hover:not(:disabled) { background: var(--glass-hover); color: var(--ink); }
 .outfit.on { border-style: solid; border-color: transparent; color: #fff; background: linear-gradient(135deg, #f6b0c4, #f3a3bd); }
@@ -701,5 +706,7 @@ body.night .star-bar { background: linear-gradient(90deg, rgba(255, 220, 140, .1
 .bubble { white-space: normal; width: max-content; max-width: 240px; text-align: center; line-height: 1.5; }
 .proj-chip { transition: transform .25s var(--ease), opacity .3s; }
 body.night .bubble, body.night .proj-chip, body.night .tooltip3d { background: rgba(40, 52, 94, .9); color: #eef2fb; }
+body.night .bubble.fuji { background: rgba(62, 50, 104, .92); color: #f1ecff; }
+body.night .bubble.fuji::after { border-top-color: rgba(62, 50, 104, .92); }
 body.night .bubble::after { border-top-color: rgba(40, 52, 94, .9); }
 body.night .tooltip3d small { color: #aab6d0; }

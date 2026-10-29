@@ -10,7 +10,10 @@ import { Decor } from './scene/decor.js'
 import { Garden } from './scene/garden.js'
 import { Towers } from './scene/towers.js'
 import { TimeRing } from './scene/timeRing.js'
-import { Mochi } from './scene/mochi.js'
+import { Character } from './scene/character.js'
+import { Duo } from './scene/duo.js'
+import { buildCatMochi } from './scene/models/catMochi.js'
+import { buildCatFuji } from './scene/models/catFuji.js'
 import { Particles } from './scene/particles.js'
 import { Labels } from './scene/labels.js'
 import { Placed, spotFree, radiusOf } from './scene/placed.js'
@@ -20,7 +23,7 @@ import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
 import { FileSync } from './sync.js'
-import { LINES } from './data/lines.js'
+import { LINES, FUJI_LINES, DUETS } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
 import { RARITIES } from './data/flowers.js'
 import { BOND_ACTS, actLevel, outfitOf } from './data/bond.js'
@@ -28,10 +31,14 @@ import { BOND_ACTS, actLevel, outfitOf } from './data/bond.js'
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const short = (s, n = 9) => ([...s].length > n ? [...s].slice(0, n - 1).join('') + '…' : s)
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-function line(key, vars = {}) {
-  const list = key.startsWith('greet.') ? LINES.greet[key.slice(6)] : LINES[key]
+const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '')
+// who：'mochi' 或 'fuji'，各自用自己的台詞
+function line(key, vars = {}, who = 'mochi') {
+  const src = who === 'fuji' ? FUJI_LINES : LINES
+  // 'greet.morning'、'season.spring' 這種有點的鍵，往下一層找
+  const list = key.split('.').reduce((o, k) => o?.[k], src)
   if (!list?.length) return ''
-  return pick(list).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '')
+  return fill(pick(list), vars)
 }
 function greetKey() {
   const h = new Date().getHours()
@@ -55,8 +62,28 @@ async function boot() {
   const labels = new Labels(world)
   const cabin = new Cabin(world, sky)
   const room = new Room(world, sky)
-  const mochi = new Mochi(world, labels, sky, cabin, room)
-  room.pickRoots.push(mochi.root)
+  // ── もち和ふじ ──
+  const homeAt = (p) => new THREE.Vector3(p.x, 0, p.z)
+  const mochi = new Character(world, labels, sky, { id: 'mochi', name: 'もち', build: buildCatMochi, home: homeAt(LAYOUT.home), seat: 0, study: 'read' })
+  const fuji = new Character(world, labels, sky, { id: 'fuji', name: 'ふじ', build: buildCatFuji, home: homeAt(LAYOUT.home2), seat: 1, study: 'write' })
+  const cast = { mochi, fuji }
+  const duo = new Duo(world, labels, { list: [mochi, fuji], cabin, room })
+  // 誰來說：花圃與慶祝交給もち，時間、日程、提醒與照顧步調交給ふじ，其他兩人輪流
+  const FUJI_KEYS = new Set(['reviewAsk', 'reviewDone', 'reschedule', 'reminder', 'eventDone', 'deadlineNear', 'onTime', 'routine', 'overdue', 'wilt', 'planAsk', 'starPick', 'starFull', 'questDone', 'weeklyReady', 'weeklyClaimed', 'charmBuy', 'charmUsed', 'breakEnd', 'tired', 'gift'])
+  const MOCHI_KEYS = new Set(['shopBuy', 'shopPlace', 'shopPoor', 'taskDone', 'highTaskDone', 'starDone', 'starAll', 'newFlower', 'rareFlower', 'water', 'revive', 'milestone'])
+  const voice = (key) => (FUJI_KEYS.has(key) ? fuji : MOCHI_KEYS.has(key) ? mochi : pick([mochi, fuji]))
+  const talk = (key, vars = {}, ms, fallback = '', who = voice(key)) => {
+    who.say(line(key, vars, who.id) || fallback, ms)
+    return who
+  }
+  // 兩人你一句我一句；pet 的對話用 self／other 代表被摸的那位和另一位
+  const duet = (key, vars = {}, self = mochi) => {
+    const list = DUETS?.[key]
+    if (!list?.length) return false
+    const other = self === mochi ? fuji : mochi
+    duo.duet(pick(list).map(([who, text]) => [who === 'self' ? self.id : who === 'other' ? other.id : who, fill(text, vars)]))
+    return true
+  }
   const fx = new Particles(world, sky)
   const placed = new Placed(world, sky)
   sfx.setEnabled(store.state.settings.sound)
@@ -72,7 +99,7 @@ async function boot() {
     island.setSeason(season)
     decor.setSeason(season)
     fx.setSeason(season)
-    mochi.setSeason(season)
+    for (const c of duo.list) c.setSeason(season)
     const el = document.getElementById('dateSeason')
     el.textContent = `${SEASONS[season].name} · ${SEASONS[season].jp}`
     el.dataset.season = season
@@ -194,7 +221,7 @@ async function boot() {
     }
     document.getElementById('placeName').textContent = moveId ? `移動「${item.name}」：點島上的空地` : `擺放「${item.name}」：點島上的空地`
     placeBar.hidden = false
-    if (!moveId) mochi.say(line('shopBuy', { item: item.name }) || `${item.name}，要放哪裡呢？`)
+    if (!moveId) talk('shopBuy', { item: item.name }, undefined, `${item.name}，要放哪裡呢？`)
   }
   const aimAt = (ray) => {
     const p = ray.intersectPlane(ground, new THREE.Vector3())
@@ -272,36 +299,36 @@ async function boot() {
       if (p) world.flyTo(p.add(new THREE.Vector3(0, 1.4, 0)), 10)
     },
     resetView: () => (room.active ? room.exit() : world.home()),
-    reviewOpened: () => mochi.say(line('reviewAsk') || '今天過得怎麼樣？', 4200),
+    reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => !room.active && world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
     setPowerSave: (on) => (world.powerSave = on),
     focusStarted: (resumed, taskId) => {
-      mochi.setFocus(true, resumed)
+      duo.setFocus(true, resumed)
       garden.setFocus(taskId)
       if (!resumed) {
         sfx.chime()
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
-        mochi.say(t ? line('focusTask', { task: short(t.title) }) || line('focusStart') : line('focusStart'))
+        if (t) talk('focusTask', { task: short(t.title) })
+        else if (!duet('focusStart')) talk('focusStart')
       }
     },
     focusTaskChanged: (taskId) => {
-      if (mochi.mode === 'focus') garden.setFocus(taskId)
+      if (duo.focusing) garden.setFocus(taskId)
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
       if (t) {
         garden.bounce(t.id)
-        if (mochi.mode === 'focus') mochi.say(line('focusTask', { task: short(t.title) }))
+        if (duo.focusing) talk('focusTask', { task: short(t.title) })
       }
     },
     focusFinished: (minutes, taskId) => {
-      mochi.setFocus(false)
+      duo.setFocus(false)
       garden.setFocus(null)
       sfx.temple()
-      // 天燈從小木屋屋頂升起（もち還在屋裡）
-      fx.skyLantern(mochi.inside ? cabin.point('roofTop') : mochi.position.clone().add(new THREE.Vector3(0, 1.4, 0)))
+      // 天燈從小木屋屋頂升起（兩人還在屋裡）；出來後兩人會擊掌慶祝
+      fx.skyLantern(duo.inside ? cabin.point('roofTop') : mochi.position.clone().add(new THREE.Vector3(0, 1.6, 0)))
       store.completePomodoro(minutes, taskId)
-      mochi.celebrate()
-      mochi.say(line('focusEnd'))
+      if (!duet('focusEnd')) talk('focusEnd')
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
       if (t) {
         const pos = garden.anchor(t.id)
@@ -312,13 +339,13 @@ async function boot() {
     },
     breakFinished: () => {
       sfx.chime()
-      mochi.say(line('breakEnd'))
+      talk('breakEnd')
       ui.toast({ icon: '風', title: '休息結束', sub: '準備好了就再開始一輪吧' })
     },
     focusStopped: () => {
-      mochi.setFocus(false)
+      duo.setFocus(false)
       garden.setFocus(null)
-      mochi.say('沒關係，下次再一起專注。')
+      fuji.say('沒關係，下次再一起專注。')
     },
   }
   const ui = new UI(store, hooks)
@@ -388,8 +415,8 @@ async function boot() {
     } else if (p.type === 'project') {
       const pr = store.state.projects.find((x) => x.id === p.id)
       if (pr) html = `${esc(pr.name)}<small>${Math.round(store.progress(pr) * 100)}%・${pr.milestones.filter((m) => m.done).length}/${pr.milestones.length} 層</small>`
-    } else if (p.type === 'mochi') html = `もち<small>點一下摸摸牠</small>`
-    else if (p.type === 'cabin') html = `もち的小木屋<small>${mochi.inside ? 'もち正在屋裡陪你專注・點一下進屋看看' : '專注時もち會回到這裡'}</small>`
+    } else if (p.type === 'char') html = `${cast[p.id].name}<small>點一下摸摸她</small>`
+    else if (p.type === 'cabin') html = `もち和ふじ的小木屋<small>${duo.inside ? '兩人正在屋裡陪你專注・點一下進屋看看' : '專注時兩人會回到這裡'}</small>`
     else if (p.type === 'placed') {
       const it = SHOP_ITEMS.find((i) => i.key === store.state.placed.find((x) => x.id === p.id)?.key)
       if (it) html = `${esc(it.name)}<small>點一下移動或收起</small>`
@@ -470,7 +497,7 @@ async function boot() {
       if (d.m0 === d.a.m0 && d.m1 === d.a.m1) return
       const ev = store.state.events.find((x) => x.id === d.id)
       store.updateEvent(d.id, { start: minToHHMM(d.m0), end: minToHHMM(Math.min(d.m1, 1439)) })
-      if (ev) mochi.say(line('reschedule', { event: short(ev.title) }) || `${short(ev.title)} 改到 ${minToHHMM(d.m0)} 了。`)
+      if (ev) talk('reschedule', { event: short(ev.title) }, undefined, `${short(ev.title)} 改到 ${minToHHMM(d.m0)} 了。`)
       sfx.chime()
     },
   }
@@ -493,18 +520,21 @@ async function boot() {
       openItemMenu(p.id)
       return
     }
-    if (p.type === 'mochi') {
+    if (p.type === 'char') {
+      const c = cast[p.id]
       store.pet()
-      mochi.pet()
+      c.pet()
       sfx.squish()
-      fx.hearts(mochi.headAnchor())
-      mochi.say(line('pat'), 2600)
+      fx.hearts(c.headAnchor())
+      // 偶爾另一位也想被摸
+      if (Math.random() < 0.25 && duet('pet', {}, c)) return
+      c.say(line('pat', {}, c.id), 2600)
       return
     }
     if (p.type === 'cabin') {
       sfx.pop()
-      if (mochi.inside) room.enter()
-      mochi.say(line(mochi.inside ? 'cabinFocus' : 'cabin'), 3200)
+      if (duo.inside) room.enter()
+      talk(duo.inside ? 'cabinFocus' : 'cabin', {}, 3200)
       return
     }
     sfx.pop()
@@ -525,7 +555,7 @@ async function boot() {
     const pos = new THREE.Vector3(p.x, 0.3, p.z)
     fx.burst(pos, { colors: ['#ffffff', '#ffd1dc', '#fff1b8'], count: 30, speed: 1.6 })
     fx.ripple(pos.clone().setY(0.05), '#ffd1dc', 1.6)
-    mochi.say(line('shopPlace', { item: item.name }) || `${item.name}擺好了！`)
+    talk('shopPlace', { item: item.name }, undefined, `${item.name}擺好了！`)
   })
   store.on('itemMoved', () => sfx.pop())
   store.on('itemStored', ({ item, refund }) => {
@@ -534,10 +564,10 @@ async function boot() {
   })
   store.on('reviewSaved', ({ first }) => {
     sfx.chime()
-    mochi.say(line('reviewDone') || '謝謝你告訴我今天的事。', 4200)
-    if (first) fx.burst(mochi.headAnchor(), { colors: ['#ffffff', '#fff1b8', '#d9ccff'], count: 30, speed: 1.4 })
+    const c = talk('reviewDone', {}, 4200, '謝謝你告訴我今天的事。')
+    if (first) fx.burst(c.headAnchor(), { colors: ['#ffffff', '#fff1b8', '#d9ccff'], count: 30, speed: 1.4 })
   })
-  store.on('shopPoor', () => mochi.say(line('shopPoor') || '金平糖還不太夠，慢慢來就好。'))
+  store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
   store.on('reload', () => {
     decor.sync(store.level.level)
     world.home()
@@ -558,9 +588,11 @@ async function boot() {
     if (pos) {
       fx.burst(pos, { colors: t.star ? ['#fff3c4', '#ffd76e', color] : ['#ffffff', color, '#ffe1ea'], count: t.priority === 3 || t.star ? 60 : 40 })
       fx.ripple(pos.clone().setY(0.1), color, 1.4)
+      // もち跑去花旁慶祝，ふじ在原地替她加油
       mochi.visit(pos, () => fx.burst(pos.clone().add(new THREE.Vector3(0, 0.3, 0)), { colors: ['#fff6d6', '#ffffff'], count: 16, speed: 1.2, size: 0.16 }))
+      fuji.cheer(pos)
     }
-    mochi.say(line(t.star ? 'starDone' : t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) }))
+    talk(t.star ? 'starDone' : t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) })
   })
 
   // ── 花の図鑑：新品種或稀有的花 ──
@@ -577,7 +609,7 @@ async function boot() {
         }
       }
       ui.toast({ icon: '花', title: isNew ? `圖鑑新發現：${flower.name}` : `開出了${r.label}的${flower.name}`, sub: `${r.label}・${flower.desc}`, ms: 5200 })
-      if (isNew || rare) mochi.say(line(isNew ? 'newFlower' : 'rareFlower', { flower: flower.name }) || `是${flower.name}呢。`, 4000)
+      if (isNew || rare) talk(isNew ? 'newFlower' : 'rareFlower', { flower: flower.name }, 4000, `是${flower.name}呢。`)
     }, 1500)
   })
 
@@ -585,26 +617,30 @@ async function boot() {
   store.on('questProgress', () => ui.renderQuests())
   store.on('weeklyReady', (w) => {
     ui.toast({ icon: '週', title: `每週挑戰「${w.title}」達成`, sub: '到左下角領取限定擺飾吧', ms: 5200 })
-    mochi.say(line('weeklyReady') || '這週的挑戰完成了。')
+    talk('weeklyReady', {}, undefined, '這週的挑戰完成了。')
   })
   store.on('weeklyClaimed', ({ item }) => {
     sfx.fanfare()
     fx.fireworks(new THREE.Vector3(0, 0, 0), 3)
     if (item) {
       ui.toast({ icon: '週', title: `拿到每週限定「${item.name}」`, sub: '到商店可以免費擺一件', ms: 5600 })
-      mochi.say(line('weeklyClaimed', { item: item.name }) || `${item.name}，這週的小紀念。`, 4200)
+      talk('weeklyClaimed', { item: item.name }, 4200, `${item.name}，這週的小紀念。`)
     } else ui.toast({ icon: '週', title: '每週挑戰完成', sub: '限定擺飾都收齊了，改送 40 顆金平糖' })
   })
 
-  // ── もち的好感度 ──
+  // ── もち和ふじ共同的好感度（各自穿自己的衣裝） ──
   const syncBond = () => {
     const lv = store.bond.level
-    mochi.abilities.water = lv >= actLevel('water')
-    mochi.abilities.sit = lv >= actLevel('sit')
+    for (const c of duo.list) {
+      c.abilities.water = lv >= actLevel('water')
+      c.abilities.sit = lv >= actLevel('sit')
+    }
     mochi.setOutfit(store.player.bond.outfit)
+    fuji.setOutfit(store.player.bond.outfitFuji)
   }
   syncBond()
   store.on('change', syncBond)
+  // 澆花是もち的工作
   mochi.onWater = {
     // 找今天還沒開的花苞
     target: () => {
@@ -617,7 +653,7 @@ async function boot() {
     sprinkle: ({ id, pos }) => {
       fx.burst(pos.clone().add(new THREE.Vector3(0, 0.6, 0)), { colors: ['#bfe6ff', '#e6f6ff', '#9fd4f5'], count: 26, speed: 0.7, up: 0.6, gravity: -5, size: 0.14, life: 1 })
       garden.bounce(id)
-      mochi.say(line('water') || '喝口水吧。', 2800)
+      talk('water', {}, 2800, '喝口水吧。', mochi)
     },
   }
   store.on('bondUp', (lv) => {
@@ -625,22 +661,23 @@ async function boot() {
     const sub = r?.outfit ? `解鎖衣裝「${outfitOf(r.outfit)?.name}」，到紀錄頁換上吧` : r?.act ? `新動作「${BOND_ACTS[r.act]?.name}」：${BOND_ACTS[r.act]?.desc}` : ''
     setTimeout(() => {
       sfx.chime()
-      fx.hearts(mochi.headAnchor())
-      ui.toast({ icon: '絆', title: `もちとの絆 Lv.${lv.level}「${lv.name}」`, sub, ms: 6000 })
-      mochi.say(line('bondUp', { level: lv.level }) || '我們更熟了一點。', 4000)
+      for (const c of duo.list) fx.hearts(c.headAnchor())
+      ui.toast({ icon: '絆', title: `もちとふじの絆 Lv.${lv.level}「${lv.name}」`, sub, ms: 6000 })
+      if (!duet('bondUp', { level: lv.level })) talk('bondUp', { level: lv.level }, 4000, '我們更熟了一點。')
     }, 1800)
   })
   store.on('gift', ({ coins }) => {
     setTimeout(() => {
       sfx.chime()
-      fx.burst(mochi.headAnchor(), { colors: ['#ffd1dc', '#fff1b8', '#bfe3ff'], count: 20, speed: 1, size: 0.16 })
-      ui.toast({ icon: '糖', title: `もち送你 ${coins} 顆金平糖`, sub: '每天第一次來看牠都有' })
-      mochi.say(line('gift', { coins }) || `${coins} 顆金平糖，給你。`, 3800)
+      fx.burst(fuji.headAnchor(), { colors: ['#ffd1dc', '#fff1b8', '#bfe3ff'], count: 20, speed: 1, size: 0.16 })
+      ui.toast({ icon: '糖', title: `ふじ送你 ${coins} 顆金平糖`, sub: '每天第一次來看她們都有' })
+      talk('gift', { coins }, 3800, `${coins} 顆金平糖，給你。`)
     }, 7000)
   })
-  store.on('outfit', () => {
-    mochi.celebrate()
-    mochi.say(line('outfit') || '好看嗎？', 3200)
+  store.on('outfit', ({ who } = {}) => {
+    const c = cast[who] || mochi
+    c.celebrate()
+    talk('outfit', {}, 3200, '好看嗎？', c)
   })
 
   // ── 專案期限 ──
@@ -650,7 +687,7 @@ async function boot() {
       const pos = towers.anchor(p.id)
       if (pos) fx.burst(pos, { colors: ['#ffe08a', '#fff6d6', '#ffffff'], count: 50, speed: 1.6 })
       ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」準時落成`, sub: `在期限前完成・額外 +${XP.onTime} XP` })
-      mochi.say(line('onTime', { project: short(p.name) }) || '在期限前落成了。', 4200)
+      talk('onTime', { project: short(p.name) }, 4200, '在期限前落成了。')
     }, 2600)
   })
 
@@ -658,18 +695,18 @@ async function boot() {
   store.on('revive', (t) => {
     const pos = garden.anchor(t.id)
     if (pos) setTimeout(() => fx.burst(pos, { colors: ['#d9f5c8', '#ffffff', '#a8e0b0'], count: 30, speed: 1.2, up: 1.4 }), 300)
-    setTimeout(() => mochi.say(line('revive') || '晚一點也沒關係，花開了。', 3800), 1200)
+    setTimeout(() => talk('revive', {}, 3800, '晚一點也沒關係，花開了。'), 1200)
   })
   store.on('charmBought', ({ charms }) => {
     sfx.chime()
     ui.toast({ icon: '守', title: '買了一個お守り', sub: `漏掉一天時會自動保住連續天數・身上 ${charms} 個` })
-    mochi.say(line('charmBuy') || 'お守り收好了。')
+    talk('charmBuy', {}, undefined, 'お守り收好了。')
   })
   store.on('charmUsed', ({ used, streak, left }) => {
     setTimeout(() => {
       sfx.chime()
       ui.toast({ icon: '守', title: `お守り保住了連續 ${streak} 天`, sub: `漏掉的 ${used} 天用掉 ${used} 個・還剩 ${left} 個`, ms: 6000 })
-      mochi.say(line('charmUsed', { streak }) || `連續 ${streak} 天，還在喔。`, 4200)
+      talk('charmUsed', { streak }, 4200, `連續 ${streak} 天，還在喔。`)
     }, 2600)
   })
 
@@ -677,35 +714,36 @@ async function boot() {
   store.on('starPicked', (t) => {
     sfx.chime()
     if (t.date === store.selectedDate) garden.bounce(t.id)
-    mochi.say(line('starPick', { task: short(t.title) }) || `「${short(t.title)}」是今天的本命。`)
+    talk('starPick', { task: short(t.title) }, undefined, `「${short(t.title)}」是今天的本命。`)
   })
   store.on('starFull', () => {
     ui.toast({ icon: '★', title: `本命已經選滿 ${MAX_STARS} 件`, sub: '先取消其中一件，再選這件' })
-    mochi.say(line('starFull') || '三件就好，太多會累的。')
+    talk('starFull', {}, undefined, '三件就好，太多會累的。')
   })
   store.on('starAll', () => {
     setTimeout(() => {
       sfx.fanfare()
       fx.fireworks(new THREE.Vector3(3.4, 0, 3.2), 2)
       ui.toast({ icon: '★', title: '本命全清', sub: `最重要的三件事都完成了・+${XP.starAll} XP` })
-      mochi.say(line('starAll') || '最重要的三件，全部完成了。', 4200)
+      talk('starAll', {}, 4200, '最重要的三件，全部完成了。')
+      fuji.cheer(mochi.position)
     }, 1100)
   })
   store.on('tired', ({ count }) => {
     ui.toast({ icon: '茶', title: `今天已經完成 ${count} 件了`, sub: `超過 ${SOFT_CAP} 件後任務 XP 減半，記得休息一下`, ms: 5200 })
-    setTimeout(() => mochi.say(line('tired') || '今天開了好多花，剩下的慢慢來。', 4200), 1600)
+    setTimeout(() => talk('tired', {}, 4200, '今天開了好多花，剩下的慢慢來。'), 1600)
   })
   store.on('taskUndone', () => sfx.undo())
   store.on('routineAdded', (r) => {
-    const msg = line('routine') || '以後我會記得幫你準備好。'
-    mochi.say(msg)
+    talk('routine', {}, undefined, '以後我會記得幫你準備好。')
     ui.toast({ icon: '↻', title: `已設為例行${r.kind === 'task' ? '任務' : '日程'}`, sub: `「${short(r.title, 12)}」・${repeatLabel(r.repeat)}` })
   })
   store.on('allDone', () => {
     setTimeout(() => {
       sfx.fanfare()
       fx.fireworks(new THREE.Vector3(3.4, 0, 3.2), 3)
-      mochi.say(line('allDone'), 4200)
+      for (const c of duo.list) c.celebrate()
+      if (!duet('allDone')) talk('allDone', {}, 4200)
     }, 900)
   })
   store.on('eventDone', (e) => {
@@ -713,18 +751,18 @@ async function boot() {
     ring.pulse(e.id)
     const pos = ring.anchor(e.id)
     if (pos) fx.burst(pos, { colors: ['#ffffff', EVENT_COLORS[e.color % EVENT_COLORS.length]], count: 36, speed: 1.6, up: 1.6 })
-    mochi.say(line('eventDone'))
+    talk('eventDone')
   })
   store.on('milestoneDone', ({ project }) => {
     sfx.build()
-    mochi.say(line('milestone', { project: short(project.name) }))
+    talk('milestone', { project: short(project.name) })
   })
   store.on('projectDone', (p) => {
     setTimeout(() => {
       sfx.fanfare()
       const pos = towers.anchor(p.id, false) || new THREE.Vector3()
       fx.fireworks(pos, 6)
-      mochi.say(line('projectDone', { project: short(p.name) }), 4500)
+      talk('projectDone', { project: short(p.name) }, 4500)
       ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」落成！`, sub: '整座塔都蓋好了，+120 XP' })
     }, 1100)
   })
@@ -754,8 +792,8 @@ async function boot() {
         else if (b && unlock.key !== 'islet') world.flyTo(b.center, Math.min(46, Math.max(13, world.fitDistance(b.size / 2) * 0.85)))
       }
       fx.fireworks(new THREE.Vector3(0, 0, 0), 4)
-      mochi.celebrate()
-      mochi.say(line('levelUp', { level }), 4200)
+      for (const c of duo.list) c.celebrate()
+      if (!duet('levelUp', { level })) talk('levelUp', { level }, 4200)
       ui.showLevelUp(level, unlock)
     }, 1200)
   })
@@ -771,16 +809,17 @@ async function boot() {
   store.on('questReady', (q) => ui.toast({ icon: '済', title: `每日任務「${q.title}」達成`, sub: '到左下角領取 +30 XP 吧' }))
   store.on('questClaimed', () => {
     sfx.chime()
-    fx.burst(mochi.headAnchor(), { colors: ['#fff1b8', '#ffd1dc', '#ffffff'], count: 30, speed: 1.4 })
-    mochi.say(line('questDone'))
+    const c = talk('questDone')
+    fx.burst(c.headAnchor(), { colors: ['#fff1b8', '#ffd1dc', '#ffffff'], count: 30, speed: 1.4 })
   })
 
   // ── 日程提醒 ──
   const reminders = new Reminders(store, (e, min) => {
     sfx.reminder()
     const when = min > 0 ? `${min} 分鐘後開始（${e.start}）` : `現在開始（${e.start}）`
-    const say = min > 0 ? line('reminder', { event: short(e.title), min }) : `「${short(e.title)}」開始囉！`
-    mochi.say(say || `${short(e.title)}，${when}`, 6000)
+    // 看時間的是ふじ
+    const say = min > 0 ? line('reminder', { event: short(e.title), min }, 'fuji') : `「${short(e.title)}」開始囉！`
+    fuji.say(say || `${short(e.title)}，${when}`, 6000)
     ui.toast({ icon: '鐘', title: e.title, sub: when, ms: 9000 })
     if (store.selectedDate === store.today) ring.pulse(e.id)
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
@@ -808,7 +847,7 @@ async function boot() {
         ui.renderSchedule(false)
         syncNextEvent()
       }
-      if (!placing && mochi.mode !== 'focus') ui.maybeAskReview()
+      if (!placing && !duo.focusing) ui.maybeAskReview()
     }
   }, 1000)
   ui.tickClock()
@@ -824,14 +863,15 @@ async function boot() {
     }
   })
 
-  // もち偶爾閒聊
+  // 兩人偶爾閒聊，有時你一句我一句
   let lastTalk = performance.now()
   addEventListener('pointerdown', () => (lastTalk = performance.now()))
   setInterval(() => {
-    if (document.hidden || mochi.mode === 'focus') return
+    if (document.hidden || duo.focusing) return
     if (performance.now() - lastTalk > 70000 && Math.random() < 0.5) {
       lastTalk = performance.now()
-      mochi.say(line('idle'))
+      if (Math.random() < 0.45 && duet('idle')) return
+      talk('idle')
     }
   }, 15000)
 
@@ -839,27 +879,28 @@ async function boot() {
   const roomBtn = document.getElementById('roomBtn')
   roomBtn.onclick = () => (room.active ? room.exit() : room.enter())
   world.add(() => {
-    if (roomBtn.hidden === mochi.inside) roomBtn.hidden = !mochi.inside
+    if (roomBtn.hidden === duo.inside) roomBtn.hidden = !duo.inside
     if (roomBtn.classList.contains('on') !== room.active) {
       roomBtn.classList.toggle('on', room.active)
       roomBtn.title = room.active ? '回到小島 (V)' : '看看小木屋裡'
     }
   })
 
-  // 小木屋蓋好之前擺在那塊地上的裝飾，挪到附近的空地
-  const { cabin: lot } = LAYOUT
-  for (const p of store.state.placed) {
-    const a0 = Math.atan2(p.z - lot.z, p.x - lot.x)
-    const r0 = lot.r + radiusOf(p.key)
-    if (Math.hypot(p.x - lot.x, p.z - lot.z) >= r0) continue
-    search: for (let d = r0 + 0.05; d < r0 + 6; d += 0.25) {
-      for (let i = 0; i < 24; i++) {
-        const a = a0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.26
-        const x = lot.x + Math.cos(a) * d
-        const z = lot.z + Math.sin(a) * d
-        if (!spotFree(x, z, store.state.placed, p.id, p.key, decor.footprints())) continue
-        store.moveItem(p.id, +x.toFixed(2), +z.toFixed(2), p.rot)
-        break search
+  // 小木屋和ふじ的家之前擺在那兩塊地上的裝飾，挪到附近的空地
+  for (const lot of [LAYOUT.cabin, { ...LAYOUT.home2, r: 1.1 }]) {
+    for (const p of store.state.placed) {
+      const a0 = Math.atan2(p.z - lot.z, p.x - lot.x)
+      const r0 = lot.r + radiusOf(p.key)
+      if (Math.hypot(p.x - lot.x, p.z - lot.z) >= r0) continue
+      search: for (let d = r0 + 0.05; d < r0 + 6; d += 0.25) {
+        for (let i = 0; i < 24; i++) {
+          const a = a0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.26
+          const x = lot.x + Math.cos(a) * d
+          const z = lot.z + Math.sin(a) * d
+          if (!spotFree(x, z, store.state.placed, p.id, p.key, decor.footprints())) continue
+          store.moveItem(p.id, +x.toFixed(2), +z.toFixed(2), p.rot)
+          break search
+        }
       }
     }
   }
@@ -873,8 +914,10 @@ async function boot() {
     requestAnimationFrame(() => {
       document.getElementById('loader').classList.add('done')
       setTimeout(() => {
-        mochi.say(line(greetKey()), 3800)
+        const g = greetKey()
+        if (!(g === 'greet.morning' && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800)
         mochi.celebrate()
+        fuji.cheer(mochi.position)
       }, 900)
       setTimeout(() => {
         if (ui.maybeShowWeekCard()) return
@@ -882,11 +925,11 @@ async function boot() {
         const overdue = store.overdue().length
         const todo = store.tasksOn(store.today).filter((t) => !t.done).length
         const soon = store.deadlineSoon()[0]
-        if (overdue) mochi.say(line('wilt', { count: overdue }) || line('overdue', { count: overdue }), 3800)
-        else if (soon) mochi.say(line('deadlineNear', { project: short(soon.project.name), days: soon.days }) || `「${short(soon.project.name)}」快到期囉。`, 4200)
-        else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) mochi.say(line('planAsk') || '今天最重要的三件事是什麼？點 ☆ 選起來吧。', 4200)
-        else if (!store.tasksOn(store.today).length) mochi.say(line('emptyDay'), 3800)
-        else if (LINES.season?.[season]) mochi.say(pick(LINES.season[season]), 3800)
+        if (overdue) talk('wilt', { count: overdue }, 3800, line('overdue', { count: overdue }, 'fuji'))
+        else if (soon) talk('deadlineNear', { project: short(soon.project.name), days: soon.days }, 4200, `「${short(soon.project.name)}」快到期囉。`)
+        else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) talk('planAsk', {}, 4200, '今天最重要的三件事是什麼？點 ☆ 選起來吧。')
+        else if (!store.tasksOn(store.today).length) talk('emptyDay', {}, 3800)
+        else talk(`season.${season}`, {}, 3800)
       }, 5600)
     }),
   )
@@ -917,7 +960,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, cabin, room, fx, decor, ui, placed, fileSync }
+  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync }
 }
 
 boot()

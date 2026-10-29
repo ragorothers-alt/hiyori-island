@@ -99,6 +99,10 @@ export function buildCabinRoom() {
   const iron = material({ roughness: 0.72, metalness: 0.18 })
   const enamel = material({ roughness: 0.35, metalness: 0.06 })
   const leaf = material({ roughness: 0.88, side: THREE.DoubleSide })
+  const seatXs = [-0.65, 0.65]
+  const seatZ = -0.72
+  const lampX = -1.43
+  const teaXs = [-1.17, 1.17]
   const makeGroup = (name, parent = group, position = [0, 0, 0]) => {
     const g = new THREE.Group()
     g.name = name
@@ -150,13 +154,13 @@ export function buildCabinRoom() {
   }
   roof.finish()
   const desk = batch(group, 'study', wood)
-  desk.add(rounded(2.8, 1.22, 0.105, 0.13), [0, 0.395, 0.5], [1, 1, 1], [-Math.PI / 2, 0, 0], '#d4a573')
-  for (const x of [-1.11, 1.11]) {
+  desk.add(rounded(3.4, 1.22, 0.105, 0.13), [0, 0.395, 0.5], [1, 1, 1], [-Math.PI / 2, 0, 0], '#d4a573')
+  for (const x of [-1.38, 1.38]) {
     for (const z of [0.06, 0.94]) desk.add(new THREE.CylinderGeometry(0.09, 0.105, 0.34, 10), [x, 0.17, z], [1, 1, 1], [0, 0, 0], '#bd8c60')
   }
   desk.finish()
   const cushion = batch(group, 'cushion', cloth)
-  cushion.add(new THREE.SphereGeometry(1, 32, 14), [0, 0.125, -0.94], [0.92, 0.125, 0.69], [0, 0, 0], '#acb18c')
+  for (const x of seatXs) cushion.add(new THREE.SphereGeometry(1, 32, 14), [x, 0.125, seatZ], [0.55, 0.125, 0.51], [0, 0, 0], '#acb18c')
   cushion.finish()
   // 木樑、窗框與家具結構
   const beams = batch(group, 'beams', wood)
@@ -283,13 +287,13 @@ export function buildCabinRoom() {
   plant.finish()
   const book = batch(group, 'open-book', paper)
   for (const side of [-1, 1]) {
-    book.add(rounded(0.43, 0.55, 0.025, 0.015), [-0.34 + side * 0.215, 0.478, 0.44], [1, 1, 1], [-Math.PI / 2, side * 0.07, 0], '#a77e66')
+    book.add(rounded(0.43, 0.55, 0.025, 0.015), [seatXs[0] + side * 0.215, 0.478, 0.34], [1, 1, 1], [-Math.PI / 2, side * 0.07, 0], '#a77e66')
     for (let i = 0; i < 4; i++) {
-      box(book, -0.34 + side * 0.209, 0.5 + i * 0.008, 0.44, 0.405, 0.007, 0.521, i % 2 ? '#f2e7cd' : '#e9dbb9', [0, 0, side * 0.06])
+      box(book, seatXs[0] + side * 0.209, 0.5 + i * 0.008, 0.34, 0.405, 0.007, 0.521, i % 2 ? '#f2e7cd' : '#e9dbb9', [0, 0, side * 0.06])
     }
   }
   book.finish()
-  const pagePivot = makeGroup('page-hinge', group, [-0.34, 0.54, 0.44])
+  const pagePivot = makeGroup('page-hinge', group, [seatXs[0], 0.54, 0.34])
   const page = batch(pagePivot, 'turning-page', leaf)
   const pageGeometry = new THREE.PlaneGeometry(0.4, 0.52, 12, 1)
   pageGeometry.rotateX(-Math.PI / 2)
@@ -300,27 +304,29 @@ export function buildCabinRoom() {
   page.add(pageGeometry, [0, 0, 0], [1, 1, 1], [0, 0, 0], '#f8edd7')
   page.finish(false)
   const notebook = batch(group, 'notebook', paper)
-  notebook.add(rounded(0.46, 0.56, 0.018, 0.02), [0.44, 0.476, 0.61], [1, 1, 1], [-Math.PI / 2, 0, -0.1], '#acb2a0')
-  box(notebook, 0.44, 0.496, 0.61, 0.42, 0.025, 0.52, '#eee1c5', [0, 0.1, 0])
-  beam(notebook, [0.29, 0.526, 0.42], [0.61, 0.526, 0.65], 0.023, '#c59b67')
-  notebook.add(new THREE.ConeGeometry(0.018, 0.06, 6), [0.634, 0.526, 0.668], [1, 1, 1], [Math.PI / 2, 0, -0.95], '#786853')
+  notebook.add(rounded(0.46, 0.56, 0.018, 0.02), [seatXs[1], 0.476, 0.5], [1, 1, 1], [-Math.PI / 2, 0, -0.1], '#acb2a0')
+  box(notebook, seatXs[1], 0.496, 0.5, 0.42, 0.025, 0.52, '#eee1c5', [0, 0.1, 0])
+  beam(notebook, [0.5, 0.526, 0.31], [0.82, 0.526, 0.54], 0.023, '#c59b67')
+  notebook.add(new THREE.ConeGeometry(0.018, 0.06, 6), [0.844, 0.526, 0.558], [1, 1, 1], [Math.PI / 2, 0, -0.95], '#786853')
   notebook.finish()
   const practical = material({ emissive: '#ffd59a', emissiveIntensity: 0.35, roughness: 0.55 })
   const lamp = batch(group, 'lamp', enamel)
-  lamp.add(new THREE.CylinderGeometry(0.18, 0.19, 0.055, 24), [-1.06, 0.485, 0.51], [1, 1, 1], [0, 0, 0], '#c9a269')
-  lamp.add(new THREE.CylinderGeometry(0.022, 0.025, 0.4, 12), [-1.06, 0.71, 0.51], [1, 1, 1], [0, 0, 0], '#c6a06b')
-  lamp.add(new THREE.LatheGeometry([[0.225, 0], [0.22, 0.05], [0.16, 0.16], [0.07, 0.205], [0, 0.21]].map(p => new THREE.Vector2(...p)), 24), [-1.06, 0.9, 0.51], [1, 1, 1], [0, 0, 0], '#e8cca0')
+  lamp.add(new THREE.CylinderGeometry(0.18, 0.19, 0.055, 24), [lampX, 0.485, 0.51], [1, 1, 1], [0, 0, 0], '#c9a269')
+  lamp.add(new THREE.CylinderGeometry(0.022, 0.025, 0.4, 12), [lampX, 0.71, 0.51], [1, 1, 1], [0, 0, 0], '#c6a06b')
+  lamp.add(new THREE.LatheGeometry([[0.225, 0], [0.22, 0.05], [0.16, 0.16], [0.07, 0.205], [0, 0.21]].map(p => new THREE.Vector2(...p)), 24), [lampX, 0.9, 0.51], [1, 1, 1], [0, 0, 0], '#e8cca0')
   lamp.finish()
   const bulb = batch(group, 'lamp-bulb', practical)
-  bulb.add(new THREE.SphereGeometry(0.065, 16, 10), [-1.06, 0.902, 0.51], [1, 0.7, 1], [0, 0, 0], '#ffe0a8')
+  bulb.add(new THREE.SphereGeometry(0.065, 16, 10), [lampX, 0.902, 0.51], [1, 0.7, 1], [0, 0, 0], '#ffe0a8')
   bulb.finish(false)
   const tea = batch(group, 'tea', enamel)
-  tea.add(new THREE.CylinderGeometry(0.17, 0.17, 0.025, 24), [0.95, 0.475, 0.31], [1, 1, 1], [0, 0, 0], '#b98c65')
-  tea.add(new THREE.LatheGeometry([[0, 0], [0.09, 0], [0.12, 0.19], [0.105, 0.2], [0.092, 0.18], [0.075, 0.035], [0, 0.035]].map(p => new THREE.Vector2(...p)), 24), [0.95, 0.49, 0.31], [1, 1, 1], [0, 0, 0], '#ead5b4')
-  tea.add(new THREE.TorusGeometry(0.064, 0.017, 6, 16), [1.085, 0.602, 0.31], [1, 1, 1], [0, 0, 0], '#ead5b4')
-  tea.add(new THREE.CylinderGeometry(0.097, 0.097, 0.006, 24), [0.95, 0.66, 0.31], [1, 1, 1], [0, 0, 0], '#96744c')
+  for (const x of teaXs) {
+    tea.add(new THREE.CylinderGeometry(0.17, 0.17, 0.025, 24), [x, 0.475, 0.81], [1, 1, 1], [0, 0, 0], '#b98c65')
+    tea.add(new THREE.LatheGeometry([[0, 0], [0.09, 0], [0.12, 0.19], [0.105, 0.2], [0.092, 0.18], [0.075, 0.035], [0, 0.035]].map(p => new THREE.Vector2(...p)), 24), [x, 0.49, 0.81], [1, 1, 1], [0, 0, 0], '#ead5b4')
+    tea.add(new THREE.TorusGeometry(0.064, 0.017, 6, 16), [x + Math.sign(x) * 0.135, 0.602, 0.81], [1, 1, 1], [0, 0, 0], '#ead5b4')
+    tea.add(new THREE.CylinderGeometry(0.097, 0.097, 0.006, 24), [x, 0.66, 0.81], [1, 1, 1], [0, 0, 0], '#96744c')
+  }
   tea.finish()
-  const timerPivot = makeGroup('timer-pivot', group, [1.04, 0.46, 0.87])
+  const timerPivot = makeGroup('timer-pivot', group, [0, 0.46, 0.87])
   const timer = batch(timerPivot, 'timer', enamel)
   for (let i = 0; i < 5; i++) {
     const a = i / 5 * TAU
@@ -454,22 +460,24 @@ export function buildCabinRoom() {
   }
   weave.finish(false)
   const welt = batch(group, 'cushion-welt', cloth)
-  welt.add(new THREE.TorusGeometry(0.9, 0.012, 5, 64), [0, 0.13, -0.94], [1, 0.748, 1], [-Math.PI / 2, 0, 0], '#c1c5a1')
-  for (let i = 0; i < 8; i++) {
-    const a = i / 8 * TAU
-    welt.add(new THREE.SphereGeometry(0.017, 8, 5), [Math.cos(a) * 0.58, 0.217, -0.94 + Math.sin(a) * 0.4], [1, 0.3, 1], [0, 0, 0], '#929f7c')
+  for (const x of seatXs) {
+    welt.add(new THREE.TorusGeometry(0.535, 0.012, 5, 64), [x, 0.13, seatZ], [1, 0.92, 1], [-Math.PI / 2, 0, 0], '#c1c5a1')
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * TAU
+      welt.add(new THREE.SphereGeometry(0.017, 8, 5), [x + Math.cos(a) * 0.34, 0.217, seatZ + Math.sin(a) * 0.31], [1, 0.3, 1], [0, 0, 0], '#929f7c')
+    }
   }
   welt.finish(false)
   const marks = batch(group, 'page-ink', paper)
   for (const side of [-1, 1]) {
     for (let i = 0; i < 7; i++) {
-      box(marks, -0.34 + side * 0.215, 0.549, 0.25 + i * 0.056, i % 3 === 2 ? 0.2 : 0.29, 0.002, 0.004, '#c6bca4', [0, 0, side * 0.045])
+      box(marks, seatXs[0] + side * 0.215, 0.549, 0.15 + i * 0.056, i % 3 === 2 ? 0.2 : 0.29, 0.002, 0.004, '#c6bca4', [0, 0, side * 0.045])
     }
   }
-  for (let i = 0; i < 7; i++) box(marks, 0.44, 0.511, 0.39 + i * 0.064, 0.32, 0.002, 0.002, '#c9c9b7', [0, 0.1, 0])
+  for (let i = 0; i < 7; i++) box(marks, seatXs[1], 0.511, 0.28 + i * 0.064, 0.32, 0.002, 0.002, '#c9c9b7', [0, 0.1, 0])
   marks.finish(false)
   const coil = batch(group, 'notebook-coil', iron)
-  for (let i = 0; i < 8; i++) coil.add(new THREE.TorusGeometry(0.018, 0.004, 4, 8), [0.225, 0.51, 0.4 + i * 0.06], [1, 1, 1], [Math.PI / 2, 0, 0], '#a59b83')
+  for (let i = 0; i < 8; i++) coil.add(new THREE.TorusGeometry(0.018, 0.004, 4, 8), [0.435, 0.51, 0.29 + i * 0.06], [1, 1, 1], [Math.PI / 2, 0, 0], '#a59b83')
   coil.finish(false)
   const clockInk = batch(group, 'clock-hands', iron)
   for (let i = 0; i < 12; i++) {
@@ -509,7 +517,7 @@ export function buildCabinRoom() {
   group.add(sun, sun.target)
   const lampLight = new THREE.PointLight('#ffce92', 0.18, 4.5, 2)
   lampLight.name = 'desk-lamp-light'
-  lampLight.position.set(-1.06, 0.88, 0.51)
+  lampLight.position.set(lampX, 0.88, 0.51)
   group.add(lampLight)
   const fireLight = new THREE.PointLight('#ffb477', 0.65, 4.5, 2)
   fireLight.name = 'hearth-light'
@@ -523,7 +531,7 @@ export function buildCabinRoom() {
   const fillNight = new THREE.Color('#e6d9ca')
   const steam = []
   const steamGeometry = new THREE.SphereGeometry(1, 14, 10)
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 6; i++) {
     const m = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -534,14 +542,16 @@ export function buildCabinRoom() {
     ownedMaterials.push(m)
     const puff = new THREE.Mesh(steamGeometry, m)
     puff.name = `tea-steam-${i}`
-    puff.position.set(0.95, 0.7, 0.31)
+    puff.position.set(teaXs[Math.floor(i / 3)], 0.7, 0.81)
     puff.scale.set(0.025, 0.055, 0.025)
     puff.renderOrder = 4
     group.add(puff)
     steam.push(puff)
   }
-  group.userData.seat = { position: new THREE.Vector3(0, 0.25, -0.94), facing: 0 }
-  group.userData.view = { target: new THREE.Vector3(0, 1.55, 0), dir: new THREE.Vector3(0.035, 0.36, 1).normalize(), radius: 3.6 }
+  // 坐墊頂面中心，兩席都朝向鏡頭
+  group.userData.seats = seatXs.map(x => ({ position: new THREE.Vector3(x, 0.25, seatZ), facing: 0 }))
+  group.userData.seat = group.userData.seats[0]
+  group.userData.view = { target: new THREE.Vector3(0, 1.55, 0), dir: new THREE.Vector3(0.035, 0.36, 1).normalize(), radius: 3.8 }
   group.userData.background = { day: '#f4eadc', night: '#292d46' }
   group.userData.anim = (t, dt, state = {}) => {
     const time = Number.isFinite(t) ? Math.max(0, t) : 0
@@ -563,9 +573,9 @@ export function buildCabinRoom() {
     for (let i = 0; i < clouds.length; i++) clouds[i].position.x = -1.71 + i * 0.51 + Math.sin(time * 0.07 + i * 2) * 0.1
     for (let i = 0; i < curtains.length; i++) curtains[i].rotation.z = Math.sin(time * 0.6 + i * 1.5) * 0.012
     for (let i = 0; i < steam.length; i++) {
-      const phase = (time * 0.22 + i / 3) % 1
+      const phase = (time * 0.22 + (i % 3) / 3) % 1
       const puff = steam[i]
-      puff.position.set(0.95 + Math.sin(time * 0.6 + i) * phase * 0.045, 0.69 + phase * 0.54, 0.31 - phase * 0.025)
+      puff.position.set(teaXs[Math.floor(i / 3)] + Math.sin(time * 0.6 + i) * phase * 0.045, 0.69 + phase * 0.54, 0.81 - phase * 0.025)
       const size = 0.023 + phase * 0.039
       puff.scale.set(size, size * 2.1, size)
       puff.material.uniforms.opacity.value = Math.sin(phase * Math.PI) * (0.17 + n * 0.045)
@@ -591,17 +601,20 @@ export function buildCabinRoom() {
     if (object.name) nodes[object.name] = object
     if (object.isMesh) meshes[object.name] = object
   })
-  const seatSocket = new THREE.Object3D()
-  seatSocket.name = 'seat-socket'
-  seatSocket.position.copy(group.userData.seat.position)
-  group.add(seatSocket)
+  const seatSockets = group.userData.seats.map((seat, i) => {
+    const socket = new THREE.Object3D()
+    socket.name = i === 0 ? 'seat-socket' : 'seat-fuji-socket'
+    socket.position.copy(seat.position)
+    group.add(socket)
+    return socket
+  })
   group.userData.sculptRuntime = {
     nodes,
     meshes,
-    sockets: { seat: seatSocket },
+    sockets: { seat: seatSockets[0], seatMochi: seatSockets[0], seatFuji: seatSockets[1] },
     colliders: [
       { id: 'floor', type: 'box', center: [0, -0.125, 0], size: [6.2, 0.25, 4.2] },
-      { id: 'desk', type: 'box', center: [0, 0.225, 0.5], size: [2.8, 0.45, 1.22] },
+      { id: 'desk', type: 'box', center: [0, 0.225, 0.5], size: [3.4, 0.45, 1.22] },
       { id: 'hearth', type: 'box', center: [2.19, 0.6, -0.95], size: [1.2, 1.2, 1.03] },
     ],
     destructionGroups: { shell: ['floor', 'walls', 'roof', 'beams'], study: ['study', 'cushion', 'open-book', 'notebook', 'lamp', 'tea', 'timer'], hearth: ['stove', 'pipe', 'kettle', 'firewood'] },

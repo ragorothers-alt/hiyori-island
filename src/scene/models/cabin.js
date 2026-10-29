@@ -98,6 +98,12 @@ export function buildCabin() {
   const stone = material({ flatShading: true, roughness: 0.96 })
   const tile = material({ roughness: 0.9 })
   const trim = material({ roughness: 0.8 })
+  const doorX = -0.3
+  const doorY = 0.14
+  const doorWidth = 0.62
+  const doorHeight = 1
+  const leafWidth = doorWidth - 0.016
+  const leafHeight = doorHeight - 0.016
   const foundation = batch(group, 'foundation', stone)
   const stoneColors = ['#c5c0c9', '#ccc5c9', '#bbb8c3', '#d5cdc5']
   for (let course = 0; course < 2; course++) {
@@ -125,10 +131,10 @@ export function buildCabin() {
     const y = 0.22 + i * 0.14
     const color = ['#d7b18b', '#dcb991', '#d1aa80', '#debb94'][i % 4]
     const cuts = []
-    if (y - 0.078 < 0.99) {
-      const h = Math.max(0, y - 0.078 - 0.715)
-      const half = Math.sqrt(Math.max(0, 0.285 ** 2 - h ** 2))
-      cuts.push([-0.31 - half, -0.31 + half])
+    if (y - 0.078 < doorY + doorHeight) {
+      const h = Math.max(0, y - 0.078 - (doorY + doorHeight - doorWidth / 2))
+      const half = Math.sqrt(Math.max(0, (doorWidth / 2) ** 2 - h ** 2))
+      cuts.push([doorX - half, doorX + half])
     }
     if (y + 0.078 > 0.64 && y - 0.078 < 1.06) cuts.push([0.14, 0.58])
     let start = -0.825
@@ -210,23 +216,24 @@ export function buildCabin() {
   }
   endgrain.finish()
   const doorFrame = batch(group, 'door-frame', trim)
-  const frameShape = arch(0.67, 0.96)
-  frameShape.holes.push(arch(0.565, 0.855, 0, 0.008, new THREE.Path()))
-  doorFrame.add(new THREE.ExtrudeGeometry(frameShape, { depth: 0.065, bevelEnabled: true, bevelSize: 0.008, bevelThickness: 0.008, bevelSegments: 1, curveSegments: 14 }), [-0.31, 0.13, 0.67], [1, 1, 1], [0, 0, 0], '#efcf9f')
+  const frameShape = arch(doorWidth + 0.1, doorHeight + 0.1)
+  frameShape.holes.push(arch(doorWidth, doorHeight, 0, 0.01, new THREE.Path()))
+  doorFrame.add(new THREE.ExtrudeGeometry(frameShape, { depth: 0.065, bevelEnabled: true, bevelSize: 0.008, bevelThickness: 0.008, bevelSegments: 1, curveSegments: 14 }), [doorX, doorY - 0.01, 0.67], [1, 1, 1], [0, 0, 0], '#efcf9f')
   doorFrame.finish()
   const doorPivot = new THREE.Group()
   doorPivot.name = 'door-hinge'
-  doorPivot.position.set(-0.035, 0.14, 0.625)
+  // 鉸鏈略內縮，整段外開軌跡仍留在半徑 1.2 內
+  doorPivot.position.set(doorX + leafWidth / 2, doorY + 0.004, 0.58)
   group.add(doorPivot)
   const doorLeaf = batch(doorPivot, 'door-leaf', timber)
-  doorLeaf.add(new THREE.ExtrudeGeometry(arch(0.55, 0.845, -0.275), { depth: 0.038, bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004, bevelSegments: 1, curveSegments: 14 }), [0, 0, -0.019], [1, 1, 1], [0, 0, 0], '#bd926e')
+  doorLeaf.add(new THREE.ExtrudeGeometry(arch(leafWidth, leafHeight, -leafWidth / 2), { depth: 0.038, bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004, bevelSegments: 1, curveSegments: 14 }), [0, 0, -0.019], [1, 1, 1], [0, 0, 0], '#bd926e')
   doorLeaf.finish()
   const floor = batch(group, 'floor', timber)
   box(floor, 0, 0.11, 0, 1.47, 0.045, 1.18, '#a98772')
   floor.finish()
   const steps = batch(group, 'steps', timber)
-  box(steps, -0.31, 0.035, 0.89, 0.6, 0.07, 0.26, '#d5af83')
-  box(steps, -0.31, 0.105, 0.765, 0.65, 0.07, 0.24, '#e0be94')
+  box(steps, doorX, 0.035, 0.89, 0.66, 0.07, 0.26, '#d5af83')
+  box(steps, doorX, 0.105, 0.765, 0.72, 0.07, 0.24, '#e0be94')
   steps.finish()
   const paper = material({ emissive: '#ffbb61', emissiveIntensity: 0.08, roughness: 0.95 })
   const windows = []
@@ -331,20 +338,20 @@ export function buildCabin() {
   lattice.finish()
   const metal = material({ metalness: 0.25, roughness: 0.65 })
   const doorHardware = batch(doorPivot, 'door-hardware', metal)
-  for (const y of [0.2, 0.56]) {
+  for (const y of [0.22, 0.69]) {
     box(doorHardware, -0.037, y, 0.027, 0.075, 0.022, 0.013, '#88746b')
     doorHardware.add(new THREE.CylinderGeometry(0.012, 0.012, 0.055, 7), [-0.006, y, 0.028], [1, 1, 1], [0, 0, 0], '#88746b')
   }
-  doorHardware.add(new THREE.SphereGeometry(0.021, 9, 6), [-0.454, 0.36, 0.04], [1, 1, 0.7], [0, 0, 0], '#b29b76')
-  doorHardware.add(new THREE.TorusGeometry(0.026, 0.005, 4, 10), [-0.454, 0.33, 0.055], [1, 1, 1], [0, 0, 0], '#8c7864')
+  doorHardware.add(new THREE.SphereGeometry(0.021, 9, 6), [-leafWidth + 0.096, 0.43, 0.04], [1, 1, 0.7], [0, 0, 0], '#b29b76')
+  doorHardware.add(new THREE.TorusGeometry(0.026, 0.005, 4, 10), [-leafWidth + 0.096, 0.4, 0.055], [1, 1, 1], [0, 0, 0], '#8c7864')
   doorHardware.finish()
   const doorPlanks = batch(doorPivot, 'door-planks', timber)
   for (let i = 1; i < 6; i++) {
-    const x = i * 0.55 / 6
-    const height = 0.57 + Math.sqrt(Math.max(0, 0.275 ** 2 - (x - 0.275) ** 2))
-    box(doorPlanks, x - 0.55, height / 2, 0.022, 0.004, height - 0.015, 0.003, '#a97e5d')
+    const x = i * leafWidth / 6
+    const height = leafHeight - leafWidth / 2 + Math.sqrt(Math.max(0, (leafWidth / 2) ** 2 - (x - leafWidth / 2) ** 2))
+    box(doorPlanks, x - leafWidth, height / 2, 0.022, 0.004, height - 0.015, 0.003, '#a97e5d')
   }
-  for (const y of [0.14, 0.53]) box(doorPlanks, -0.275, y, 0.034, 0.47, 0.044, 0.026, '#c8a17a')
+  for (const y of [0.16, 0.65]) box(doorPlanks, -leafWidth / 2, y, 0.034, leafWidth - 0.08, 0.044, 0.026, '#c8a17a')
   doorPlanks.finish()
   // 材質階段
   // 細節階段
@@ -393,8 +400,8 @@ export function buildCabin() {
   }
   petals.finish()
   const doormat = batch(group, 'doormat', trim)
-  doormat.add(polygon([[-0.18, -0.062], [-0.16, -0.075], [0.16, -0.075], [0.18, -0.055], [0.18, 0.055], [0.16, 0.075], [-0.16, 0.075], [-0.18, 0.055]], 0.01, 0.003), [-0.31, 0.146, 0.775], [1, 1, 1], [-Math.PI / 2, 0, 0], '#d5bd8c')
-  for (let i = 0; i < 11; i++) box(doormat, -0.465 + i * 0.031, 0.16, 0.775, 0.008, 0.003, 0.12, '#c1a474')
+  doormat.add(polygon([[-0.18, -0.062], [-0.16, -0.075], [0.16, -0.075], [0.18, -0.055], [0.18, 0.055], [0.16, 0.075], [-0.16, 0.075], [-0.18, 0.055]], 0.01, 0.003), [doorX, 0.146, 0.775], [1, 1, 1], [-Math.PI / 2, 0, 0], '#d5bd8c')
+  for (let i = 0; i < 11; i++) box(doormat, doorX - 0.155 + i * 0.031, 0.16, 0.775, 0.008, 0.003, 0.12, '#c1a474')
   doormat.finish()
   // 光線階段
   const lanternFrame = batch(group, 'lantern-frame', metal)
@@ -414,15 +421,28 @@ export function buildCabin() {
   // 互動階段
   const shadowMaterial = new THREE.MeshBasicMaterial({ color: '#62556d', transparent: true, opacity: 0, depthWrite: false })
   ownedMaterials.push(shadowMaterial)
-  const shadowShape = new THREE.Shape()
-  shadowShape.moveTo(0, 0.095)
-  shadowShape.bezierCurveTo(0.075, 0.095, 0.103, 0.06, 0.12, 0.009)
-  shadowShape.bezierCurveTo(0.166, 0.042, 0.178, -0.024, 0.126, -0.029)
-  shadowShape.bezierCurveTo(0.108, -0.092, -0.108, -0.092, -0.126, -0.029)
-  shadowShape.bezierCurveTo(-0.178, -0.024, -0.166, 0.042, -0.12, 0.009)
-  shadowShape.bezierCurveTo(-0.103, 0.06, -0.075, 0.095, 0, 0.095)
-  const shadowMesh = new THREE.Mesh(new THREE.ShapeGeometry(shadowShape, 12), shadowMaterial)
-  shadowMesh.name = 'mochi-shadow'
+  // 兩個獨立頭肩輪廓，尖耳略有高低差
+  const shadowMesh = new THREE.Group()
+  shadowMesh.name = 'catgirls-shadow'
+  for (let i = 0; i < 2; i++) {
+    const shape = new THREE.Shape()
+    shape.moveTo(-0.081, -0.105)
+    shape.bezierCurveTo(-0.081, -0.067, -0.058, -0.052, -0.035, -0.048)
+    shape.bezierCurveTo(-0.074, -0.025, -0.077, 0.025, -0.05, 0.057)
+    shape.lineTo(-0.062, 0.112)
+    shape.lineTo(-0.018, 0.077)
+    shape.quadraticCurveTo(0, 0.083, 0.018, 0.077)
+    shape.lineTo(0.062, 0.112)
+    shape.lineTo(0.05, 0.057)
+    shape.bezierCurveTo(0.077, 0.025, 0.074, -0.025, 0.035, -0.048)
+    shape.bezierCurveTo(0.058, -0.052, 0.081, -0.067, 0.081, -0.105)
+    shape.closePath()
+    const silhouette = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), shadowMaterial)
+    silhouette.name = i === 0 ? 'mochi-shadow' : 'fuji-shadow'
+    silhouette.position.set(i === 0 ? -0.094 : 0.094, i === 0 ? -0.014 : 0.014, 0)
+    silhouette.renderOrder = 1
+    shadowMesh.add(silhouette)
+  }
   shadowMesh.position.set(0.36, 0.825, 0.72)
   shadowMesh.visible = false
   shadowMesh.renderOrder = 1
@@ -460,8 +480,8 @@ export function buildCabin() {
   const paperDay = new THREE.Color('#e9dcb9')
   const paperFocus = new THREE.Color('#ffd58c')
   const clamp01 = value => Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 0
-  group.userData.doorway = new THREE.Vector3(-0.31, 0, 1.33)
-  group.userData.inside = new THREE.Vector3(-0.31, 0, 0.25)
+  group.userData.doorway = new THREE.Vector3(doorX, 0, 1.32)
+  group.userData.inside = new THREE.Vector3(doorX, 0, 0.156)
   group.userData.roofTop = new THREE.Vector3(0, 2.46, 0)
   group.userData.setDoor = k => { doorPivot.rotation.y = clamp01(k) * Math.PI * 5 / 9 }
   group.userData.anim = (t, dt, night, state = {}) => {
@@ -507,6 +527,7 @@ export function buildCabin() {
   for (const name of ['right-window', 'left-window']) sideWindows.add(group.getObjectByName(name))
   const lanternGroup = new THREE.Group()
   lanternGroup.name = 'lantern'
+  lanternGroup.position.x = -0.02
   group.add(lanternGroup)
   lanternGroup.add(group.getObjectByName('lantern-frame'), group.getObjectByName('lantern-paper'))
   const nodes = {}
@@ -529,7 +550,7 @@ export function buildCabin() {
     sockets,
     colliders: [
       { id: 'floor', type: 'box', center: [0, 0.08, 0], size: [1.5, 0.16, 1.2] },
-      { id: 'doorway', type: 'box', center: [-0.31, 0.55, 0.67], size: [0.55, 0.85, 0.18], isTrigger: true },
+      { id: 'doorway', type: 'box', center: [doorX, doorY + doorHeight / 2, 0.606], size: [doorWidth, doorHeight, 0.18], isTrigger: true },
     ],
     destructionGroups: { shell: ['front-logs', 'side-logs', 'endgrain'], roof: ['roof', 'shingles', 'fascia', 'eaves'], door: ['door-leaf', 'door-hardware', 'door-planks'] },
   }

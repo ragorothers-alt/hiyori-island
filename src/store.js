@@ -88,8 +88,8 @@ const emptyDay = () => {
   return d
 }
 
-// もち的好感度：pts 累計點數、outfit 目前衣裝、visit 最近一次來訪、petDay/petN 今天摸了幾次（有上限）、gift 最近一次收到禮物
-const emptyBond = () => ({ pts: 0, outfit: 'none', visit: '', petDay: '', petN: 0, gift: '' })
+// もち和ふじ共同的好感度：pts 累計點數、outfit／outfitFuji 兩人各自的衣裝、visit 最近一次來訪、petDay/petN 今天摸了幾次（有上限）、gift 最近一次收到禮物
+const emptyBond = () => ({ pts: 0, outfit: 'none', outfitFuji: 'none', visit: '', petDay: '', petN: 0, gift: '' })
 
 const ms = (title, done = false) => ({ id: uid(), title, done, rewarded: done })
 
@@ -256,7 +256,7 @@ function migrate(s) {
   if (isObj(ps.bond)) {
     const b = ps.bond
     Object.assign(player.bond, {
-      pts: num(b.pts, 0, 1e7, 0), outfit: outfitOf(b.outfit) ? b.outfit : 'none',
+      pts: num(b.pts, 0, 1e7, 0), outfit: outfitOf(b.outfit) ? b.outfit : 'none', outfitFuji: outfitOf(b.outfitFuji) ? b.outfitFuji : 'none',
       visit: ymd(b.visit, ''), petDay: ymd(b.petDay, ''), petN: num(b.petN, 0, 99, 0), gift: ymd(b.gift, ''),
     })
   }
@@ -701,10 +701,12 @@ export class Store {
   outfitUnlocked(key) {
     return !!outfitOf(key) && this.bond.level >= outfitLevel(key)
   }
-  setOutfit(key) {
-    if (!this.outfitUnlocked(key) || this.state.player.bond.outfit === key) return
-    this.state.player.bond.outfit = key
-    this._finish([['outfit', key]])
+  // who：'mochi' 或 'fuji'，兩人各自換衣裝
+  setOutfit(key, who = 'mochi') {
+    const field = who === 'fuji' ? 'outfitFuji' : 'outfit'
+    if (!this.outfitUnlocked(key) || this.state.player.bond[field] === key) return
+    this.state.player.bond[field] = key
+    this._finish([['outfit', { key, who }]])
   }
 
   // ── お守り ──

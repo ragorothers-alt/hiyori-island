@@ -864,7 +864,7 @@ describe('上週回顧卡', () => {
   })
 })
 
-describe('もち的好感度', () => {
+describe('もち和ふじ的好感度', () => {
   it('摸摸一天最多算 5 次', () => {
     const before = store.player.bond.pts
     for (let i = 0; i < 8; i++) store.pet()
@@ -905,6 +905,17 @@ describe('もち的好感度', () => {
     expect(store.player.bond.outfit).toBe('crown')
   })
 
+  it('兩人各自換衣裝，互不影響', () => {
+    const onOutfit = vi.fn()
+    store.on('outfit', onOutfit)
+    store.player.bond.pts = 70
+    store.setOutfit('straw', 'fuji')
+    expect(store.player.bond).toMatchObject({ outfit: 'none', outfitFuji: 'straw' })
+    expect(onOutfit).toHaveBeenCalledWith({ key: 'straw', who: 'fuji' })
+    store.setOutfit('crown')
+    expect(store.player.bond).toMatchObject({ outfit: 'crown', outfitFuji: 'straw' })
+  })
+
   it('好感度 7 級起，每天第一次打開會收到 3–6 顆金平糖', () => {
     store.player.bond.pts = 240
     const onGift = vi.fn()
@@ -923,7 +934,7 @@ describe('もち的好感度', () => {
 
   it('舊存檔沒有好感度時從 0 開始，壞掉的衣裝改回預設', () => {
     store.importJSON(JSON.stringify({ tasks: [], player: { bond: { pts: 40, outfit: '不存在' } } }))
-    expect(store.player.bond).toMatchObject({ pts: 40, outfit: 'none' })
+    expect(store.player.bond).toMatchObject({ pts: 40, outfit: 'none', outfitFuji: 'none' })
     store.importJSON(JSON.stringify({ tasks: [], player: {} }))
     expect(store.player.bond.pts).toBeGreaterThanOrEqual(0)
   })

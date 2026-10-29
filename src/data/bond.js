@@ -1,4 +1,4 @@
-// もち的好感度：摸摸、專注、回顧、每天來看看牠都會累積。每升一級解鎖一件衣裝或一個新動作。
+// もち和ふじ共同的好感度：摸摸、專注、回顧、每天來看看她們都會累積。每升一級解鎖一件衣裝（兩人都能穿）或一個新動作。
 
 // 每次加多少（摸摸一天最多算 petDailyMax 次）
 export const BOND_POINTS = { visit: 2, pet: 1, petDailyMax: 5, pomodoro: 3, review: 4, starAll: 3 }
@@ -18,21 +18,21 @@ export const BOND_LEVELS = [
 
 // 衣裝（模型在 scene/outfits.js）。none = 只戴原本的季節小花髮飾
 export const OUTFITS = [
-  { key: 'none', name: '季節髮飾', jp: 'いつもの', desc: '頭上那朵小花，會跟著季節換顏色。' },
-  { key: 'crown', name: '花冠', jp: 'はなかんむり', desc: '小花繞成一圈，輕輕停在圓圓的頭頂。' },
-  { key: 'straw', name: '麥稈草帽', jp: 'むぎわらぼうし', desc: '麥稈織成小草帽，頭頂多了一片涼蔭。' },
-  { key: 'kitsune', name: '狐狸面具', jp: 'きつねのおめん', desc: '白色小狐面輕輕一戴，探頭看看花圃。' },
-  { key: 'hachimaki', name: '日式頭帶', jp: 'はちまき', desc: '白頭帶輕輕繫好，前額留著一輪紅日。' },
-  { key: 'kanzashi', name: '星星髮簪', jp: 'ほしのかんざし', desc: '一顆小星星別在頭邊，走動時輕輕晃。' },
-  { key: 'wagasa', name: '紅色和傘', jp: 'あかいわがさ', desc: '撐開一把小紅傘，把細雨聲留在傘面。' },
+  { key: 'none', name: '季節髮飾', jp: 'いつもの', desc: '耳邊的小櫻花，隨著季節悄悄換色。' },
+  { key: 'crown', name: '花冠', jp: 'はなかんむり', desc: '小花沿著髮梢綻放，貓耳也探出來賞花。' },
+  { key: 'straw', name: '麥稈草帽', jp: 'むぎわらぼうし', desc: '兩耳間的小草帽，繫著出遊的好心情。' },
+  { key: 'kitsune', name: '狐狸面具', jp: 'きつねのおめん', desc: '小狐面斜掛髮側，露出祭典裡的笑臉。' },
+  { key: 'hachimaki', name: '日式頭帶', jp: 'はちまき', desc: '繫好額前的頭帶，今天也一起加油。' },
+  { key: 'kanzashi', name: '星星髮簪', jp: 'ほしのかんざし', desc: '星星別在耳邊，垂下兩串溫柔的星光。' },
+  { key: 'wagasa', name: '紅色和傘', jp: 'あかいわがさ', desc: '小手握著紅和傘，陪你走過晴天細雨。' },
 ]
 export const outfitOf = (key) => OUTFITS.find((o) => o.key === key)
 
 // 解鎖的新動作
 export const BOND_ACTS = {
-  water: { name: '花間澆水', desc: '偶爾跳進花圃，替你的花澆上一點清水。' },
-  sit: { name: '並肩專注', desc: '專注時待在小木屋的紙窗邊，影子映在窗上陪著你。' },
-  gift: { name: '每日小禮', desc: '每天初次來訪，送你幾顆收在掌心的金平糖。' },
+  water: { name: '花間澆水', desc: 'もち偶爾跑進花圃，替你的花澆上一點清水。' },
+  sit: { name: '並肩專注', desc: '專注時兩人坐在小木屋紙窗邊，影子映在窗上陪著你。' },
+  gift: { name: '每日小禮', desc: 'ふじ每天在你初次來訪時，送上幾顆收在掌心的金平糖。' },
 }
 
 // 解鎖某個動作或衣裝需要的好感度等級

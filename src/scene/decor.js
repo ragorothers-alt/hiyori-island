@@ -334,11 +334,12 @@ function limb(g, from, to, radius, material) {
 }
 
 function openGround(x, z, pad = 0, avoidDecor = false) {
-  const { radius, pond, bed, home, cabin, slots, decor } = LAYOUT
+  const { radius, pond, bed, home, home2, cabin, slots, decor } = LAYOUT
   if (Math.hypot(x, z) > radius - pad) return false
   if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.5 + pad) return false
   if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.3 + pad) return false
   if (Math.hypot(x - home.x, z - home.z) < 1.2 + pad) return false
+  if (Math.hypot(x - home2.x, z - home2.z) < 1.2 + pad) return false
   if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + pad) return false
   if (Math.abs(x) < 0.9 + pad && z > 1.8 - pad) return false
   if (slots.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < 1.35 + pad)) return false
