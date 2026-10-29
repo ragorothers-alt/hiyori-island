@@ -147,7 +147,7 @@ export class HabitsView {
       const from = this.ringFrom ?? pct
       ring = `<div class="hb-ring-big${p.total && p.done === p.total ? ' full' : ''}"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16"/><circle class="fg" cx="20" cy="20" r="16" style="stroke-dashoffset:${(SUM_RING * (1 - from)).toFixed(2)}" data-to="${(SUM_RING * (1 - pct)).toFixed(2)}"/></svg><b>${p.total ? `${p.done}<small>/${p.total}</small>` : '休'}</b></div>`
       if (!p.total) [title, sub] = ['今天沒有養成安排', '沒有排到今天的養成習慣，放鬆一下']
-      else if (p.done === p.total) [title, sub] = ['今天的養成習慣都完成了', '做得很好，今天又累積了一格']
+      else if (p.done === p.total) [title, sub] = ['養成習慣都完成了','做得很好，今天又累積了一格']
       else if (!p.done) [title, sub] = [`今天有 ${p.total} 個習慣`, '想從哪一個開始呢？']
       else [title, sub] = [`今天完成 ${p.done} / ${p.total}`, `還有 ${p.total - p.done} 個，照自己的步調來`]
     } else {

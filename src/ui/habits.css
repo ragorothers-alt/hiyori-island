@@ -142,6 +142,7 @@ body.night .hb-input { color-scheme: dark; }
 .hb-cell { display: block; aspect-ratio: 1; width: 100%; padding: 0; border-radius: 6px; background: var(--hb-faint); position: relative; transition: transform .15s var(--ease), box-shadow .15s; }
 .hb-cell.fut, .hb-cell.pre { background: transparent; }
 .hb-cell.pre { box-shadow: inset 0 0 0 1px var(--hb-faint); }
+button.hb-cell.pre { box-shadow: inset 0 0 0 1px var(--hb-empty); }
 .hb-cell.rest { background: transparent; box-shadow: inset 0 0 0 1px var(--hb-empty); }
 .hb-cell.rest::after { content: ""; position: absolute; left: 30%; right: 30%; top: 50%; height: 1.5px; margin-top: -.75px; border-radius: 1px; background: var(--hb-empty); }
 .hb-cell.miss { background: var(--hb-empty); }
