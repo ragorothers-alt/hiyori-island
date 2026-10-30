@@ -6,11 +6,13 @@ import { applies, countOn, doneOn } from '../habits.js'
 import { awake, DEFAULT_RHYTHM, fmtDur, sleepMinutes, taskDur } from '../planner.js'
 import { ENERGY, lifeKindOf } from '../data/life.js'
 
-// 日曆：全畫面浮層。月檢視（6×7、週一開頭）／週檢視（時間格），右側（手機在下方）是那天的詳情
+// 日曆：全畫面浮層。月檢視（6×7、週一開頭）／週檢視（時間格）／三日檢視（手機用的寬欄時間格），右側（手機在下方）是那天的詳情
 
 const MONTH_JP = ['睦月', '如月', '弥生', '卯月', '皐月', '水無月', '文月', '葉月', '長月', '神無月', '霜月', '師走']
 const DOW = ['一', '二', '三', '四', '五', '六', '日']
 const MODE_KEY = 'hiyori-cal-mode'
+// 三日檢視只在手機寬度出現（和 calendar.css 的 600px 同步）
+const PHONE = '(max-width: 600px)'
 // 日曆開著時不讓這些快捷鍵傳到底下（它們會動到被蓋住的面板）
 const SWALLOW = /^[1-5nNsSfFvVeE]$/
 
@@ -82,8 +84,11 @@ export class CalendarView {
     this.date = store.selectedDate
     this.mode = 'month'
     try {
-      if (localStorage.getItem(MODE_KEY) === 'week') this.mode = 'week'
+      const m = localStorage.getItem(MODE_KEY)
+      if (m === 'week' || m === 'day3') this.mode = m
     } catch {}
+    // 三日檢視的第一天
+    this._d3 = null
     this._period = ''
     this._bars = 3
     root.setAttribute('role', 'dialog')
@@ -94,13 +99,14 @@ export class CalendarView {
         <header class="cal-head">
           <h2 class="cal-title"></h2>
           <div class="cal-nav">
-            <button class="icon-btn" data-act="prev" title="上一月／週" aria-label="上一月／週">${ICON.prev}</button>
+            <button class="icon-btn" data-act="prev" title="上一頁" aria-label="上一頁">${ICON.prev}</button>
             <button class="chip-toggle cal-today" data-act="today" title="回到今天（Home）">今天</button>
-            <button class="icon-btn" data-act="next" title="下一月／週" aria-label="下一月／週">${ICON.next}</button>
+            <button class="icon-btn" data-act="next" title="下一頁" aria-label="下一頁">${ICON.next}</button>
           </div>
           <div class="seg cal-mode" role="group" aria-label="檢視方式">
             <button type="button" data-mode="month" title="月檢視（M）">月</button>
             <button type="button" data-mode="week" title="週檢視（W）">週</button>
+            <button type="button" data-mode="day3" class="cal-d3" title="三日檢視">3日</button>
           </div>
           <button class="icon-btn cal-close" data-act="close" title="關閉（Esc）" aria-label="關閉日曆">${ICON.close}</button>
         </header>
@@ -109,12 +115,50 @@ export class CalendarView {
       </div>`
     this.el = { title: $('.cal-title', root), main: $('.cal-main', root), side: $('.cal-side', root), today: $('.cal-today', root) }
     root.addEventListener('click', (e) => this._onClick(e))
-    root.addEventListener('dblclick', (e) => this._onDbl(e))
     // 用捕獲階段攔截，按鍵才不會傳到 ui.js（←／→ 會切換面板日期、數字鍵切分頁）
     addEventListener('keydown', (e) => this._onKey(e), true)
     addEventListener('resize', () => {
-      if (this.isOpen && this.mode === 'month' && this._fitBars()) this.render()
+      if (!this.isOpen) return
+      // 轉成寬螢幕時三日檢視換回整週
+      if (this.view !== this._shown || (this.view === 'month' && this._fitBars())) this.render()
     })
+    this._bindSwipe()
+  }
+
+  // 實際顯示的檢視：寬螢幕沒有三日檢視，記住的是三日時改看整週
+  get view() {
+    return this.mode === 'day3' && !matchMedia(PHONE).matches ? 'week' : this.mode
+  }
+
+  // 觸控：在主區左右滑換上一頁／下一頁
+  _bindSwipe() {
+    const main = this.el.main
+    let start = null
+    let swiped = false
+    main.addEventListener('pointerdown', (e) => {
+      start = e.pointerType === 'mouse' ? null : { x: e.clientX, y: e.clientY }
+      swiped = false
+    })
+    main.addEventListener('pointerup', (e) => {
+      if (!start) return
+      const dx = e.clientX - start.x
+      const dy = e.clientY - start.y
+      start = null
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return
+      swiped = true
+      this.flip(dx < 0 ? 1 : -1)
+    })
+    main.addEventListener('pointercancel', () => (start = null))
+    // 滑完放開時手指底下的格子不算點到
+    main.addEventListener(
+      'click',
+      (e) => {
+        if (!swiped) return
+        swiped = false
+        e.stopPropagation()
+      },
+      true,
+    )
   }
 
   get isOpen() {
@@ -126,6 +170,7 @@ export class CalendarView {
     this.root.classList.remove('is-closing')
     if (this.root.hidden) this._back = document.activeElement
     this.date = date || this.store.selectedDate
+    this._d3 = null
     this.root.hidden = false
     this._period = ''
     this.render()
@@ -161,11 +206,16 @@ export class CalendarView {
     this.render()
   }
   flip(dir) {
-    this.moveTo(this.mode === 'month' ? addMonths(this.date, dir) : addDays(this.date, dir * 7))
+    const v = this.view
+    if (v === 'month') return this.moveTo(addMonths(this.date, dir))
+    // 三日檢視：整個窗往前／後推 3 天，正在看的那天留在同一格
+    if (v === 'day3' && this._d3) this._d3 = addDays(this._d3, dir * 3)
+    this.moveTo(addDays(this.date, dir * (v === 'day3' ? 3 : 7)))
   }
   setMode(mode) {
     if (mode === this.mode) return
     this.mode = mode
+    this._d3 = null
     try {
       localStorage.setItem(MODE_KEY, mode)
     } catch {}
@@ -198,12 +248,9 @@ export class CalendarView {
     const day = btn.dataset.day
     // 格子與週標頭：再點一次＝到這一天
     if (day === this.date && btn.matches('.cal-cell, .cw-day')) return this.goTo(day)
+    // 時間格空白處點兩下＝到這一天：第一下已經重畫掉原本的欄，瀏覽器不會發 dblclick，改看第二下的 detail
+    if (e.detail === 2 && btn.matches('.cw-col, .cw-allcell')) return this.goTo(day)
     this.moveTo(day)
-  }
-  _onDbl(e) {
-    if (!this.isOpen || e.target.closest('[data-open], [data-act], [data-mode]')) return
-    const col = e.target.closest('.cw-col, .cw-allcell')
-    if (col) this.goTo(col.dataset.day)
   }
   _onKey(e) {
     if (!this.isOpen) return
@@ -257,14 +304,15 @@ export class CalendarView {
     const d = parseDate(this.date)
     let title
     let sub
-    if (this.mode === 'month') {
+    const view = this.view
+    if (view === 'month') {
       title = `<b>${d.getFullYear()}</b> 年 <b>${d.getMonth() + 1}</b> 月`
       sub = MONTH_JP[d.getMonth()]
     } else {
-      const mon = weekKey(this.date)
-      const sun = addDays(mon, 6)
-      const a = parseDate(mon)
-      const b = parseDate(sun)
+      const { start, n } = this._days()
+      const end = addDays(start, n - 1)
+      const a = parseDate(start)
+      const b = parseDate(end)
       title =
         a.getFullYear() !== b.getFullYear()
           ? `<b>${a.getFullYear()}</b> 年 <b>${a.getMonth() + 1}</b> 月 – <b>${b.getFullYear()}</b> 年 <b>${b.getMonth() + 1}</b> 月`
@@ -272,24 +320,38 @@ export class CalendarView {
             ? `<b>${a.getFullYear()}</b> 年 <b>${a.getMonth() + 1}</b>–<b>${b.getMonth() + 1}</b> 月`
             : `<b>${a.getFullYear()}</b> 年 <b>${a.getMonth() + 1}</b> 月`
       const t = this.store.today
-      sub = `${md(mon)} – ${md(sun)}${t >= mon && t <= sun ? '・今週' : ''}`
+      sub = `${md(start)} – ${md(end)}${view === 'week' && t >= start && t <= end ? '・今週' : ''}`
     }
     this.el.title.innerHTML = `<span>${title}</span><small>${sub}</small>`
     this.el.today.disabled = this.date === this.store.today
     for (const b of this.root.querySelectorAll('[data-mode]')) {
-      b.classList.toggle('on', b.dataset.mode === this.mode)
-      b.setAttribute('aria-pressed', b.dataset.mode === this.mode)
+      b.classList.toggle('on', b.dataset.mode === view)
+      b.setAttribute('aria-pressed', b.dataset.mode === view)
     }
+  }
+
+  // 時間格要畫哪幾天：週檢視是週一開始的 7 天；
+  // 三日檢視是跟著正在看的那天走的 3 天窗，走出窗外才移動：往前或往後一天只推一格，跳遠了那天放第一格
+  _days() {
+    if (this.view === 'week') return { start: weekKey(this.date), n: 7 }
+    const off = this._d3 ? daysBetween(this._d3, this.date) : -9
+    if (off === 3) this._d3 = addDays(this._d3, 1)
+    else if (off < 0 || off > 3) this._d3 = this.date
+    return { start: this._d3, n: 3 }
   }
 
   _renderMain() {
     const main = this.el.main
-    const key = this.mode === 'month' ? 'm' + this.date.slice(0, 7) : 'w' + weekKey(this.date)
+    const view = this.view
+    const days = view === 'month' ? null : this._days()
+    const key = days ? view[0] + days.start : 'm' + this.date.slice(0, 7)
     const same = key === this._period
     const scroll = $('.cw-body', main)?.scrollTop
-    main.dataset.mode = this.mode
-    main.innerHTML = this.mode === 'month' ? this._month() : this._week()
-    if (this.mode === 'month' && this._fitBars()) main.innerHTML = this._month()
+    // 不能叫 data-mode：會被當成檢視按鈕（點空白處切檢視、點兩下前往失效）
+    main.dataset.view = view
+    main.innerHTML = days ? this._week(days.start, days.n) : this._month()
+    if (!days && this._fitBars()) main.innerHTML = this._month()
+    this._shown = view
     const body = $('.cw-body', main)
     if (body) body.scrollTop = same && scroll != null ? scroll : this._autoScroll(body)
     // 換月／換週：內容輕輕滑進來
@@ -447,15 +509,14 @@ export class CalendarView {
     </button>`
   }
 
-  // ── 週檢視 ──
-  _weekData() {
+  // ── 週檢視／三日檢視：從 start 開始 n 天的時間格 ──
+  _weekData(start, n) {
     const s = this.store
-    const mon = weekKey(this.date)
-    const ghosts = this._ghosts(mon, 7)
+    const ghosts = this._ghosts(start, n)
     const r = s.state.rhythm || DEFAULT_RHYTHM
     let [from, to] = awake(r)
-    const days = Array.from({ length: 7 }, (_, i) => {
-      const date = addDays(mon, i)
+    const days = Array.from({ length: n }, (_, i) => {
+      const date = addDays(start, i)
       const sum = s.daySummary(date)
       const g = ghosts.get(date) || []
       const blocks = [
@@ -474,20 +535,21 @@ export class CalendarView {
     return { days, from, to }
   }
 
-  _week() {
+  _week(start, n) {
     const s = this.store
-    const { days, from, to } = this._weekData()
+    const { days, from, to } = this._weekData(start, n)
     const span = to - from
     const starts = days.flatMap((x) => x.blocks.map((b) => b.start))
-    this._range = [from, span, starts.length ? Math.min(...starts) : null]
+    this._range = [from, span, starts.length ? Math.min(...starts) : null, start, n]
     const pct = (m) => `${(((m - from) / span) * 100).toFixed(3)}%`
     let anyGhost = false
 
     const head = days
-      .map(({ date, sum }, i) => {
+      .map(({ date, sum }) => {
         const d = parseDate(date)
-        return `<button type="button" class="${this._dayCls(date, 'cw-day')}" data-day="${date}" tabindex="${date === this.date ? 0 : -1}" aria-pressed="${date === this.date}"${date === s.today ? ' aria-current="date"' : ''} aria-label="${d.getMonth() + 1} 月 ${d.getDate()} 日（${DOW[i]}）">
-          <small>${DOW[i]}</small><b>${d.getDate()}</b>${this._moodStamp(sum, 'cc-mood cw-mood')}
+        const dow = DOW[(d.getDay() + 6) % 7]
+        return `<button type="button" class="${this._dayCls(date, 'cw-day')}" data-day="${date}" tabindex="${date === this.date ? 0 : -1}" aria-pressed="${date === this.date}"${date === s.today ? ' aria-current="date"' : ''} aria-label="${d.getMonth() + 1} 月 ${d.getDate()} 日（${dow}）">
+          <small>${dow}</small><b>${d.getDate()}</b>${this._moodStamp(sum, 'cc-mood cw-mood')}
         </button>`
       })
       .join('')
@@ -540,7 +602,7 @@ export class CalendarView {
       .join('')
 
     return `
-      <div class="cw" style="--hours:${span / 60}">
+      <div class="cw${n === 3 ? ' d3' : ''}" style="--hours:${span / 60};--n:${n}">
         <div class="cw-head"><span class="cw-gut"></span>${head}</div>
         <div class="cw-all"><span class="cw-gut">摘要</span>${all}</div>
         <div class="cw-body"><div class="cw-hours" aria-hidden="true">${hours.join('')}</div>${cols}</div>
@@ -555,21 +617,20 @@ export class CalendarView {
       </div>`
   }
 
-  // 週檢視第一次出現時捲到「現在」或第一個區塊附近
+  // 時間格第一次出現時捲到「現在」或第一個區塊附近
   _autoScroll(body) {
     const col = $('.cw-col', body)
     if (!col || !this._range) return 0
-    const [from, span, first] = this._range
+    const [from, span, first, start, n] = this._range
     const s = this.store
-    const mon = weekKey(this.date)
     let target = from
-    if (s.today >= mon && s.today <= addDays(mon, 6)) target = nowMin() - 90
+    if (s.today >= start && s.today <= addDays(start, n - 1)) target = nowMin() - 90
     else if (first != null) target = first - 30
     return Math.max(0, ((target - from) / span) * col.offsetHeight)
   }
 
   _nowTick() {
-    if (!this.isOpen || this.mode !== 'week' || !this._range) return
+    if (!this.isOpen || this.view === 'month' || !this._range) return
     const [from, span] = this._range
     const now = nowMin()
     const top = `${(((now - from) / span) * 100).toFixed(3)}%`

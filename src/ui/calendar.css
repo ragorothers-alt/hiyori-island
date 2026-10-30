@@ -27,9 +27,10 @@ body.night .calendar { background: rgba(10, 18, 45, .38); }
 .cal-today { min-height: 32px; padding: 4px 14px; font-size: 12.5px; }
 .cal-today:disabled { opacity: .45; }
 .cal-mode button { min-width: 46px; min-height: 32px; font-size: 13px; padding: 4px 12px; }
+.cal-mode .cal-d3 { display: none; }
 
-/* 主區：月格或時間格 */
-.cal-main { min-width: 0; min-height: 0; padding: 10px 14px 10px 18px; display: flex; flex-direction: column; overflow: hidden; }
+/* 主區：月格或時間格；觸控時左右滑換頁（calendar.js _bindSwipe），所以橫向的手勢不交給瀏覽器 */
+.cal-main { min-width: 0; min-height: 0; padding: 10px 14px 10px 18px; display: flex; flex-direction: column; overflow: hidden; touch-action: pan-y pinch-zoom; }
 .cal-main > * { flex: 1; min-height: 0; }
 .cal-side { min-height: 0; overflow-y: auto; padding: 16px 18px 22px; border-left: 1px solid var(--line); scrollbar-width: thin; scrollbar-color: rgba(120, 150, 190, .3) transparent; }
 
@@ -133,9 +134,9 @@ body.night .cc-hb em { color: #a6e3c8; }
   .cl-touch { display: inline-flex !important; }
 }
 
-/* ── 週檢視 ── */
+/* ── 週檢視／三日檢視（--n 是天數） ── */
 .cw { --hh: 46px; --gut: 50px; display: flex; flex-direction: column; min-height: 0; }
-.cw-head, .cw-all, .cw-body { display: grid; grid-template-columns: var(--gut) repeat(7, minmax(0, 1fr)); column-gap: 5px; scrollbar-width: thin; scrollbar-gutter: stable; }
+.cw-head, .cw-all, .cw-body { display: grid; grid-template-columns: var(--gut) repeat(var(--n, 7), minmax(0, 1fr)); column-gap: 5px; scrollbar-width: thin; scrollbar-gutter: stable; }
 .cw-head, .cw-all { overflow: hidden; flex: none; }
 .cw-gut { font-size: 10.5px; color: var(--ink-faint); text-align: right; padding-right: 8px; align-self: center; letter-spacing: .1em; }
 .cw-day { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 2px 6px; border-radius: 14px; transition: background .2s; }
@@ -275,7 +276,8 @@ body.night .cd-amt { color: #f3cf7f; }
   .cal-grid { grid-template-rows: repeat(6, minmax(92px, auto)); }
   .cal-side { overflow: visible; border-left: 0; border-top: 1px solid var(--line); padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); }
   .cw-body { overflow: visible; }
-  .cw-head { position: sticky; top: 61px; z-index: 5; background: var(--glass-strong); }
+  /* 和上面的標頭一樣加模糊，捲過去的區塊才不會透出來疊在日期上 */
+  .cw-head { position: sticky; top: 61px; z-index: 5; background: var(--glass-strong); backdrop-filter: blur(16px); }
 }
 
 /* ── 手機：月格精簡成小點 ── */
@@ -329,6 +331,20 @@ body.night .cd-amt { color: #f3cf7f; }
   .cw-blk small { display: none; }
   .cw-blk.task { padding-left: 4px; }
   .cw-blk.task .ck { display: none; }
+
+  /* 三日檢視：欄夠寬，區塊放回時間和小圓圈，摘要也寫完整 */
+  .cal-mode .cal-d3 { display: block; }
+  .cw.d3 { --hh: 44px; }
+  .cw.d3 :is(.cw-head, .cw-all, .cw-body) { column-gap: 4px; }
+  .cw.d3 .cw-blk { padding: 2px 5px 2px 6px; font-size: 11.5px; border-radius: 7px; border-left-width: 3px; }
+  .cw.d3 .cw-blk small { display: block; }
+  .cw.d3 .cw-blk.short small { display: none; }
+  .cw.d3 .cw-blk.task { padding-left: 16px; }
+  .cw.d3 .cw-blk.task .ck { display: block; }
+  .cw.d3 .cw-allcell { flex-direction: row; flex-wrap: wrap; padding: 3px 2px; }
+  .cw.d3 .cw-chip { font-size: 10.5px; line-height: 18px; padding: 0 7px; }
+  .cw.d3 .cw-chip em { display: inline; }
+  .cw.d3 .cw-chip::before { content: none; }
 
   .cal-side { padding: 14px 12px calc(28px + env(safe-area-inset-bottom)); }
   .cd-row { min-height: 44px; }
