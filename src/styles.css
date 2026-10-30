@@ -13,6 +13,7 @@
   --glass-strong: rgba(255, 255, 255, 0.82);
   --glass-hover: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(255, 255, 255, 0.86);
+  --glass-solid: rgba(240, 246, 251, 0.94);
   --line: rgba(110, 140, 175, 0.16);
   --field: rgba(255, 255, 255, 0.66);
   --shadow: 0 12px 40px rgba(70, 110, 160, 0.16), 0 2px 8px rgba(70, 110, 160, 0.07);
@@ -31,6 +32,7 @@ body.night {
   --glass-strong: rgba(40, 52, 94, 0.82);
   --glass-hover: rgba(52, 66, 112, 0.7);
   --glass-border: rgba(170, 190, 240, 0.28);
+  --glass-solid: rgba(26, 34, 66, 0.95);
   --line: rgba(170, 190, 240, 0.16);
   --field: rgba(255, 255, 255, 0.08);
   --shadow: 0 12px 40px rgba(5, 10, 35, 0.35);
@@ -742,7 +744,11 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 /* ── 全螢幕編輯：面板撐滿日期列與 Dock 之間，寬螢幕時內容排成左右兩欄 ── */
 .full-btn { color: var(--ink-faint); }
 .full-btn[aria-pressed="true"] { color: var(--sakura); }
-.panel.full { top: 84px; bottom: 84px; left: 20px; right: 20px; width: auto; z-index: 44; animation: panelFull .4s var(--ease); }
+/* 撐滿畫面後背後的島會透出一片色塊，改用幾乎不透的底，文字才讀得清楚 */
+.panel.full {
+  top: 84px; bottom: 84px; left: 20px; right: 20px; width: auto; z-index: 44; animation: panelFull .4s var(--ease);
+  background: var(--glass-solid); backdrop-filter: blur(28px) saturate(120%); -webkit-backdrop-filter: blur(28px) saturate(120%);
+}
 @keyframes panelFull { from { opacity: .5; transform: scale(.985); } }
 .panel.full .panel-body { padding: 20px 28px 32px; }
 .panel.full .tab-page { max-width: 1240px; margin: 0 auto; }
