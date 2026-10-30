@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- iOS 點到字小於 16px 的輸入框會自動放大整頁；只在 iOS 加 maximum-scale，iOS 仍然可以手動縮放 -->
+  <script>
+    if (/iP(hone|ad|od)/.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1))
+      document.querySelector('meta[name=viewport]').content += ', maximum-scale=1'
+  </script>
   <meta name="theme-color" content="#cfe8f5" />
   <title>ひより日和 · 日程小島</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -90,7 +95,7 @@
         </div>
         <div class="star-bar" id="starBar" hidden></div>
 
-        <form class="add-form" id="taskForm" autocomplete="off">
+        <form class="add-form" id="taskForm" autocomplete="off" data-fold>
           <input id="taskTitle" maxlength="80" placeholder="種下一個任務…" />
           <div class="quick-preview" id="quickPreview" hidden></div>
           <div class="form-row">
@@ -119,7 +124,7 @@
         <div class="pg-side">
         <div class="week-strip" id="weekStrip"></div>
         <div id="sleepCard"></div>
-        <form class="add-form" id="eventForm" autocomplete="off">
+        <form class="add-form" id="eventForm" autocomplete="off" data-fold>
           <input id="eventTitle" maxlength="60" placeholder="新增日程，例如：設計週會" />
           <div class="form-row">
             <label class="time-field"><input type="time" id="eventStart" value="09:00" /></label>

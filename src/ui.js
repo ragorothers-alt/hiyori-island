@@ -19,6 +19,9 @@ import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
 
 const TAB_ORDER = ['tasks', 'schedule', 'habits', 'projects', 'records']
+// 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
+export const SIDE_PHONE = '(max-width: 860px) and (max-height: 500px) and (orientation: landscape)'
+export const sheetLayout = () => matchMedia('(max-width: 860px)').matches && !matchMedia(SIDE_PHONE).matches
 const THEME_INFO = {
   auto: '跟著真實時間，傍晚會自然變成夜晚',
   system: '跟著電腦或手機的深色模式',
@@ -159,6 +162,8 @@ export class UI {
     $('#levelModal').addEventListener('click', (e) => {
       if (e.target.id === 'levelModal') this.closeModal()
     })
+    this._bindFold()
+    this._bindSheet()
 
     addEventListener('keydown', (e) => {
       const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)
@@ -212,6 +217,70 @@ export class UI {
     if (collapsed) this.toggleFull(false)
     panel.classList.toggle('collapsed', collapsed)
     document.body.classList.toggle('panel-collapsed', collapsed)
+  }
+
+  // 手機直式：在分頁列上往上滑展開面板（收起 → 半開 → 全螢幕），往下滑收回
+  _bindSheet() {
+    const panel = $('#panel')
+    const bar = $('#panel .tabs')
+    let start = null
+    let dragged = false
+    bar.addEventListener('pointerdown', (e) => {
+      if (!sheetLayout() || e.pointerType === 'mouse') return
+      start = { x: e.clientX, y: e.clientY }
+      dragged = false
+    })
+    bar.addEventListener('pointermove', (e) => {
+      if (!start) return
+      const dy = e.clientY - start.y
+      if (!dragged && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(e.clientX - start.x)) {
+        dragged = true
+        panel.classList.add('dragging')
+        bar.setPointerCapture(e.pointerId)
+      }
+      // 面板跟著手指動一點，放開時再決定停在哪一段
+      if (dragged) panel.style.translate = `0 ${Math.max(-50, Math.min(80, dy * 0.6))}px`
+    })
+    const end = (e) => {
+      if (!start) return
+      const dy = e.clientY - start.y
+      start = null
+      if (!dragged) return
+      panel.classList.remove('dragging')
+      panel.style.translate = ''
+      if (e.type === 'pointercancel' || Math.abs(dy) < 40) return
+      const collapsed = panel.classList.contains('collapsed')
+      const full = panel.classList.contains('full')
+      if (dy < 0) collapsed ? this.togglePanel(false) : this.toggleFull(true)
+      else full ? this.toggleFull(false) : this.togglePanel(true)
+    }
+    bar.addEventListener('pointerup', end)
+    bar.addEventListener('pointercancel', end)
+    // 滑完放開時，手指底下的分頁不算點到
+    bar.addEventListener(
+      'click',
+      (e) => {
+        if (!dragged) return
+        dragged = false
+        e.stopPropagation()
+        e.preventDefault()
+      },
+      true,
+    )
+  }
+
+  // 手機上新增表單平常只露出標題欄，點進去才展開優先度、重複、分類（styles.css 的 .add-form[data-fold]）
+  _bindFold() {
+    for (const form of $$('.add-form[data-fold]')) {
+      const input = form.querySelector('input')
+      const open = (on) => form.classList.toggle('open', on)
+      form.addEventListener('focusin', () => open(true))
+      form.addEventListener('pointerdown', () => open(true))
+      // iOS 點按鈕不會拿到焦點，不能靠 focusout：點到表單以外、標題又是空的才收起
+      document.addEventListener('pointerdown', (e) => {
+        if (form.classList.contains('open') && !form.contains(e.target) && !input.value.trim()) open(false)
+      })
+    }
   }
 
   // 全螢幕編輯：面板蓋滿整個畫面，寬螢幕時內容排成左右兩欄
@@ -1066,7 +1135,7 @@ export class UI {
     $('#achCount').textContent = `${n} / ${ACHIEVEMENTS.length}`
     $('#achGrid').innerHTML = ACHIEVEMENTS.map((a) => {
       const ok = !!got[a.id]
-      return `<div class="stamp ${ok ? '' : 'locked'}">
+      return `<div class="stamp ${ok ? '' : 'locked'}" tabindex="0">
         <div class="stamp-k">${ok ? a.kanji : '？'}</div>
         <div class="stamp-n">${ok ? esc(a.title) : '？？？'}</div>
         <div class="tip"><b>${esc(a.name)}・${esc(a.title)}</b>${esc(a.desc)}${ok ? `<br><small>${new Date(got[a.id]).toLocaleDateString('zh-TW')} 取得</small>` : ''}</div>

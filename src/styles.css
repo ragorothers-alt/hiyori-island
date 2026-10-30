@@ -157,8 +157,9 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .panel {
   position: fixed; top: 18px; right: 20px; bottom: 18px; width: 384px; z-index: 10;
   display: flex; flex-direction: column; overflow: hidden;
-  transition: transform .5s var(--ease), opacity .4s, background .8s;
+  transition: transform .5s var(--ease), opacity .4s, background .8s, translate .35s var(--ease);
 }
+.panel.dragging { transition: none; }
 .panel.collapsed { transform: translateX(calc(100% + 30px)); opacity: 0; pointer-events: none; }
 .tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; align-items: center; gap: 3px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
 .tab { padding: 8px 4px 6px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--ink-soft); transition: background .2s, color .2s; }
@@ -240,7 +241,8 @@ body.night input[type=time], body.night input[type=date] { color-scheme: dark; }
 .done .check svg, .check.on svg { opacity: 1; transform: none; }
 .item-main { flex: 1; min-width: 0; }
 .item-title { font-size: 14px; line-height: 1.4; word-break: break-word; }
-.item-meta { font-size: 11px; color: var(--ink-faint); display: flex; gap: 8px; margin-top: 1px; align-items: center; }
+.item-meta { font-size: 11px; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: 1px; align-items: center; }
+.item-meta > * { white-space: nowrap; }
 .pri { font-family: var(--font-num); letter-spacing: .1em; }
 .pri-3 { color: #e08aa2; }
 .item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity .2s; }
@@ -282,6 +284,8 @@ body.night .proj-pct { filter: none; }
 .ms.done span { color: var(--ink-faint); text-decoration: line-through; }
 .ms .mini { opacity: 0; }
 .ms:hover .mini { opacity: 1; }
+/* 觸控裝置沒有「滑過」：任務和里程碑的小按鈕直接淡淡地顯示，不然找不到 */
+@media (hover: none) { .item-actions, .ms .mini { opacity: .7; } }
 .ms-add { display: flex; gap: 6px; margin-top: 6px; }
 .ms-add input { flex: 1; border: 0; outline: 0; background: rgba(140, 170, 200, .12); border-radius: 10px; padding: 5px 9px; font-size: 12.5px; }
 .proj-actions { display: flex; gap: 4px; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
@@ -328,11 +332,11 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
   opacity: 0; pointer-events: none; transition: .2s; text-align: left;
 }
 .stamp .tip b { font-family: var(--font-display); font-weight: 400; display: block; font-size: 13px; }
-.stamp:hover .tip { opacity: 1; transform: translateX(-50%); }
+.stamp:is(:hover, :focus) .tip { opacity: 1; transform: translateX(-50%); }
 .stamps .stamp:nth-child(4n+1) .tip { left: 0; transform: translateY(4px); }
-.stamps .stamp:nth-child(4n+1):hover .tip { transform: none; }
+.stamps .stamp:nth-child(4n+1):is(:hover, :focus) .tip { transform: none; }
 .stamps .stamp:nth-child(4n) .tip { left: auto; right: 0; transform: translateY(4px); }
-.stamps .stamp:nth-child(4n):hover .tip { transform: none; }
+.stamps .stamp:nth-child(4n):is(:hover, :focus) .tip { transform: none; }
 .data-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 20px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .data-tools > * { font-size: 12px; }
 
@@ -484,6 +488,17 @@ body.night .stage-fade { background: #1d1a2a; }
   .toasts { top: 64px; width: calc(100% - 20px); }
   .toast { max-width: 100%; }
   .stamp .tip { width: 130px; }
+}
+@media (max-width: 860px) {
+  /* 抽屜頂端的小橫條：提示分頁列可以上下滑（ui.js _bindSheet） */
+  .panel::before { content: ''; position: absolute; top: 4px; left: 50%; width: 34px; height: 4px; margin-left: -17px; border-radius: 2px; background: var(--ink-faint); opacity: .4; pointer-events: none; }
+  .tabs { touch-action: none; }
+  /* 新增表單平常只露出標題欄，點進去才展開其他選項（ui.js _bindFold） */
+  .add-form[data-fold]:not(.open) > :not(:first-child) { display: none; }
+  /* 任務頁：每日任務移到清單後面，打開面板先看到今天的花苞 */
+  .tab-page.active[data-page="tasks"] { display: flex; flex-direction: column; }
+  [data-page="tasks"] > :is(.pg-side, .pg-main) { display: contents; }
+  [data-page="tasks"] .quest-mini { order: 1; margin: 12px 0 0; }
 }
 /* ── もち的好感度 ── */
 .bond { padding: 12px 14px; border-radius: 16px; background: var(--field); }
@@ -807,4 +822,22 @@ body.in-room .hud, body.in-room .datebar, body.in-room .quests { opacity: 0; poi
 /* 窄螢幕專注中：Dock 多了停止和小屋按鈕，先收起商店和回到全景，避免超出畫面 */
 @media (max-width: 480px) {
   .dock:has(#focusStop:not([hidden])) :is(#shopBtn, #viewBtn) { display: none; }
+}
+
+/* ── 橫向手機：高度放不下下半部的抽屜，面板改回右側，Dock、日期列和提示讓到左邊的空間 ── */
+@media (max-width: 860px) and (max-height: 500px) and (orientation: landscape) {
+  body { --pw: min(380px, 44vw); --side: calc(var(--pw) + 16px); --mid: calc((100vw - var(--side)) / 2); }
+  body.panel-collapsed { --side: 0px; }
+  .panel { top: 8px; bottom: 8px; right: 8px; left: auto; width: var(--pw); height: auto; border-radius: 20px; border-bottom: 1px solid var(--glass-border); }
+  .panel::before { display: none; }
+  .panel.collapsed, body.in-room .panel.collapsed { transform: translateX(calc(100% + 20px)); opacity: 0; pointer-events: none; }
+  .panel.full { inset: 8px; height: auto; border-radius: 20px; }
+  .tabs { touch-action: auto; }
+  .hud { top: 8px; left: 8px; }
+  .datebar { top: 8px; right: calc(var(--side) + 8px); transition: right .5s var(--ease), opacity .4s, background .8s, border-color .8s; }
+  .dock, body.panel-collapsed .dock, body.in-room.panel-collapsed .dock { left: var(--mid); bottom: calc(8px + env(safe-area-inset-bottom)); transition: left .5s var(--ease); }
+  .toasts { top: 60px; left: var(--mid); width: min(420px, calc(100vw - var(--side) - 20px)); }
+  :is(.shop, .focus-pick) { left: var(--mid); bottom: 62px; width: min(560px, calc(100vw - var(--side) - 20px)); }
+  .shop-card { max-height: calc(100dvh - 130px); }
+  .place-bar { top: 60px; left: var(--mid); }
 }

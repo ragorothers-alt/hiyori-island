@@ -1,7 +1,7 @@
 import './styles.css'
 import * as THREE from 'three'
 import { Store, toMin, minToHHMM, repeatLabel, daysBetween } from './store.js'
-import { UI } from './ui.js'
+import { UI, sheetLayout } from './ui.js'
 import { World } from './scene/world.js'
 import { Sky } from './scene/sky.js'
 import { Island, LAYOUT } from './scene/island.js'
@@ -376,7 +376,8 @@ async function boot() {
 
   // 小島置中在面板以外的區域
   const panel = document.getElementById('panel')
-  const wide = () => innerWidth > 860
+  // 寬螢幕和橫向手機：面板在右側；手機直式：面板是下半部的抽屜
+  const wide = () => !sheetLayout()
   const panelShift = (collapsed) => wide()
     ? { x: collapsed ? 0 : (panel.offsetWidth + 20) / 2, y: 0 }
     : { x: 0, y: collapsed ? 30 : innerHeight * 0.25 - 36 }

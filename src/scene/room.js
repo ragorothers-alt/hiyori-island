@@ -143,11 +143,11 @@ export class Room {
     const at = this.center
     const tan = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))
     // 可見範圍的半高、半寬換成鏡頭的斜率，四周留 3% 的邊；
-    // 直式畫面房間顯得很扁，左右各裁掉一點外牆，屋裡就能大一些
+    // 直式畫面房間顯得很扁，左右各裁掉一點外牆，屋裡就能大一些；畫面越瘦長裁得越多
     const aw = r.right - r.left
     const ah = r.bottom - r.top
     const ty = tan * (ah / H) * 0.97
-    const tx = tan * cam.aspect * (aw / W) * (aw < ah ? 1.22 : 0.97)
+    const tx = tan * cam.aspect * (aw / W) * (aw < ah ? THREE.MathUtils.clamp((ah / aw) * 0.75, 1.22, 1.5) : 0.97)
     const { d, ox, oy } = this._fit(tx, ty)
     cam.position.copy(at).addScaledVector(dir, d)
     cam.position.x += Math.sin(t * 0.13) * 0.06
