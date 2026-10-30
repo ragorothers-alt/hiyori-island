@@ -360,13 +360,21 @@ async function boot() {
   const panelShift = (collapsed) => wide()
     ? { x: collapsed ? 0 : (panel.offsetWidth + 20) / 2, y: 0 }
     : { x: 0, y: collapsed ? 30 : innerHeight * 0.25 - 36 }
+  // 全螢幕編輯時面板蓋住整個畫面：小島維持原本的取景，場景也降低幀率
+  const full = () => panel.classList.contains('full')
   const updateShift = () => {
+    world.covered = full()
+    if (full()) return
     const { x, y } = panelShift(panel.classList.contains('collapsed'))
     world.setViewShift(x, y)
   }
   // 星之大樹放在預設視角（面板展開時）看得到的右上角：日期列下方、面板左側；
   // 雲鯨的弧線也依同一個可見範圍決定高度
+  let skyStale = false
   const placeSky = () => {
+    // 全螢幕時量不到平常的面板寬度，等離開全螢幕再算
+    skyStale = full()
+    if (skyStale) return
     const cam = world.homeCamera(panelShift(false))
     const right = (wide() ? innerWidth - panel.offsetWidth - 20 : innerWidth) - 14
     const top = document.querySelector('.datebar').getBoundingClientRect().bottom + 14
@@ -383,7 +391,10 @@ async function boot() {
       dy: (roomTop + bottom) / 2 - (innerHeight / 2 - y),
     }
   }
-  new MutationObserver(updateShift).observe(panel, { attributes: true, attributeFilter: ['class'] })
+  new MutationObserver(() => {
+    updateShift()
+    if (skyStale) placeSky()
+  }).observe(panel, { attributes: true, attributeFilter: ['class'] })
   addEventListener('resize', updateShift)
   addEventListener('resize', placeSky)
   updateShift()
@@ -936,7 +947,10 @@ async function boot() {
 
   // 專注時才出現的「屋內／小島」切換鈕
   const roomBtn = document.getElementById('roomBtn')
-  roomBtn.onclick = () => (room.active ? room.exit() : room.enter())
+  roomBtn.onclick = () => {
+    ui.toggleFull(false)
+    room.active ? room.exit() : room.enter()
+  }
   world.add(() => {
     if (roomBtn.hidden === duo.inside) roomBtn.hidden = !duo.inside
     if (roomBtn.classList.contains('on') !== room.active) {

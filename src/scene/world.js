@@ -62,6 +62,8 @@ export class World {
     this.idleRotate = true
     // 省電：閒置時降低幀率（powerSave 由設定控制）
     this.powerSave = true
+    // 全螢幕面板蓋住場景時：一律用最低幀率
+    this.covered = false
     this.renders = 0
     this._lastRender = 0
     this.busyUntil = 0
@@ -116,6 +118,7 @@ export class World {
 
   // 閒置程度：0 = 全速、1 = 30fps、2 = 15fps 且停止自動旋轉
   idleLevel(now = performance.now()) {
+    if (this.covered) return 2
     if (!this.powerSave || this.dragging || this._focusing || tweensActive() || now < this.busyUntil) return 0
     const quiet = now - this.lastInteract
     return quiet > 90000 ? 2 : quiet > 15000 ? 1 : 0

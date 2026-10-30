@@ -73,11 +73,14 @@
       <button class="tab" data-tab="habits" role="tab"><span>習慣</span><small>しゅうかん</small></button>
       <button class="tab" data-tab="projects" role="tab"><span>專案</span><small>しごと</small></button>
       <button class="tab" data-tab="records" role="tab"><span>紀錄</span><small>きろく</small></button>
+      <button class="icon-btn small full-btn" id="fullBtn" title="全螢幕編輯 (E)" aria-pressed="false"></button>
     </nav>
 
     <div class="panel-body">
       <!-- 任務 -->
+      <!-- 每頁分成 pg-side／pg-main：平常上下接著排，全螢幕時變成左右兩欄 -->
       <section class="tab-page active" data-page="tasks">
+        <div class="pg-side">
         <div class="bloom-summary">
           <div class="bloom-ring" id="bloomRing"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16"/><circle cx="20" cy="20" r="16" class="fg" id="bloomArc"/></svg><b id="bloomPct">0%</b></div>
           <div>
@@ -103,13 +106,17 @@
         </form>
 
         <div class="quest-mini"><h4>今日のおつとめ</h4><ul id="questMini"></ul></div>
+        </div>
+        <div class="pg-main">
         <div id="overdueBox"></div>
         <ul class="list" id="taskList"></ul>
         <details class="routines" id="taskRoutines" hidden><summary></summary><ul></ul></details>
+        </div>
       </section>
 
       <!-- 日程 -->
       <section class="tab-page" data-page="schedule">
+        <div class="pg-side">
         <div class="week-strip" id="weekStrip"></div>
         <div id="sleepCard"></div>
         <form class="add-form" id="eventForm" autocomplete="off">
@@ -135,11 +142,16 @@
           </select>
           <button type="button" class="chip-toggle" id="notifyBtn">開啟系統通知</button>
         </div>
+        </div>
+        <div class="pg-main">
         <div class="plan-bar" id="planBar"></div>
         <div class="tray" id="planTray"></div>
         <div class="dayline" id="dayline"></div>
+        </div>
+        <div class="pg-side pg-after">
         <details class="routines" id="eventRoutines" hidden><summary></summary><ul></ul></details>
         <details class="rhythm-box" id="rhythmBox"><summary>作息設定<small>せいかつリズム</small></summary><div id="rhythmForm"></div></details>
+        </div>
       </section>
       <!-- 習慣 -->
       <section class="tab-page" data-page="habits">
@@ -170,7 +182,8 @@
 
       <!-- 紀錄 -->
       <section class="tab-page" data-page="records">
-        <div id="lifeRoot"></div>
+        <div class="pg-side" id="lifeRoot"></div>
+        <div class="pg-main">
         <div class="stats-grid" id="statsGrid"></div>
         <button class="btn-ghost wide" id="reviewBtn">寫下今天的回顧</button>
         <button class="btn-ghost wide" id="weekBtn">看看上週的小結</button>
@@ -197,6 +210,7 @@
           <button class="btn-ghost" id="exportBtn">匯出資料</button>
           <label class="btn-ghost">匯入資料<input type="file" id="importInput" accept="application/json" hidden /></label>
           <button class="btn-ghost danger" id="resetBtn">重置小島</button>
+        </div>
         </div>
       </section>
     </div>

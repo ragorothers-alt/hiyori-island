@@ -108,7 +108,10 @@ export class UI {
     $('#prevDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, -1))
     $('#nextDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, 1))
     $('#todayBtn').onclick = () => this.store.selectDate(this.store.today)
-    $('#viewBtn').onclick = () => this.hooks.resetView()
+    $('#viewBtn').onclick = () => {
+      this.toggleFull(false)
+      this.hooks.resetView()
+    }
     $('#soundBtn').onclick = () => {
       const on = !this.store.state.settings.sound
       this.store.setSetting('sound', on)
@@ -116,6 +119,8 @@ export class UI {
       this.renderChrome()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
+    $('#fullBtn').onclick = () => this.toggleFull()
+    this.toggleFull(false)
     $('#calBtn').onclick = () => this.calendar.toggle()
     $('#dateMain').onclick = () => this.calendar.open()
     $('#dateMain').onkeydown = (e) => {
@@ -150,6 +155,8 @@ export class UI {
       if (e.key === 'Escape') {
         // 一次關一層：日曆上面還開著對話框（編輯、回顧…）時，只關對話框
         const modal = $$('.modal').some((m) => !m.hidden)
+        // 全螢幕面板在最底層：上面什麼都沒開、也不是在打字時才離開
+        const covered = modal || typing || this.calendar.isOpen || !$('#shop').hidden
         this.toggleShop(false)
         this.closeModal()
         if (!modal) this.calendar.close()
@@ -157,14 +164,19 @@ export class UI {
         if (!$('#reviewModal').hidden) $('#reviewLater').click()
         this.closeWeekCard()
         if (typing) document.activeElement.blur()
+        if (!covered) this.toggleFull(false)
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault()
         this.setTab('tasks')
         $('#taskTitle').focus()
-      } else if (e.key === 'v' || e.key === 'V') this.hooks.resetView()
-      else if (e.key === 's' || e.key === 'S') this.toggleShop()
+      } else if (e.key === 'e' || e.key === 'E') this.toggleFull()
+      // 回到全景是要看島，先離開全螢幕
+      else if (e.key === 'v' || e.key === 'V') {
+        this.toggleFull(false)
+        this.hooks.resetView()
+      } else if (e.key === 's' || e.key === 'S') this.toggleShop()
       else if (e.key === 'c' || e.key === 'C') this.calendar.toggle()
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
@@ -186,8 +198,25 @@ export class UI {
   togglePanel(force) {
     const panel = $('#panel')
     const collapsed = force === undefined ? !panel.classList.contains('collapsed') : force
+    if (collapsed) this.toggleFull(false)
     panel.classList.toggle('collapsed', collapsed)
     document.body.classList.toggle('panel-collapsed', collapsed)
+  }
+
+  // 全螢幕編輯：面板蓋滿整個畫面，寬螢幕時內容排成左右兩欄
+  toggleFull(force) {
+    const panel = $('#panel')
+    const full = force ?? !panel.classList.contains('full')
+    if (full) {
+      this.togglePanel(false)
+      this.toggleShop(false)
+    }
+    panel.classList.toggle('full', full)
+    document.body.classList.toggle('panel-full', full)
+    const b = $('#fullBtn')
+    b.innerHTML = full ? ICON.shrink : ICON.expand
+    b.title = full ? '離開全螢幕 (E / Esc)' : '全螢幕編輯 (E)'
+    b.setAttribute('aria-pressed', String(full))
   }
 
   // ── 任務 ──
@@ -1034,6 +1063,8 @@ export class UI {
   // ── 金平糖商店 ──
   toggleShop(force) {
     const open = force ?? $('#shop').hidden
+    // 商店要在島上擺東西，打開時先離開全螢幕
+    if (open) this.toggleFull(false)
     $('#shop').hidden = !open
     $('#shopBtn').classList.toggle('on', open)
     if (open) this.renderShop()
@@ -1216,6 +1247,8 @@ class FocusTimer {
       this.endAt = Date.now() + this.focusMin * 60000
       this.paused = null
       if (!this.task) this.taskId = null
+      // 專注時兩人會走進小木屋、計時器在 Dock 上，全螢幕會把它們蓋住
+      this.ui.toggleFull(false)
       this.hooks.focusStarted(false, this.taskId)
     } else if (this.paused != null) {
       this.endAt = Date.now() + this.paused

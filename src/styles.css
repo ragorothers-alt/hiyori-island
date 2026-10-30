@@ -152,7 +152,7 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   transition: transform .5s var(--ease), opacity .4s, background .8s;
 }
 .panel.collapsed { transform: translateX(calc(100% + 30px)); opacity: 0; pointer-events: none; }
-.tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+.tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; align-items: center; gap: 3px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
 .tab { padding: 8px 4px 6px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--ink-soft); transition: background .2s, color .2s; }
 .tab span { font-size: 14px; font-weight: 500; letter-spacing: .08em; }
 .tab small { font-family: var(--font-display); font-size: 10px; color: var(--ink-faint); letter-spacing: .1em; white-space: nowrap; }
@@ -698,3 +698,55 @@ body.night .bubble.fuji { background: rgba(62, 50, 104, .92); color: #f1ecff; }
 body.night .bubble.fuji::after { border-top-color: rgba(62, 50, 104, .92); }
 body.night .bubble::after { border-top-color: rgba(40, 52, 94, .9); }
 body.night .tooltip3d small { color: #aab6d0; }
+
+/* ── 全螢幕編輯：面板撐滿日期列與 Dock 之間，寬螢幕時內容排成左右兩欄 ── */
+.full-btn { color: var(--ink-faint); }
+.full-btn[aria-pressed="true"] { color: var(--sakura); }
+.panel.full { top: 84px; bottom: 84px; left: 20px; right: 20px; width: auto; z-index: 44; animation: panelFull .4s var(--ease); }
+@keyframes panelFull { from { opacity: .5; transform: scale(.985); } }
+.panel.full .panel-body { padding: 20px 28px 32px; }
+.panel.full .tab-page { max-width: 1240px; margin: 0 auto; }
+.panel.full .quest-mini { display: block; }
+.panel.full .stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* 專案：卡片排成格狀 */
+.panel.full [data-page="projects"] { max-width: 1100px; }
+.panel.full #projectForm { max-width: 640px; margin-left: auto; margin-right: auto; }
+.panel.full #projectList, .panel.full #archiveList { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.panel.full #projectList > .empty { grid-column: 1 / -1; }
+.panel.full .proj { margin-bottom: 0; }
+
+@media (min-width: 861px) {
+  body.panel-full .hud, body.panel-full .quests { opacity: 0; pointer-events: none; }
+  /* 提示改到左上角（等級卡的位置），不擋分頁列 */
+  body.panel-full .toasts { top: 14px; left: 20px; transform: none; align-items: flex-start; }
+  .panel.full .tabs { position: relative; grid-template-columns: repeat(5, 116px); justify-content: center; padding: 8px 56px; }
+  .panel.full .full-btn { position: absolute; right: 12px; top: calc(50% - 15px); }
+}
+@media (min-width: 861px) and (max-width: 979px) {
+  .panel.full .tab-page { max-width: 760px; }
+}
+@media (min-width: 980px) {
+  .panel.full .tab-page.active:is([data-page="tasks"], [data-page="schedule"], [data-page="records"]) {
+    display: grid; grid-template-columns: minmax(300px, 372px) minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 32px; align-items: start;
+  }
+  .panel.full .pg-side { grid-area: 1 / 1; min-width: 0; }
+  .panel.full .pg-after { grid-area: 2 / 1; }
+  .panel.full .pg-main { grid-area: 1 / 2 / 3 / 3; min-width: 0; }
+  /* 日程：右欄的時間軸固定在畫面裡、撐滿高度，左欄捲動時它不動 */
+  .panel.full [data-page="schedule"] .pg-main { position: sticky; top: 0; display: flex; flex-direction: column; height: calc(100dvh - 292px); min-height: 420px; }
+  .panel.full [data-page="schedule"] .dayline { flex: 1; min-height: 240px; max-height: none; margin-bottom: 0; }
+  /* 習慣：養成、戒除左右並排；只有一種時卡片排成兩欄 */
+  .panel.full #habitsRoot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
+  .panel.full #habitsRoot > * { grid-column: 1 / -1; }
+  .panel.full #habitsRoot > .hb-sec:not(:only-of-type) { grid-column: auto; }
+  .panel.full #habitsRoot > .hb-sec .sec-title { margin-top: 10px; }
+  .panel.full .hb-sec:only-of-type { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px; align-items: start; }
+  .panel.full .hb-sec:only-of-type > [data-k="t"] { grid-column: 1 / -1; }
+}
+@media (max-width: 860px) {
+  .panel.full { top: 64px; bottom: 0; left: 0; right: 0; height: auto; border-radius: 24px 24px 0 0; }
+  .panel.full .panel-body { padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); }
+  .panel.full .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .panel.full { animation: none; } }

@@ -12,7 +12,7 @@ const MONTH_JP = ['睦月', '如月', '弥生', '卯月', '皐月', '水無月',
 const DOW = ['一', '二', '三', '四', '五', '六', '日']
 const MODE_KEY = 'hiyori-cal-mode'
 // 日曆開著時不讓這些快捷鍵傳到底下（它們會動到被蓋住的面板）
-const SWALLOW = /^[1-5nNsSfFvV]$/
+const SWALLOW = /^[1-5nNsSfFvVeE]$/
 
 const colorOf = (i) => EVENT_COLORS[(+i || 0) % EVENT_COLORS.length]
 const md = (date) => {

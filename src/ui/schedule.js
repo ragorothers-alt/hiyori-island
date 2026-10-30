@@ -240,10 +240,10 @@ export class ScheduleView {
     $('#dayline').innerHTML = `<div class="dl-body" style="height:${(to - from) * PX}px">
       ${grid}<div class="dl-lane">${bands}${html}${nowLine}<div class="dl-drop" hidden></div></div></div>
       ${empty ? `<p class="dl-empty">${date < s.today ? '這天沒有排時段。' : '可以點空白處新增日程，或用「最佳化時程」安排任務。'}</p>` : ''}`
-    // 換日期時捲到現在（今天）或起床時間
-    if (this.scrolledFor !== date) {
+    // 換日期時捲到現在（今天）或起床時間；分頁還沒顯示時捲不動，等看得到再捲
+    const box = $('#dayline')
+    if (this.scrolledFor !== date && box.clientHeight) {
       this.scrolledFor = date
-      const box = $('#dayline')
       box.scrollTop = Math.max(0, y(isToday ? now - 60 : wake - 30))
     }
   }
