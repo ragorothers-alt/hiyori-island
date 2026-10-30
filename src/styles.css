@@ -757,3 +757,16 @@ body.night .tooltip3d small { color: #aab6d0; }
   .panel.full .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { .panel.full { animation: none; } }
+
+/* ── 小木屋室內：整個畫面交給屋裡，等級卡、日期列和每日任務先淡出，只留 Dock ── */
+.hud, .datebar, .quests { transition: opacity .4s, background .8s, border-color .8s; }
+body.in-room .hud, body.in-room .datebar, body.in-room .quests { opacity: 0; pointer-events: none; }
+@media (max-width: 860px) {
+  /* 手機：面板收到最底下（連分頁列都藏起來），Dock 貼著底部 */
+  body.in-room .panel.collapsed { transform: translateY(100%); }
+  body.in-room.panel-collapsed .dock { bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
+/* 窄螢幕專注中：Dock 多了停止和小屋按鈕，先收起商店和回到全景，避免超出畫面 */
+@media (max-width: 480px) {
+  .dock:has(#focusStop:not([hidden])) :is(#shopBtn, #viewBtn) { display: none; }
+}

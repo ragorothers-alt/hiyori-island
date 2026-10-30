@@ -394,24 +394,46 @@ async function boot() {
     decor.placeSky(cam, { right, top })
     const bottom = wide() ? innerHeight : innerHeight - panel.offsetHeight - 60
     decor.placeWhale(cam, { left: 0, right: right + 14, top, bottom })
-    // 小木屋室內的取景：可見範圍（手機扣掉上方日期列）佔整個畫面的比例，以及它的中心離畫面中心（含面板偏移）多遠
-    const { x, y } = panelShift(false)
-    const roomTop = wide() ? 0 : top - 8
-    room.area = {
-      w: (right + 14) / innerWidth,
-      h: (bottom - roomTop) / innerHeight,
-      dx: (right + 14) / 2 - (innerWidth / 2 - x),
-      dy: (roomTop + bottom) / 2 - (innerHeight / 2 - y),
+  }
+  // 小木屋室內的取景：整個畫面扣掉打開的面板和 Dock（進屋時其他資訊卡都會淡出）
+  const dock = document.querySelector('.dock')
+  const placeRoom = () => {
+    const W = innerWidth
+    const H = innerHeight
+    const open = !panel.classList.contains('collapsed')
+    if (wide()) {
+      room.area = { left: 0, top: 0, right: open ? W - panel.offsetWidth - 30 : W, bottom: H - 18 - dock.offsetHeight - 6 }
+    } else {
+      // 手機：面板打開時是下半部的抽屜，Dock 浮在它上面；收起時 Dock 貼在最下面
+      const dockBottom = open ? panel.offsetHeight + 10 : 12
+      room.area = { left: 0, top: 0, right: W, bottom: H - dockBottom - dock.offsetHeight - 6 }
     }
   }
+  // 進小木屋時把畫面整個交給屋裡：面板收起、等級卡和日期列淡出；出來時面板回到原本的樣子
+  let panelBeforeRoom = null
+  room.onToggle = (inside) => {
+    document.body.classList.toggle('in-room', inside)
+    if (inside) {
+      panelBeforeRoom ??= !panel.classList.contains('collapsed')
+      ui.togglePanel(true)
+    } else if (panelBeforeRoom != null) {
+      if (panelBeforeRoom) ui.togglePanel(false)
+      panelBeforeRoom = null
+    }
+    placeRoom()
+  }
+  if (room.active) room.onToggle(true)
   new MutationObserver(() => {
     updateShift()
     if (skyStale) placeSky()
+    placeRoom()
   }).observe(panel, { attributes: true, attributeFilter: ['class'] })
   addEventListener('resize', updateShift)
   addEventListener('resize', placeSky)
+  addEventListener('resize', placeRoom)
   updateShift()
   placeSky()
+  placeRoom()
   world.shift = { ...world.shiftTarget }
   world._applyShift()
 
