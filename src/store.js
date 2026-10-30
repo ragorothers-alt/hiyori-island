@@ -10,6 +10,7 @@ import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_ST
 import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
 import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
 import { LIFE_KINDS } from './data/life.js'
+import { THEMES } from './daylight.js'
 
 const KEY = 'hiyori-daily-v1'
 
@@ -56,7 +57,7 @@ export function repeatLabel(rep) {
 }
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
-export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true }
+export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto' }
 
 // 舊版固定的三個每日任務（舊存檔沿用）
 const LEGACY_QUESTS = ['tasks3', 'focus2', 'step1']
@@ -340,6 +341,7 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
+  if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
 
   // 睡眠：{ 醒來那天: { bed, wake, q } }
   const sleep = {}

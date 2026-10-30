@@ -84,6 +84,7 @@ body.night .haze { opacity: .2; }
   font-family: var(--font-display); color: var(--ink-soft); letter-spacing: .2em;
 }
 #loader.done { opacity: 0; visibility: hidden; }
+body.night #loader { background: linear-gradient(180deg, #192147, #283667 70%, #3a3f72); }
 .loader-mochi {
   width: 74px; height: 58px; border-radius: 50% 50% 46% 46% / 60% 60% 40% 40%;
   background: radial-gradient(circle at 35% 30%, #fff, #f4f1f3); position: relative;
@@ -144,6 +145,12 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .icon-btn.small { width: 30px; height: 30px; }
 .icon-btn.small svg { width: 16px; height: 16px; }
 .icon-btn.off { opacity: .45; }
+/* 白天顯示月亮（按了變夜晚），夜晚顯示太陽 */
+#themeBtn .i-sun, #themeBtn.night .i-moon { display: none; }
+#themeBtn.night .i-sun { display: block; }
+.theme-row { flex-wrap: wrap; }
+.theme-row > div:first-child { min-width: 150px; }
+.theme-row .seg { flex: none; }
 
 /* ── 主面板 ── */
 .panel {

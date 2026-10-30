@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { rng, smooth, clamp } from './util.js'
+import { rng, smooth } from './util.js'
+import { SUNRISE, SUNSET, sunElevation, lookHour, systemDark, realHour } from '../daylight.js'
 
 // 依真實時間變化的天空：漸層穹頂、太陽/月光、星星、雲與雲海
+// 外觀設定（白天／夜晚／跟著系統）會改變天空顯示的時間，切換時快轉過去：變夜晚看夕陽、變白天看日出
 const KEYS = [
   { h: 0, top: '#121a3d', mid: '#283667', bot: '#454a82' },
   { h: 4.6, top: '#1b2350', mid: '#36467a', bot: '#62649a' },
@@ -16,8 +18,6 @@ const KEYS = [
   { h: 24, top: '#121a3d', mid: '#283667', bot: '#454a82' },
 ].map((k) => ({ h: k.h, top: new THREE.Color(k.top), mid: new THREE.Color(k.mid), bot: new THREE.Color(k.bot) }))
 
-const SUNRISE = 5.9
-const SUNSET = 18.6
 const C_GOLD = new THREE.Color('#ffc6a8')
 const C_GOLD2 = new THREE.Color('#ffc9a6')
 const C_WHITE = new THREE.Color('#ffffff')
@@ -37,6 +37,14 @@ export class Sky {
     this.bot = new THREE.Color()
     this.night = 0
     this.hourOverride = null
+    this.theme = 'auto'
+    this.shown = null // 天空正在顯示的時間（快轉中會超過 24）
+    this._shift = null // 切換外觀時的快轉：{ from, ahead, t, sec }
+    if (typeof matchMedia === 'function') {
+      matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+        if (this.theme === 'system') this._retarget(() => {})
+      })
+    }
 
     // 穹頂
     this.uniforms = {
@@ -104,10 +112,28 @@ export class Sky {
     this.update(0, 0)
   }
 
+  // 真實時間（時之環的「現在」用這個）
   hour() {
     if (this.hourOverride != null) return this.hourOverride
-    const d = new Date()
-    return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600
+    return realHour()
+  }
+
+  setTheme(theme) {
+    if (theme !== this.theme) this._retarget(() => (this.theme = theme))
+  }
+  // 依外觀，天空該顯示的時間（0–24）
+  _target() {
+    return lookHour(((this.hour() % 24) + 24) % 24, this.theme, systemDark())
+  }
+  // 一律往後快轉到新的時間，跑過的時數越多稍微久一點
+  _retarget(change) {
+    const from = this.shown ?? this._target()
+    change()
+    const ahead = (((this._target() - from) % 24) + 24) % 24
+    if (ahead < 0.05 || ahead > 23.95) return
+    const sec = 1.2 + ahead * 0.08
+    this._shift = { from, ahead, t: 0, sec }
+    this.world.keepAwake(sec * 1000 + 300)
   }
 
   _stars(scene) {
@@ -201,7 +227,15 @@ export class Sky {
   }
 
   update(dt, t) {
-    const h = ((this.hour() % 24) + 24) % 24
+    let shown = this._target()
+    const s = this._shift
+    if (s) {
+      s.t = Math.min(1, s.t + dt / s.sec)
+      shown = s.from + s.ahead * smooth(0, 1, s.t)
+      if (s.t >= 1) this._shift = null
+    }
+    this.shown = shown
+    const h = ((shown % 24) + 24) % 24
     // 天色插值
     let i = 0
     while (i < KEYS.length - 2 && h >= KEYS[i + 1].h) i++
@@ -215,7 +249,7 @@ export class Sky {
 
     // 太陽軌跡：右 → 前上方 → 左
     const p = (h - SUNRISE) / (SUNSET - SUNRISE)
-    const elev = Math.sin(Math.PI * clamp(p, -0.2, 1.2))
+    const elev = sunElevation(h)
     const sunDir = _sunDir.set(Math.cos(Math.PI * p), elev * 1.25 + 0.05, 0.6).normalize()
     const day = smooth(-0.08, 0.32, elev)
     this.day = day

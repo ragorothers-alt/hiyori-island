@@ -11,12 +11,19 @@ import { LINES, FUJI_LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm } from './ui/dom.js'
+import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
 
 const TAB_ORDER = ['tasks', 'schedule', 'habits', 'projects', 'records']
+const THEME_INFO = {
+  auto: '跟著真實時間，傍晚會自然變成夜晚',
+  system: '跟著電腦或手機的深色模式',
+  day: '一直是白天，島上維持明亮',
+  night: '一直是夜晚，星星、燈籠和螢火蟲都會出來',
+}
 
 export const levelTitle = (lv) => LEVEL_TITLES[Math.min(lv, LEVEL_TITLES.length) - 1] || LEVEL_TITLES[0]
 const hhmm = (ts) => {
@@ -121,6 +128,8 @@ export class UI {
     $('#panelBtn').onclick = () => this.togglePanel()
     $('#fullBtn').onclick = () => this.toggleFull()
     this.toggleFull(false)
+    $('#themeBtn').onclick = () => this.toggleTheme()
+    this.renderTheme()
     $('#calBtn').onclick = () => this.calendar.toggle()
     $('#dateMain').onclick = () => this.calendar.open()
     $('#dateMain').onkeydown = (e) => {
@@ -172,6 +181,7 @@ export class UI {
         this.setTab('tasks')
         $('#taskTitle').focus()
       } else if (e.key === 'e' || e.key === 'E') this.toggleFull()
+      else if (e.key === 'd' || e.key === 'D') this.toggleTheme()
       // 回到全景是要看島，先離開全螢幕
       else if (e.key === 'v' || e.key === 'V') {
         this.toggleFull(false)
@@ -217,6 +227,37 @@ export class UI {
     b.innerHTML = full ? ICON.shrink : ICON.expand
     b.title = full ? '離開全螢幕 (E / Esc)' : '全螢幕編輯 (E)'
     b.setAttribute('aria-pressed', String(full))
+  }
+
+  // ── 白天／夜晚 ──
+  // 這個外觀設定下，現在天空是不是夜晚
+  _nightFor(theme) {
+    const h = this.hooks.hourNow?.() ?? realHour()
+    return nightAt(lookHour(((h % 24) + 24) % 24, theme, systemDark())) > 0.5
+  }
+
+  setTheme(theme) {
+    this.store.setSetting('theme', theme)
+    this.hooks.setTheme?.(theme)
+    this.renderSettings()
+    this.renderTheme()
+  }
+
+  // Dock 上的快速切換：換成和現在相反的；剛好等於依時間的結果，就回到依時間
+  toggleTheme() {
+    const night = !this._nightFor(this.store.state.settings.theme)
+    const theme = this._nightFor('auto') === night ? 'auto' : night ? 'night' : 'day'
+    this.setTheme(theme)
+    const where = '想換回來，到「紀錄 → 設定 → 夜間模式」'
+    if (theme === 'auto') this.toast({ icon: '時', title: '天色回到跟著時間走', sub: '傍晚會自然變成夜晚' })
+    else this.toast({ icon: night ? '夜' : '晝', title: night ? '換成夜晚了' : '換成白天了', sub: where })
+  }
+
+  renderTheme() {
+    const night = this._nightFor(this.store.state.settings.theme)
+    const b = $('#themeBtn')
+    b.classList.toggle('night', night)
+    b.title = night ? '切換成白天 (D)' : '切換成夜晚 (D)'
   }
 
   // ── 任務 ──
@@ -657,6 +698,9 @@ export class UI {
     const on = this.store.state.settings.powerSave
     $('#powerBtn').classList.toggle('on', on)
     $('#powerBtn').textContent = on ? '開' : '關'
+    const theme = this.store.state.settings.theme
+    $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.v === theme))
+    $('#themeInfo').textContent = THEME_INFO[theme]
   }
 
   // ── 雲端同步 ──
@@ -903,6 +947,10 @@ export class UI {
     $('#bondBox').addEventListener('click', (e) => {
       const b = e.target.closest('[data-outfit]:not(:disabled)')
       if (b) this.store.setOutfit(b.dataset.outfit, b.dataset.who)
+    })
+    $('#themePick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (b) this.setTheme(b.dataset.v)
     })
     $('#powerBtn').onclick = () => {
       const on = !this.store.state.settings.powerSave

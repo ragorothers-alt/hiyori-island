@@ -28,17 +28,22 @@ import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
 import { BOND_ACTS, actLevel, outfitOf } from './data/bond.js'
+import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const short = (s, n = 9) => ([...s].length > n ? [...s].slice(0, n - 1).join('') + '…' : s)
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '')
-// who：'mochi' 或 'fuji'，各自用自己的台詞
-function line(key, vars = {}, who = 'mochi') {
+// 描寫天色的字眼：外觀設定讓天空和真實時間不同時（例如白天開夜間模式），問候避開這些句子
+const SKY_WORDS = /陽光|晨光|太陽|曬|樹蔭|晚霞|夕陽|星星|月亮|夜色|天色|天黑|螢火蟲/
+// who：'mochi' 或 'fuji'，各自用自己的台詞；avoid：不要挑到符合的句子
+function line(key, vars = {}, who = 'mochi', avoid = null) {
   const src = who === 'fuji' ? FUJI_LINES : LINES
   // 'greet.morning'、'season.spring' 這種有點的鍵，往下一層找
-  const list = key.split('.').reduce((o, k) => o?.[k], src)
+  let list = key.split('.').reduce((o, k) => o?.[k], src)
   if (!list?.length) return ''
+  const ok = avoid ? list.filter((s) => !avoid.test(s)) : list
+  if (ok.length) list = ok
   return fill(pick(list), vars)
 }
 function greetKey() {
@@ -47,16 +52,21 @@ function greetKey() {
 }
 
 async function boot() {
+  const params = new URLSearchParams(location.search)
+  const store = new Store()
+  // 選了夜晚的話，載入畫面就先用深色，不要先閃一下白
+  const theme = store.state.settings.theme
+  const bootHour = params.has('hour') ? parseFloat(params.get('hour')) : realHour()
+  document.body.classList.toggle('night', nightAt(lookHour(bootHour, theme, systemDark())) > 0.5)
   // 兩位主角的模型和字型一起載
   const catsReady = preloadCats()
   // 等字型載入，3D 刻度文字才會用對字體（最多等 2.5 秒）
   await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 2500))])
-  const params = new URLSearchParams(location.search)
 
-  const store = new Store()
   const world = new World(document.getElementById('scene'))
   const sky = new Sky(world)
   if (params.has('hour')) sky.hourOverride = parseFloat(params.get('hour'))
+  sky.theme = theme
   const island = new Island(world)
   const decor = new Decor(world, sky)
   const garden = new Garden(world, sky)
@@ -76,8 +86,8 @@ async function boot() {
   const FUJI_KEYS = new Set(['reviewAsk', 'reviewDone', 'reschedule', 'reminder', 'eventDone', 'deadlineNear', 'onTime', 'routine', 'overdue', 'wilt', 'planAsk', 'starPick', 'starFull', 'questDone', 'weeklyReady', 'weeklyClaimed', 'charmBuy', 'charmUsed', 'breakEnd', 'tired', 'gift', 'planApplied', 'planFull', 'sleepGood', 'sleepShort', 'bedtime', 'habitSlip', 'quitMilestone'])
   const MOCHI_KEYS = new Set(['shopBuy', 'shopPlace', 'shopPoor', 'taskDone', 'highTaskDone', 'starDone', 'starAll', 'newFlower', 'rareFlower', 'water', 'revive', 'milestone', 'habitDone', 'habitAll', 'urgeResisted', 'lifeLogged'])
   const voice = (key) => (FUJI_KEYS.has(key) ? fuji : MOCHI_KEYS.has(key) ? mochi : pick([mochi, fuji]))
-  const talk = (key, vars = {}, ms, fallback = '', who = voice(key)) => {
-    who.say(line(key, vars, who.id) || fallback, ms)
+  const talk = (key, vars = {}, ms, fallback = '', who = voice(key), avoid = null) => {
+    who.say(line(key, vars, who.id, avoid) || fallback, ms)
     return who
   }
   // 兩人你一句我一句；pet 的對話用 self／other 代表被摸的那位和另一位
@@ -307,6 +317,9 @@ async function boot() {
     modalClosed: () => !room.active && world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
     setPowerSave: (on) => (world.powerSave = on),
+    setTheme: (t) => sky.setTheme(t),
+    // 現在幾點（網址帶 ?hour= 時用那個）
+    hourNow: () => sky.hour(),
     focusStarted: (resumed, taskId) => {
       duo.setFocus(true, resumed)
       garden.setFocus(taskId)
@@ -930,6 +943,7 @@ async function boot() {
       isNight = night
       document.body.classList.toggle('night', night)
       document.querySelector('meta[name=theme-color]')?.setAttribute('content', night ? '#283667' : '#cfe8f6')
+      ui.renderTheme()
     }
   })
 
@@ -988,7 +1002,9 @@ async function boot() {
       document.getElementById('loader').classList.add('done')
       setTimeout(() => {
         const g = greetKey()
-        if (!(g === 'greet.morning' && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800)
+        const skyDiffers = sky.night > 0.5 !== nightAt(((sky.hour() % 24) + 24) % 24) > 0.5
+        const avoid = skyDiffers ? SKY_WORDS : null
+        if (!(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
         mochi.celebrate()
         fuji.cheer(mochi.position)
       }, 900)
