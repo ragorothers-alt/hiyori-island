@@ -35,9 +35,10 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url)
 
   // 頁面：網路優先，離線時用快取
+  // no-cache：GitHub Pages 讓 HTML 在瀏覽器快取 10 分鐘，不加的話剛部署的新版要等快取過期才拿得到
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => {
           const copy = res.clone()
           caches.open(VERSION).then((c) => c.put('./index.html', copy))
