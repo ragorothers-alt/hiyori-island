@@ -1,7 +1,7 @@
 /* ── 日曆浮層：蓋住 3D 場景與右側面板，在 toast（50）與對話框（60）之下 ── */
 .calendar {
   position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 20px;
-  background: rgba(220, 235, 248, .3); backdrop-filter: blur(14px) saturate(130%); -webkit-backdrop-filter: blur(14px) saturate(130%);
+  background: rgba(220, 235, 248, .3); backdrop-filter: blur(14px) saturate(130%);
   animation: fadeIn .35s both;
 }
 /* 毛玻璃做在外層：外層有 backdrop-filter／淡入動畫時會成為 backdrop root，卡片自己的模糊看不到後面的畫面 */
@@ -269,7 +269,7 @@ body.night .cd-amt { color: #f3cf7f; }
   .calendar { display: block; padding: 0; overflow-y: auto; overscroll-behavior: contain; }
   .cal-card { display: flex; flex-direction: column; width: 100%; height: auto; min-height: 100%; max-height: none; border-radius: 0; border: 0; overflow: visible; }
   .cal-card > * { flex: none; min-height: auto; }
-  .cal-head { position: sticky; top: 0; z-index: 6; background: var(--glass-strong); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); padding: max(10px, env(safe-area-inset-top)) 12px 10px 16px; }
+  .cal-head { position: sticky; top: 0; z-index: 6; background: var(--glass-strong); backdrop-filter: blur(16px); padding: max(10px, env(safe-area-inset-top)) 12px 10px 16px; }
   .cal-main { overflow: visible; padding: 10px 12px 6px; }
   .cal-main > *, .cal-grid, .cw-body { flex: none; min-height: auto; }
   .cal-grid { grid-template-rows: repeat(6, minmax(92px, auto)); }
