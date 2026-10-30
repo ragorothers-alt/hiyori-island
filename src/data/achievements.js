@@ -47,4 +47,7 @@ export const ACHIEVEMENTS = [
   { id: 'life_30', name: '暮らしの手帖', title: '生活手帖', desc: '累計寫下30筆生活記錄', kanji: '帖', cond: { stat: 'lifeEntries', gte: 30 } },
   { id: 'sleep_7', name: 'おやすみ日誌', title: '晚安日誌', desc: '累計新增7筆睡眠記錄', kanji: '眠', cond: { stat: 'sleepLogs', gte: 7 } },
   { id: 'planner_10', name: '時の設計士', title: '時光設計師', desc: '累計套用10次最佳化時程（每次至少排入1件任務）', kanji: '時', cond: { stat: 'plansApplied', gte: 10 } },
+  { id: 'town_neighbor', name: 'はじめてのご近所', title: '第一位鄰居', desc: 'ひより町搬來第1位居民', kanji: '隣', cond: { stat: 'residents', gte: 1 } },
+  { id: 'town_six', name: 'にぎやかな町', title: '六戶人家', desc: '六位居民都搬進了ひより町', kanji: '町', cond: { stat: 'residents', gte: 6 } },
+  { id: 'town_full', name: '雲の上の町', title: '雲上的小鎮', desc: 'ひより町的六間店都長到第5階', kanji: '都', cond: { stat: 'townRank', gte: 30 } },
 ]

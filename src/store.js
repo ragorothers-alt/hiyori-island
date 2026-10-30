@@ -11,6 +11,17 @@ import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
 import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
 import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
+import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
+
+// 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
+const townStages = (stats) => {
+  const out = {}
+  for (const b of BUILDINGS) {
+    const st = buildingStage(b, stats).stage
+    if (st) out[b.key] = st
+  }
+  return out
+}
 
 const KEY = 'hiyori-daily-v1'
 
@@ -138,6 +149,7 @@ function seed() {
     sleep: {},
     habits: [],
     life: {},
+    town: { seen: {}, since: '' },
     journal: {},
     dex: {},
     weekly: {},
@@ -387,9 +399,23 @@ function migrate(s) {
       if (items.length || energy) life[d] = { items, energy }
     }
   }
+
+  // ひより町：各建築已經慶祝到第幾階。舊存檔沒有這欄時照現在的統計安靜補上，只打一次招呼
+  let town
+  if (isObj(s.town)) {
+    const seen = {}
+    const raw = isObj(s.town.seen) ? s.town.seen : {}
+    for (const b of BUILDINGS) {
+      const v = num(raw[b.key], 0, MAX_STAGE, 0)
+      if (v) seen[b.key] = v
+    }
+    town = { seen, since: ymd(s.town.since, '') }
+  } else {
+    town = { seen: townStages(stats), since: '', welcome: true }
+  }
   return {
     version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
-    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0,
+    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0,
   }
 }
 
@@ -427,6 +453,7 @@ export class Store {
     this._applyCharms()
     this._visit()
     this._quitMilestones(this._pending)
+    this._townWelcome()
     const made = this._ensureRoutines(this.today).length
     if (this._ensureQuests() || made) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
@@ -526,10 +553,16 @@ export class Store {
   get bond() {
     return bondLevel(this.state.player.bond.pts)
   }
+  // ひより町：各建築階段、等級、稱號、已搬來的居民（全由累積統計推算）
+  get town() {
+    return townOf(this.stats)
+  }
   statsSnapshot() {
     const found = Object.keys(this.state.dex)
+    const town = this.town
     return {
       ...this.stats, level: this.level.level, streak: this.streak, bondLevel: this.bond.level,
+      townRank: town.rank, residents: town.residents.length,
       flowersFound: found.length, legendFound: found.filter((k) => flowerOf(k)?.rarity === 'legend').length,
       bestHabit: Math.max(0, ...this.state.habits.filter((h) => h.kind === 'build').map((h) => bestStreak(h, this.today))),
       bestClean: Math.max(0, ...this.state.habits.filter((h) => h.kind === 'quit').map((h) => bestClean(h, this.today))),
@@ -678,6 +711,7 @@ export class Store {
     p.stats.bestStreak = Math.max(p.stats.bestStreak, p.streak)
   }
   _finish(fx = []) {
+    this._townCheck(fx)
     const got = this.state.player.achievements
     const snap = this.statsSnapshot()
     for (const a of ACHIEVEMENTS) {
@@ -701,6 +735,29 @@ export class Store {
     }
     for (const [type, payload] of fx) this.emit(type, payload)
     this.flushPending()
+  }
+  // 小鎮：建築長到比上次慶祝時更高的階段就發事件（一次長好幾階也只發一次），2 階起店長搬進來
+  _townCheck(fx) {
+    const t = this.state.town
+    const now = townStages(this.stats)
+    const { grew, movedIn } = townChanges(t.seen, now)
+    if (!grew.length) return
+    t.seen = { ...t.seen, ...now }
+    if (!t.since) t.since = this.today
+    for (const g of grew) fx.push(['townGrow', g])
+    for (const m of movedIn) fx.push(['townMoveIn', m])
+  }
+  // 舊存檔第一次看到小鎮：照現在的統計直接蓋好，打一聲招呼（等介面接好再送）
+  _townWelcome() {
+    const t = this.state.town
+    if (!t.welcome) return
+    delete t.welcome
+    const town = this.town
+    if (town.rank) {
+      t.since = this.today
+      this._pending.push(['townWelcome', town])
+    }
+    this.save(false)
   }
   // 換日時發生、但當下還沒人聽的事件（例如お守り生效），等介面接好再送
   flushPending() {
@@ -1528,6 +1585,8 @@ export class Store {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     const next = migrate(obj)
     next.updatedAt = updatedAt
+    // 匯入的舊檔沒有小鎮紀錄：照統計直接蓋好就好，不另外打招呼
+    delete next.town.welcome
     this.state = next
     this.today = dateStr()
     this._ensureRoutines(this.today)

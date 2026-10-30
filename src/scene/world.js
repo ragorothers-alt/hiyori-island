@@ -71,6 +71,9 @@ export class World {
     this.shiftTarget = { x: 0, y: 0 }
     // 另一個場景（小木屋室內）：{ scene, pickRoots, frame(dt, t), onLeave() }；null 時是小島
     this.stage = null
+    // 小鎮長大時預設視角往後拉：距離倍率與看的中心（見 setTownView）
+    this.zoomOut = 1
+    this.homeTarget = HOME_TARGET.clone()
 
     this._bindPointer(canvas)
     addEventListener('resize', () => this.resize())
@@ -94,7 +97,7 @@ export class World {
     // 直式畫面：拉遠到時之環（半徑約 12）能完整放進螢幕寬度
     const halfH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * (w / h)
     this.distFactor = Math.max(1, 12 / halfH / HOME_POS.distanceTo(HOME_TARGET))
-    this.controls.maxDistance = 52 * this.distFactor
+    this.controls.maxDistance = 52 * this.distFactor * this.zoomOut
     this._applyShift()
     this.renderer.setSize(w, h, false)
     this.composer.setSize(w, h)
@@ -291,7 +294,7 @@ export class World {
     const cam = (this._homeCam ??= new THREE.PerspectiveCamera())
     cam.copy(this.camera, false)
     cam.position.copy(this._homePos())
-    cam.lookAt(HOME_TARGET)
+    cam.lookAt(this.homeTarget)
     if (Math.abs(shift.x) < 0.5 && Math.abs(shift.y) < 0.5) cam.clearViewOffset()
     else cam.setViewOffset(innerWidth, innerHeight, shift.x, shift.y, innerWidth, innerHeight)
     cam.updateMatrixWorld()
@@ -303,12 +306,13 @@ export class World {
     const narrow = Math.min(half, Math.atan(Math.tan(half) * this.camera.aspect))
     return r / Math.sin(narrow)
   }
-  flyTo(target, distance = 13, { elevation = 0.62, duration = 1.1 } = {}) {
+  // dir：從哪個水平方向看過去（省略時沿用目前的方向）
+  flyTo(target, distance = 13, { elevation = 0.62, duration = 1.1, dir: from = null } = {}) {
     this.setStage(null)
     const c = this.controls
     const fromT = c.target.clone()
     const fromP = this.camera.position.clone()
-    const dir = fromP.clone().sub(fromT)
+    const dir = from ? from.clone() : fromP.clone().sub(fromT)
     dir.y = 0
     if (dir.lengthSq() < 0.01) dir.set(0, 0, 1)
     dir.normalize()
@@ -326,7 +330,13 @@ export class World {
     )
   }
   _homePos() {
-    return HOME_POS.clone().sub(HOME_TARGET).multiplyScalar(this.distFactor || 1).add(HOME_TARGET)
+    return HOME_POS.clone().sub(HOME_TARGET).multiplyScalar((this.distFactor || 1) * this.zoomOut).add(this.homeTarget)
+  }
+  // 小鎮的街區浮在島後方：zoom 是預設距離的倍率，back 是看的中心往後（-z）移多少
+  setTownView(zoom, back = 0) {
+    this.zoomOut = zoom
+    this.homeTarget.set(HOME_TARGET.x, HOME_TARGET.y, HOME_TARGET.z - back)
+    this.controls.maxDistance = 52 * (this.distFactor || 1) * zoom
   }
   home(duration = 1.3) {
     this.setStage(null)
@@ -338,7 +348,7 @@ export class World {
     tween(
       duration,
       (k) => {
-        c.target.lerpVectors(fromT, HOME_TARGET, k)
+        c.target.lerpVectors(fromT, this.homeTarget, k)
         this.camera.position.lerpVectors(fromP, toP, k)
       },
       { easing: ease.inOutCubic, onDone: () => (this._focusing = false) },

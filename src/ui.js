@@ -9,6 +9,7 @@ import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
 import { LINES, FUJI_LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
+import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
@@ -782,6 +783,32 @@ export class UI {
       <p class="hint">摸摸もち和ふじ、專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近。</p>`
   }
 
+  // ── ひより町：每間店的階段、下一階還差多少、住在那裡的居民 ──
+  renderTown() {
+    const t = this.store.town
+    $('#townCount').textContent = `${t.rank} / ${t.max}`
+    const cards = BUILDINGS.map((b, i) => {
+      const s = t.buildings[i]
+      const res = RESIDENTS[b.resident]
+      const pips = Array.from({ length: MAX_STAGE }, (_, k) => `<i class="${k < s.stage ? 'on' : ''}"></i>`).join('')
+      const need = s.next == null ? 0 : s.next - s.value
+      const next = s.next == null ? '已經長到最大了' : s.stage ? `再 ${need} ${b.unit} → ${b.stages[s.stage]}` : `再 ${need} ${b.unit}就會開張`
+      const who = s.stage >= MOVE_IN ? `${res.name}（${res.animal}）住在這裡` : `長到 ${MOVE_IN} 階時，${res.animal}${res.name}會搬來`
+      return `<button type="button" class="bld ${s.stage ? '' : 'locked'}" data-town="${b.key}" style="--bc:${res.color}" title="${esc(`${b.name}：${b.feature}越多，它長得越大`)}">
+        <span class="bld-k">${b.icon}</span>
+        <span class="bld-n"><b>${b.name}</b><small>${s.stage ? esc(b.stages[s.stage - 1]) : '還沒開張'}</small></span>
+        <span class="bld-pips">${pips}</span>
+        <span class="bld-bar"><i style="width:${Math.round(s.progress * 100)}%"></i></span>
+        <small class="bld-next">${esc(next)}</small>
+        <small class="bld-res">${esc(who)}</small>
+      </button>`
+    }).join('')
+    $('#townBox').innerHTML = `
+      <div class="town-head"><b>${esc(t.title)}</b><small>${t.residents.length} 位居民</small></div>
+      <div class="town-grid">${cards}</div>
+      <p class="hint">每間店綁著一個功能，用得越多就長得越大；點卡片飛過去看看。</p>`
+  }
+
   // ── 花の図鑑 ──
   renderDex() {
     const dex = this.store.state.dex
@@ -948,6 +975,13 @@ export class UI {
       const b = e.target.closest('[data-outfit]:not(:disabled)')
       if (b) this.store.setOutfit(b.dataset.outfit, b.dataset.who)
     })
+    $('#townBox').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-town]')
+      if (!b) return
+      // 手機上面板蓋住下半部，收起來才看得到浮島
+      if (innerWidth <= 860) this.togglePanel(true)
+      this.hooks.focusTown?.(b.dataset.town)
+    })
     $('#themePick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (b) this.setTheme(b.dataset.v)
@@ -1009,6 +1043,7 @@ export class UI {
 
     this.renderSettings()
     this.renderBond()
+    this.renderTown()
     this.renderDex()
     const entries = s.journalList(14)
     $('#journalTitle').hidden = !entries.length

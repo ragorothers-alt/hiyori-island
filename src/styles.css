@@ -503,6 +503,38 @@ body.night .stage-fade { background: #1d1a2a; }
 .outfit small { font-family: var(--font-num); font-size: 10.5px; }
 .bond .hint { margin: 8px 0 0; font-size: 10.5px; color: var(--ink-faint); }
 
+/* ひより町：每間店一張卡片，顏色跟著店長 */
+.town { padding: 12px 12px 10px; border-radius: 16px; background: var(--field); }
+.town-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 8px; }
+.town-head b { font-family: var(--font-display); font-weight: 400; font-size: 15px; letter-spacing: .1em; }
+.town-head small { font-size: 11px; color: var(--ink-faint); }
+.town-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px; }
+.bld {
+  display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; text-align: left; padding: 9px 10px 8px; border-radius: 14px;
+  background: var(--glass); border: 1px solid var(--glass-border); color: var(--ink); transition: background .2s, transform .25s var(--ease);
+}
+.bld:hover { background: var(--glass-strong); transform: translateY(-1px); }
+.bld-k {
+  grid-row: span 2; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; font-family: var(--font-display); font-size: 15px;
+  color: #fff; background: var(--bc); box-shadow: 0 2px 8px color-mix(in srgb, var(--bc) 40%, transparent);
+}
+.bld-n { display: flex; flex-direction: column; min-width: 0; }
+.bld-n b { font-weight: 600; font-size: 13px; letter-spacing: .06em; }
+.bld-n small { font-size: 10.5px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bld-pips { display: flex; gap: 3px; }
+.bld-pips i { width: 7px; height: 7px; border-radius: 50%; background: color-mix(in srgb, var(--bc) 22%, transparent); }
+.bld-pips i.on { background: var(--bc); }
+.bld-bar { grid-column: 1 / -1; height: 4px; margin-top: 4px; border-radius: 3px; background: color-mix(in srgb, var(--bc) 18%, transparent); overflow: hidden; }
+.bld-bar i { display: block; height: 100%; border-radius: inherit; background: var(--bc); transition: width .8s var(--ease); }
+.bld-next, .bld-res { grid-column: 1 / -1; font-size: 10.5px; line-height: 1.4; color: var(--ink-soft); }
+.bld-res { color: var(--ink-faint); }
+.bld.locked { opacity: .62; }
+.bld.locked .bld-k { background: color-mix(in srgb, var(--bc) 45%, #c9d2de); box-shadow: none; }
+.town .hint { margin: 8px 2px 0; font-size: 10.5px; color: var(--ink-faint); }
+/* 居民的泡泡：上面一行小小的名字，顏色跟著居民 */
+.bubble.res { border-bottom: 2px solid var(--rc); }
+.bubble.res small { display: block; margin-bottom: 1px; font-size: 10px; letter-spacing: .1em; color: var(--rc); filter: saturate(1.3) brightness(.85); }
+
 /* ── 花の図鑑 ── */
 .dex { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
 .dex-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 5px; border-radius: 14px; background: var(--field); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--rc) 45%, transparent); transition: transform .2s, box-shadow .2s; }
@@ -705,6 +737,7 @@ body.night .bubble.fuji { background: rgba(62, 50, 104, .92); color: #f1ecff; }
 body.night .bubble.fuji::after { border-top-color: rgba(62, 50, 104, .92); }
 body.night .bubble::after { border-top-color: rgba(40, 52, 94, .9); }
 body.night .tooltip3d small { color: #aab6d0; }
+body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 
 /* ── 全螢幕編輯：面板撐滿日期列與 Dock 之間，寬螢幕時內容排成左右兩欄 ── */
 .full-btn { color: var(--ink-faint); }

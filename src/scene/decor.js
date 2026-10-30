@@ -531,7 +531,9 @@ function teahouse() {
   piece(g, new THREE.CylinderGeometry(0.04, 0.06, 1.1, 6), mat(WOOD), -1.65, 0.55, 0.65)
   piece(g, new THREE.CylinderGeometry(0.18, 0.2, 0.34, 6), glow, -1.65, 1.18, 0.65)
   piece(g, new THREE.ConeGeometry(0.28, 0.18, 6), mat(VERMILION), -1.65, 1.44, 0.65)
-  g.position.set(-15, 3.2, -9)
+  // 島的左側（後方留給ひより町的街區浮島）
+  g.position.set(-17.2, 3.2, 3)
+  g.rotation.y = 0.3
   g.userData.glow = { mats: [glow], lights: [], base: 0.3 }
   g.userData.ownedMaterials = [glow]
   g.userData.anim = (t) => { g.position.y = 3.2 + Math.sin(t * 0.32) * 0.25 }
@@ -636,7 +638,9 @@ function rainbow() {
       m.scale.set(1.4, 0.45 + i * 0.1, 0.75)
     }
   }
-  g.position.set(0, -4, -18)
+  // 掛在ひより町後方的街區浮島外面
+  g.position.set(0, -5, -28)
+  g.scale.setScalar(1.5)
   g.userData.ownedMaterials = [...bands, cloud]
   g.userData.anim = (t, dt, night) => {
     for (const m of bands) m.opacity = 0.42 * (1 - night) ** 1.6
@@ -1003,8 +1007,11 @@ export class Decor {
         }
       }
       if (o.userData.orbit) {
+        // 飄到島前方時壓低（不擋到小島），兩側和後方升高，從ひより町的街區和茶屋上空飛過
         const a = t * 0.025 + 0.6
-        o.position.set(Math.cos(a) * 16, 4.5 + Math.sin(t * 0.4) * 0.4, Math.sin(a) * -16)
+        const s = Math.sin(a)
+        const up = THREE.MathUtils.smoothstep(s, -0.95, -0.3)
+        o.position.set(Math.cos(a) * 16, 4.5 + up * 5 + Math.sin(t * 0.4) * 0.4, s * -16)
       }
       if (typeof o.userData.anim === 'function') o.userData.anim(t, dt, night)
     }

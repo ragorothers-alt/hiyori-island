@@ -18,6 +18,7 @@ import { Labels } from './scene/labels.js'
 import { Placed, spotFree, radiusOf } from './scene/placed.js'
 import { Cabin } from './scene/cabin.js'
 import { Room } from './scene/room.js'
+import { Town, islandPath } from './scene/town.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
@@ -29,6 +30,8 @@ import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
 import { BOND_ACTS, actLevel, outfitOf } from './data/bond.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
+import { RESIDENTS, MOVE_IN, buildingOf, buildingStage } from './data/town.js'
+import { RESIDENT_LINES, VISITS, TOWN_LINES, TOWN_DUETS } from './data/townLines.js'
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const short = (s, n = 9) => ([...s].length > n ? [...s].slice(0, n - 1).join('') + '…' : s)
@@ -100,6 +103,7 @@ async function boot() {
   }
   const fx = new Particles(world, sky)
   const placed = new Placed(world, sky)
+  const town = new Town(world, labels, island, sky)
   sfx.setEnabled(store.state.settings.sound)
   world.powerSave = store.state.settings.powerSave
   decor.sync(store.level.level)
@@ -312,6 +316,8 @@ async function boot() {
       const p = towers.anchor(id, false)
       if (p) world.flyTo(p.add(new THREE.Vector3(0, 1.4, 0)), 10)
     },
+    // ひより町的建築卡片：還沒開張的就看看它會浮出來的地方
+    focusTown: (key) => flyToDistrict(key),
     resetView: () => (room.active ? room.exit() : world.home()),
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => !room.active && world.home(1.6),
@@ -346,6 +352,7 @@ async function boot() {
       fx.skyLantern(duo.inside ? cabin.point('roofTop') : mochi.position.clone().add(new THREE.Vector3(0, 1.6, 0)))
       store.completePomodoro(minutes, taskId)
       if (!duet('focusEnd')) talk('focusEnd')
+      resWork('library')
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
       if (t) {
         const pos = garden.anchor(t.id)
@@ -437,6 +444,241 @@ async function boot() {
   world.shift = { ...world.shiftTarget }
   world._applyShift()
 
+  // ── ひより町 ──
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const resLine = (key, kind, vars = {}) => {
+    const list = RESIDENT_LINES[key]?.[kind]
+    return list?.length ? fill(pick(list), vars) : ''
+  }
+  const townLine = (who, key, vars = {}) => {
+    const list = TOWN_LINES[who.id]?.[key]
+    return list?.length ? fill(pick(list), vars) : ''
+  }
+  const townDuet = (key, vars) => {
+    const list = TOWN_DUETS[key]
+    if (!list?.length) return false
+    duo.duet(pick(list).map(([who, text]) => [who, fill(text, vars)]))
+    return true
+  }
+  // 街區越多，預設視角往後拉一點，讓後方的浮島入鏡
+  const townView = () => {
+    const n = town.count
+    world.setTownView(1 + n * 0.035, n * 0.35)
+    placeSky()
+  }
+  const flyToDistrict = (key) => {
+    const v = town.view(key)
+    world.flyTo(v.target, world.fitDistance(v.radius) + 2, { dir: v.dir, elevation: 0.72, duration: 1.5 })
+  }
+  town.sync(store.state.town.seen)
+  townView()
+  world.controls.target.copy(world.homeTarget)
+  world.camera.position.copy(world._homePos())
+
+  // 開張、長大、搬家的演出排隊播：專注中、在小木屋裡、全螢幕面板、彈窗開著或擺放中都先等等
+  const townQueue = []
+  let townBusy = false
+  // 鏡頭回到預設視角後，挑最重要的一則讓兩人說（搬家 > 開張 > 長大）
+  let townReact = null
+  const react = (rank, fn) => {
+    if (!townReact || rank >= townReact.rank) townReact = { rank, fn }
+  }
+  const townQuiet = () =>
+    !document.hidden && !duo.focusing && !room.active && !world.covered && !placing && ![...document.querySelectorAll('.modal')].some((m) => !m.hidden)
+  const runTown = async () => {
+    if (townBusy) return
+    townBusy = true
+    let mark = null
+    try {
+      while (townQueue.length) {
+        if (!townQuiet()) {
+          await sleep(2000)
+          continue
+        }
+        const job = townQueue.shift()
+        await job()
+        mark = world.lastInteract
+      }
+      await sleep(1200)
+      // 使用者沒動鏡頭的話就回到預設視角（街區變多時已經拉遠）
+      if (mark !== null && world.lastInteract === mark) {
+        world.home(1.8)
+        await sleep(1900)
+      }
+      const r = townReact
+      townReact = null
+      r?.fn()
+    } finally {
+      townBusy = false
+      if (townQueue.length) runTown()
+    }
+  }
+  const queueTown = (job) => {
+    townQueue.push(job)
+    setTimeout(runTown, 2600)
+  }
+  // 搬家的居民走到店門口時
+  const arrived = new Set()
+  const arrivalWaits = new Map()
+  town.onArrived = (key) => {
+    arrived.add(key)
+    arrivalWaits.get(key)?.()
+  }
+  const waitArrival = (key, ms) =>
+    arrived.has(key) ? Promise.resolve() : new Promise((res) => (arrivalWaits.set(key, res), setTimeout(res, ms)))
+
+  store.on('townGrow', ({ key, stage }) =>
+    queueTown(async () => {
+      const b = buildingOf(key)
+      const found = !town.districts[key]
+      const vars = { building: b.name, stage: b.stages[stage - 1] }
+      flyToDistrict(key)
+      await sleep(1600)
+      const res = town.set(key, stage, true)
+      if (!res) return
+      if (found) townView()
+      sfx.build()
+      setTimeout(() => {
+        sfx.chime()
+        fx.burst(res.at, { colors: ['#ffffff', RESIDENTS[b.resident].color, '#fff1b8'], count: found ? 60 : 44, speed: 1.8, up: 1.4 })
+        if (found) fx.ripple(town.districts[key].layout.center.clone().add(new THREE.Vector3(0, 0.05, 0)), '#fff1b8', 2.6)
+      }, found ? 3300 : 900)
+      ui.toast({
+        icon: b.icon,
+        title: found ? `ひより町：${b.name}開張了` : `${b.name}長成了「${vars.stage}」`,
+        sub: found ? `${b.stages[0]}・${b.feature}越多，它會一路長大` : `${stage} / 5 階・${b.feature}讓它一路長大`,
+        ms: 5600,
+      })
+      // 店長已經住在這裡的話，說說自己的店
+      const r = town.residents[b.resident]
+      if (!found && stage > MOVE_IN && r && !r.away) setTimeout(() => r.say(resLine(r.key, 'grow', vars), 3800), 1500)
+      react(found ? 2 : 1, () => {
+        if (found && Math.random() < 0.5 && townDuet('townFound', vars)) return
+        const who = pick([mochi, fuji])
+        who.say(townLine(who, found ? 'townFound' : 'townGrow', vars), 4200)
+      })
+      ui.renderTown()
+      await sleep(found ? 5200 : 3400)
+    }),
+  )
+  store.on('townMoveIn', ({ key, home }) =>
+    queueTown(async () => {
+      const info = RESIDENTS[key]
+      const r = town.residents[key]
+      if (!r) return
+      flyToDistrict(home)
+      // 搬家的居民在建築長出來的同時出發，等他走過橋到店門口
+      await waitArrival(key, 18000)
+      sfx.chime()
+      fx.hearts(r.headAnchor())
+      r.say(resLine(key, 'moveIn'), 4200)
+      ui.toast({ icon: '居', title: `${info.name}搬進了ひより町`, sub: `${info.animal}・${info.role}`, ms: 5600 })
+      const vars = { resident: info.name, animal: info.animal }
+      react(3, () => {
+        if (Math.random() < 0.5 && townDuet('townMoveIn', vars)) return
+        const who = pick([mochi, fuji])
+        who.say(townLine(who, 'townMoveIn', vars), 4200)
+      })
+      ui.renderTown()
+      await sleep(4200)
+    }),
+  )
+  // 舊存檔第一次打開：小島已經照累積的紀錄長成小鎮了
+  store.on('townWelcome', (t) => {
+    setTimeout(() => {
+      sfx.chime()
+      ui.toast({ icon: '町', title: `小島長成了「${t.title}」`, sub: `ひより町 ${t.rank} / ${t.max}・到紀錄頁看看每一間店`, ms: 6400 })
+      const who = pick([mochi, fuji])
+      who.say(townLine(who, 'townWelcome', { title: t.title }), 4600)
+    }, 8200)
+  })
+  // 用了對應功能時，那間店的店長偶爾說一句
+  const resWork = (home) => {
+    const r = town.residents[buildingOf(home).resident]
+    if (!r || r.away || Math.random() > 0.35) return
+    setTimeout(() => r.say(resLine(r.key, 'work'), 3400), 2400)
+  }
+
+  // ── 居民偶爾走過橋，到主島找兩人聊天 ──
+  // 主島上走不過去的地方：池塘、花圃、小木屋、塔、升級景觀、擺設（每趟路線開始時拍一次快照）
+  const walkBlocked = () => {
+    const { pond, bed, cabin, slots, decor: spots } = LAYOUT
+    const towersAt = store.activeProjects().map((p) => slots[p.slot]).filter(Boolean)
+    const prints = decor.footprints()
+    const items = store.state.placed.map((p) => [p.x, p.z, radiusOf(p.key) + 0.15])
+    return (x, z) => {
+      if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.3) return true
+      if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.15) return true
+      if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + 0.3) return true
+      for (const [sx, sz] of towersAt) if (Math.hypot(x - sx, z - sz) < 1.15) return true
+      for (const [dx, dz] of spots) if (Math.hypot(x - dx, z - dz) < 0.75) return true
+      for (const [bx, bz, br] of prints) if (Math.hypot(x - bx, z - bz) < br) return true
+      for (const [ix, iz, ir] of items) if (Math.hypot(x - ix, z - iz) < ir) return true
+      return false
+    }
+  }
+  // 兩人斜前方、靠居民走來那一側的空地（站在後面會被塔擋住，兩人也會背對鏡頭）
+  const meetSpot = (r) => {
+    if (duo.focusing || duo.inside) return null
+    const blocked = walkBlocked()
+    const mid = mochi.position.clone().add(fuji.position).multiplyScalar(0.5).setY(0)
+    const a0 = Math.atan2(0.55, r.position.x < mid.x ? -1 : 1)
+    for (let i = 0; i < 14; i++) {
+      const a = a0 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.32
+      for (const d of [1.35, 1.8]) {
+        const p = new THREE.Vector3(mid.x + Math.cos(a) * d, 0, mid.z + Math.sin(a) * d)
+        if (Math.hypot(p.x, p.z) > LAYOUT.radius - 1 || blocked(p.x, p.z)) continue
+        if (p.distanceTo(mochi.position) < 0.85 || p.distanceTo(fuji.position) < 0.85) continue
+        return p
+      }
+    }
+    return null
+  }
+  const faceEach = (r) => {
+    for (const c of duo.list) {
+      if (c.busy || c.inside) continue
+      c.faceAngle = Math.atan2(r.position.x - c.position.x, r.position.z - c.position.z)
+      c.wanderT = Math.max(c.wanderT, 9)
+    }
+  }
+  const visitTalk = async (r) => {
+    const mid = mochi.position.clone().add(fuji.position).multiplyScalar(0.5)
+    r.faceTo(mid)
+    faceEach(r)
+    const seg = !duo.focusing && VISITS[r.key]?.length ? pick(VISITS[r.key]) : [['res', resLine(r.key, 'hello')]]
+    for (const [who, text] of seg) {
+      const sp = who === 'res' ? r : cast[who]
+      for (const s of [r, mochi, fuji]) if (s !== sp) s.hush()
+      sp.say(text, 3300)
+      faceEach(r)
+      await sleep(3400)
+    }
+    r.wave(1.2)
+    await sleep(1300)
+  }
+  const startVisit = (key) =>
+    town.visit(key, {
+      meet: (r) => {
+        const p = meetSpot(r)
+        // 剛走下橋：兩人其中一位先打招呼
+        if (p) {
+          const who = pick([mochi, fuji])
+          setTimeout(() => who.say(townLine(who, 'townVisit', { resident: r.info.name }), 3000), 400)
+        }
+        return p
+      },
+      path: (from, to) => islandPath(from, to, walkBlocked()),
+      onArrive: visitTalk,
+    })
+  let lastVisit = performance.now()
+  setInterval(() => {
+    const keys = Object.keys(town.residents).filter((k) => !town.residents[k].busy)
+    if (!keys.length || !townQuiet() || townBusy || town.visiting || duo.inside || mochi.busy || fuji.busy) return
+    if (performance.now() - lastVisit < 150000 || Math.random() < 0.55) return
+    lastVisit = performance.now()
+    startVisit(pick(keys))
+  }, 20000)
+
   // ── 3D 互動 ──
   const tip = document.createElement('div')
   tip.className = 'tooltip3d'
@@ -470,6 +712,14 @@ async function boot() {
     else if (p.type === 'placed') {
       const it = SHOP_ITEMS.find((i) => i.key === store.state.placed.find((x) => x.id === p.id)?.key)
       if (it) html = `${esc(it.name)}<small>點一下移動或收起</small>`
+    } else if (p.type === 'town') {
+      const b = buildingOf(p.id)
+      const s = buildingStage(b, store.stats)
+      const stage = town.districts[p.id]?.stage || s.stage
+      html = `${b.name}・${b.stages[stage - 1]}<small>${s.next ? `${b.feature}・再 ${s.next - s.value} ${b.unit}長大` : '已經長到最大了'}</small>`
+    } else if (p.type === 'resident') {
+      const r = RESIDENTS[p.id]
+      html = `${r.name}<small>${r.animal}・${r.role}・點一下打招呼</small>`
     }
     if (!html) return
     tip.innerHTML = html
@@ -587,6 +837,23 @@ async function boot() {
       talk(duo.inside ? 'cabinFocus' : 'cabin', {}, 3200)
       return
     }
+    if (p.type === 'town') {
+      sfx.pop()
+      flyToDistrict(p.id)
+      const r = town.residents[buildingOf(p.id).resident]
+      if (r && !r.away) setTimeout(() => r.say(resLine(r.key, sky.night > 0.5 ? 'night' : 'idle'), 3400), 900)
+      return
+    }
+    if (p.type === 'resident') {
+      const r = town.residents[p.id]
+      if (!r) return
+      sfx.squish()
+      fx.hearts(r.headAnchor())
+      if (!r.busy) r.faceCamera()
+      r.wave(1.1)
+      r.say(resLine(p.id, sky.night > 0.5 ? 'night' : 'hello'), 3200)
+      return
+    }
     sfx.pop()
     ui.reveal(p.type, p.id)
     if (p.type === 'task') garden.bounce(p.id)
@@ -616,10 +883,16 @@ async function boot() {
     sfx.chime()
     const c = talk('reviewDone', {}, 4200, '謝謝你告訴我今天的事。')
     if (first) fx.burst(c.headAnchor(), { colors: ['#ffffff', '#fff1b8', '#d9ccff'], count: 30, speed: 1.4 })
+    resWork('post')
   })
   store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
   store.on('reload', () => {
     decor.sync(store.level.level)
+    // 匯入的存檔小鎮可能比較小：整個重蓋
+    townQueue.length = 0
+    town.reset()
+    town.sync(store.state.town.seen)
+    townView()
     world.home()
   })
   store.on('taskAdded', (t) => {
@@ -643,6 +916,7 @@ async function boot() {
       fuji.cheer(pos)
     }
     talk(t.star ? 'starDone' : t.priority === 3 ? 'highTaskDone' : 'taskDone', { task: short(t.title) })
+    resWork('florist')
   })
 
   // ── 花の図鑑：新品種或稀有的花 ──
@@ -802,6 +1076,7 @@ async function boot() {
     const pos = ring.anchor(e.id)
     if (pos) fx.burst(pos, { colors: ['#ffffff', EVENT_COLORS[e.color % EVENT_COLORS.length]], count: 36, speed: 1.6, up: 1.6 })
     talk('eventDone')
+    resWork('clock')
   })
   store.on('milestoneDone', ({ project }) => {
     sfx.build()
@@ -874,15 +1149,18 @@ async function boot() {
     sfx.chime()
     if (left) talk('planFull', { count: left }, 4800, '空檔有點滿，改天安排也沒關係。')
     else talk('planApplied', { count, end: planEnd(date) }, 4200, '時段排好了，照自己的步調來。')
+    resWork('clock')
   })
   store.on('sleepLogged', ({ date, min, first }) => {
     if (date !== store.today || !first) return
     talk(min < 360 ? 'sleepShort' : 'sleepGood', { hours: Math.round(min / 6) / 10 }, 4200)
+    resWork('cafe')
   })
   store.on('habitDone', ({ habit, streak }) => {
     sfx.bloom(2)
     mochi.cheer(fuji.position)
     talk('habitDone', { habit: short(habit.name), streak }, 3800)
+    resWork('bathhouse')
   })
   store.on('habitAll', () => {
     setTimeout(() => {
@@ -895,6 +1173,7 @@ async function boot() {
   store.on('urgeResisted', ({ habit, days }) => {
     sfx.pop()
     talk('urgeResisted', { habit: short(habit.name), days }, 3800)
+    resWork('bathhouse')
   })
   store.on('habitSlip', ({ habit, days }) => talk('habitSlip', { habit: short(habit.name), days }, 5200, '沒關係，我會陪你慢慢來。'))
   store.on('quitMilestone', ({ habit, days }) => {
@@ -909,6 +1188,7 @@ async function boot() {
     sfx.pop()
     // 不要每筆都說話：第一筆之後每 3 筆說一次
     if (count === 1 || count % 3 === 0) talk('lifeLogged', { kind: lifeKindOf(item.kind).label }, 3400)
+    resWork('cafe')
   })
 
   // ── 提醒：日程、排進時段的任務、就寢 ──
@@ -976,6 +1256,13 @@ async function boot() {
     if (document.hidden || duo.focusing) return
     if (performance.now() - lastTalk > 70000 && Math.random() < 0.5) {
       lastTalk = performance.now()
+      // 小鎮有居民的話，有時換店長在自己店門口說一句
+      const idle = Object.values(town.residents).filter((r) => !r.away && !r.busy)
+      if (idle.length && Math.random() < 0.3) {
+        const r = pick(idle)
+        r.say(resLine(r.key, 'idle'), 3600)
+        return
+      }
       if (Math.random() < 0.45 && duet('idle')) return
       talk('idle')
     }
@@ -1071,7 +1358,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync }
+  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, town, visit: startVisit }
 }
 
 boot()
