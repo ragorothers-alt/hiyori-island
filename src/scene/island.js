@@ -5,7 +5,8 @@ import { buildIslandBase, addGrassDetail, FALL_UNIFORMS } from './islandBase.js'
 
 // 島嶼配置（俯視座標 x, z；鏡頭在 +z 方向）
 export const LAYOUT = {
-  radius: 9.5,
+  // 原本是 9.5，擴島後外圈多出 2.5 的地（新的塔位在這一圈）
+  radius: 12,
   pond: { x: -3.3, z: 4.0, r: 1.9 },
   bed: { x: 3.4, z: 3.2, r: 2.5 },
   home: { x: 0, z: 1.4 },
@@ -13,10 +14,14 @@ export const LAYOUT = {
   home2: { x: 1.5, z: 0.4 },
   // もち的小木屋：中心、佔地半徑、朝向（門朝 +z 轉 rot）、模型放大倍率（讓壓扁的もち擠得過門）
   cabin: { x: -2.55, z: -0.2, r: 1.5, rot: 0.35, scale: 1.25 },
-  path: { z0: 8.8, z1: 2.4 },
+  path: { z0: 11.3, z1: 2.4 },
+  // 專案塔的空地（數量要和 theme.js 的 TOWER_SLOTS 一致）。前 8 塊在島的後半；
+  // 後 8 塊是擴島後的外圈（離中心 10.4，從正後方往兩側 ±22°、±46°、±78°、±106°），避開神社、櫻花樹、繡球花和溪流
   slots: [
     [-1.3, -4.2], [1.3, -4.2], [-3.9, -3.4], [3.9, -3.4],
     [-2.6, -6.6], [2.6, -6.6], [-6.6, -1.2], [6.6, -1.2],
+    [-3.9, -9.64], [3.9, -9.64], [-7.48, -7.22], [7.48, -7.22],
+    [-10.17, -2.16], [10.17, -2.16], [-10.0, 2.87], [10.0, 2.87],
   ],
   // 裝飾的預留位置（避免草叢長在上面）
   decor: [[-6.0, 1.9], [-1.5, 5.6], [0, 7.4], [6.9, 4.6], [-7.0, -4.2]],
@@ -85,7 +90,7 @@ export class Island {
     )
     rim.position.y = -0.62
     // 草地以下：層疊岩壁、垂根苔蘚、往下收成岩錐，兩道從岩壁流出的瀑布（鏡頭看得到的左前、右前）
-    const base = buildIslandBase({ radius: R * 0.99, top: -0.62, cliff: 2.2, depth: 11, seed: 0, wob: 0.035, roots: 1.3, falls: [2.0, 0.62], fallTo: -15 })
+    const base = buildIslandBase({ radius: R * 0.99, top: -0.62, cliff: 2.4, depth: 13, seed: 0, wob: 0.035, segs: 88, roots: 1.3, falls: [2.0, 0.62], fallTo: -15 })
     this.base = base
 
     this.group.add(shadowed(grass, false, true), rim, base)
@@ -192,7 +197,7 @@ export class Island {
     const R = LAYOUT.radius - 0.7
     const tufts = []
     this.tuftMix = []
-    while (tufts.length < 170) {
+    while (tufts.length < 270) {
       const a = r() * Math.PI * 2
       const d = Math.sqrt(r()) * R
       const x = Math.cos(a) * d
@@ -226,7 +231,7 @@ export class Island {
 
     // 野花小點
     const flowers = []
-    while (flowers.length < 90) {
+    while (flowers.length < 145) {
       const a = r() * Math.PI * 2
       const d = Math.sqrt(r()) * R
       const x = Math.cos(a) * d
@@ -259,7 +264,7 @@ export class Island {
       const top = new THREE.Mesh(new THREE.CylinderGeometry(s * 1.02, s, 0.16, 18), this.topMat)
       g.add(rock, top)
       const a = (i / 7) * Math.PI * 2 + r()
-      const d = 11.5 + r() * 4
+      const d = 14 + r() * 4
       g.position.set(Math.cos(a) * d, -3 + r() * 4, Math.sin(a) * d)
       g.userData = { y: g.position.y, phase: r() * 6, sp: 0.4 + r() * 0.4 }
       this.group.add(g)

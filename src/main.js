@@ -168,9 +168,10 @@ async function boot() {
       }
       const pct = Math.round(store.progress(p) * 100)
       c.el.style.setProperty('--c', PROJECT_COLORS[p.color % PROJECT_COLORS.length])
-      const days = p.deadline && !p.completedAt ? daysBetween(store.today, p.deadline) : null
+      const days = p.deadline && !p.completedAt && !p.pausedAt ? daysBetween(store.today, p.deadline) : null
       const due = days === null || days > 2 ? '' : days < 0 ? '<i class="due late">逾期</i>' : `<i class="due">${days ? `剩 ${days} 天` : '今天截止'}</i>`
-      c.el.innerHTML = `${esc(short(p.name, 10))} <b>${pct === 100 ? (p.onTime ? '準時落成' : '落成') : pct + '%'}</b>${due}`
+      c.el.classList.toggle('paused', !!p.pausedAt)
+      c.el.innerHTML = `${esc(short(p.name, 10))} <b>${pct === 100 ? (p.onTime ? '準時落成' : '落成') : p.pausedAt ? `暫停・${pct}%` : pct + '%'}</b>${due}`
     }
   }
 

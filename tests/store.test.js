@@ -1140,3 +1140,56 @@ describe('更多專案與島上的塔位', () => {
     expect(ps.filter((p) => p.archived).map((p) => p.id)).toEqual([`p${MAX_PROJECTS}`, `p${MAX_PROJECTS + 1}`])
   })
 })
+
+describe('專案狀態與暫停', () => {
+  it('暫停的專案沒有到期提醒，繼續後恢復；已落成的不能暫停', () => {
+    const p = store.addProject({ name: '先放著', milestones: ['一', '二'], deadline: TODAY })
+    expect(store.projectStatus(p)).toBe('active')
+    expect(store.deadlineSoon()).toHaveLength(1)
+    store.pauseProject(p.id)
+    expect(store.projectStatus(p)).toBe('paused')
+    expect(p.pausedAt).toBe(Date.now())
+    expect(store.deadlineSoon()).toHaveLength(0)
+    store.pauseProject(p.id, false)
+    expect(p.pausedAt).toBeNull()
+    expect(store.deadlineSoon()).toHaveLength(1)
+
+    const done = store.addProject({ name: '蓋好了', milestones: ['一'] })
+    store.toggleMilestone(done.id, done.milestones[0].id)
+    store.pauseProject(done.id)
+    expect(done.pausedAt).toBeNull()
+    expect(store.projectStatus(done)).toBe('done')
+  })
+
+  it('暫停中把里程碑做完會直接落成，狀態變成已落成', () => {
+    const p = store.addProject({ name: '暫停但做完', milestones: ['一'] })
+    store.pauseProject(p.id)
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    expect(p.completedAt).toBe(Date.now())
+    expect(p.pausedAt).toBeNull()
+  })
+
+  it('空地讓出來時，進行中的專案比暫停的先上島', () => {
+    const towers = Array.from({ length: TOWER_SLOTS }, (_, i) => store.addProject({ name: `塔 ${i}`, milestones: ['一'] }))
+    const paused = store.addProject({ name: '暫停的（比較早）', milestones: ['一'] })
+    store.pauseProject(paused.id)
+    setDate(TODAY, 13)
+    const active = store.addProject({ name: '進行中的', milestones: ['一'] })
+    store.archiveProject(towers[0].id)
+    expect(active.slot).toBe(0)
+    expect(paused.slot).toBe(-1)
+  })
+
+  it('讀檔保留暫停狀態；已落成的專案不會是暫停', () => {
+    store.importJSON(JSON.stringify({
+      tasks: [], player: {},
+      projects: [
+        { id: 'a', name: '暫停的', pausedAt: 123, milestones: [] },
+        { id: 'b', name: '已落成', pausedAt: 123, completedAt: 456, milestones: [] },
+      ],
+    }))
+    const [a, b] = store.state.projects
+    expect(a.pausedAt).toBe(123)
+    expect(b.pausedAt).toBeNull()
+  })
+})

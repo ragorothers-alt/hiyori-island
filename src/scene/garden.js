@@ -85,10 +85,10 @@ function plotPosition(i) {
     const a = i * 2.39996 + 0.4
     return new THREE.Vector3(bed.x + Math.cos(a) * r, 0.1, bed.z + Math.sin(a) * r)
   }
-  // 花圃滿了：沿島嶼邊緣種
+  // 花圃滿了：沿著擴島前的島緣那一圈種（外圈留給塔）
   const k = i - max
   const a = 0.15 + k * 0.23
-  const R = LAYOUT.radius - 0.9 - (k % 2) * 0.35
+  const R = 8.6 - (k % 2) * 0.35
   return new THREE.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)
 }
 

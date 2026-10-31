@@ -56,7 +56,7 @@ export const FOCUS_MIN = 25
 export const BREAK_MIN = 5
 // 同時進行的專案上限；島上只有 TOWER_SLOTS 塊空地（scene/island.js 的 LAYOUT.slots），其他專案先在清單裡等空地
 export const MAX_PROJECTS = 30
-export const TOWER_SLOTS = 8
+export const TOWER_SLOTS = 16
 
 // 等級解鎖的島嶼裝飾（scene/decor.js 依 key 建立）
 export const UNLOCKS = [

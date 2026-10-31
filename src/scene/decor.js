@@ -335,7 +335,7 @@ function islet() {
   t.position.set(0.6, 0, 0.6)
   t.rotation.y = -0.6
   g.add(t)
-  g.position.set(13.5, 4.5, -10)
+  g.position.set(15.5, 4.5, -11.6)
   g.userData.orbit = true
   g.userData.ownedMaterials = [...base.userData.ownedMaterials, ...tree.userData.ownedMaterials]
   return shadowed(g)
@@ -417,6 +417,9 @@ function sakuraGrow() {
   return shadowed(at(g, -6, 1.9))
 }
 
+// 擴島（9.5 → 12）後瀑布往外移到新的島緣
+const DROP_X = 2.47
+const DROP_Z = 0.36
 function waterfall() {
   const g = new THREE.Group()
   const creek = new THREE.Group()
@@ -425,8 +428,8 @@ function waterfall() {
     color: '#bfe9f7', transparent: true, opacity: 0.57, roughness: 0.2, flatShading: true,
     emissive: '#a9e2f5', emissiveIntensity: 0.2, side: THREE.DoubleSide, depthWrite: false,
   })
-  // 從繡球花北側繞往島緣，最後一段跨過草地與外緣
-  const course = [[8.25, 0.42], [8.65, 0.55], [9.1, 0.72], [9.7, 0.94]]
+  // 從繡球花北側繞往島緣，最後一段跨過草地與外緣（擴島後延長到新的島緣）
+  const course = [[8.25, 0.42], [8.65, 0.55], [9.1, 0.72], [9.7, 0.94], [10.4, 1.14], [11.1, 1.3], [12.2, 1.48]]
   const vertices = []
   course.forEach(([x, z], i) => {
     const before = course[Math.max(0, i - 1)]
@@ -438,10 +441,14 @@ function waterfall() {
   })
   const ribbon = new THREE.BufferGeometry()
   ribbon.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
-  ribbon.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4, 4, 5, 6, 5, 7, 6])
+  ribbon.setIndex(course.slice(1).flatMap((_, i) => [i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2]))
   ribbon.computeVertexNormals()
   piece(creek, ribbon, water)
   g.add(creek)
+  // 瀑布本體（水簾、水花、水霧）從新的島緣落下
+  const drop = new THREE.Group()
+  drop.position.set(DROP_X, 0, DROP_Z)
+  g.add(drop)
   const owned = [water]
   const fallMats = []
   for (let i = 0; i < 7; i++) {
@@ -449,7 +456,7 @@ function waterfall() {
     m.opacity = 0.53 * (1 - i / 7) ** 1.1
     fallMats.push(m)
     owned.push(m)
-    const sheet = piece(g, new THREE.PlaneGeometry(0.52 + i * 0.045, 1.02), m, 1.45 + i * 0.045, -0.48 - i * 0.95, -0.22)
+    const sheet = piece(drop, new THREE.PlaneGeometry(0.52 + i * 0.045, 1.02), m, 1.45 + i * 0.045, -0.48 - i * 0.95, -0.22)
     sheet.rotation.y = -0.65
   }
   const foam = new THREE.MeshBasicMaterial({ color: '#effaff', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
@@ -464,7 +471,7 @@ function waterfall() {
   for (let i = 0; i < 9; i++) {
     const m = foam.clone()
     owned.push(m)
-    const streak = piece(g, new THREE.PlaneGeometry(0.035 + i % 3 * 0.012, 0.35 + i % 4 * 0.15), m)
+    const streak = piece(drop, new THREE.PlaneGeometry(0.035 + i % 3 * 0.012, 0.35 + i % 4 * 0.15), m)
     streak.rotation.y = -0.65
     streaks.push(streak)
   }
@@ -473,7 +480,7 @@ function waterfall() {
   const mist = []
   const puff = new THREE.IcosahedronGeometry(1, 1)
   for (let i = 0; i < 7; i++) {
-    const m = piece(g, puff, mistMat, 1.8 + Math.cos(i * 2.4) * 0.6, -6.6 + i % 3 * 0.14, -0.2 + Math.sin(i * 2.4) * 0.5)
+    const m = piece(drop, puff, mistMat, 1.8 + Math.cos(i * 2.4) * 0.6, -6.6 + i % 3 * 0.14, -0.2 + Math.sin(i * 2.4) * 0.5)
     mist.push(m)
   }
   g.userData.ownedMaterials = owned
@@ -559,7 +566,7 @@ function teahouse() {
   piece(g, new THREE.CylinderGeometry(0.18, 0.2, 0.34, 6), glow, -1.65, 1.18, 0.65)
   piece(g, new THREE.ConeGeometry(0.28, 0.18, 6), mat(VERMILION), -1.65, 1.44, 0.65)
   // 島的左側（後方留給ひより町的街區浮島）
-  g.position.set(-17.2, 3.2, 3)
+  g.position.set(-19.6, 3.2, 3.4)
   g.rotation.y = 0.3
   g.userData.glow = { mats: [glow], lights: [], base: 0.3 }
   g.userData.ownedMaterials = [glow, ...base.userData.ownedMaterials]
@@ -724,13 +731,13 @@ function tsukimidai() {
   g.add(light)
   g.userData.glow = { mats: [glow], lights: [light], base: 0.2 }
   g.userData.ownedMaterials = [glow]
-  return shadowed(at(g, 7.05, 6.65))
+  return shadowed(at(g, 8.87, 8.37))
 }
 
 // 雲鯨繞島一圈：水平半徑 ring（身體內外緣都在茶屋浮島與星之大樹之間），角度 φ = 0 在島正後方。
 // 島後方是弧頂，往兩側一路下潛 dive 到前方的雲海裡；弧頂高度與畫面上看得到的角度由 Decor.placeWhale 依預設視角決定。
 // 看得到的那段用 speed 慢慢游，看不到的地方加速到 fast 倍，大部分時間都在畫面裡
-const WHALE = { ring: 22, scale: 1.15, dive: 26, speed: 0.027, fast: 6 }
+const WHALE = { ring: 24.5, scale: 1.15, dive: 26, speed: 0.027, fast: 6 }
 
 // φ（-π..π）與時間的對照表：ts[i] 是從 -π 游到第 i 格要花的秒數
 function whaleClock(seen) {
@@ -794,9 +801,9 @@ function whale() {
   return g
 }
 
-// 星之大樹：離島中心水平 ring 遠（樹冠內緣也在雲鯨軌道半徑 22 外側，不論高度都不會相撞），
+// 星之大樹：離島中心水平 ring 遠（樹冠內緣也在雲鯨軌道半徑 24.5 外側，不論高度都不會相撞），
 // 樹冠中心在草地上方 canopy、樹冠頂再高 above、半寬 radius（皆為模型原尺寸）
-const SKY = { ring: 29.5, scale: 1.3, canopy: 6, above: 2.5, radius: 3.9 }
+const SKY = { ring: 32, scale: 1.3, canopy: 6, above: 2.5, radius: 3.9 }
 
 // 星之大樹模型（models/starTree.js）原點在浮島草地頂面；位置由 Decor.placeSky 依畫面決定，這裡只負責上下漂浮
 function skytree() {
@@ -865,9 +872,9 @@ const BUILDERS = {
 }
 // 升級景觀在島上佔的地面（商店裝飾不能擺在這裡）
 const FOOTPRINTS = {
-  waterfall: [[8.6, 1.1, 0.9]],
+  waterfall: [[8.6, 1.1, 0.9], [10.2, 1.2, 0.8], [11.4, 1.4, 0.7]],
   shrineUp: [[-6.85, -4.0, 1.55]],
-  tsukimidai: [[7.05, 6.65, 1.0]],
+  tsukimidai: [[8.87, 8.37, 1.0]],
 }
 
 // 這些是「一群」散在島上的物件，彈出動畫要逐一套用在子物件上
@@ -1043,7 +1050,7 @@ export class Decor {
         const a = t * 0.025 + 0.6
         const s = Math.sin(a)
         const up = THREE.MathUtils.smoothstep(s, -0.95, -0.3)
-        o.position.set(Math.cos(a) * 16, 4.5 + up * 5 + Math.sin(t * 0.4) * 0.4, s * -16)
+        o.position.set(Math.cos(a) * 18.5, 4.5 + up * 5 + Math.sin(t * 0.4) * 0.4, s * -18.5)
       }
       if (typeof o.userData.anim === 'function') o.userData.anim(t, dt, night)
     }

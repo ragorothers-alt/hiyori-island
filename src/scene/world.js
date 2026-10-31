@@ -12,8 +12,8 @@ const HOME_TARGET = new THREE.Vector3(0, 0.5, 0)
 const UP = new THREE.Vector3(0, 1, 0)
 // 構圖：地平線落在可見區域上方的比例；時之環前緣（含數字標籤）的半徑與它離下緣（Dock／抽屜）至少要留的像素
 const SKY = 0.22
-const RING_FRONT = 13.9
-const RING_SIDE = 13.6
+const RING_FRONT = 16.4
+const RING_SIDE = 16.1
 const MARGIN = 12
 // 閒置時左右慢慢擺動（不整圈轉到背面）：振幅與角速度
 const SWAY = 1.0

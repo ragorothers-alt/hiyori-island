@@ -260,6 +260,8 @@ function migrate(s) {
     return {
       id: str(p.id), name, color: num(p.color, 0, 99, 0), deadline: ymd(p.deadline, ''), createdAt: ts(p.createdAt) || Date.now(),
       milestones, completedAt: ts(p.completedAt), archived: !!p.archived, onTime: !!p.onTime,
+      // 暫停的時間；null = 進行中（已落成的不會暫停）
+      pausedAt: ts(p.completedAt) ? null : ts(p.pausedAt),
       // slot：島上的第幾塊空地，-1 = 還沒上島（空地滿了，先在清單裡）；parked：使用者自己移下島的，不自動補上去
       slot: num(p.slot, -1, TOWER_SLOTS - 1, 0), parked: !!p.parked,
     }
@@ -568,7 +570,7 @@ export class Store {
   // 期限在兩天內（含今天）還沒落成的專案，最急的在前
   deadlineSoon() {
     return this.activeProjects()
-      .filter((p) => p.deadline && !p.completedAt && p.milestones.length)
+      .filter((p) => p.deadline && !p.completedAt && !p.pausedAt && p.milestones.length)
       .map((p) => ({ project: p, days: daysBetween(this.today, p.deadline) }))
       .filter((x) => x.days >= 0 && x.days <= 2)
       .sort((a, b) => a.days - b.days)
@@ -617,7 +619,7 @@ export class Store {
       hour: new Date().getHours(),
       events: this.eventsOn(date).length,
       routineTasks: this.tasksOn(date).filter((t) => t.routineId).length,
-      projects: this.activeProjects().filter((p) => !p.completedAt).length,
+      projects: this.activeProjects().filter((p) => !p.completedAt && !p.pausedAt).length,
       habits: todayProgress(this.state.habits, date).total,
     }
     const yesterday = this.state.quests[addDays(date, -1)]?.ids || []
@@ -1457,11 +1459,23 @@ export class Store {
   canAddProject() {
     return this.activeProjects().length < MAX_PROJECTS
   }
-  // 空出來的空地：讓清單裡等著的專案上島（還沒完成的優先、先建立的先）；使用者自己移下島的不算
+  // 專案狀態：active 進行中、paused 暫停、done 已落成（收藏另外看 archived）
+  projectStatus(p) {
+    return p.completedAt ? 'done' : p.pausedAt ? 'paused' : 'active'
+  }
+  // 暫停／繼續：暫停的專案沒有到期提醒，塔的旗子降下來；已落成的不用暫停
+  pauseProject(id, paused = true) {
+    const p = this._find('projects', id)
+    if (!p || p.completedAt || !!p.pausedAt === paused) return
+    p.pausedAt = paused ? Date.now() : null
+    this._finish()
+  }
+  // 空出來的空地：讓清單裡等著的專案上島（進行中的優先、再來暫停的、已落成的最後，同狀態先建立的先）；使用者自己移下島的不算
   _fillSlots() {
+    const rank = { active: 0, paused: 1, done: 2 }
     const waiting = this.activeProjects()
       .filter((p) => p.slot < 0 && !p.parked)
-      .sort((a, b) => !!a.completedAt - !!b.completedAt || a.createdAt - b.createdAt)
+      .sort((a, b) => rank[this.projectStatus(a)] - rank[this.projectStatus(b)] || a.createdAt - b.createdAt)
     for (const p of waiting) {
       const slot = this.freeSlot()
       if (slot < 0) break
@@ -1495,7 +1509,7 @@ export class Store {
     const p = {
       id: uid(), name: name.trim(), color, deadline: DATE_RE.test(deadline) ? deadline : '', slot, createdAt: Date.now(),
       milestones: milestones.map((t) => t.trim()).filter(Boolean).map((t) => ms(t)),
-      completedAt: null, archived: false, parked: false,
+      completedAt: null, pausedAt: null, archived: false, parked: false,
     }
     this.state.projects.push(p)
     this.stats.projectsCreated++
@@ -1552,6 +1566,7 @@ export class Store {
   _completeProject(p, fx) {
     if (!p.milestones.length || p.completedAt || !p.milestones.every((m) => m.done)) return
     p.completedAt = Date.now()
+    p.pausedAt = null
     this.stats.projectsDone++
     this._gain(XP.project, fx, { kind: 'project', id: p.id })
     fx.push(['projectDone', p])

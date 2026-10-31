@@ -4,8 +4,9 @@ import { toMin } from '../store.js'
 import { textSprite, glowTexture, tween, ease } from './util.js'
 
 // 時之環：24 小時環繞小島。0 點在後方、6 點在右、12 點在正前方、18 點在左（俯視順時針）。
-const R_IN = 11.0
-const R_OUT = 12.6
+// 圍在島外（島半徑 12）
+const R_IN = 13.5
+const R_OUT = 15.1
 const Y = -0.55
 const LANE_H = 0.26
 

@@ -17,6 +17,7 @@ roofGeo.rotateY(Math.PI / 4)
 const edgeBody = new THREE.EdgesGeometry(bodyGeo)
 const edgeRoof = new THREE.EdgesGeometry(roofGeo)
 
+const PAUSED_GREY = new THREE.Color('#b9bcc4')
 export const floorsOf = (p) => Math.min(MAX_FLOORS, Math.max(1, p.milestones.length))
 
 class Tower {
@@ -154,7 +155,7 @@ class Tower {
 
   // 期限燈籠與準時光環
   _marks(project, done, today) {
-    const days = project.deadline && today ? daysBetween(today, project.deadline) : null
+    const days = project.deadline && today && !project.pausedAt ? daysBetween(today, project.deadline) : null
     this.lanternState = !done && project.milestones.length && days !== null && days <= 2 ? (days < 0 ? 'late' : 'near') : null
     this.lantern.visible = !!this.lanternState
     this.lanternMat.color.set(this.lanternState === 'late' ? '#c9b6b8' : '#f07f86')
@@ -164,6 +165,10 @@ class Tower {
   // 回傳新蓋好的樓層（供特效使用）
   setState(project, progress, animate, today = null) {
     const color = new THREE.Color(PROJECT_COLORS[project.color % PROJECT_COLORS.length])
+    // 暫停：顏色褪成灰、旗子降到半旗
+    this.paused = !!project.pausedAt
+    if (this.paused) color.lerp(PAUSED_GREY, 0.65)
+    this.flag.position.y = this.paused ? 0.62 : 1.02
     this.roofMat.color.copy(color)
     this.roofMat.emissive.copy(color).multiplyScalar(0.12)
     this.flagMat.color.copy(color)
@@ -214,7 +219,7 @@ class Tower {
   update(t, night) {
     this.bandMat.emissiveIntensity = 0.15 + night * 1.6
     this.orbMat.emissiveIntensity = 1 + Math.sin(t * 2) * 0.3 + night
-    this.flag.rotation.y = Math.sin(t * 2 + this.group.position.x) * 0.25
+    this.flag.rotation.y = this.paused ? 0.1 : Math.sin(t * 2 + this.group.position.x) * 0.25
     if (this.lanternState) {
       this.lanternBody.rotation.z = Math.sin(t * 1.3 + this.group.position.z) * 0.1
       this.lanternMat.emissiveIntensity = this.lanternState === 'near' ? 0.55 + Math.sin(t * 2.6) * 0.25 + night * 1.4 : 0.05
