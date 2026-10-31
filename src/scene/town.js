@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mat, rng, wobble, tween, ease, wait, glowTexture } from './util.js'
 import { LAYOUT } from './island.js'
+import { buildIslandBase } from './islandBase.js'
 import { BUILDINGS, RESIDENTS, MOVE_IN } from '../data/town.js'
 import { buildBuilding, buildResident } from './models/town/index.js'
 
@@ -64,33 +65,11 @@ function buildIslet(island, seed) {
   grass.receiveShadow = true
   const rim = new THREE.Mesh(jitter(new THREE.CylinderGeometry(R * 1.01, R * 0.98, 0.14, 40, 1, true), 0.05, seed), island.rimMat)
   rim.position.y = -0.45
-  const soil = new THREE.Mesh(jitter(new THREE.CylinderGeometry(R * 0.97, R * 0.8, 0.8, 30, 1), 0.06, seed + 0.7), mat('#f1dccb'))
-  soil.position.y = -0.9
-  // 岩錐：頂部奶茶色 → 底部薰衣草
-  const H = 3.2
-  const cone = new THREE.ConeGeometry(R * 0.86, H, 16, 4)
-  cone.rotateX(Math.PI)
-  const p = cone.attributes.position
+  // 草地以下和主島同一套：層疊岩壁、垂根苔蘚、岩錐，朝鏡頭那一側一道細瀑布
+  const base = buildIslandBase({ radius: R * 0.975, top: -0.48, cliff: 1.1, depth: 4.4, seed, wob: 0.05, segs: 40, roots: 0.8, falls: [Math.PI / 2 + ((seed * 7) % 3) * 0.5 - 0.5], fallTo: -15 })
   const r = rng(seed * 31 + 7)
-  const colors = []
-  const top = new THREE.Color('#ecd3c4')
-  const bottom = new THREE.Color('#c6bde6')
   const c = new THREE.Color()
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i)
-    // 翻轉後頂蓋的 y 會有浮點誤差，t 要夾在 0..1（負數開次方會變 NaN、整面變黑）
-    const t = Math.min(1, Math.max(0, (H / 2 - y) / H))
-    const k = 1 + 0.1 * wobble(Math.atan2(p.getZ(i), p.getX(i)), seed + 2) + (r() - 0.5) * 0.12 * t
-    p.setXYZ(i, p.getX(i) * k, y + (t > 0.05 && t < 0.97 ? (r() - 0.5) * 0.25 : 0), p.getZ(i) * k)
-    c.lerpColors(top, bottom, Math.pow(t, 0.8))
-    colors.push(c.r, c.g, c.b)
-  }
-  cone.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-  cone.computeVertexNormals()
-  const rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 })
-  const rock = new THREE.Mesh(cone, rockMat)
-  rock.position.y = -1.3 - H / 2
-  g.add(grass, rim, soil, rock)
+  g.add(grass, rim, base)
 
   // 野花小點（避開建築）
   const spots = []
@@ -113,7 +92,7 @@ function buildIslet(island, seed) {
     dots.setColorAt(k, c.set(palette[Math.floor(r() * palette.length)]))
   })
   g.add(dots)
-  g.userData.ownedMaterials = [rockMat, dotMat]
+  g.userData.ownedMaterials = [...base.userData.ownedMaterials, dotMat]
   return g
 }
 

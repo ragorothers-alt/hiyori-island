@@ -74,9 +74,10 @@ export function mat(color, opts = {}) {
   return matCache.get(key)
 }
 
+// userData.noShadow 的網格（瀑布、垂根這類半透明的面）不參與陰影
 export function shadowed(obj, cast = true, receive = true) {
   obj.traverse((o) => {
-    if (o.isMesh) {
+    if (o.isMesh && !o.userData.noShadow) {
       o.castShadow = cast
       o.receiveShadow = receive
     }

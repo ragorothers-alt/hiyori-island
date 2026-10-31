@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mat, rng, shadowed, tween, ease } from './util.js'
 import { LAYOUT } from './island.js'
+import { buildIslandBase } from './islandBase.js'
 import { UNLOCKS } from '../theme.js'
 import { SEASONS } from './season.js'
 import { buildCloudWhale } from './models/cloudWhale.js'
@@ -288,12 +289,11 @@ function lilies() {
 
 function islet() {
   const g = new THREE.Group()
-  const rock = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 8, 2), mat('#e3cbd6'))
-  rock.rotation.x = Math.PI
-  rock.position.y = -1.6
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.5, 0.3, 10), mat('#c5e6b4'))
+  // 底座和主島同一套（層疊岩壁、垂根、岩錐），正面一道落進雲海的小瀑布
+  const base = buildIslandBase({ radius: 1.5, top: -0.3, cliff: 0.7, depth: 3.1, seed: 5, wob: 0.06, segs: 28, roots: 0.5, falls: [Math.PI / 2], fallTo: -18 })
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.5, 0.3, 28), mat('#c5e6b4'))
   top.position.y = -0.15
-  g.add(rock, top)
+  g.add(base, top)
   const tree = sakuraTree(99, 0.45)
   tree.position.set(-0.4, 0, -0.2)
   g.add(tree)
@@ -303,16 +303,9 @@ function islet() {
   t.position.set(0.6, 0, 0.6)
   t.rotation.y = -0.6
   g.add(t)
-  // 小瀑布
-  const fall = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.35, 3.2),
-    new THREE.MeshStandardMaterial({ color: '#d9f2fb', transparent: true, opacity: 0.6, emissive: '#bfe9f7', emissiveIntensity: 0.3, side: THREE.DoubleSide }),
-  )
-  fall.position.set(0, -1.75, 1.42)
-  g.add(fall)
   g.position.set(13.5, 4.5, -10)
   g.userData.orbit = true
-  g.userData.ownedMaterials = [fall.material, ...tree.userData.ownedMaterials]
+  g.userData.ownedMaterials = [...base.userData.ownedMaterials, ...tree.userData.ownedMaterials]
   return shadowed(g)
 }
 
@@ -503,9 +496,9 @@ function bonbori() {
 
 function teahouse() {
   const g = new THREE.Group()
-  const rock = piece(g, new THREE.ConeGeometry(2.3, 4.4, 9, 2), mat('#e1cddd'), 0, -2.35)
-  rock.rotation.x = Math.PI
-  piece(g, new THREE.CylinderGeometry(2.35, 2.3, 0.3, 12), mat('#c5e6b4'), 0, -0.15)
+  const base = buildIslandBase({ radius: 2.3, top: -0.3, cliff: 0.9, depth: 4.4, seed: 8, wob: 0.05, segs: 36, roots: 0.6 })
+  g.add(base)
+  piece(g, new THREE.CylinderGeometry(2.35, 2.3, 0.3, 36), mat('#c5e6b4'), 0, -0.15)
   piece(g, new THREE.BoxGeometry(1.7, 0.12, 1.4), mat('#d9bd9e'), -0.55, 0.06, -0.55)
   piece(g, new THREE.BoxGeometry(1.55, 1.25, 1.22), mat('#ead7c0'), -0.55, 0.72, -0.55)
   piece(g, new THREE.PlaneGeometry(0.95, 1.02), mat('#716971'), -0.55, 0.64, 0.067)
@@ -535,7 +528,7 @@ function teahouse() {
   g.position.set(-17.2, 3.2, 3)
   g.rotation.y = 0.3
   g.userData.glow = { mats: [glow], lights: [], base: 0.3 }
-  g.userData.ownedMaterials = [glow]
+  g.userData.ownedMaterials = [glow, ...base.userData.ownedMaterials]
   g.userData.anim = (t) => { g.position.y = 3.2 + Math.sin(t * 0.32) * 0.25 }
   return shadowed(g)
 }

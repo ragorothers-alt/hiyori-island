@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mat, rng, wobble, shadowed } from './util.js'
 import { SEASONS } from './season.js'
+import { buildIslandBase, addGrassDetail, FALL_UNIFORMS } from './islandBase.js'
 
 // 島嶼配置（俯視座標 x, z；鏡頭在 +z 方向）
 export const LAYOUT = {
@@ -38,9 +39,9 @@ export class Island {
   constructor(world) {
     this.world = world
     // 會隨季節變色的材質：不走 mat() 快取，避免影響其他物件
-    this.grassMat = new THREE.MeshStandardMaterial({ color: '#bde5b6', roughness: 0.95, flatShading: true })
+    this.grassMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#bde5b6', roughness: 0.95, flatShading: true }))
     this.rimMat = new THREE.MeshStandardMaterial({ color: '#addb9d', roughness: 0.95, flatShading: true, side: THREE.DoubleSide })
-    this.topMat = new THREE.MeshStandardMaterial({ color: '#c5e6b4', roughness: 0.82, flatShading: true })
+    this.topMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#c5e6b4', roughness: 0.82, flatShading: true }))
     this.group = new THREE.Group()
     world.scene.add(this.group)
     this._terrain()
@@ -83,36 +84,11 @@ export class Island {
       this.rimMat,
     )
     rim.position.y = -0.62
-    // 土層
-    const soil = new THREE.Mesh(jitter(new THREE.CylinderGeometry(R * 0.985, R * 0.88, 1.5, 56, 2), 0.045, 0.7), mat('#f1dccb'))
-    soil.position.y = -1.45
+    // 草地以下：層疊岩壁、垂根苔蘚、往下收成岩錐，兩道從岩壁流出的瀑布（鏡頭看得到的左前、右前）
+    const base = buildIslandBase({ radius: R * 0.99, top: -0.62, cliff: 2.2, depth: 11, seed: 0, wob: 0.035, roots: 1.3, falls: [2.0, 0.62], fallTo: -15 })
+    this.base = base
 
-    // 下方岩錐：頂部奶茶色 → 底部薰衣草，頂點色漸層
-    const cone = new THREE.ConeGeometry(R * 0.88, 9.5, 36, 7)
-    cone.rotateX(Math.PI)
-    const p = cone.attributes.position
-    const r = rng(3)
-    const colors = []
-    const top = new THREE.Color('#ecd3c4')
-    const bottom = new THREE.Color('#c6bde6')
-    const c = new THREE.Color()
-    for (let i = 0; i < p.count; i++) {
-      const y = p.getY(i)
-      const x = p.getX(i)
-      const z = p.getZ(i)
-      const a = Math.atan2(z, x)
-      const t = (4.75 - y) / 9.5
-      const k = 1 + 0.08 * wobble(a, 2.2) + (r() - 0.5) * 0.09 * t
-      p.setXYZ(i, x * k, y + (t > 0.05 && t < 0.98 ? (r() - 0.5) * 0.35 : 0), z * k)
-      c.lerpColors(top, bottom, Math.pow(t, 0.8))
-      colors.push(c.r, c.g, c.b)
-    }
-    cone.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-    cone.computeVertexNormals()
-    const rock = new THREE.Mesh(cone, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 }))
-    rock.position.y = -2.2 - 4.75
-
-    this.group.add(shadowed(grass, false, true), rim, shadowed(soil, false, true), rock)
+    this.group.add(shadowed(grass, false, true), rim, base)
     this.ground = grass
   }
 
@@ -273,16 +249,14 @@ export class Island {
   }
 
   _floaters() {
-    // 漂浮的小石塊
+    // 漂浮的小石塊：主島底座的迷你版（層疊岩壁＋岩錐，沒有垂根）
     this.floaters = []
     const r = rng(9)
     for (let i = 0; i < 7; i++) {
       const g = new THREE.Group()
       const s = 0.35 + r() * 0.55
-      const rock = new THREE.Mesh(new THREE.ConeGeometry(s, s * 1.8, 6, 1), mat('#e2cfd2'))
-      rock.rotation.x = Math.PI
-      rock.position.y = -s * 0.9
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(s * 1.02, s, 0.16, 6), this.topMat)
+      const rock = buildIslandBase({ radius: s * 0.99, top: -0.08, cliff: s * 0.45, depth: s * 1.9, seed: 20 + i, wob: 0.08, segs: 18, roots: 0 })
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(s * 1.02, s, 0.16, 18), this.topMat)
       g.add(rock, top)
       const a = (i / 7) * Math.PI * 2 + r()
       const d = 11.5 + r() * 4
@@ -310,6 +284,8 @@ export class Island {
   }
 
   update(dt, t) {
+    FALL_UNIFORMS.uTime.value = t
+    FALL_UNIFORMS.uNight.value = this.world.look?.night ?? 0
     for (const k of this.koi) {
       const u = k.userData
       const a = t * u.speed * u.dir + u.phase
