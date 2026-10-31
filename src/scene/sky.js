@@ -3,6 +3,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { rng, smooth } from './util.js'
 import { SUNRISE, SUNSET, sunElevation, lookHour, systemDark, realHour } from '../daylight.js'
 import { CLOUD_TOP } from './shading.js'
+import { SKY_GLSL, NOISE_GLSL } from './skyGlsl.js'
+import { SkyArt, SKY_SRC } from './skyArt.js'
 
 // 依真實時間變化的天空：漸層穹頂（日盤、月盤、銀河）、星星、雲與雲海
 // 外觀設定（白天／夜晚／跟著系統）會改變天空顯示的時間，切換時快轉過去：變夜晚看夕陽、變白天看日出
@@ -24,42 +26,10 @@ const KEYS = [
 // 月亮掛在預設視角看得到的天空：島的左後方、地平線上方約 4°（預設視角只看得到地平線上方 8° 左右），避開左上角的等級卡
 const MOON_SKY = new THREE.Vector3(-0.17, 0.072, -0.98).normalize()
 
-// 穹頂與雲海共用：依方向的高度 h（-1..1）取天空顏色，兩邊在遠方接得起來。
-// 畫面裡的天空只有地平線上方一小段，漸層要很快轉深，畫面上緣才看得到飽和的藍
-const SKY_GLSL = /* glsl */ `
-  uniform vec3 uTop, uMid, uBot;
-  vec3 skyColor(float h) {
-    return h > 0.0
-      ? mix(uMid, uTop, pow(smoothstep(-0.01, 0.2, h), 0.6))
-      : mix(uMid, uBot, smoothstep(0.0, -0.05, h));
-  }
-`
-const NOISE_GLSL = /* glsl */ `
-  float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  float noise2(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
-  }
-  float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-  float noise3(vec3 x) {
-    vec3 i = floor(x), f = fract(x);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
-      mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y),
-      f.z);
-  }
-  float fbm3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++) { s += a * noise3(p); p *= 2.03; a *= 0.5; } return s; }
-`
-
 const C_GOLD = new THREE.Color('#ffc6a8')
 const C_GOLD2 = new THREE.Color('#ffc9a6')
 const C_WHITE = new THREE.Color('#ffffff')
 const C_NIGHT_GROUND = new THREE.Color('#3a3f72')
-const C_NIGHT_CLOUD = new THREE.Color('#3f477c')
-const C_MOON_GLOW = new THREE.Color('#7d8fd8')
-const C_DAY_GLOW = new THREE.Color('#ffffff')
 const MOON_DIR = new THREE.Vector3(-0.45, 1, 0.35).normalize()
 const C_KEY_DAY = new THREE.Color('#fff3df')
 const C_KEY_MOON = new THREE.Color('#a9bcff')
@@ -110,6 +80,15 @@ export class Sky {
       uSunVis: { value: 1 },
       uMoonDir: { value: MOON_SKY },
       uNight: { value: 0 },
+      uMoonMap: { value: null },
+      uMoonReady: { value: 0 },
+    }
+    if (typeof document !== 'undefined') {
+      new THREE.TextureLoader().load(SKY_SRC.moon, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace
+        this.uniforms.uMoonMap.value = tex
+        this.uniforms.uMoonReady.value = 1
+      })
     }
     const dome = new THREE.Mesh(
       new THREE.SphereGeometry(800, 48, 24),
@@ -128,7 +107,8 @@ export class Sky {
           ${SKY_GLSL}
           ${NOISE_GLSL}
           uniform vec3 uSunDir, uSunColor, uMoonDir;
-          uniform float uSunVis, uNight;
+          uniform float uSunVis, uNight, uMoonReady;
+          uniform sampler2D uMoonMap;
           varying vec3 vDir;
           void main() {
             vec3 dir = normalize(vDir);
@@ -150,11 +130,22 @@ export class Sky {
               float mw = band * smoothstep(0.32, 0.8, n) * (0.55 + 0.7 * n2);
               col += mix(vec3(0.42, 0.5, 1.0), vec3(1.0, 0.78, 0.95), n2) * mw * 0.5 * uNight * above;
               col *= 1.0 - band * smoothstep(0.5, 0.72, n2) * 0.22 * uNight * above;
-              // 月亮：圓盤＋淡淡的月海＋藍色光暈
+              // 月亮：手繪的月盤（載好之前用雜訊畫的圓盤＋月海）＋藍色光暈
               float md = dot(dir, uMoonDir);
-              float disc = smoothstep(0.99925, 0.99942, md);
-              float maria = fbm3(dir * 120.0);
-              col = mix(col, vec3(1.0, 0.97, 0.88) * (1.9 - maria * 0.55), disc * uNight);
+              if (uMoonReady > 0.5) {
+                vec3 mx = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)));
+                vec3 my = cross(mx, uMoonDir);
+                // 月盤半徑約 2.2°（tan ≈ 0.0385），原圖的圓盤佔整張寬度 86%
+                vec2 muv = vec2(dot(dir, mx), dot(dir, my)) / (2.0 * 0.0385 / 0.86) + 0.5;
+                if (md > 0.0 && abs(muv.x - 0.5) < 0.5 && abs(muv.y - 0.5) < 0.5) {
+                  vec4 mt = texture2D(uMoonMap, muv);
+                  col = mix(col, mt.rgb * 1.9, mt.a * uNight);
+                }
+              } else {
+                float disc = smoothstep(0.99925, 0.99942, md);
+                float maria = fbm3(dir * 120.0);
+                col = mix(col, vec3(1.0, 0.97, 0.88) * (1.9 - maria * 0.55), disc * uNight);
+              }
               col += vec3(0.62, 0.7, 1.0) * (pow(max(md, 0.0), 260.0) * 0.7 + pow(max(md, 0.0), 18.0) * 0.12) * uNight;
             }
             gl_FragColor = vec4(col, 1.0);
@@ -203,6 +194,8 @@ export class Sky {
 
     this._stars(scene)
     this._clouds(scene)
+    const { uTop, uMid, uBot, uSunDir, uSunColor } = this.uniforms
+    this.art = new SkyArt(scene, { uTop, uMid, uBot, uSunDir, uSunColor, uLit: this.seaUniforms.uLit, uShade: this.seaUniforms.uShade })
     world.add((dt, t) => this.update(dt, t))
     this.update(0, 0)
   }
@@ -274,6 +267,7 @@ export class Sky {
     })
     const stars = new THREE.Points(g, this.starMat)
     stars.frustumCulled = false
+    stars.renderOrder = -9.5 // 在遠景畫之前畫，星星會被雲和浮島擋住
     scene.add(stars)
     this.stars = stars
   }
@@ -291,6 +285,17 @@ export class Sky {
       uShade: { value: new THREE.Color() },
       uDay: { value: 1 },
       uTime: { value: 0 },
+      uTile: { value: null },
+      uTileOn: { value: 0 },
+    }
+    if (typeof document !== 'undefined') {
+      new THREE.TextureLoader().load(SKY_SRC.sea, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+        tex.anisotropy = 8
+        this.seaUniforms.uTile.value = tex
+        this.seaUniforms.uTileOn.value = 1
+      })
     }
     const sea = new THREE.Mesh(
       new THREE.PlaneGeometry(1700, 1700).rotateX(-Math.PI / 2),
@@ -308,7 +313,8 @@ export class Sky {
           ${SKY_GLSL}
           ${NOISE_GLSL}
           uniform vec3 uSunDir, uSunColor, uLit, uShade;
-          uniform float uDay, uTime;
+          uniform float uDay, uTime, uTileOn;
+          uniform sampler2D uTile;
           varying vec3 vWorld;
           vec2 hash22(vec2 p) {
             p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
@@ -328,9 +334,14 @@ export class Sky {
               }
             return sqrt(d);
           }
-          // 雲頂高度：大團的圓頂上再疊小團，加一點細碎起伏
+          // 雲頂高度：大團的圓頂上再疊小團，加一點細碎起伏；近處再疊上手繪雲海圖的明暗當筆觸
+          float tileL(vec2 p) {
+            return dot(texture2D(uTile, p * 0.14).rgb, vec3(0.2126, 0.7152, 0.0722));
+          }
           float cloudH(vec2 p) {
-            return (1.0 - worley(p)) * 0.62 + (1.0 - worley(p * 2.3 + 5.0)) * 0.28 + noise2(p * 6.0) * 0.1;
+            float h = (1.0 - worley(p)) * 0.62 + (1.0 - worley(p * 2.3 + 5.0)) * 0.28 + noise2(p * 6.0) * 0.1;
+            if (uTileOn > 0.5) h += (tileL(p) - 0.55) * 0.5;
+            return h;
           }
           void main() {
             vec3 to = vWorld - cameraPosition;
@@ -347,6 +358,8 @@ export class Sky {
             lit = mix(0.62, lit, near);
             vec3 col = mix(uShade, uLit, lit);
             col *= mix(1.0, mix(0.86, 1.04, smoothstep(0.15, 0.7, h)), near);
+            // 手繪圖的色彩變化（暖白的頂、藍紫的谷）淡淡疊上
+            if (uTileOn > 0.5) col = mix(col, mix(uShade, uLit, smoothstep(0.25, 0.95, tileL(p))), 0.3 * near);
             // 往太陽方向看過去，雲海會透出一層暖光
             float fs = pow(max(dot(normalize(dir.xz + vec2(1e-4)), normalize(uSunDir.xz + vec2(1e-4))), 0.0), 5.0);
             col += uSunColor * fs * 0.16 * uDay;
@@ -362,16 +375,46 @@ export class Sky {
     this.sea = sea
   }
 
+  // 島下半埋在雲海裡、只露出頂部的近處雲團，讓雲海有立體感（天上的雲改成 SkyArt 的手繪積雨雲）。
+  // 畫法跟雲海一樣：朝光面是雲海的亮色、背光是藍紫，表面用雜訊擾動法線做出一球球的花椰菜感，邊緣鑲一圈亮光；
+  // 全部合併成一個網格，一次畫完
   _clouds(scene) {
     const r = rng(21)
     const puff = new THREE.IcosahedronGeometry(1, 3)
-    this.cloudMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      roughness: 1,
-      emissive: '#ffffff',
-      emissiveIntensity: 0.18,
-      transparent: true,
-      opacity: 0.94,
+    this.cloudMat = new THREE.ShaderMaterial({
+      fog: false,
+      uniforms: this.seaUniforms,
+      vertexShader: /* glsl */ `
+        varying vec3 vN;
+        varying vec3 vWorld;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vWorld = w.xyz;
+          vN = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * w;
+        }`,
+      fragmentShader: /* glsl */ `
+        ${SKY_GLSL}
+        ${NOISE_GLSL}
+        uniform vec3 uSunDir, uLit, uShade;
+        varying vec3 vN;
+        varying vec3 vWorld;
+        void main() {
+          vec3 to = vWorld - cameraPosition;
+          float dist = length(to);
+          vec3 dir = to / dist;
+          vec3 q = vWorld * 0.8;
+          vec3 n = normalize(vN + (vec3(noise3(q), noise3(q + 7.1), noise3(q + 13.7)) - 0.5) * 1.1);
+          // 光從太陽那一側的上方來：雲頂一定亮
+          vec3 L = normalize(uSunDir + vec3(0.0, 0.9, 0.0));
+          float lit = smoothstep(-0.3, 0.75, dot(n, L));
+          vec3 col = mix(uShade, uLit, lit);
+          col += uLit * pow(1.0 - abs(dot(normalize(vN), dir)), 3.0) * 0.22;
+          // 沉在雲海頂面以下的部分融成雲海的顏色，遠處融進天色
+          col = mix(col, mix(uShade, uLit, 0.62), smoothstep(${(CLOUD_TOP + 0.9).toFixed(1)}, ${(CLOUD_TOP - 0.3).toFixed(1)}, vWorld.y));
+          col = mix(col, skyColor(dir.y), smoothstep(110.0, 760.0, dist));
+          gl_FragColor = vec4(col, 1.0);
+        }`,
     })
     const makeCloud = (scale, flat) => {
       const parts = []
@@ -387,28 +430,17 @@ export class Sky {
       merged.scale(scale, scale, scale)
       return merged
     }
-    // 天空中的雲
-    this.skyClouds = new THREE.Group()
-    for (let i = 0; i < 16; i++) {
-      const m = new THREE.Mesh(makeCloud(2.2 + r() * 2.4, 0.6), this.cloudMat)
-      const a = r() * Math.PI * 2
-      const d = 55 + r() * 60
-      m.position.set(Math.cos(a) * d, -2 + r() * 24, Math.sin(a) * d)
-      m.rotation.y = r() * Math.PI
-      this.skyClouds.add(m)
-    }
-    // 島下的雲海
-    this.seaClouds = new THREE.Group()
+    const parts = []
+    const m = new THREE.Matrix4()
     for (let i = 0; i < 34; i++) {
-      const m = new THREE.Mesh(makeCloud(2.4 + r() * 2.8, 0.45), this.cloudMat)
+      const g = makeCloud(2.4 + r() * 2.8, 0.45)
       const a = (i / 34) * Math.PI * 2 + r() * 0.3
       const d = 14 + r() * 50
-      // 半埋在雲海裡、只露出頂部的近處雲團，讓雲海有立體感
-      m.position.set(Math.cos(a) * d, CLOUD_TOP - 0.6 - r() * 1.4, Math.sin(a) * d)
-      m.rotation.y = r() * Math.PI
-      this.seaClouds.add(m)
+      m.makeRotationY(r() * Math.PI).setPosition(Math.cos(a) * d, CLOUD_TOP - 0.6 - r() * 1.4, Math.sin(a) * d)
+      parts.push(g.applyMatrix4(m))
     }
-    scene.add(this.skyClouds, this.seaClouds)
+    this.seaClouds = new THREE.Mesh(mergeGeometries(parts), this.cloudMat)
+    scene.add(this.seaClouds)
   }
 
   update(dt, t) {
@@ -466,10 +498,6 @@ export class Sky {
     this.starMat.uniforms.uOpacity.value = smooth(0.35, 0.95, this.night)
     this.starMat.uniforms.uTime.value = t
 
-    this.cloudMat.color.set('#ffffff').lerp(this.bot, 0.3).lerp(C_NIGHT_CLOUD, this.night * 0.8)
-    this.cloudMat.emissive.copy(C_DAY_GLOW).lerp(C_MOON_GLOW, this.night)
-    this.cloudMat.emissiveIntensity = 0.05 + day * 0.1 + this.night * 0.08
-    this.skyClouds.rotation.y += dt * 0.006
     this.seaClouds.rotation.y -= dt * 0.003
 
     // 雲海：亮面帶太陽的顏色、暗面是偏天空色的藍紫；夜晚整片是月光下的藍紫
@@ -485,6 +513,14 @@ export class Sky {
     const cam = this.world.camera.position
     this.dome.position.copy(cam)
     this.stars.position.copy(cam)
+    // 遠景畫：白天保留原畫，黃昏染上太陽色、改用雲海的亮暗色，夜晚整片是月光下的藍紫剪影
+    const golden2 = golden * day
+    const A = this.art.uniforms
+    A.uTint.value.copy(C_WHITE).lerp(this.uniforms.uSunColor.value, golden2 * 0.55)
+    A.uRemap.value = mix(golden2 * 0.38, 0.88, this.night)
+    A.uGlow.value = golden2 * 0.7
+    A.uNight.value = smooth(0.4, 0.9, this.night)
+    this.art.update(dt, cam)
     this.sea.position.x = cam.x
     this.sea.position.z = cam.z
 
