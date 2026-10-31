@@ -23,6 +23,7 @@ import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
 import { FileSync } from './sync.js'
+import { CloudSync, codeFromHash } from './cloud.js'
 import { LINES, FUJI_LINES, DUETS } from './data/lines.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
 import { RARITIES } from './data/flowers.js'
@@ -913,14 +914,19 @@ async function boot() {
     resWork('post')
   })
   store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
-  store.on('reload', () => {
+  store.on('reload', ({ soft } = {}) => {
     decor.sync(store.level.level)
-    // 匯入的存檔小鎮可能比較小：整個重蓋
-    townQueue.length = 0
-    town.reset()
-    town.sync(store.state.town.seen)
+    // 匯入的存檔小鎮可能比較小：整個重蓋。同步拉回的通常只是多了幾筆，小鎮沒變小就照常長，鏡頭也不動
+    const seen = store.state.town.seen
+    const count = town.count
+    if (!soft || Object.entries(town.districts).some(([k, d]) => (seen[k] || 0) < d.stage)) {
+      townQueue.length = 0
+      town.reset()
+    }
+    town.sync(seen)
+    if (soft && town.count === count) return
     townView()
-    world.home()
+    if (!soft) world.home()
   })
   store.on('taskAdded', (t) => {
     if (t.date !== store.selectedDate) return
@@ -1237,14 +1243,28 @@ async function boot() {
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
   })
 
-  // ── 雲端同步（不需後端：資料寫進使用者選的檔案，放在雲端資料夾即可跨裝置） ──
+  // ── 同步：線上同步（同步碼，手機也能用）＋資料夾同步（資料寫進 OneDrive／Dropbox 裡的檔案）。兩種可以同時開 ──
+  const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「紀錄 → 設定」選要保留哪一邊', ms: 7000 })
+  const cloudSync = new CloudSync(store, {
+    onStatus: () => ui.renderSync(),
+    onPulled: () => ui.toast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),
+    onConflict,
+  })
   const fileSync = new FileSync(store, {
     onStatus: () => ui.renderSync(),
     onPulled: () => ui.toast({ icon: '雲', title: '已載入雲端的新資料', sub: '別台裝置的變更同步過來了' }),
-    onConflict: () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「紀錄 → 設定」選要保留哪一邊', ms: 7000 }),
+    onConflict,
   })
+  ui.attachCloud(cloudSync)
   ui.attachSync(fileSync)
+  cloudSync.init()
   fileSync.init()
+  // 分享連結（#sync=同步碼）：先從網址拿掉，再到設定裡等使用者按「連線」
+  const linkCode = codeFromHash()
+  if (linkCode) {
+    history.replaceState(null, '', location.pathname + location.search)
+    ui.offerCloud(linkCode)
+  }
 
   // ── 時間 ──
   let lastMin = -1
@@ -1397,7 +1417,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, town, visit: startVisit }
+  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, visit: startVisit }
 }
 
 boot()

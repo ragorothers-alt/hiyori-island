@@ -1,0 +1,22 @@
+# 線上同步後端。部署：在這個資料夾執行 npx wrangler@4 deploy（資料表變更：npx wrangler@4 d1 migrations apply hiyori-sync --remote）
+name = "hiyori-sync"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hiyori-sync"
+database_id = "10ee1924-6221-4fea-aa25-6f877d7d6855"
+migrations_dir = "migrations"
+
+# 每個 IP 每分鐘的請求上限（namespace_id 在整個 Cloudflare 帳號裡不能重複）
+[[ratelimits]]
+name = "SYNC_LIMIT"
+namespace_id = "2001"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "CREATE_LIMIT"
+namespace_id = "2002"
+simple = { limit = 5, period = 60 }

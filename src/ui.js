@@ -17,6 +17,8 @@ import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
+import { CloudView } from './ui/cloud.js'
+import { readBackup, restoreBackup } from './sync.js'
 
 const TAB_ORDER = ['tasks', 'schedule', 'habits', 'projects', 'records']
 // 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
@@ -781,7 +783,26 @@ export class UI {
     $('#qualityInfo').textContent = QUALITY_INFO[quality]
   }
 
-  // ── 雲端同步 ──
+  // ── 同步 ──
+  // 線上同步（手機也能用）
+  attachCloud(cloud) {
+    this.cloud = cloud
+    this.cloudView = new CloudView($('#cloudRow'), cloud, { toast: (o) => this.toast(o) })
+    $('#backupBtn').addEventListener('click', (e) => {
+      armConfirm(e.currentTarget, '再按一次還原', () => {
+        if (restoreBackup(this.store)) this.toast({ icon: '戻', title: '已還原備份', sub: '小島回到被取代前的樣子' })
+        this.renderSync()
+      })
+    })
+    this.renderSync()
+  }
+  // 分享連結打開時：到設定裡填好同步碼
+  offerCloud(code) {
+    this.setTab('records')
+    this.cloudView?.offer(code)
+  }
+
+  // 資料夾同步（電腦版 Chrome／Edge：資料寫進 OneDrive／Dropbox 裡的檔案）
   attachSync(sync) {
     this.sync = sync
     $('#syncBtns').addEventListener('click', async (e) => {
@@ -789,11 +810,6 @@ export class UI {
       if (!b) return
       const act = b.dataset.sync
       if (act === 'unlink') return armConfirm(b, '再按一次解除', () => sync.unlink())
-      if (act === 'restore') {
-        return armConfirm(b, '再按一次還原', () => {
-          if (sync.restoreBackup()) this.toast({ icon: '戻', title: '已還原備份', sub: '小島回到被取代前的樣子' })
-        })
-      }
       try {
         if (act === 'create') await sync.create()
         else if (act === 'choose') await sync.choose()
@@ -809,26 +825,32 @@ export class UI {
   }
 
   renderSync() {
+    this.cloudView?.render()
+    const when = (t) => `${new Date(t).getMonth() + 1}/${new Date(t).getDate()} ${hhmm(t)}`
+    // 被同步取代的那一份（兩種同步共用）：還在選邊時先不顯示
+    const bk = readBackup()
+    const choosing = this.cloud?.state === 'conflict' || this.sync?.state === 'conflict'
+    $('#backupRow').hidden = !bk || choosing
+    if (bk) $('#backupInfo').textContent = `${when(bk.at)} 的${bk.from === 'local' ? '這台' : bk.from === 'file' ? '同步檔' : '雲端'}版本，同步時被比較新的資料取代，留著備用`
     const sy = this.sync
     if (!sy) return
+    // 手機和 Firefox 不能直接存取檔案：有線上同步就夠了，整列藏起來
+    $('#syncRow').hidden = sy.state === 'unsupported'
     const name = esc(sy.fileName)
-    const when = (t) => `${new Date(t).getMonth() + 1}/${new Date(t).getDate()} ${hhmm(t)}`
     const view = {
-      unsupported: ['這個瀏覽器不能直接存取檔案，請改用電腦版 Chrome 或 Edge。也可以用下面的匯出／匯入手動搬資料', []],
+      unsupported: ['', []],
       off: ['把資料自動存進 OneDrive、Dropbox 等雲端資料夾裡的一個檔案，其他電腦連結同一個檔案就能共用', [['create', '建立同步檔', 1], ['choose', '連結既有檔案']]],
       'needs-permission': [`已記住「${name}」，瀏覽器需要你同意一次才能繼續同步`, [['resume', '繼續同步', 1], ['unlink', '解除']]],
       linked: [`已連結「${name}」・${sy.lastSync ? `${hhmm(sy.lastSync)} 同步過` : '同步中…'}`, [['now', '立即同步'], ['unlink', '解除']]],
       conflict: [
-        sy.conflict ? `這台和「${name}」都有新的變更（雲端 ${when(sy.conflict.fileAt)}、這台 ${when(sy.conflict.localAt)}）。要保留哪一邊？另一邊會留一份備份` : '',
-        [['file', '用雲端的', 1], ['local', '用這台的', 1]],
+        sy.conflict ? `這台和「${name}」都有新的變更（檔案 ${when(sy.conflict.remoteAt)}、這台 ${when(sy.conflict.localAt)}）。要保留哪一邊？另一邊會留一份備份` : '',
+        [['file', '用檔案的', 1], ['local', '用這台的', 1]],
       ],
       error: [`同步失敗：${esc(sy.message)}`, [['now', '重試', 1], ['unlink', '解除']]],
     }[sy.state]
     const [info, btns] = view
-    // 衝突時只留兩個選擇，備份等決定完再顯示
-    const bk = (sy.state === 'linked' || sy.state === 'off') && sy.backup
-    $('#syncInfo').innerHTML = info + (bk ? `<br>備份：${when(bk.at)} 的${bk.from === 'file' ? '雲端' : '這台'}版本` : '')
-    $('#syncBtns').innerHTML = [...btns, ...(bk ? [['restore', '還原備份']] : [])]
+    $('#syncInfo').innerHTML = info
+    $('#syncBtns').innerHTML = btns
       .map(([act, label, on]) => `<button class="chip-toggle ${on ? 'on' : ''}" data-sync="${act}">${label}</button>`)
       .join('')
     $('#syncDot').dataset.state = sy.state

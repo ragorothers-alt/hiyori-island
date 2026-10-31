@@ -215,7 +215,9 @@
           <div class="set-row"><div><b>省電模式</b><small>閒置時降低畫面更新率，筆電整天開著也不耗電</small></div><button class="chip-toggle" id="powerBtn"></button></div>
           <div class="set-row theme-row"><div><b>畫質</b><small id="qualityInfo"></small></div>
             <div class="seg" id="qualityPick"><button type="button" data-v="auto">自動</button><button type="button" data-v="high">高</button><button type="button" data-v="standard">標準</button></div></div>
-          <div class="set-row sync-row" id="syncRow"><div><b>雲端同步<span class="sync-dot" id="syncDot"></span></b><small id="syncInfo"></small></div><div class="sync-btns" id="syncBtns"></div></div>
+          <div class="set-row sync-row" id="cloudRow"></div>
+          <div class="set-row sync-row" id="syncRow"><div><b>資料夾同步<span class="sync-dot" id="syncDot"></span></b><small id="syncInfo"></small></div><div class="sync-btns" id="syncBtns"></div></div>
+          <div class="set-row" id="backupRow" hidden><div><b>被取代的資料</b><small id="backupInfo"></small></div><button class="chip-toggle" id="backupBtn">還原</button></div>
         </div>
         <div class="data-tools">
           <button class="btn-ghost" id="exportBtn">匯出資料</button>

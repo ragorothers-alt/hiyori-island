@@ -216,6 +216,51 @@ describe('雲端資料夾同步', () => {
     expect(titles(JSON.parse(file.content).state)).toContain('B 接著改')
   })
 
+  it('衝突等待期間檔案又被別台更新：選「用這台的」不會蓋掉，改成拿新的檔案再問一次', async () => {
+    const a = device()
+    const b = device()
+    await link(a, file)
+    later()
+    await link(b, file)
+    later()
+    await a.run(async (s, sync) => (s.addTask({ title: 'A 第一次' }), sync.sync()))
+    later()
+    await b.run(async (s, sync) => (s.addTask({ title: 'B 改的' }), sync.sync()))
+    expect(b.sync.state).toBe('conflict')
+    later()
+    await a.run(async (s, sync) => (s.addTask({ title: 'A 又改了' }), sync.sync()))
+    await b.run((_s, sync) => sync.resolve('local'))
+    expect(titles(JSON.parse(file.content).state)).toContain('A 又改了')
+    expect(b.sync.state).toBe('conflict')
+    expect(titles(b.sync.conflict.state)).toContain('A 又改了')
+  })
+
+  it('舊版同步檔（沒有 rev）和舊存檔對得起來，不會無故問衝突', async () => {
+    const a = device()
+    await a.run((s) => s.addTask({ title: '舊的' }))
+    const at = a.store.state.updatedAt
+    const legacy = { ...a.store.state }
+    delete legacy.rev
+    file.content = JSON.stringify({ app: 'hiyori', version: 1, savedAt: at, state: legacy })
+    // 舊版記的 base 是數字、存檔裡沒有 rev
+    a.mem.setItem('hiyori-sync-base', String(at))
+    a.mem.setItem('hiyori-daily-v1', JSON.stringify(legacy))
+    globalThis.localStorage = a.mem
+    const store = new Store()
+    expect(store.state.rev).toBe(String(at))
+    const sync = new FileSync(store)
+    sync.handle = file
+    sync.state = 'linked'
+    await sync.sync()
+    expect(sync.state).toBe('linked')
+    later()
+    store.addTask({ title: '新的' })
+    await sync.sync()
+    const saved = JSON.parse(file.content)
+    expect(saved.rev).toBe(store.state.rev)
+    expect(titles(saved.state)).toContain('新的')
+  })
+
   it('檔案不是ひより的同步檔時顯示錯誤，資料不動', async () => {
     file.content = '{"hello":1}'
     const a = device()

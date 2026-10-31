@@ -82,14 +82,30 @@ npm test         # 單元測試（Vitest）
 資料都存在瀏覽器的 localStorage。在「紀錄 → 設定」可以：
 
 - **匯出／匯入** JSON 備份，或重置小島
-- **雲端同步**（電腦版 Chrome／Edge）：選一個放在 OneDrive、Dropbox、Google 雲端硬碟同步資料夾裡的檔案，之後每次變更都會自動寫進去；回到視窗或每分鐘會檢查有沒有別台裝置的新資料。第一台按「建立同步檔」，其他電腦按「連結既有檔案」選同一個檔案
-  - 只有一邊改過：自動用新的那一邊
-  - 兩邊都改過（例如兩台都在離線時用過）：不會自動覆蓋，會請你選「用雲端的」或「用這台的」
-  - 被取代的那一份會留一份備份，可以按「還原備份」拿回來
-  - 瀏覽器重開後可能要按一次「繼續同步」重新授權（瀏覽器的安全規定）
-  - 手機瀏覽器和 Firefox 不支援直接存取檔案，請用匯出／匯入
+- **線上同步**（手機、電腦都能用）：第一台按「開始同步」會拿到一組 16 碼的同步碼；其他裝置按「輸入同步碼」，或用手機相機掃設定裡的 QR code、打開「複製連結」的網址
+  - 每次變更約 1.5 秒後上傳；回到視窗、恢復連線，或開著時每 30 秒會檢查別台裝置的新資料；手機切到背景前會先把還沒送出的變更送出去
+  - 端對端加密：同步碼只留在裝置上，用它推導出給伺服器找資料的 id 和 AES-GCM 金鑰；上傳的是壓縮後加密的整份小島，伺服器看不到內容。同步碼就是鑰匙，弄丟了就只能重新開一組
+  - 「停止同步」只讓這台忘記同步碼；「刪除雲端資料」會把雲端那份刪掉，其他裝置也會停止同步
+  - iPhone 加到主畫面的 App 和 Safari 是分開的兩份資料：要同步主畫面的 App，請在 App 裡輸入同步碼
+- **資料夾同步**（電腦版 Chrome／Edge）：選一個放在 OneDrive、Dropbox、Google 雲端硬碟同步資料夾裡的檔案，之後每次變更都會自動寫進去；回到視窗或每分鐘會檢查有沒有別台裝置的新資料。第一台按「建立同步檔」，其他電腦按「連結既有檔案」選同一個檔案。瀏覽器重開後可能要按一次「繼續同步」重新授權（瀏覽器的安全規定）
 
-這個同步不需要任何伺服器。如果想要手機也能即時同步，需要接一個真正的後端（例如 Supabase 或 Firebase）：要有你自己的帳號、專案網址和金鑰，再把 `src/sync.js` 的讀寫換成 API 呼叫，判斷新舊的邏輯可以沿用。
+兩種同步判斷新舊的規則相同（`src/sync.js`），也可以同時開：
+
+- 只有一邊改過：自動用新的那一邊
+- 兩邊都改過（例如兩台都在離線時用過），或已經有資料的裝置第一次連上：不會自動覆蓋，會請你選「用雲端的」或「用這台的」
+- 被取代的那一份會留一份備份，設定裡會出現「被取代的資料」，按「還原」拿回來
+
+### 線上同步後端
+
+`worker/` 是一個 Cloudflare Worker，資料存在 D1（SQLite）：每組同步碼一列，存 vault id 的 SHA-256、版本識別（每次修改都換一個的隨機字串，不用時間比新舊：各台時鐘可能不準）、修改時間和密文。上傳時要帶「我以為雲端現在是哪一版」，對不上代表別台剛寫過，伺服器回 409，前端重新比對，不會蓋掉別台的變更。測試（`tests/cloud.test.js`）用 Node 內建的 SQLite 跑真正的 Worker 程式，模擬兩台裝置互相同步。
+
+```bash
+cd worker
+npx wrangler@4 deploy                                     # 部署 Worker
+npx wrangler@4 d1 migrations apply hiyori-sync --remote   # 套用 migrations/ 裡的資料表變更
+```
+
+開發時可以用 `VITE_SYNC_API=http://localhost:8787 npm run dev` 指到本機的 `npx wrangler@4 dev`。
 
 ## 開發用參數
 
@@ -98,7 +114,7 @@ npm test         # 單元測試（Vitest）
 - `?focus=0.1`：番茄鐘縮短成 0.1 分鐘，方便測試（只在 `npm run dev` 有效）
 - `?tab=habits`：直接打開某個分頁（tasks／schedule／habits／projects／records）；`?calendar`：直接打開日曆
 - `?classic`：改用舊的程序化角色模型
-- Console 裡的 `hiyori.store`、`hiyori.fileSync`、`hiyori.sky.hourOverride = 6` 可以直接操作
+- Console 裡的 `hiyori.store`、`hiyori.cloudSync`、`hiyori.fileSync`、`hiyori.sky.hourOverride = 6` 可以直接操作
 
 ## 結構
 
@@ -109,10 +125,11 @@ src/
   planner.js       時段安排：作息色帶、衝突、空檔、最佳化時程、睡眠統計（純函式）
   habits.js        習慣：連續天數、達成率、戒除天數與里程碑、熱度圖（純函式）
   ui.js            面板、表單、列表、番茄鐘、商店、回顧、設定
-  ui/              schedule.js（時間軸、排程、作息設定、編輯面板）、habits.js、life.js、calendar.js 與各自的樣式
+  ui/              schedule.js（時間軸、排程、作息設定、編輯面板）、habits.js、life.js、calendar.js、cloud.js（線上同步的設定列、QR code）與各自的樣式
   parse.js         一行快速輸入的解析
   reminders.js     日程、時段任務與就寢提醒，系統通知
-  sync.js          雲端資料夾同步（File System Access API）
+  sync.js          同步共用的新舊判斷與備份；資料夾同步（File System Access API）
+  cloud.js         線上同步：同步碼、端對端加密、和 worker/ 溝通
   audio.js         WebAudio 即時合成音效（不需音檔）
   theme.js         色票、XP 數值、等級解鎖表
   data/            成就、もち與ふじ的台詞和對話、商店品項、花の図鑑、每日任務題庫、好感度與衣裝、ひより町的建築門檻與居民台詞
@@ -144,5 +161,6 @@ src/
 public/
   sw.js            Service Worker（離線快取、通知點擊）
   manifest.webmanifest
+worker/            線上同步後端（Cloudflare Worker + D1）
 tests/             Vitest 單元測試
 ```

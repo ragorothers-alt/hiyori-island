@@ -44,6 +44,9 @@ export const toMin = (hhmm) => {
   return (h || 0) * 60 + (m || 0)
 }
 export const uid = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7)
+// 同步用的版本識別：每次使用者改了資料就換一個。比對「是不是同一版」用它，不比時間大小（各台時鐘可能不準）
+export const newRev = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
+const REV_RE = /^[\w-]{1,40}$/
 
 // ── 例行公事（重複任務／日程） ──
 export const REPEAT_TYPES = ['daily', 'weekdays', 'weekly']
@@ -161,6 +164,7 @@ function seed() {
     settings: { ...DEFAULT_SETTINGS },
     createdAt: Date.now(),
     updatedAt: 0,
+    rev: '',
   }
 }
 
@@ -419,6 +423,8 @@ function migrate(s) {
   return {
     version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0,
+    // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
+    rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
   }
 }
 
@@ -482,11 +488,12 @@ export class Store {
     }
     return seed()
   }
-  // touch：這次存檔是否算「使用者改了資料」。同步靠 updatedAt 判斷哪一邊比較新，
+  // touch：這次存檔是否算「使用者改了資料」。同步靠 rev 判斷哪一邊改過，
   // 例行實例生成、跨日這類每台裝置各自推導的變化不算，避免剛打開的裝置蓋掉雲端的新資料
   save(touch = true) {
     if (touch) {
       this.state.updatedAt = this._nextVersion()
+      this.state.rev = newRev()
       this.emit('dirty')
     }
     clearTimeout(this._saveTimer)
@@ -1584,10 +1591,13 @@ export class Store {
     this.replaceState(obj)
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
-  replaceState(obj, updatedAt = this._nextVersion()) {
+  // 同步拉回時帶著雲端那一版的 updatedAt 和 rev；匯入、還原備份則算一次新的變更
+  // soft：同步拉回的新資料（畫面就地更新，不重蓋小鎮、不移動鏡頭）
+  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev() } = {}) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     const next = migrate(obj)
     next.updatedAt = updatedAt
+    next.rev = rev
     // 匯入的舊檔沒有小鎮紀錄：照統計直接蓋好就好，不另外打招呼
     delete next.town.welcome
     this.state = next
@@ -1600,13 +1610,14 @@ export class Store {
     this._weeklyReady = this.weekly()?.ready
     this.emit('dirty')
     this.emit('change')
-    this.emit('reload')
+    this.emit('reload', { soft })
   }
   reset() {
     localStorage.removeItem(KEY)
     const version = this._nextVersion()
     this.state = seed()
     this.state.updatedAt = version
+    this.state.rev = newRev()
     this._readyQuests = new Set()
     this.saveNow()
     this.emit('dirty')
