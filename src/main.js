@@ -383,9 +383,11 @@ async function boot() {
   const panel = document.getElementById('panel')
   // 寬螢幕和橫向手機：面板在右側；手機直式：面板是下半部的抽屜
   const wide = () => !sheetLayout()
+  // 手機直式抽屜打開時，畫面要往上推多少才讓島落在上半部（由 composeView 算）
+  let phoneOpenY = innerHeight * 0.25
   const panelShift = (collapsed) => wide()
     ? { x: collapsed ? 0 : (panel.offsetWidth + 20) / 2, y: 0 }
-    : { x: 0, y: collapsed ? 30 : innerHeight * 0.25 - 36 }
+    : { x: 0, y: collapsed ? 0 : phoneOpenY }
   // 全螢幕編輯時面板蓋住整個畫面：小島維持原本的取景，場景停止更新（world.covered）
   const full = () => panel.classList.contains('full')
   const updateShift = () => {
@@ -393,6 +395,22 @@ async function boot() {
     if (full()) return
     const { x, y } = panelShift(panel.classList.contains('collapsed'))
     world.setViewShift(x, y)
+  }
+  // 預設視角的構圖：寬螢幕以面板展開時的版面去解，收起時只是左右平移。
+  // 手機直式的抽屜佔掉下半部，上半部塞不下天空加整座島：以抽屜收起（全螢幕）去解，
+  // 抽屜打開時把島往上推到上半部可見區域的中間，天空暫時被推出畫面
+  const composeView = () => {
+    const dock = document.querySelector('.dock')
+    if (wide()) {
+      const right = innerWidth - panel.offsetWidth - 20
+      world.compose({ shiftX: (panel.offsetWidth + 20) / 2, right, bottom: dock.getBoundingClientRect().top })
+      return
+    }
+    world.compose({ bottom: innerHeight - 12 - dock.offsetHeight })
+    const p = new THREE.Vector3(0, 0.5, 0).project(world.homeCamera({ x: 0, y: 0 }))
+    const islandY = ((1 - p.y) / 2) * innerHeight
+    const visible = innerHeight - panel.offsetHeight - 10 - dock.offsetHeight
+    phoneOpenY = islandY - visible * 0.52
   }
   // 星之大樹放在預設視角（面板展開時）看得到的右上角：日期列下方、面板左側；
   // 雲鯨的弧線也依同一個可見範圍決定高度
@@ -441,9 +459,11 @@ async function boot() {
     if (skyStale) placeSky()
     placeRoom()
   }).observe(panel, { attributes: true, attributeFilter: ['class'] })
+  addEventListener('resize', composeView)
   addEventListener('resize', updateShift)
   addEventListener('resize', placeSky)
   addEventListener('resize', placeRoom)
+  composeView()
   updateShift()
   placeSky()
   placeRoom()
@@ -469,7 +489,8 @@ async function boot() {
   // 街區越多，預設視角往後拉一點，讓後方的浮島入鏡
   const townView = () => {
     const n = town.count
-    world.setTownView(1 + n * 0.035, n * 0.35)
+    world.setTownView(1, n * 0.3)
+    composeView()
     placeSky()
   }
   const flyToDistrict = (key) => {

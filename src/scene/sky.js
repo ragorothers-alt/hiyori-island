@@ -2,21 +2,56 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { rng, smooth } from './util.js'
 import { SUNRISE, SUNSET, sunElevation, lookHour, systemDark, realHour } from '../daylight.js'
+import { CLOUD_TOP } from './shading.js'
 
-// 依真實時間變化的天空：漸層穹頂、太陽/月光、星星、雲與雲海
+// 依真實時間變化的天空：漸層穹頂（日盤、月盤、銀河）、星星、雲與雲海
 // 外觀設定（白天／夜晚／跟著系統）會改變天空顯示的時間，切換時快轉過去：變夜晚看夕陽、變白天看日出
+// 新海誠式的配色：天頂是飽和的深鈷藍，往地平線很快亮成淡青白；黃昏地平線橘粉、天頂轉紫；夜晚深藍紫。
+// top＝天頂、mid＝地平線、bot＝地平線以下（遠方雲海上的霧）
 const KEYS = [
-  { h: 0, top: '#121a3d', mid: '#283667', bot: '#454a82' },
-  { h: 4.6, top: '#1b2350', mid: '#36467a', bot: '#62649a' },
-  { h: 6, top: '#8eb0de', mid: '#f6d6dc', bot: '#e9d3e3' },
-  { h: 8, top: '#6fb6e8', mid: '#e3f2fb', bot: '#bfe0f4' },
-  { h: 12, top: '#5aaee6', mid: '#dff1fb', bot: '#b4dbf3' },
-  { h: 16, top: '#6db4e4', mid: '#e7f2f8', bot: '#c6e0f1' },
-  { h: 18, top: '#8a9ed6', mid: '#f6cad0', bot: '#e6c8d8' },
-  { h: 19.4, top: '#3b4884', mid: '#998cc1', bot: '#e0b3c4' },
-  { h: 20.8, top: '#192147', mid: '#323f77', bot: '#525590' },
-  { h: 24, top: '#121a3d', mid: '#283667', bot: '#454a82' },
+  { h: 0, top: '#0a1033', mid: '#26346e', bot: '#2b3468' },
+  { h: 4.6, top: '#121a46', mid: '#3a4888', bot: '#454b86' },
+  { h: 6, top: '#3a5aa8', mid: '#f6c4b2', bot: '#e3c1cc' },
+  { h: 8, top: '#1d5fc6', mid: '#bde2f7', bot: '#d9ebf6' },
+  { h: 12, top: '#1450c0', mid: '#acd9f4', bot: '#dcedf8' },
+  { h: 16, top: '#1b5ac2', mid: '#bfe0f3', bot: '#e1ecf5' },
+  { h: 18, top: '#4256a6', mid: '#ffbd98', bot: '#efc0c2' },
+  { h: 19.4, top: '#262f74', mid: '#c387a6', bot: '#8a77ab' },
+  { h: 20.8, top: '#10184a', mid: '#33407e', bot: '#363d73' },
+  { h: 24, top: '#0a1033', mid: '#26346e', bot: '#2b3468' },
 ].map((k) => ({ h: k.h, top: new THREE.Color(k.top), mid: new THREE.Color(k.mid), bot: new THREE.Color(k.bot) }))
+
+// 月亮掛在預設視角看得到的天空：島的左後方、地平線上方約 4°（預設視角只看得到地平線上方 8° 左右），避開左上角的等級卡
+const MOON_SKY = new THREE.Vector3(-0.17, 0.072, -0.98).normalize()
+
+// 穹頂與雲海共用：依方向的高度 h（-1..1）取天空顏色，兩邊在遠方接得起來。
+// 畫面裡的天空只有地平線上方一小段，漸層要很快轉深，畫面上緣才看得到飽和的藍
+const SKY_GLSL = /* glsl */ `
+  uniform vec3 uTop, uMid, uBot;
+  vec3 skyColor(float h) {
+    return h > 0.0
+      ? mix(uMid, uTop, pow(smoothstep(-0.01, 0.2, h), 0.6))
+      : mix(uMid, uBot, smoothstep(0.0, -0.05, h));
+  }
+`
+const NOISE_GLSL = /* glsl */ `
+  float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise2(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), f.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float noise3(vec3 x) {
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+      mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y),
+      f.z);
+  }
+  float fbm3(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 4; i++) { s += a * noise3(p); p *= 2.03; a *= 0.5; } return s; }
+`
 
 const C_GOLD = new THREE.Color('#ffc6a8')
 const C_GOLD2 = new THREE.Color('#ffc9a6')
@@ -29,6 +64,9 @@ const MOON_DIR = new THREE.Vector3(-0.45, 1, 0.35).normalize()
 const C_KEY_DAY = new THREE.Color('#fff3df')
 const C_KEY_MOON = new THREE.Color('#a9bcff')
 const C_BOUNCE = new THREE.Color('#ead9c4')
+const C_SEA_SHADE = new THREE.Color('#bcb9ea')
+const C_SEA_NIGHT_LIT = new THREE.Color('#6f78bf')
+const C_SEA_NIGHT_SHADE = new THREE.Color('#2b3165')
 const _sunDir = new THREE.Vector3()
 const _keyDir = new THREE.Vector3()
 const _c = new THREE.Color()
@@ -62,7 +100,7 @@ export class Sky {
       })
     }
 
-    // 穹頂
+    // 穹頂：跟著鏡頭走（地平線永遠在眼睛的高度），畫天空漸層、日盤與光暈、夜晚的月亮和銀河
     this.uniforms = {
       uTop: { value: this.top },
       uMid: { value: this.mid },
@@ -70,9 +108,11 @@ export class Sky {
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uSunColor: { value: new THREE.Color('#fff2dc') },
       uSunVis: { value: 1 },
+      uMoonDir: { value: MOON_SKY },
+      uNight: { value: 0 },
     }
     const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(320, 48, 24),
+      new THREE.SphereGeometry(800, 48, 24),
       new THREE.ShaderMaterial({
         side: THREE.BackSide,
         depthWrite: false,
@@ -81,20 +121,42 @@ export class Sky {
         vertexShader: /* glsl */ `
           varying vec3 vDir;
           void main() {
-            vDir = normalize(position);
+            vDir = position;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }`,
         fragmentShader: /* glsl */ `
-          uniform vec3 uTop, uMid, uBot, uSunDir, uSunColor;
-          uniform float uSunVis;
+          ${SKY_GLSL}
+          ${NOISE_GLSL}
+          uniform vec3 uSunDir, uSunColor, uMoonDir;
+          uniform float uSunVis, uNight;
           varying vec3 vDir;
           void main() {
-            float h = vDir.y;
-            vec3 col = h > 0.0
-              ? mix(uMid, uTop, pow(smoothstep(0.0, 0.85, h), 0.7))
-              : mix(uMid, uBot, smoothstep(0.0, -0.35, h));
-            float d = max(dot(normalize(vDir), uSunDir), 0.0);
-            col += uSunColor * (pow(d, 900.0) * 1.6 + pow(d, 40.0) * 0.18 + pow(d, 6.0) * 0.08) * uSunVis;
+            vec3 dir = normalize(vDir);
+            float h = dir.y;
+            vec3 col = skyColor(h);
+            float sd = max(dot(dir, uSunDir), 0.0);
+            // 地平線一圈亮帶，靠太陽那一側更暖更亮
+            col += uSunColor * exp(-abs(h) * 16.0) * (0.05 + 0.4 * pow(sd, 4.0)) * uSunVis;
+            // 日盤（夠亮才會泛光）＋光暈
+            col += uSunColor * (smoothstep(0.99965, 0.99978, sd) * 12.0 + pow(sd, 500.0) * 1.6 + pow(sd, 36.0) * 0.28 + pow(sd, 5.0) * 0.08) * uSunVis;
+            if (uNight > 0.01) {
+              float above = smoothstep(-0.01, 0.12, h);
+              // 銀河：斜斜跨過天空的一條雲狀光帶，中間有暗色的塵帶
+              vec3 bn = normalize(vec3(0.55, 0.45, 0.7));
+              float b = dot(dir, bn);
+              float band = exp(-b * b * 26.0);
+              float n = fbm3(dir * 5.0);
+              float n2 = fbm3(dir * 16.0 + 3.1);
+              float mw = band * smoothstep(0.32, 0.8, n) * (0.55 + 0.7 * n2);
+              col += mix(vec3(0.42, 0.5, 1.0), vec3(1.0, 0.78, 0.95), n2) * mw * 0.5 * uNight * above;
+              col *= 1.0 - band * smoothstep(0.5, 0.72, n2) * 0.22 * uNight * above;
+              // 月亮：圓盤＋淡淡的月海＋藍色光暈
+              float md = dot(dir, uMoonDir);
+              float disc = smoothstep(0.99925, 0.99942, md);
+              float maria = fbm3(dir * 120.0);
+              col = mix(col, vec3(1.0, 0.97, 0.88) * (1.9 - maria * 0.55), disc * uNight);
+              col += vec3(0.62, 0.7, 1.0) * (pow(max(md, 0.0), 260.0) * 0.7 + pow(max(md, 0.0), 18.0) * 0.12) * uNight;
+            }
             gl_FragColor = vec4(col, 1.0);
           }`,
       }),
@@ -103,8 +165,9 @@ export class Sky {
     dome.frustumCulled = false
     scene.add(dome)
     this.dome = dome
+    this._cloudSea(scene)
 
-    scene.fog = new THREE.Fog(this.mid, 80, 280)
+    scene.fog = new THREE.Fog(this.bot, 90, 320)
 
     // 光
     this.hemi = new THREE.HemisphereLight('#eaf6ff', '#f3e2d6', 1.4)
@@ -212,6 +275,91 @@ export class Sky {
     const stars = new THREE.Points(g, this.starMat)
     stars.frustumCulled = false
     scene.add(stars)
+    this.stars = stars
+  }
+
+  // 雲海：島下方一整片不透明的雲頂平面，跟著鏡頭的水平位置走、一直延伸到地平線附近。
+  // 雲朵起伏用雜訊畫：朝太陽那一側亮、背面是藍紫色的陰影，遠處漸漸融進穹頂地平線以下的顏色
+  _cloudSea(scene) {
+    this.seaUniforms = {
+      uTop: { value: this.top },
+      uMid: { value: this.mid },
+      uBot: { value: this.bot },
+      uSunDir: { value: this.uniforms.uSunDir.value },
+      uSunColor: { value: this.uniforms.uSunColor.value },
+      uLit: { value: new THREE.Color() },
+      uShade: { value: new THREE.Color() },
+      uDay: { value: 1 },
+      uTime: { value: 0 },
+    }
+    const sea = new THREE.Mesh(
+      new THREE.PlaneGeometry(1700, 1700).rotateX(-Math.PI / 2),
+      new THREE.ShaderMaterial({
+        fog: false,
+        uniforms: this.seaUniforms,
+        vertexShader: /* glsl */ `
+          varying vec3 vWorld;
+          void main() {
+            vec4 w = modelMatrix * vec4(position, 1.0);
+            vWorld = w.xyz;
+            gl_Position = projectionMatrix * viewMatrix * w;
+          }`,
+        fragmentShader: /* glsl */ `
+          ${SKY_GLSL}
+          ${NOISE_GLSL}
+          uniform vec3 uSunDir, uSunColor, uLit, uShade;
+          uniform float uDay, uTime;
+          varying vec3 vWorld;
+          vec2 hash22(vec2 p) {
+            p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+            return fract(sin(p) * 43758.5453);
+          }
+          // 細胞雜訊：每格一顆會慢慢漂的種子，離最近種子的距離 → 一團團圓頂
+          float worley(vec2 p) {
+            vec2 i = floor(p), f = fract(p);
+            float d = 1.0;
+            for (int y = -1; y <= 1; y++)
+              for (int x = -1; x <= 1; x++) {
+                vec2 g = vec2(float(x), float(y));
+                vec2 o = hash22(i + g);
+                o = 0.5 + 0.4 * sin(uTime * 0.04 + 6.2831 * o);
+                vec2 r = g + o - f;
+                d = min(d, dot(r, r));
+              }
+            return sqrt(d);
+          }
+          // 雲頂高度：大團的圓頂上再疊小團，加一點細碎起伏
+          float cloudH(vec2 p) {
+            return (1.0 - worley(p)) * 0.62 + (1.0 - worley(p * 2.3 + 5.0)) * 0.28 + noise2(p * 6.0) * 0.1;
+          }
+          void main() {
+            vec3 to = vWorld - cameraPosition;
+            float dist = length(to);
+            vec3 dir = to / dist;
+            vec2 p = vWorld.xz * 0.075 + vec2(uTime * 0.01, uTime * 0.006);
+            float h = cloudH(p);
+            // 往太陽的方向偏一點再取一次：高度差就是朝光面的亮度；低的地方是雲團之間的陰影
+            vec2 toSun = normalize(uSunDir.xz + vec2(1e-4));
+            float hs = cloudH(p - toSun * 0.11);
+            float lit = clamp(0.5 + (h - hs) * 3.2 + (h - 0.45) * 0.9, 0.0, 1.0);
+            // 遠處的細節收掉，避免斜看時變成一條條細紋
+            float near = 1.0 - smoothstep(50.0, 260.0, dist);
+            lit = mix(0.62, lit, near);
+            vec3 col = mix(uShade, uLit, lit);
+            col *= mix(1.0, mix(0.86, 1.04, smoothstep(0.15, 0.7, h)), near);
+            // 往太陽方向看過去，雲海會透出一層暖光
+            float fs = pow(max(dot(normalize(dir.xz + vec2(1e-4)), normalize(uSunDir.xz + vec2(1e-4))), 0.0), 5.0);
+            col += uSunColor * fs * 0.16 * uDay;
+            col = mix(col, skyColor(dir.y), smoothstep(110.0, 760.0, dist));
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+      }),
+    )
+    sea.position.y = CLOUD_TOP
+    sea.frustumCulled = false
+    sea.renderOrder = -9
+    scene.add(sea)
+    this.sea = sea
   }
 
   _clouds(scene) {
@@ -255,7 +403,8 @@ export class Sky {
       const m = new THREE.Mesh(makeCloud(2.4 + r() * 2.8, 0.45), this.cloudMat)
       const a = (i / 34) * Math.PI * 2 + r() * 0.3
       const d = 14 + r() * 50
-      m.position.set(Math.cos(a) * d, -15 - r() * 6, Math.sin(a) * d)
+      // 半埋在雲海裡、只露出頂部的近處雲團，讓雲海有立體感
+      m.position.set(Math.cos(a) * d, CLOUD_TOP - 0.6 - r() * 1.4, Math.sin(a) * d)
       m.rotation.y = r() * Math.PI
       this.seaClouds.add(m)
     }
@@ -281,7 +430,6 @@ export class Sky {
     this.top.lerpColors(a.top, b.top, k)
     this.mid.lerpColors(a.mid, b.mid, k)
     this.bot.lerpColors(a.bot, b.bot, k)
-    this.world.scene.fog.color.copy(this.mid)
 
     // 天空裡的太陽（日盤、光暈、雲的亮邊）：右後方升起 → 島的後上方 → 左後方落下，
     // 低角度時會出現在鏡頭前方的天空裡
@@ -311,7 +459,7 @@ export class Sky {
     sun.intensity = mix(0.7, 2.3, day)
 
     // 半球光：天空那一面偏藍，陰影裡自然帶藍；地面那一面是暖色的反光
-    this.hemi.color.copy(this.top).lerp(C_WHITE, 0.4)
+    this.hemi.color.copy(this.top).lerp(C_WHITE, 0.55)
     this.hemi.groundColor.copy(C_BOUNCE).lerp(C_NIGHT_GROUND, this.night)
     this.hemi.intensity = 0.62 + day * 0.4
 
@@ -323,6 +471,22 @@ export class Sky {
     this.cloudMat.emissiveIntensity = 0.05 + day * 0.1 + this.night * 0.08
     this.skyClouds.rotation.y += dt * 0.006
     this.seaClouds.rotation.y -= dt * 0.003
+
+    // 雲海：亮面帶太陽的顏色、暗面是偏天空色的藍紫；夜晚整片是月光下的藍紫
+    const su = this.seaUniforms
+    su.uLit.value.copy(C_WHITE).lerp(this.uniforms.uSunColor.value, 0.4).lerp(C_SEA_NIGHT_LIT, this.night)
+    su.uShade.value.copy(this.top).lerp(C_SEA_SHADE, 0.62).lerp(C_SEA_NIGHT_SHADE, this.night)
+    su.uDay.value = day
+    su.uTime.value = t
+    // 霧色＝雲海的平均色：沉進雲海的東西會融成雲的顏色
+    this.world.scene.fog.color.copy(su.uLit.value).lerp(su.uShade.value, 0.4)
+    this.uniforms.uNight.value = this.night
+    // 穹頂、星星、雲海跟著鏡頭：地平線永遠在眼睛的高度，雲海永遠鋪到天邊
+    const cam = this.world.camera.position
+    this.dome.position.copy(cam)
+    this.stars.position.copy(cam)
+    this.sea.position.x = cam.x
+    this.sea.position.z = cam.z
 
     const L = this.look
     const n = this.night

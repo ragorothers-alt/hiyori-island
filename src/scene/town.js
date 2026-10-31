@@ -18,6 +18,8 @@ export const DISTRICTS = {
   post: { a: 70, r: 17, y: 0.5 },
 }
 const ISLET_R = 2.7
+// 街區浮島開張時從雲海底下升起的距離
+const RISE = 17
 // 建築放在浮島中心稍微後面，前面留一塊小廣場
 const BUILD_Z = -0.5
 // 各階段建築的佔地半徑（居民閒晃要避開）
@@ -543,12 +545,13 @@ export class Town {
     this.districts[key] = d
     if (animate) {
       // 浮島從雲海底下升起，橋從主島這端鋪過去
+      // 起點整座沉在雲海頂面（y = -13）底下，高度霧會把它藏起來，升上來時才從雲裡冒出
       const y0 = L.center.y
-      root.position.y = y0 - 9
+      root.position.y = y0 - RISE
       root.scale.setScalar(0.6)
       revealBridge(bridge, 0)
-      tween(2.2, (k) => {
-        root.position.y = y0 - 9 * (1 - k)
+      tween(2.6, (k) => {
+        root.position.y = y0 - RISE * (1 - k)
         root.scale.setScalar(0.6 + 0.4 * k)
       }, { easing: ease.outBack, onDone: () => root.position.setY(y0) })
       tween(1.6, (k) => revealBridge(bridge, k), { delay: 1.6, easing: ease.inOutSine })

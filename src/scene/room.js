@@ -156,8 +156,8 @@ export class Room {
     cam.position.x += Math.sin(t * 0.13) * 0.06
     cam.position.y += Math.sin(t * 0.11) * 0.04
     cam.lookAt(at)
-    // 鏡頭往旁邊平移：先讓房間在鏡頭正中，再移到可見範圍的中心（world.shift 是整個畫面為了面板做的偏移）
-    const s = this.world.shift
+    // 鏡頭往旁邊平移：先讓房間在鏡頭正中，再移到可見範圍的中心（viewOffset 是整個畫面為了面板和構圖做的偏移）
+    const s = this.world.viewOffset()
     const dx = (r.left + r.right) / 2 - (W / 2 - s.x)
     const dy = (r.top + r.bottom) / 2 - (H / 2 - s.y)
     const px = 2 * d * tan / H

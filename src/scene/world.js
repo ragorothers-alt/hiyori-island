@@ -7,8 +7,17 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FinalPass } from './postfx.js'
 import { tween, updateTweens, tweensActive, ease } from './util.js'
 
-const HOME_POS = new THREE.Vector3(0, 21, 30.5)
-const HOME_TARGET = new THREE.Vector3(0, -0.6, 0)
+// 預設視角看的中心：島中心稍微上方
+const HOME_TARGET = new THREE.Vector3(0, 0.5, 0)
+const UP = new THREE.Vector3(0, 1, 0)
+// 構圖：地平線落在可見區域上方的比例；時之環前緣（含數字標籤）的半徑與它離下緣（Dock／抽屜）至少要留的像素
+const SKY = 0.22
+const RING_FRONT = 13.9
+const RING_SIDE = 13.6
+const MARGIN = 12
+// 閒置時左右慢慢擺動（不整圈轉到背面）：振幅與角速度
+const SWAY = 1.0
+const SWAY_W = 0.04
 // 畫質：high＝反鋸齒（composer 4× MSAA）＋白天也開泛光；standard（手機）＝不做 MSAA、泛光只在夜晚
 const QUALITY = {
   high: { dpr: 1.5, samples: 4, dayBloom: true },
@@ -30,20 +39,22 @@ export class World {
     renderer.toneMappingExposure = 1.05
 
     this.scene = new THREE.Scene()
-    this.camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 600)
-    this.camera.position.copy(HOME_POS)
+    this.camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 900)
 
     const controls = (this.controls = new OrbitControls(this.camera, canvas))
     controls.target.copy(HOME_TARGET)
     controls.enableDamping = true
     controls.dampingFactor = 0.07
     controls.minDistance = 9
-    controls.maxDistance = 52
+    controls.maxDistance = 70
     controls.minPolarAngle = 0.2
     controls.maxPolarAngle = 1.42
     controls.enablePan = false
-    controls.autoRotateSpeed = 0.35
     controls.addEventListener('start', () => this._interacted())
+    // 預設視角（由 compose 依版面解出）：仰角、距離，以及整個畫面往下移的像素（讓上方露出天空）
+    this.view = { elev: THREE.MathUtils.degToRad(20), dist: 36 }
+    this.lens = 0
+    this._sway = null
 
     this.composer = new EffectComposer(renderer)
     this.renderPass = new RenderPass(this.scene, this.camera)
@@ -105,6 +116,7 @@ export class World {
     this._bindPointer(canvas)
     addEventListener('resize', () => this.resize())
     this.resize()
+    this.compose()
     this.camera.position.copy(this._homePos())
   }
 
@@ -119,12 +131,6 @@ export class World {
     const w = innerWidth
     const h = innerHeight
     this.camera.aspect = w / h
-    // 手機直式畫面拉遠一點，讓整座島入鏡
-    this.camera.fov = w / h < 0.8 ? 50 : 38
-    // 直式畫面：拉遠到時之環（半徑約 12）能完整放進螢幕寬度
-    const halfH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * (w / h)
-    this.distFactor = Math.max(1, 12 / halfH / HOME_POS.distanceTo(HOME_TARGET))
-    this.controls.maxDistance = 52 * this.distFactor * this.zoomOut
     this._applyShift()
     this.renderer.setSize(w, h, false)
     this.composer.setSize(w, h)
@@ -132,12 +138,51 @@ export class World {
     this._redraw = true
   }
 
+  // 依版面解出預設視角。layout（像素）：面板展開時的畫面位移 shiftX／shiftY（同 setViewShift），
+  // 島可以用的區域 left／right／bottom（bottom 是 Dock 或手機抽屜的上緣）。
+  // 條件：地平線落在可見區域上方 SKY 的位置、時之環前緣的數字不被下緣擋住、整圈時之環左右放得下；
+  // 在這些條件下鏡頭盡量靠近，島越大越好
+  compose({ shiftX = 0, shiftY = 0, left = 0, right = innerWidth, bottom = innerHeight } = {}) {
+    const W = innerWidth
+    const H = innerHeight
+    const portrait = W / H < 0.8
+    const fov = portrait ? 58 : 50
+    const elev = THREE.MathUtils.degToRad(portrait ? 28 : 20)
+    const tanF = Math.tan(THREE.MathUtils.degToRad(fov / 2))
+    const sin = Math.sin(elev)
+    const cos = Math.cos(elev)
+    const ty = HOME_TARGET.y
+    // 地平線：鏡頭往下看 elev，地平線在畫面中心上方 tan(elev)/tanF（NDC）；整個畫面往下移 lens 像素讓它落到想要的高度
+    const horizonNdc = 1 - (2 * bottom * SKY) / H
+    const lens = shiftY + (H / 2) * (sin / cos / tanF - horizonNdc)
+    const off = (2 * (shiftY - lens)) / H
+    // 時之環前緣 (0, 0, RING_FRONT)：相對鏡頭的上下偏移固定是 -k，只有深度（= ty·sin + dist - rf·cos）跟距離有關；
+    // 小鎮把看的中心往後移時（setTownView），前緣離中心更遠
+    const rf = RING_FRONT - this.homeTarget.z
+    const k = ty * cos + rf * sin
+    const room = off - (1 - (2 * (bottom - MARGIN)) / H)
+    const front = room > 0.02 ? k / (tanF * room) - ty * sin + rf * cos : 90
+    // 左右：時之環兩側 (±RING_SIDE, 0, 0) 放進 left..right（深度 = ty·sin + dist）
+    const halfW = Math.max(60, (right - left) / 2 - MARGIN)
+    const side = (RING_SIDE * (W / 2)) / (tanF * this.camera.aspect * halfW) - ty * sin
+    const dist = THREE.MathUtils.clamp(Math.max(front, side), 18, 90) / this.zoomOut
+    this.view = { elev, dist }
+    this.lens = lens
+    this.camera.fov = fov
+    this.controls.maxDistance = Math.max(52, dist * 1.6) * this.zoomOut
+    this._applyShift()
+  }
+
   // 讓畫面中心避開側邊面板：x>0 往左移、y>0 往上移（像素）
   setViewShift(x, y = 0) {
     this.shiftTarget = { x, y }
   }
+  // 實際套到鏡頭上的位移：面板位移加上構圖的下移
+  viewOffset(shift = this.shift) {
+    return { x: shift.x, y: shift.y - this.lens }
+  }
   _applyShift() {
-    const { x, y } = this.shift
+    const { x, y } = this.viewOffset()
     if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) this.camera.clearViewOffset()
     else this.camera.setViewOffset(innerWidth, innerHeight, x, y, innerWidth, innerHeight)
     this.camera.updateProjectionMatrix()
@@ -232,11 +277,24 @@ export class World {
     }
     for (const fn of this.updaters) fn(dt, el)
     const idle = performance.now() - this.lastInteract > 25000
-    this.controls.autoRotate = this.idleRotate && idle && !this._focusing && level < 2
+    if (this.idleRotate && idle && !this._focusing && level < 2 && !this.stage) this._swayStep(dt)
+    else this._sway = null
     if (this.stage) this.stage.frame(dt, el)
     else this.controls.update(dt)
     this._applyLook()
     this.composer.render()
+  }
+
+  // 閒置時鏡頭在正面左右 ±SWAY 之間慢慢擺動：遠景、太陽都在島的後方，整圈轉到背面會只看到空蕩的一側。
+  // 從目前的角度接上擺動的相位；如果被轉到範圍外，先慢慢轉回來
+  _swayStep(dt) {
+    const c = this.controls
+    const theta = c.getAzimuthalAngle()
+    if (this._sway == null) this._sway = Math.asin(THREE.MathUtils.clamp(theta / SWAY, -1, 1))
+    this._sway += dt * SWAY_W
+    const step = THREE.MathUtils.clamp(Math.sin(this._sway) * SWAY - theta, -dt * 0.06, dt * 0.06)
+    _sunP.copy(this.camera.position).sub(c.target).applyAxisAngle(UP, step)
+    this.camera.position.copy(c.target).add(_sunP)
   }
 
   _interacted() {
@@ -375,8 +433,9 @@ export class World {
     cam.copy(this.camera, false)
     cam.position.copy(this._homePos())
     cam.lookAt(this.homeTarget)
-    if (Math.abs(shift.x) < 0.5 && Math.abs(shift.y) < 0.5) cam.clearViewOffset()
-    else cam.setViewOffset(innerWidth, innerHeight, shift.x, shift.y, innerWidth, innerHeight)
+    const { x, y } = this.viewOffset(shift)
+    if (Math.abs(x) < 0.5 && Math.abs(y) < 0.5) cam.clearViewOffset()
+    else cam.setViewOffset(innerWidth, innerHeight, x, y, innerWidth, innerHeight)
     cam.updateMatrixWorld()
     return cam
   }
@@ -410,13 +469,15 @@ export class World {
     )
   }
   _homePos() {
-    return HOME_POS.clone().sub(HOME_TARGET).multiplyScalar((this.distFactor || 1) * this.zoomOut).add(this.homeTarget)
+    const { elev, dist } = this.view
+    const d = dist * this.zoomOut
+    return new THREE.Vector3(0, Math.sin(elev) * d, Math.cos(elev) * d).add(this.homeTarget)
   }
   // 小鎮的街區浮在島後方：zoom 是預設距離的倍率，back 是看的中心往後（-z）移多少
   setTownView(zoom, back = 0) {
     this.zoomOut = zoom
     this.homeTarget.set(HOME_TARGET.x, HOME_TARGET.y, HOME_TARGET.z - back)
-    this.controls.maxDistance = 52 * (this.distFactor || 1) * zoom
+    this.controls.maxDistance = Math.max(52, this.view.dist * 1.6) * zoom
   }
   home(duration = 1.3) {
     this.setStage(null)
