@@ -62,8 +62,13 @@ export class World {
     this.idleRotate = true
     // 省電：閒置時降低幀率（powerSave 由設定控制）
     this.powerSave = true
-    // 全螢幕面板蓋住場景時：一律用最低幀率
+    // 全螢幕面板蓋住場景時：不更新也不畫，畫面停在最後一幀；
+    // 只每半秒跑一次 coveredTick(dt)，給不能停的輕量工作（例如天色到了晚上要換深色玻璃）
     this.covered = false
+    this.coveredTick = null
+    this._lastTick = 0
+    // 改了 canvas 尺寸會清空畫面，蓋住時也要補畫一幀
+    this._redraw = false
     this.renders = 0
     this._lastRender = 0
     this.busyUntil = 0
@@ -102,6 +107,7 @@ export class World {
     this.renderer.setSize(w, h, false)
     this.composer.setSize(w, h)
     this.bloom.resolution.set(w / 2, h / 2)
+    this._redraw = true
   }
 
   // 讓畫面中心避開側邊面板：x>0 往左移、y>0 往上移（像素）
@@ -126,15 +132,28 @@ export class World {
     const quiet = now - this.lastInteract
     return quiet > 90000 ? 2 : quiet > 15000 ? 1 : 0
   }
+  // 場景停住時（covered）要求補畫一幀
+  redraw() {
+    this._redraw = true
+  }
   // 有特效在播（爆花、煙火、天燈）時呼叫，暫時維持全速
   keepAwake(ms = 2500) {
     this.busyUntil = Math.max(this.busyUntil, performance.now() + ms)
   }
 
   _frame(t) {
+    if (this.covered && !this._redraw) {
+      // dt 用實際經過的秒數：切換外觀時的天色快轉才會照真實時間跑完
+      if (t - this._lastTick >= 500) {
+        this.coveredTick?.(Math.min((t - this._lastTick) / 1000, 1))
+        this._lastTick = t
+      }
+      return
+    }
     const level = this.idleLevel()
     const interval = [0, 1000 / 30, 1000 / 15][level]
     if (interval && t - this._lastRender < interval - 1) return
+    this._redraw = false
     this._lastRender = t
     this.renders++
     this.timer.update(t)

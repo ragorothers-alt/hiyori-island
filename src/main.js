@@ -381,7 +381,7 @@ async function boot() {
   const panelShift = (collapsed) => wide()
     ? { x: collapsed ? 0 : (panel.offsetWidth + 20) / 2, y: 0 }
     : { x: 0, y: collapsed ? 30 : innerHeight * 0.25 - 36 }
-  // 全螢幕編輯時面板蓋住整個畫面：小島維持原本的取景，場景也降低幀率
+  // 全螢幕編輯時面板蓋住整個畫面：小島維持原本的取景，場景停止更新（world.covered）
   const full = () => panel.classList.contains('full')
   const updateShift = () => {
     world.covered = full()
@@ -1240,15 +1240,24 @@ async function boot() {
 
   // 夜晚切換深色玻璃
   let isNight = null
-  world.add(() => {
+  // 回傳這次有沒有換
+  const syncNight = () => {
     const night = isNight ? sky.night > 0.45 : sky.night > 0.55
-    if (night !== isNight) {
-      isNight = night
-      document.body.classList.toggle('night', night)
-      document.querySelector('meta[name=theme-color]')?.setAttribute('content', night ? '#283667' : '#cfe8f6')
-      ui.renderTheme()
-    }
-  })
+    if (night === isNight) return false
+    isNight = night
+    document.body.classList.toggle('night', night)
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', night ? '#283667' : '#cfe8f6')
+    ui.renderTheme()
+    return true
+  }
+  world.add(syncNight)
+  // 全螢幕面板蓋住場景時整個場景停住，只推天色：入夜或在全螢幕裡切換外觀，玻璃照樣換深色；
+  // 天色快轉中或剛換了日夜就補畫一幀，面板四周露出的天空才跟玻璃一致
+  world.coveredTick = (dt) => {
+    const shifting = sky.shifting
+    sky.update(dt, world.timer.getElapsed())
+    if (syncNight() || shifting) world.redraw()
+  }
 
   // 兩人偶爾閒聊，有時你一句我一句
   let lastTalk = performance.now()
@@ -1309,7 +1318,10 @@ async function boot() {
   world.start()
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
-      document.getElementById('loader').classList.add('done')
+      const loader = document.getElementById('loader')
+      loader.classList.add('done')
+      // 淡出後整個拿掉：只藏起來的話，もち跳跳的無限動畫會在背後一直跑
+      setTimeout(() => loader.remove(), 1000)
       setTimeout(() => {
         const g = greetKey()
         const skyDiffers = sky.night > 0.5 !== nightAt(((sky.hour() % 24) + 24) % 24) > 0.5

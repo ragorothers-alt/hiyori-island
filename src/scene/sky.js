@@ -121,6 +121,10 @@ export class Sky {
   setTheme(theme) {
     if (theme !== this.theme) this._retarget(() => (this.theme = theme))
   }
+  // 切換外觀後天色還在快轉
+  get shifting() {
+    return !!this._shift
+  }
   // 依外觀，天空該顯示的時間（0–24）
   _target() {
     return lookHour(((this.hour() % 24) + 24) % 24, this.theme, systemDark())
