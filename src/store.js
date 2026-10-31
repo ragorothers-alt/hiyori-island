@@ -115,34 +115,38 @@ const emptyBond = () => ({ pts: 0, outfit: 'none', outfitFuji: 'none', visit: ''
 
 const ms = (title, done = false) => ({ id: uid(), title, done, rewarded: done })
 
-function seed() {
+// 第一次打開時放的範例：讓空島一開始就有花、時之環和塔可以看。id 開頭是 ex-，之後可以一鍵清掉
+const SAMPLE_TASKS = [['寫下今天最重要的三件事', 3, 'work'], ['讀 20 頁書', 2, 'study'], ['喝一杯溫水', 1, 'health'], ['整理桌面', 1, 'life'], ['記下一個新點子', 2, 'idea']]
+const SAMPLE_EVENTS = [['晨間規劃', '09:00', '09:30', 0], ['深度工作時段', '10:00', '12:00', 2], ['午餐散步', '12:30', '13:30', 1], ['設計週會', '15:00', '16:00', 3], ['晚間閱讀', '21:00', '22:00', 4]]
+const SAMPLE_PROJECTS = ['作品集網站改版', '認識ひより小島']
+const sampleId = () => `ex-${uid()}`
+// 存檔格式 2 起範例才有 ex- 記號。更舊的存檔載入時認一次：標題一樣、而且是開島那天放的，換成 ex- 開頭的 id
+function markLegacySamples({ tasks, events, projects }, createdAt) {
+  const born = dateStr(new Date(createdAt))
+  const near = (t) => Math.abs((t || 0) - createdAt) < 60000
+  const mark = (x) => (x.id = `ex-${x.id}`.slice(0, 40))
+  for (const t of tasks) if (SAMPLE_TASKS.some(([title]) => title === t.title) && (t.date === born || near(t.createdAt))) mark(t)
+  for (const e of events) if (e.date === born && SAMPLE_EVENTS.some(([title, start, end]) => title === e.title && start === e.start && end === e.end)) mark(e)
+  for (const p of projects) if (SAMPLE_PROJECTS.includes(p.name) && near(p.createdAt)) mark(p)
+}
+
+// samples：要不要放範例（重置小島時不放）
+function seed(samples = true) {
   const today = dateStr()
-  const task = (title, priority, tag) => ({ id: uid(), title, date: today, priority, tag, done: false, rewarded: false, createdAt: Date.now() })
-  const ev = (title, start, end, color) => ({ id: uid(), title, date: today, start, end, color, done: false, rewarded: false })
+  const task = ([title, priority, tag]) => ({ id: sampleId(), title, date: today, priority, tag, done: false, rewarded: false, createdAt: Date.now() })
+  const ev = ([title, start, end, color]) => ({ id: sampleId(), title, date: today, start, end, color, done: false, rewarded: false })
   return {
-    version: 1,
-    tasks: [
-      task('寫下今天最重要的三件事', 3, 'work'),
-      task('讀 20 頁書', 2, 'study'),
-      task('喝一杯溫水', 1, 'health'),
-      task('整理桌面', 1, 'life'),
-      task('記下一個新點子', 2, 'idea'),
-    ],
-    events: [
-      ev('晨間規劃', '09:00', '09:30', 0),
-      ev('深度工作時段', '10:00', '12:00', 2),
-      ev('午餐散步', '12:30', '13:30', 1),
-      ev('設計週會', '15:00', '16:00', 3),
-      ev('晚間閱讀', '21:00', '22:00', 4),
-    ],
-    projects: [
+    version: 2,
+    tasks: samples ? SAMPLE_TASKS.map(task) : [],
+    events: samples ? SAMPLE_EVENTS.map(ev) : [],
+    projects: !samples ? [] : [
       {
-        id: uid(), name: '作品集網站改版', color: 1, deadline: addDays(today, 14), slot: 0, createdAt: Date.now(),
+        id: sampleId(), name: SAMPLE_PROJECTS[0], color: 1, deadline: addDays(today, 14), slot: 0, createdAt: Date.now(),
         milestones: [ms('整理作品清單', true), ms('設計首頁版型', true), ms('撰寫案例文案'), ms('前端切版'), ms('上線發佈')],
         completedAt: null, archived: false,
       },
       {
-        id: uid(), name: '認識ひより小島', color: 0, deadline: addDays(today, 3), slot: 1, createdAt: Date.now(),
+        id: sampleId(), name: SAMPLE_PROJECTS[1], color: 0, deadline: addDays(today, 3), slot: 1, createdAt: Date.now(),
         milestones: [ms('完成第一個任務'), ms('加入一個日程'), ms('完成一次番茄鐘'), ms('摸摸もち')],
         completedAt: null, archived: false,
       },
@@ -420,9 +424,11 @@ function migrate(s) {
   } else {
     town = { seen: townStages(stats), since: '', welcome: true }
   }
+  const createdAt = ts(s.createdAt) || Date.now()
+  if (!(s.version >= 2)) markLegacySamples({ tasks, events, projects }, createdAt)
   return {
-    version: 1, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
-    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, createdAt: ts(s.createdAt) || Date.now(), updatedAt: ts(s.updatedAt) || 0,
+    version: 2, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
+    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, createdAt, updatedAt: ts(s.updatedAt) || 0,
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
   }
@@ -1612,10 +1618,33 @@ export class Store {
     this.emit('change')
     this.emit('reload', { soft })
   }
+  // ── 範例資料（id 開頭是 ex-） ──
+  samples() {
+    const mark = (x) => x.id.startsWith('ex-')
+    const s = this.state
+    return { tasks: s.tasks.filter(mark), events: s.events.filter(mark), projects: s.projects.filter(mark) }
+  }
+  sampleCount() {
+    const x = this.samples()
+    return x.tasks.length + x.events.length + x.projects.length
+  }
+  // 清掉範例，自己加的資料、經驗值和統計都不動
+  clearSamples() {
+    const x = this.samples()
+    const drop = (list, gone) => list.filter((item) => !gone.includes(item))
+    this.state.tasks = drop(this.state.tasks, x.tasks)
+    this.state.events = drop(this.state.events, x.events)
+    this.state.projects = drop(this.state.projects, x.projects)
+    const n = x.tasks.length + x.events.length + x.projects.length
+    if (n) this._finish()
+    return n
+  }
+
+  // 重置：清空成一座空島（不放範例）
   reset() {
     localStorage.removeItem(KEY)
     const version = this._nextVersion()
-    this.state = seed()
+    this.state = seed(false)
     this.state.updatedAt = version
     this.state.rev = newRev()
     this._readyQuests = new Set()

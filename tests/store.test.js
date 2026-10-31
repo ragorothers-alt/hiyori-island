@@ -1003,3 +1003,52 @@ describe('晚間回顧', () => {
     expect(store.stats.reviews).toBe(1)
   })
 })
+
+describe('範例資料', () => {
+  const fresh = () => {
+    localStorage.clear()
+    return new Store()
+  }
+
+  it('第一次打開有範例，可以一鍵清掉，自己加的資料和經驗值都留著', () => {
+    const s = fresh()
+    expect(s.sampleCount()).toBe(12)
+    expect(s.state.tasks.every((t) => t.id.startsWith('ex-'))).toBe(true)
+    s.toggleTask(s.state.tasks[0].id)
+    const xp = s.player.xp
+    expect(xp).toBeGreaterThan(0)
+    const mine = s.addTask({ title: '讀 20 頁書' })
+    s.addEvent({ title: '晨間規劃', start: '09:00', end: '09:30' })
+    expect(s.clearSamples()).toBe(12)
+    expect(s.state.tasks.map((t) => t.id)).toEqual([mine.id])
+    expect(s.state.events.map((e) => e.title)).toEqual(['晨間規劃'])
+    expect(s.state.projects).toHaveLength(0)
+    expect(s.player.xp).toBe(xp)
+    expect(s.sampleCount()).toBe(0)
+    expect(s.clearSamples()).toBe(0)
+  })
+
+  it('舊存檔的範例沒有記號：只認開島那天放的同名項目', () => {
+    const s = fresh()
+    const old = JSON.parse(s.exportJSON())
+    old.version = 1
+    for (const list of [old.tasks, old.events, old.projects]) for (const x of list) x.id = x.id.replace('ex-', 'old')
+    // 隔天自己加了一個同名任務
+    old.tasks.push({ id: 'mine1', title: '喝一杯溫水', date: addDays(TODAY, 1), createdAt: Date.now() + 86400000 })
+    setDate(addDays(TODAY, 2))
+    s.importJSON(JSON.stringify(old))
+    expect(s.sampleCount()).toBe(12)
+    s.clearSamples()
+    expect(s.state.tasks.map((t) => t.id)).toEqual(['mine1'])
+  })
+
+  it('重置小島會變成空島，不再放範例', () => {
+    const s = fresh()
+    s.addTask({ title: '自己的' })
+    s.reset()
+    expect(s.state.tasks).toHaveLength(0)
+    expect(s.state.events).toHaveLength(0)
+    expect(s.state.projects).toHaveLength(0)
+    expect(s.sampleCount()).toBe(0)
+  })
+})

@@ -781,6 +781,11 @@ export class UI {
     const quality = this.store.state.settings.quality
     $$('#qualityPick button').forEach((b) => b.classList.toggle('on', b.dataset.v === quality))
     $('#qualityInfo').textContent = QUALITY_INFO[quality]
+    // 第一次打開時放的範例還在才顯示
+    const n = this.store.sampleCount()
+    const btn = $('#sampleBtn')
+    btn.hidden = !n
+    if (n && !btn.dataset.armed) btn.textContent = `清除範例資料（${n} 筆）`
   }
 
   // ── 同步 ──
@@ -1117,6 +1122,12 @@ export class UI {
       }
       e.target.value = ''
     }
+    $('#sampleBtn').onclick = (e) =>
+      armConfirm(e.currentTarget, '再按一次清除範例', () => {
+        const n = this.store.clearSamples()
+        this.toast({ icon: '掃', title: `清掉了 ${n} 筆範例`, sub: '自己加的資料、經驗值和統計都還在' })
+        this.renderSettings()
+      })
     $('#resetBtn').onclick = (e) => armConfirm(e.currentTarget, '再按一次，清空所有資料', () => this.store.reset())
   }
 
