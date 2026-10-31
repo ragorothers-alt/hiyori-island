@@ -1,19 +1,28 @@
+import './shading.js'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+import { FinalPass } from './postfx.js'
 import { tween, updateTweens, tweensActive, ease } from './util.js'
 
 const HOME_POS = new THREE.Vector3(0, 21, 30.5)
 const HOME_TARGET = new THREE.Vector3(0, -0.6, 0)
+// 畫質：high＝反鋸齒（composer 4× MSAA）＋白天也開泛光；standard（手機）＝不做 MSAA、泛光只在夜晚
+const QUALITY = {
+  high: { dpr: 1.5, samples: 4, dayBloom: true },
+  standard: { dpr: 1.5, samples: 0, dayBloom: false },
+}
+const _sunP = new THREE.Vector3()
+const _fwd = new THREE.Vector3()
 
 // 渲染器、相機、後製、互動拾取與主迴圈
 export class World {
   constructor(canvas) {
-    const renderer = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }))
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    // 畫面先畫進 composer 的 render target（自己做 MSAA），預設畫布的反鋸齒用不到
+    const renderer = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' }))
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
     renderer.setSize(innerWidth, innerHeight, false)
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFShadowMap
@@ -40,8 +49,21 @@ export class World {
     this.renderPass = new RenderPass(this.scene, this.camera)
     this.composer.addPass(this.renderPass)
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 0.86)
+    // 泛光取亮時把亮度封頂：光滑水面的太陽反光、燈籠裡點光源照到的表面 HDR 亮度會到上千，不封頂會暈成一大團
+    const hp = this.bloom.materialHighPassFilter
+    hp.fragmentShader = hp.fragmentShader.replace(
+      'gl_FragColor = mix( outputColor, texel, alpha );',
+      'texel.rgb *= min( 1.0, BLOOM_MAX / max( v, 1e-4 ) );\n\t\t\tgl_FragColor = mix( outputColor, texel, alpha );',
+    )
+    hp.defines = { ...hp.defines, BLOOM_MAX: '3.0' }
+    hp.needsUpdate = true
     this.composer.addPass(this.bloom)
-    this.composer.addPass(new OutputPass())
+    this.final = new FinalPass()
+    this.composer.addPass(this.final)
+    // 每幀的色調：天空依時段算好放在 look；另一個場景（小木屋室內）可以帶自己的 look
+    this.look = null
+    this.qualityName = null
+    this.setQuality('high')
 
     this.timer = new THREE.Timer()
     this.timer.connect(document)
@@ -125,6 +147,46 @@ export class World {
     this.renderer.setAnimationLoop((t) => this._frame(t))
   }
 
+  // 'high' | 'standard'（見 QUALITY）
+  setQuality(name) {
+    if (!QUALITY[name] || name === this.qualityName) return
+    this.qualityName = name
+    const q = (this.quality = QUALITY[name])
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.dpr))
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      rt.samples = q.samples
+      rt.dispose()
+    }
+    this.composer.setPixelRatio(this.renderer.getPixelRatio())
+    this._redraw = true
+  }
+
+  // 把這一幀的色調套到泛光與最後一道後製；太陽方向換算成畫面座標給光暈用
+  _applyLook() {
+    const look = this.stage?.look ?? this.look
+    if (!look) return
+    const b = this.bloom
+    b.strength = look.bloom.strength
+    b.threshold = look.bloom.threshold
+    b.radius = look.bloom.radius
+    b.highPassUniforms.smoothWidth.value = look.bloom.knee
+    b.enabled = b.strength > 0.02 && (this.quality.dayBloom || look.night > 0.15)
+    this.final.apply(look)
+    let glare = look.glare
+    if (glare > 0 && look.sunDir) {
+      const cam = this.camera
+      cam.getWorldDirection(_fwd)
+      // 太陽在鏡頭背後時不畫光暈；在畫面外但在前方時，從靠近太陽的那一側漏光
+      glare *= THREE.MathUtils.smoothstep(_fwd.dot(look.sunDir), -0.15, 0.45)
+      _sunP.copy(cam.position).addScaledVector(look.sunDir, 100).project(cam)
+      this.final.uniforms.uSun.value.set(
+        THREE.MathUtils.clamp(_sunP.x * 0.5 + 0.5, -1.5, 2.5),
+        THREE.MathUtils.clamp(_sunP.y * 0.5 + 0.5, -1.5, 2.5),
+      )
+    }
+    this.final.uniforms.uGlare.value = glare
+  }
+
   // 閒置程度：0 = 全速、1 = 30fps、2 = 15fps 且停止自動旋轉
   idleLevel(now = performance.now()) {
     if (this.covered) return 2
@@ -171,10 +233,9 @@ export class World {
     for (const fn of this.updaters) fn(dt, el)
     const idle = performance.now() - this.lastInteract > 25000
     this.controls.autoRotate = this.idleRotate && idle && !this._focusing && level < 2
-    // 白天的 bloom 幾乎看不出來，直接關掉這個後製 pass 省 GPU
-    this.bloom.enabled = this.bloom.strength > 0.2
     if (this.stage) this.stage.frame(dt, el)
     else this.controls.update(dt)
+    this._applyLook()
     this.composer.render()
   }
 

@@ -28,6 +28,11 @@ const THEME_INFO = {
   day: '一直是白天，島上維持明亮',
   night: '一直是夜晚，星星、燈籠和螢火蟲都會出來',
 }
+const QUALITY_INFO = {
+  auto: '電腦用高畫質，手機用標準，比較省電',
+  high: '反鋸齒、白天也有柔光，畫面最細緻',
+  standard: '關掉反鋸齒和白天柔光，手機不容易發燙',
+}
 
 export const levelTitle = (lv) => LEVEL_TITLES[Math.min(lv, LEVEL_TITLES.length) - 1] || LEVEL_TITLES[0]
 const hhmm = (ts) => {
@@ -771,6 +776,9 @@ export class UI {
     const theme = this.store.state.settings.theme
     $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.v === theme))
     $('#themeInfo').textContent = THEME_INFO[theme]
+    const quality = this.store.state.settings.quality
+    $$('#qualityPick button').forEach((b) => b.classList.toggle('on', b.dataset.v === quality))
+    $('#qualityInfo').textContent = QUALITY_INFO[quality]
   }
 
   // ── 雲端同步 ──
@@ -1054,6 +1062,13 @@ export class UI {
     $('#themePick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (b) this.setTheme(b.dataset.v)
+    })
+    $('#qualityPick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (!b) return
+      this.store.setSetting('quality', b.dataset.v)
+      this.hooks.setQuality?.(b.dataset.v)
+      this.renderSettings()
     })
     $('#powerBtn').onclick = () => {
       const on = !this.store.state.settings.powerSave

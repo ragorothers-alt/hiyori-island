@@ -5,6 +5,8 @@ import { buildCabinRoom } from './models/cabinRoom.js'
 // 放在離小島很遠的地方，小島上的 3D 標籤投影時會落在畫面外而自動藏起來
 const ORIGIN = new THREE.Vector3(0, -1000, 0)
 const FADE_MS = 450
+// 室內的色調跟著外面的時段，但沒有太陽光暈，暗角輕一點
+const ROOM_LOOK = { glare: 0, vignette: 0.12 }
 const UP = new THREE.Vector3(0, 1, 0)
 const _v = new THREE.Vector3()
 
@@ -30,6 +32,7 @@ export class Room {
     this.active = false
     this.switching = false
     this.state = { night: 0, skyTop: sky.top, skyBottom: sky.bot }
+    this.look = { ...sky.look, ...ROOM_LOOK }
     this._right = new THREE.Vector3()
     this._up = new THREE.Vector3()
     this.fade = document.createElement('div')
@@ -166,6 +169,7 @@ export class Room {
     if (!this.active) return
     const s = this.state
     s.night = this.sky.night
+    Object.assign(this.look, this.sky.look, ROOM_LOOK)
     this.scene.background.copy(this.bgDay).lerp(this.bgNight, s.night)
     this.group.userData.anim(t, dt, s)
   }

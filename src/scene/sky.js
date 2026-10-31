@@ -26,7 +26,23 @@ const C_NIGHT_CLOUD = new THREE.Color('#3f477c')
 const C_MOON_GLOW = new THREE.Color('#7d8fd8')
 const C_DAY_GLOW = new THREE.Color('#ffffff')
 const MOON_DIR = new THREE.Vector3(-0.45, 1, 0.35).normalize()
+const C_KEY_DAY = new THREE.Color('#fff3df')
+const C_KEY_MOON = new THREE.Color('#a9bcff')
+const C_BOUNCE = new THREE.Color('#ead9c4')
 const _sunDir = new THREE.Vector3()
+const _keyDir = new THREE.Vector3()
+const _c = new THREE.Color()
+const mix = (a, b, k) => a + (b - a) * k
+const mix3 = (out, a, b, k) => {
+  for (let i = 0; i < 3; i++) out[i] = mix(a[i], b[i], k)
+  return out
+}
+// 調色（後製 lift/gamma/gain）：白天陰影帶一點藍、亮部微暖；黃昏整體偏暖；夜晚偏藍紫
+const GRADE = {
+  day: { lift: [0.012, 0.024, 0.055], gamma: [1, 1, 1], gain: [1.03, 1.01, 0.97], sat: 1.08 },
+  gold: { lift: [0.03, 0.016, 0.05], gamma: [1, 0.99, 0.97], gain: [1.06, 0.99, 0.92], sat: 1.1 },
+  night: { lift: [0.02, 0.022, 0.06], gamma: [1, 1, 1.03], gain: [0.97, 0.99, 1.05], sat: 1.05 },
+}
 
 export class Sky {
   constructor(world) {
@@ -105,6 +121,22 @@ export class Sky {
     sc.near = 1
     sc.far = 80
     scene.add(sun, sun.target)
+
+    // 這一幀的整體色調（world 每幀套到泛光和最後一道後製）
+    this.look = {
+      night: 0,
+      exposure: 1,
+      glare: 0,
+      sunDir: new THREE.Vector3(0, 1, 0),
+      sunColor: new THREE.Color('#fff1d6'),
+      bloom: { strength: 0.3, threshold: 0.95, radius: 0.5, knee: 0.25 },
+      lift: [0, 0, 0],
+      gamma: [1, 1, 1],
+      gain: [1, 1, 1],
+      sat: 1,
+      vignette: 0.2,
+    }
+    world.look = this.look
 
     this._stars(scene)
     this._clouds(scene)
@@ -251,33 +283,37 @@ export class Sky {
     this.bot.lerpColors(a.bot, b.bot, k)
     this.world.scene.fog.color.copy(this.mid)
 
-    // 太陽軌跡：右 → 前上方 → 左
+    // 天空裡的太陽（日盤、光暈、雲的亮邊）：右後方升起 → 島的後上方 → 左後方落下，
+    // 低角度時會出現在鏡頭前方的天空裡
     const p = (h - SUNRISE) / (SUNSET - SUNRISE)
     const elev = sunElevation(h)
-    const sunDir = _sunDir.set(Math.cos(Math.PI * p), elev * 1.25 + 0.05, 0.6).normalize()
+    const sunDir = _sunDir.set(Math.cos(Math.PI * p), elev * 1.25 + 0.05, -0.55).normalize()
     const day = smooth(-0.08, 0.32, elev)
     this.day = day
     this.night = 1 - day
     this.uniforms.uSunDir.value.copy(sunDir)
-    this.uniforms.uSunVis.value = smooth(-0.05, 0.1, elev)
+    const sunVis = smooth(-0.05, 0.1, elev)
+    this.uniforms.uSunVis.value = sunVis
     const golden = 1 - smooth(0.12, 0.5, elev)
     this.uniforms.uSunColor.value.set('#fff4dc').lerp(C_GOLD, golden)
 
+    // 主光（投影子）和天空的太陽分開：一直保持在鏡頭這一側約 3/4 正面、仰角 25° 以上，花和貓不會逆光；
+    // 白天的太陽方向和夜晚的月光方向連續插值，日落時不會突然跳
+    const az = Math.cos(Math.PI * THREE.MathUtils.clamp(p, 0, 1)) * 0.9
+    const theta = THREE.MathUtils.degToRad(mix(25, 62, THREE.MathUtils.clamp(elev, 0, 1)))
+    const flat = Math.hypot(az, 0.6)
+    _keyDir.set((az / flat) * Math.cos(theta), Math.sin(theta), (0.6 / flat) * Math.cos(theta))
+    _keyDir.lerp(MOON_DIR, this.night).normalize()
     const sun = this.sun
-    if (elev > 0) {
-      sun.position.copy(sunDir).multiplyScalar(40)
-      sun.color.set('#fff6ea').lerp(C_GOLD2, golden * 0.8)
-      sun.intensity = 1.9 * day
-    } else {
-      sun.position.copy(MOON_DIR).multiplyScalar(40)
-      sun.color.set('#a9bcff')
-      sun.intensity = 0.75 * this.night
-    }
+    sun.position.copy(_keyDir).multiplyScalar(40)
     sun.target.position.set(0, 0, 0)
+    sun.color.copy(C_KEY_MOON).lerp(_c.copy(C_KEY_DAY).lerp(C_GOLD2, golden * 0.8), day)
+    sun.intensity = mix(0.7, 2.3, day)
 
-    this.hemi.color.copy(this.mid).lerp(C_WHITE, 0.45)
-    this.hemi.groundColor.set('#f4e4d8').lerp(C_NIGHT_GROUND, this.night)
-    this.hemi.intensity = 0.7 + day * 0.55
+    // 半球光：天空那一面偏藍，陰影裡自然帶藍；地面那一面是暖色的反光
+    this.hemi.color.copy(this.top).lerp(C_WHITE, 0.4)
+    this.hemi.groundColor.copy(C_BOUNCE).lerp(C_NIGHT_GROUND, this.night)
+    this.hemi.intensity = 0.62 + day * 0.4
 
     this.starMat.uniforms.uOpacity.value = smooth(0.35, 0.95, this.night)
     this.starMat.uniforms.uTime.value = t
@@ -288,7 +324,23 @@ export class Sky {
     this.skyClouds.rotation.y += dt * 0.006
     this.seaClouds.rotation.y -= dt * 0.003
 
-    this.world.renderer.toneMappingExposure = 0.98 + this.night * 0.14
-    this.world.bloom.strength = 0.14 + this.night * 0.55
+    const L = this.look
+    const n = this.night
+    L.night = n
+    L.exposure = mix(1, 1.12, n)
+    L.sunDir.copy(sunDir)
+    L.sunColor.copy(this.uniforms.uSunColor.value)
+    L.glare = sunVis * mix(0.5, 0.75, golden)
+    const B = L.bloom
+    // 白天受光的白色表面、自帶微光的貓和花苞 HDR 亮度大約到 1.5，門檻高過它們，只讓日盤和真正的高光泛光；
+    // 夜晚門檻也不能太低，不然滿天星星會糊成一片，留給燈籠、窗光這些亮度 2 以上的光源
+    B.strength = mix(0.22, 0.55, n)
+    B.threshold = mix(2.0, 1.35, n)
+    B.radius = mix(0.4, 0.55, n)
+    B.knee = mix(0.3, 0.3, n)
+    const g = golden * day
+    for (const k of ['lift', 'gamma', 'gain']) mix3(mix3(L[k], GRADE.day[k], GRADE.gold[k], g), L[k], GRADE.night[k], n)
+    L.sat = mix(mix(GRADE.day.sat, GRADE.gold.sat, g), GRADE.night.sat, n)
+    L.vignette = mix(0.18, 0.3, n)
   }
 }

@@ -106,6 +106,10 @@ async function boot() {
   const town = new Town(world, labels, island, sky)
   sfx.setEnabled(store.state.settings.sound)
   world.powerSave = store.state.settings.powerSave
+  // 畫質：auto 時觸控手機用標準（不做 MSAA、白天不開泛光），其他用高
+  const applyQuality = (q) =>
+    world.setQuality(q === 'auto' ? (matchMedia('(hover: none) and (pointer: coarse)').matches ? 'standard' : 'high') : q)
+  applyQuality(store.state.settings.quality)
   decor.sync(store.level.level)
 
   // ── 四季 ──
@@ -323,6 +327,7 @@ async function boot() {
     modalClosed: () => !room.active && world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
     setPowerSave: (on) => (world.powerSave = on),
+    setQuality: (q) => applyQuality(q),
     setTheme: (t) => sky.setTheme(t),
     // 現在幾點（網址帶 ?hour= 時用那個）
     hourNow: () => sky.hour(),

@@ -68,7 +68,9 @@ export function repeatLabel(rep) {
 }
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
-export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto' }
+export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto' }
+// 畫質：auto＝桌機高、觸控手機標準
+export const QUALITIES = ['auto', 'high', 'standard']
 
 // 舊版固定的三個每日任務（舊存檔沿用）
 const LEGACY_QUESTS = ['tasks3', 'focus2', 'step1']
@@ -354,6 +356,7 @@ function migrate(s) {
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
+  if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 
   // 睡眠：{ 醒來那天: { bed, wake, q } }
   const sleep = {}
