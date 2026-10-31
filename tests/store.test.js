@@ -556,6 +556,20 @@ describe('專案期限', () => {
     store.addProject({ name: '已逾期', milestones: ['一'], deadline: '2026-10-20' })
     expect(store.deadlineSoon().map((x) => [x.project.id, x.days])).toEqual([[b.id, 0], [a.id, 2]])
   })
+
+  it('截止日可以之後再設、改或拿掉；不合法的日期當成不設', () => {
+    const p = store.addProject({ name: '慢慢來', milestones: ['一'], deadline: 'nope' })
+    expect(p.deadline).toBe('')
+    expect(store.deadlineSoon()).toEqual([])
+    store.setDeadline(p.id, '2026-10-26')
+    expect(p.deadline).toBe('2026-10-26')
+    expect(store.deadlineSoon().map((x) => x.days)).toEqual([1])
+    store.setDeadline(p.id, '')
+    expect(p.deadline).toBe('')
+    expect(store.deadlineSoon()).toEqual([])
+    store.setDeadline(p.id, '10/30')
+    expect(p.deadline).toBe('')
+  })
 })
 
 describe('例行公事與跨日', () => {

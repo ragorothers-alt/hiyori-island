@@ -650,9 +650,20 @@ export class UI {
       }
       form.hidden = false
       $('#newProjectBtn').hidden = true
-      $('#projectDeadline').value = addDays(this.store.today, 14)
+      showDeadline(false)
       $('#projectName').focus()
     }
+    // 截止日可有可無：預設不設，按「＋ 截止日」才出現日期（先填兩週後）
+    const showDeadline = (on) => {
+      $('#projectDeadlineAdd').hidden = on
+      $('#projectDeadlineField').hidden = !on
+      $('#projectDeadline').value = on ? addDays(this.store.today, 14) : ''
+    }
+    $('#projectDeadlineAdd').onclick = () => {
+      showDeadline(true)
+      $('#projectDeadline').focus()
+    }
+    $('#projectDeadlineClear').onclick = () => showDeadline(false)
     $('#cancelProject').onclick = () => {
       form.hidden = true
       $('#newProjectBtn').hidden = false
@@ -693,6 +704,15 @@ export class UI {
       else if (act === 'view') this.hooks.focusProject(id)
       else if (act === 'rename') inlineEdit($('.proj-name', card), p.name, (v) => (v ? s.updateProject(id, { name: v }) : this.renderProjects()))
       else if (act === 'color') s.updateProject(id, { color: (p.color + 1) % PROJECT_COLORS.length })
+      else if (act === 'deadline') {
+        this._dlEdit = id
+        this.renderProjects()
+        $(`.proj[data-id="${CSS.escape(id)}"] .dl-input`)?.focus()
+      } else if (act === 'dl-save' || act === 'dl-clear' || act === 'dl-cancel') {
+        this._dlEdit = null
+        if (act === 'dl-cancel') this.renderProjects()
+        else s.setDeadline(id, act === 'dl-clear' ? '' : $('.dl-input', card).value)
+      }
       else if (act === 'archive') s.archiveProject(id, true)
       else if (act === 'restore') {
         if (!s.archiveProject(id, false)) this.toast({ icon: '塔', title: '島上的空地滿了', sub: '先收藏其他專案再放回來吧' })
@@ -714,6 +734,10 @@ export class UI {
   }
 
   _deadlineText(p) {
+    if (this._dlEdit === p.id) {
+      return `<span class="dl-edit"><input type="date" class="dl-input" value="${p.deadline || addDays(this.store.today, 14)}" aria-label="截止日">`
+        + `<button type="button" data-act="dl-save">好</button>${p.deadline ? '<button type="button" data-act="dl-clear">不設截止</button>' : ''}<button type="button" data-act="dl-cancel">取消</button></span>`
+    }
     if (!p.deadline) return ''
     if (p.completedAt && this.store.progress(p) >= 1) {
       const day = new Date(p.completedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })
@@ -750,7 +774,7 @@ export class UI {
       <div class="proj-actions">
         ${archived
           ? `<button data-act="restore">放回島上</button><button data-act="delete">刪除</button>`
-          : `<button data-act="view">在島上查看</button><button data-act="rename">改名</button><button data-act="color">換色</button><button data-act="archive">收藏</button><button data-act="delete">刪除</button>`}
+          : `<button data-act="view">在島上查看</button><button data-act="rename">改名</button><button data-act="color">換色</button>${p.completedAt ? '' : '<button data-act="deadline">截止日</button>'}<button data-act="archive">收藏</button><button data-act="delete">刪除</button>`}
       </div>
     </div>`
   }

@@ -288,7 +288,13 @@ body.night .proj-pct { filter: none; }
 @media (hover: none) { .item-actions, .ms .mini { opacity: .7; } }
 .ms-add { display: flex; gap: 6px; margin-top: 6px; }
 .ms-add input { flex: 1; border: 0; outline: 0; background: rgba(140, 170, 200, .12); border-radius: 10px; padding: 5px 9px; font-size: 12.5px; }
-.proj-actions { display: flex; gap: 4px; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.proj-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.dl-edit { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.dl-edit input { border: 0; outline: 0; border-radius: 8px; padding: 3px 6px; font-size: 12px; color: var(--ink); background: var(--glass-strong); box-shadow: inset 0 0 0 1.5px var(--sky); }
+body.night .dl-edit input { color-scheme: dark; }
+.dl-edit button { font-size: 11.5px; color: var(--ink-soft); padding: 3px 8px; border-radius: 8px; }
+.dl-edit button:hover { background: rgba(140, 170, 200, .16); color: var(--ink); }
+.dl-edit button[data-act="dl-save"] { color: var(--sky-deep); }
 .proj-actions button { font-size: 11.5px; color: var(--ink-soft); padding: 4px 8px; border-radius: 8px; }
 .proj-actions button:hover { background: rgba(140, 170, 200, .16); color: var(--ink); }
 .archive summary { cursor: pointer; font-size: 12.5px; color: var(--ink-soft); padding: 6px 4px; }

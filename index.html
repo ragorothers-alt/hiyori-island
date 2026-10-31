@@ -169,7 +169,8 @@
         <form class="add-form project-form" id="projectForm" hidden autocomplete="off">
           <input id="projectName" maxlength="40" placeholder="專案名稱" required />
           <div class="form-row">
-            <label class="date-field">截止 <input type="date" id="projectDeadline" /></label>
+            <button type="button" class="chip-toggle" id="projectDeadlineAdd">＋ 截止日</button>
+            <label class="date-field" id="projectDeadlineField" hidden>截止 <input type="date" id="projectDeadline" /><button type="button" class="mini" id="projectDeadlineClear" title="不設截止日" aria-label="不設截止日">×</button></label>
             <div class="swatches" id="projectColor"></div>
           </div>
           <textarea id="projectMilestones" rows="4" placeholder="里程碑，一行一個（每完成一個，塔就蓋高一層）"></textarea>

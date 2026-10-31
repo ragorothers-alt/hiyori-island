@@ -1443,11 +1443,12 @@ export class Store {
     for (let i = 0; i < MAX_PROJECTS; i++) if (!used.has(i)) return i
     return -1
   }
+  // deadline 可以不設（空字串）：沒有截止日的專案就沒有到期提醒和準時落成獎勵
   addProject({ name, color = 0, deadline = '', milestones = [] }) {
     const slot = this.freeSlot()
     if (slot < 0 || !name.trim()) return null
     const p = {
-      id: uid(), name: name.trim(), color, deadline, slot, createdAt: Date.now(),
+      id: uid(), name: name.trim(), color, deadline: DATE_RE.test(deadline) ? deadline : '', slot, createdAt: Date.now(),
       milestones: milestones.map((t) => t.trim()).filter(Boolean).map((t) => ms(t)),
       completedAt: null, archived: false,
     }
@@ -1460,6 +1461,14 @@ export class Store {
     const p = this._find('projects', id)
     if (!p) return
     Object.assign(p, patch)
+    this._finish()
+  }
+  // 改截止日；空字串 = 不設截止日
+  setDeadline(id, date) {
+    const p = this._find('projects', id)
+    const d = DATE_RE.test(date) ? date : ''
+    if (!p || p.deadline === d) return
+    p.deadline = d
     this._finish()
   }
   deleteProject(id) {
