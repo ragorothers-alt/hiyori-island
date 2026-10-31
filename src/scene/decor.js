@@ -522,7 +522,8 @@ function bonbori() {
   const light = new THREE.PointLight('#ffd5a4', 0, 7, 1.8)
   light.position.set(-6, 1.8, 1.9)
   g.add(light)
-  g.userData.glow = { mats: [paper], lights: [light], base: 0.25 }
+  // 光源就在樹冠正下方，Tripo 的樹冠底色接近白，全亮會過曝成一團
+  g.userData.glow = { mats: [paper], lights: [light], base: 0.25, lightScale: 0.4 }
   g.userData.ownedMaterials = [paper]
   return g
 }
@@ -1029,7 +1030,7 @@ export class Decor {
       const glow = o.userData.glow
       if (glow) {
         for (const m of glow.mats) m.emissiveIntensity = glow.base + night * 2.6 + Math.sin(t * 2.3) * 0.05 * night
-        for (const l of glow.lights) l.intensity = night * 4
+        for (const l of glow.lights) l.intensity = night * 4 * (glow.lightScale ?? 1)
       }
       if (o.userData.float) {
         for (const lan of o.userData.float) {

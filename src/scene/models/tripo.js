@@ -93,7 +93,7 @@ export function canopyMask(material) {
           float sat = (mx - min(s.r, min(s.g, s.b))) / max(mx, 1e-3);
           hiyoriCanopy = smoothstep(0.42, 0.28, sat) * smoothstep(0.42, 0.58, mx);
           float lum = dot(s, vec3(0.2126, 0.7152, 0.0722));
-          vec3 canopy = diffuse * pow(clamp(lum / 0.82, 0.0, 1.25), 2.2);
+          vec3 canopy = diffuse * pow(clamp(lum / 0.94, 0.0, 1.08), 2.2);
           diffuseColor.rgb = mix(texel.rgb, canopy, hiyoriCanopy);
         #endif
         `,

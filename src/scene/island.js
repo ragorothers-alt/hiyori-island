@@ -39,9 +39,9 @@ export class Island {
   constructor(world) {
     this.world = world
     // 會隨季節變色的材質：不走 mat() 快取，避免影響其他物件
-    this.grassMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#bde5b6', roughness: 0.95, flatShading: true }))
-    this.rimMat = new THREE.MeshStandardMaterial({ color: '#addb9d', roughness: 0.95, flatShading: true, side: THREE.DoubleSide })
-    this.topMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#c5e6b4', roughness: 0.82, flatShading: true }))
+    this.grassMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#bde5b6', roughness: 0.95 }))
+    this.rimMat = new THREE.MeshStandardMaterial({ color: '#addb9d', roughness: 0.95, side: THREE.DoubleSide })
+    this.topMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#c5e6b4', roughness: 0.82 }))
     this.group = new THREE.Group()
     world.scene.add(this.group)
     this._terrain()
