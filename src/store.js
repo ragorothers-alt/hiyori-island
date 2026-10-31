@@ -6,7 +6,7 @@ import { SHOP_ITEMS } from './data/shop.js'
 import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
 import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
 import { BOND_POINTS, actLevel, bondLevel, outfitLevel, outfitOf } from './data/bond.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM } from './theme.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TOWER_SLOTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM } from './theme.js'
 import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
 import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
 import { LIFE_KINDS } from './data/life.js'
@@ -259,20 +259,27 @@ function migrate(s) {
     })
     return {
       id: str(p.id), name, color: num(p.color, 0, 99, 0), deadline: ymd(p.deadline, ''), createdAt: ts(p.createdAt) || Date.now(),
-      milestones, completedAt: ts(p.completedAt), archived: !!p.archived, slot: num(p.slot, 0, MAX_PROJECTS - 1, 0), onTime: !!p.onTime,
+      milestones, completedAt: ts(p.completedAt), archived: !!p.archived, onTime: !!p.onTime,
+      // slot：島上的第幾塊空地，-1 = 還沒上島（空地滿了，先在清單裡）；parked：使用者自己移下島的，不自動補上去
+      slot: num(p.slot, -1, TOWER_SLOTS - 1, 0), parked: !!p.parked,
     }
   })
-  // 重新分配塔位：重複的換到空地，空地不夠就改為收藏
+  // 重新分配塔位：重複的換到空地，空地不夠就先不上島；進行中的專案超過上限的改為收藏
   const used = new Set()
+  let active = 0
   for (const p of projects) {
     if (p.archived) continue
+    if (++active > MAX_PROJECTS) {
+      p.archived = true
+      continue
+    }
+    if (p.slot < 0) continue
     if (used.has(p.slot)) {
       let free = 0
-      while (used.has(free) && free < MAX_PROJECTS) free++
-      if (free >= MAX_PROJECTS) p.archived = true
-      else p.slot = free
+      while (used.has(free)) free++
+      p.slot = free < TOWER_SLOTS ? free : -1
     }
-    if (!p.archived) used.add(p.slot)
+    if (p.slot >= 0) used.add(p.slot)
   }
 
   const ps = isObj(s.player) ? s.player : {}
@@ -550,6 +557,10 @@ export class Store {
   }
   eventsOn(date) {
     return this.state.events.filter((e) => e.date === date).sort((a, b) => toMin(a.start) - toMin(b.start))
+  }
+  // 島上有塔的專案
+  towerProjects() {
+    return this.activeProjects().filter((p) => p.slot >= 0)
   }
   activeProjects() {
     return this.state.projects.filter((p) => !p.archived)
@@ -1439,18 +1450,52 @@ export class Store {
 
   // ── 專案 ──
   freeSlot() {
-    const used = new Set(this.activeProjects().map((p) => p.slot))
-    for (let i = 0; i < MAX_PROJECTS; i++) if (!used.has(i)) return i
+    const used = new Set(this.towerProjects().map((p) => p.slot))
+    for (let i = 0; i < TOWER_SLOTS; i++) if (!used.has(i)) return i
     return -1
   }
-  // deadline 可以不設（空字串）：沒有截止日的專案就沒有到期提醒和準時落成獎勵
-  addProject({ name, color = 0, deadline = '', milestones = [] }) {
+  canAddProject() {
+    return this.activeProjects().length < MAX_PROJECTS
+  }
+  // 空出來的空地：讓清單裡等著的專案上島（還沒完成的優先、先建立的先）；使用者自己移下島的不算
+  _fillSlots() {
+    const waiting = this.activeProjects()
+      .filter((p) => p.slot < 0 && !p.parked)
+      .sort((a, b) => !!a.completedAt - !!b.completedAt || a.createdAt - b.createdAt)
+    for (const p of waiting) {
+      const slot = this.freeSlot()
+      if (slot < 0) break
+      p.slot = slot
+    }
+  }
+  // 放上島／移下島：自己決定哪些專案有塔
+  placeProject(id) {
+    const p = this._find('projects', id)
+    if (!p || p.archived) return false
+    if (p.slot >= 0) return true
     const slot = this.freeSlot()
-    if (slot < 0 || !name.trim()) return null
+    if (slot < 0) return false
+    p.slot = slot
+    p.parked = false
+    this._finish()
+    return true
+  }
+  unplaceProject(id) {
+    const p = this._find('projects', id)
+    if (!p || p.slot < 0) return
+    p.slot = -1
+    p.parked = true
+    this._finish()
+  }
+  // deadline 可以不設（空字串）：沒有截止日的專案就沒有到期提醒和準時落成獎勵
+  // 島上的空地滿了也能建立：slot 是 -1，先在清單裡，有空地時自動上島
+  addProject({ name, color = 0, deadline = '', milestones = [] }) {
+    if (!this.canAddProject() || !name.trim()) return null
+    const slot = this.freeSlot()
     const p = {
       id: uid(), name: name.trim(), color, deadline: DATE_RE.test(deadline) ? deadline : '', slot, createdAt: Date.now(),
       milestones: milestones.map((t) => t.trim()).filter(Boolean).map((t) => ms(t)),
-      completedAt: null, archived: false,
+      completedAt: null, archived: false, parked: false,
     }
     this.state.projects.push(p)
     this.stats.projectsCreated++
@@ -1473,17 +1518,20 @@ export class Store {
   }
   deleteProject(id) {
     this.state.projects = this.state.projects.filter((p) => p.id !== id)
+    this._fillSlots()
     this._finish()
   }
+  // 收藏：塔拆掉，空地讓給清單裡等著的專案。放回：有空地就上島，沒有就先在清單裡
   archiveProject(id, archived = true) {
     const p = this._find('projects', id)
     if (!p) return false
     if (!archived) {
-      const slot = this.freeSlot()
-      if (slot < 0) return false
-      p.slot = slot
+      if (!this.canAddProject()) return false
+      p.slot = this.freeSlot()
+      p.parked = false
     }
     p.archived = archived
+    if (archived) this._fillSlots()
     this._finish()
     return true
   }

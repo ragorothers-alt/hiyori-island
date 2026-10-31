@@ -1,4 +1,4 @@
-import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
+import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
@@ -644,8 +644,8 @@ export class UI {
   _bindProjects() {
     const form = $('#projectForm')
     $('#newProjectBtn').onclick = () => {
-      if (this.store.freeSlot() < 0) {
-        this.toast({ icon: '塔', title: '島上的空地滿了', sub: `最多同時 ${MAX_PROJECTS} 座塔，先收藏已完成的專案吧` })
+      if (!this.store.canAddProject()) {
+        this.toast({ icon: '塔', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏已完成的專案吧' })
         return
       }
       form.hidden = false
@@ -688,7 +688,8 @@ export class UI {
       $('#newProjectBtn').hidden = false
       this.projectColor = (this.projectColor + 1) % PROJECT_COLORS.length
       this._syncPickers()
-      this.hooks.focusProject(p.id)
+      if (p.slot >= 0) this.hooks.focusProject(p.id)
+      else this.toast({ icon: '塔', title: '島上的空地都蓋滿了', sub: '這個專案先放在清單裡，有空地時會自動蓋塔；也可以把別的專案「移下島」' })
     })
 
     const onClick = (e) => {
@@ -714,8 +715,12 @@ export class UI {
         else s.setDeadline(id, act === 'dl-clear' ? '' : $('.dl-input', card).value)
       }
       else if (act === 'archive') s.archiveProject(id, true)
+      else if (act === 'place') {
+        if (s.placeProject(id)) this.hooks.focusProject(id)
+        else this.toast({ icon: '塔', title: `島上的 ${TOWER_SLOTS} 塊空地都蓋了`, sub: '先把一個專案「移下島」或收藏，再放上來' })
+      } else if (act === 'unplace') s.unplaceProject(id)
       else if (act === 'restore') {
-        if (!s.archiveProject(id, false)) this.toast({ icon: '塔', title: '島上的空地滿了', sub: '先收藏其他專案再放回來吧' })
+        if (!s.archiveProject(id, false)) this.toast({ icon: '塔', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏其他專案再放回來吧' })
       } else if (act === 'delete') armConfirm(e.target.closest('button'), '確定刪除？', () => s.deleteProject(id))
     }
     $('#projectList').addEventListener('click', onClick)
@@ -750,7 +755,8 @@ export class UI {
     return `<span class="${d <= 2 ? 'warn' : ''}">截止 ${md} · 剩 ${d} 天</span>`
   }
 
-  _projectCard(p, archived = false) {
+  // waiting：清單裡有還沒上島的專案（才需要「移下島」讓位）
+  _projectCard(p, archived = false, waiting = false) {
     const s = this.store
     const prog = s.progress(p)
     const pct = Math.round(prog * 100)
@@ -767,24 +773,26 @@ export class UI {
       .join('')
     return `<div class="proj ${this.hlKey === 'project:' + p.id ? 'hl' : ''}" data-id="${esc(p.id)}" style="--c:${c}">
       <div class="proj-head"><div class="proj-name">${esc(p.name)}</div><div class="proj-pct">${pct}%</div></div>
-      <div class="proj-meta">${this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>
+      <div class="proj-meta">${archived || p.slot >= 0 ? '' : '<span class="waiting">還沒上島</span>'}${this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>
       <div class="proj-bar">${p.milestones.map((m) => `<i class="${m.done ? 'on' : ''}"></i>`).join('') || '<i></i>'}</div>
       ${archived ? '' : `<ul class="ms-list">${ms}</ul>
       <form class="ms-add"><input placeholder="新增里程碑（塔會多一層）" maxlength="60" /><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`}
       <div class="proj-actions">
         ${archived
           ? `<button data-act="restore">放回島上</button><button data-act="delete">刪除</button>`
-          : `<button data-act="view">在島上查看</button><button data-act="rename">改名</button><button data-act="color">換色</button>${p.completedAt ? '' : '<button data-act="deadline">截止日</button>'}<button data-act="archive">收藏</button><button data-act="delete">刪除</button>`}
+          : `${p.slot >= 0 ? '<button data-act="view">在島上查看</button>' : '<button data-act="place">放上島</button>'}${p.slot >= 0 && waiting ? '<button data-act="unplace">移下島</button>' : ''}<button data-act="rename">改名</button><button data-act="color">換色</button>${p.completedAt ? '' : '<button data-act="deadline">截止日</button>'}<button data-act="archive">收藏</button><button data-act="delete">刪除</button>`}
       </div>
     </div>`
   }
 
   renderProjects() {
     const s = this.store
-    const active = s.activeProjects().sort((a, b) => a.createdAt - b.createdAt)
+    // 島上有塔的在前，還沒上島的接在後面
+    const active = s.activeProjects().sort((a, b) => (a.slot < 0) - (b.slot < 0) || a.createdAt - b.createdAt)
+    const waiting = active.some((p) => p.slot < 0)
     const archived = s.state.projects.filter((p) => p.archived)
     $('#projectList').innerHTML = active.length
-      ? active.map((p) => this._projectCard(p)).join('')
+      ? active.map((p) => this._projectCard(p, false, waiting)).join('')
       : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，島上的塔就會蓋高一層。</div>`
     $('#archiveBox').hidden = !archived.length
     $('#archiveList').innerHTML = archived.map((p) => this._projectCard(p, true)).join('')

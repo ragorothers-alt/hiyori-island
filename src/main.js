@@ -150,7 +150,7 @@ async function boot() {
   // ── 專案名牌 & 日程提示 ──
   const chips = new Map()
   function syncChips() {
-    const active = store.activeProjects()
+    const active = store.towerProjects()
     const ids = new Set(active.map((p) => p.id))
     for (const [id, c] of chips) {
       if (!ids.has(id)) {
@@ -194,7 +194,7 @@ async function boot() {
   // ── 場景同步 ──
   function syncScene(animate = true) {
     garden.sync(store.gardenTasks(store.selectedDate), store.selectedDate, store.today)
-    const built = towers.sync(store.activeProjects(), (p) => store.progress(p), animate, store.today)
+    const built = towers.sync(store.towerProjects(), (p) => store.progress(p), animate, store.today)
     for (const b of built) {
       const p = store.state.projects.find((x) => x.id === b.id)
       const color = PROJECT_COLORS[(p?.color ?? 0) % PROJECT_COLORS.length]
@@ -631,7 +631,7 @@ async function boot() {
   // 主島上走不過去的地方：池塘、花圃、小木屋、塔、升級景觀、擺設（每趟路線開始時拍一次快照）
   const walkBlocked = () => {
     const { pond, bed, cabin, slots, decor: spots } = LAYOUT
-    const towersAt = store.activeProjects().map((p) => slots[p.slot]).filter(Boolean)
+    const towersAt = store.towerProjects().map((p) => slots[p.slot]).filter(Boolean)
     const prints = decor.footprints()
     const items = store.state.placed.map((p) => [p.x, p.z, radiusOf(p.key) + 0.15])
     return (x, z) => {
@@ -1118,10 +1118,10 @@ async function boot() {
   store.on('projectDone', (p) => {
     setTimeout(() => {
       sfx.fanfare()
-      const pos = towers.anchor(p.id, false) || new THREE.Vector3()
-      fx.fireworks(pos, 6)
+      const tower = towers.anchor(p.id, false)
+      fx.fireworks(tower || new THREE.Vector3(), 6)
       talk('projectDone', { project: short(p.name) }, 4500)
-      ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」落成！`, sub: '整座塔都蓋好了，+120 XP' })
+      ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」落成！`, sub: `${tower ? '整座塔都蓋好了' : '所有里程碑都完成了'}，+${XP.project} XP` })
     }, 1100)
   })
   store.on('xp', ({ amount, coins, kind, id }) => {

@@ -4,7 +4,8 @@ import {
 } from '../src/store.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
-import { levelFromXp, xpNeed } from '../src/theme.js'
+import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS } from '../src/theme.js'
+import { LAYOUT } from '../src/scene/island.js'
 
 const TODAY = '2026-10-25'
 const QUEST_IDS = DAILY_QUESTS.map((q) => q.id)
@@ -1064,5 +1065,78 @@ describe('範例資料', () => {
     expect(s.state.events).toHaveLength(0)
     expect(s.state.projects).toHaveLength(0)
     expect(s.sampleCount()).toBe(0)
+  })
+})
+
+describe('更多專案與島上的塔位', () => {
+  const add = (name, extra = {}) => store.addProject({ name, milestones: ['一'], ...extra })
+  const slots = () => store.towerProjects().map((p) => p.slot).sort((a, b) => a - b)
+
+  it('島上的塔位和場景的空地數量一致', () => {
+    expect(LAYOUT.slots).toHaveLength(TOWER_SLOTS)
+  })
+
+  it('空地蓋滿後還能建立專案，先在清單裡；進行中的專案有上限', () => {
+    for (let i = 0; i < TOWER_SLOTS; i++) add(`塔 ${i}`)
+    const extra = add('排隊的')
+    expect(extra.slot).toBe(-1)
+    expect(store.towerProjects()).toHaveLength(TOWER_SLOTS)
+    expect(slots()).toEqual([...Array(TOWER_SLOTS).keys()])
+    while (store.canAddProject()) add('更多')
+    expect(store.activeProjects()).toHaveLength(MAX_PROJECTS)
+    expect(add('太多了')).toBeNull()
+  })
+
+  it('收藏或刪除有塔的專案，空地讓給最早建立、還沒完成的專案', () => {
+    const towers = Array.from({ length: TOWER_SLOTS }, (_, i) => add(`塔 ${i}`))
+    const done = add('已完成的')
+    store.toggleMilestone(done.id, done.milestones[0].id)
+    setDate(TODAY, 13)
+    const first = add('先排的')
+    const second = add('後排的')
+    store.archiveProject(towers[2].id)
+    expect(first.slot).toBe(2)
+    expect(second.slot).toBe(-1)
+    store.deleteProject(towers[5].id)
+    expect(second.slot).toBe(5)
+    store.deleteProject(towers[6].id)
+    expect(done.slot).toBe(6)
+  })
+
+  it('自己移下島的不會被自動補上去；放上島要有空地', () => {
+    const towers = Array.from({ length: TOWER_SLOTS }, (_, i) => add(`塔 ${i}`))
+    const waiting = add('等著的')
+    expect(store.placeProject(waiting.id)).toBe(false)
+    store.unplaceProject(towers[0].id)
+    expect(towers[0].slot).toBe(-1)
+    expect(towers[0].parked).toBe(true)
+    expect(store.placeProject(waiting.id)).toBe(true)
+    expect(waiting.slot).toBe(0)
+    store.archiveProject(towers[1].id)
+    expect(towers[0].slot).toBe(-1)
+    expect(store.placeProject(towers[0].id)).toBe(true)
+    expect(towers[0].slot).toBe(1)
+    expect(towers[0].parked).toBe(false)
+  })
+
+  it('從收藏放回時空地滿了也可以，先在清單裡', () => {
+    const old = add('收起來的')
+    store.archiveProject(old.id)
+    for (let i = 0; i < TOWER_SLOTS; i++) add(`塔 ${i}`)
+    expect(store.archiveProject(old.id, false)).toBe(true)
+    expect(old.archived).toBe(false)
+    expect(old.slot).toBe(-1)
+  })
+
+  it('讀檔時重複或超出的塔位改成先不上島，進行中超過上限的改為收藏', () => {
+    const projects = Array.from({ length: MAX_PROJECTS + 2 }, (_, i) => ({ id: `p${i}`, name: `專案 ${i}`, slot: i < 3 ? 0 : i, milestones: [] }))
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, projects }))
+    const ps = store.state.projects
+    expect(ps.slice(0, 3).map((p) => p.slot)).toEqual([0, 1, 2])
+    expect(ps[3].slot).toBe(3)
+    expect(ps[TOWER_SLOTS].slot).toBe(-1)
+    expect(store.towerProjects()).toHaveLength(TOWER_SLOTS)
+    expect(store.activeProjects()).toHaveLength(MAX_PROJECTS)
+    expect(ps.filter((p) => p.archived).map((p) => p.id)).toEqual([`p${MAX_PROJECTS}`, `p${MAX_PROJECTS + 1}`])
   })
 })
