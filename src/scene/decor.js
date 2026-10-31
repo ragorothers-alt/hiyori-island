@@ -6,6 +6,7 @@ import { UNLOCKS } from '../theme.js'
 import { SEASONS } from './season.js'
 import { buildCloudWhale } from './models/cloudWhale.js'
 import { buildStarTree } from './models/starTree.js'
+import { swapIn, canopyMask } from './models/tripo.js'
 
 // 依等級解鎖的島嶼裝飾
 const VERMILION = '#ef8e83'
@@ -61,7 +62,24 @@ function sakuraTree(seed, scale = 1) {
   g.scale.setScalar(scale)
   g.userData.seasonal = { canopyMats, fallenMat }
   g.userData.ownedMaterials = [...canopyMats, fallenMat]
+  tripoTree(g, [4.4, 4.5, 4.2])
   return shadowed(g)
+}
+
+// 把櫻花樹換成 Tripo 模型：樹冠用遮罩換成季節色（seasonal.canopyMats 換成這一個材質，之後換季照常生效）
+function tripoTree(g, size) {
+  const { canopyMats } = g.userData.seasonal
+  swapIn(g, 'tree', {
+    size,
+    keep: (c) => c.isInstancedMesh,
+    tune: (m) => {
+      canopyMask(m)
+      m.color.copy(canopyMats[0].color)
+      m.emissive.copy(canopyMats[0].emissive)
+      m.emissiveIntensity = 0.1
+    },
+    onSwap: (mesh) => canopyMats.splice(0, canopyMats.length, mesh.material),
+  })
 }
 
 function stoneLantern() {
@@ -85,6 +103,16 @@ function stoneLantern() {
   g.add(light)
   g.userData.glow = { mats: [glow], lights: [light], base: 0.4 }
   g.userData.ownedMaterials = [glow]
+  swapIn(g, 'stoneLantern', {
+    size: [null, 1.95, null],
+    keep: (c) => c.isLight || c === box,
+    // 苔蘚石材的原畫偏暗，在粉彩的島上提亮一點
+    tune: (m) => m.color.setScalar(1.35),
+    onSwap: () => {
+      box.scale.set(0.95, 0.75, 0.95)
+      box.position.y = 1.2
+    },
+  })
   return shadowed(g)
 }
 
@@ -114,6 +142,7 @@ function torii() {
     g.add(tip)
   }
   g.add(kasagi, shimaki, nuki, gakuzuka)
+  swapIn(g, 'torii', { size: [null, 2.6, null] })
   return shadowed(g)
 }
 
@@ -155,6 +184,7 @@ function bridge() {
   }
   g.position.set(pond.x, 0, pond.z)
   g.rotation.y = 0.35
+  swapIn(g, 'bridge', { size: [len + 0.3, 1.25, 1.1] })
   return shadowed(g)
 }
 
@@ -222,9 +252,11 @@ function shrine() {
     ear2.position.x = -0.045
     fox.add(b, head, ear1, ear2)
     fox.position.set(s * 0.82, 0.2, 0.55)
+    fox.userData.keep = true
     g.add(fox)
   }
   g.rotation.y = 0.6
+  swapIn(g, 'shrineSmall', { size: [null, 1.75, null], keep: (c) => c.userData.keep })
   return shadowed(g)
 }
 
@@ -381,6 +413,7 @@ function sakuraGrow() {
   g.scale.setScalar(1.05)
   g.userData.seasonal = { canopyMats, fallenMat }
   g.userData.ownedMaterials = [...canopyMats, fallenMat]
+  tripoTree(g, [5.4, 5.3, 5.1])
   return shadowed(at(g, -6, 1.9))
 }
 
@@ -538,11 +571,14 @@ function shrineUp() {
   const stone = mat('#e4e0e6')
   const wood = mat(WOOD)
   // 沿原小祠的局部 +z 方向鋪設短參道
-  for (let i = 0; i < 4; i++) piece(g, new THREE.BoxGeometry(0.64, 0.08, 0.28), stone, 0.18, 0.05 + (3 - i) * 0.055, 0.73 + i * 0.28)
+  for (let i = 0; i < 4; i++) {
+    piece(g, new THREE.BoxGeometry(0.64, 0.08, 0.28), stone, 0.18, 0.05 + (3 - i) * 0.055, 0.73 + i * 0.28).userData.keep = true
+  }
   for (let i = 0; i < 3; i++) {
     const gate = torii()
     gate.scale.setScalar(0.4 - i * 0.065)
     gate.position.set(0.18, 0.12, 0.88 + i * 0.435)
+    gate.userData.keep = true
     g.add(gate)
   }
   piece(g, new THREE.BoxGeometry(1.05, 1.4, 0.7), mat('#e9d6c2'), 0, 0.9, -0.48)
@@ -566,6 +602,8 @@ function shrineUp() {
   piece(g, new THREE.BoxGeometry(0.67, 0.06, 0.42), mat('#cba98c'), 0.18, 0.6, 0.87)
   for (let i = 0; i < 5; i++) piece(g, new THREE.BoxGeometry(0.54, 0.012, 0.018), mat(DARK), 0.18, 0.638, 0.72 + i * 0.075)
   g.rotation.y = 0.6
+  // 大殿要罩得住原本的小祠（小祠寬約 1.3、高 1.75）
+  swapIn(g, 'shrineLarge', { size: [2.1, null, null], offset: new THREE.Vector3(0, 0, -0.4), keep: (c) => c.userData.keep })
   return shadowed(at(g, -7, -4.2))
 }
 
