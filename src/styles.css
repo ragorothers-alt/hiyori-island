@@ -3,7 +3,9 @@
   --app-bg: #f3f1f7;
   --ink: #3e4a5c;
   --ink-soft: #66768a;
-  --ink-faint: #9aa8b8;
+  /* 淡色小字：在白底上至少 3:1（原本 #9aa8b8 只有 2.3:1）；要讀的資訊（任務、專案的小字）用 --ink-soft */
+  --ink-faint: #8592a3;
+  --focus: rgba(79, 151, 201, .5);
   --sky: #78b6e0;
   --sky-deep: #4f97c9;
   --sakura: #f19bb2;
@@ -29,7 +31,8 @@ body.night {
   --app-bg: #1c1a2e;
   --ink: #e9eef8;
   --ink-soft: #bcc7da;
-  --ink-faint: #8995ad;
+  --ink-faint: #919db4;
+  --focus: rgba(160, 196, 255, .55);
   --glass: rgba(34, 44, 82, 0.5);
   --glass-strong: rgba(40, 52, 94, 0.82);
   --glass-hover: rgba(52, 66, 112, 0.7);
@@ -245,7 +248,7 @@ body.night input[type=time], body.night input[type=date] { color-scheme: dark; }
 .done .check svg, .check.on svg { opacity: 1; transform: none; }
 .item-main { flex: 1; min-width: 0; }
 .item-title { font-size: 14px; line-height: 1.4; word-break: break-word; }
-.item-meta { font-size: 11px; color: var(--ink-faint); display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: 1px; align-items: center; }
+.item-meta { font-size: 11px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: 1px; align-items: center; }
 .item-meta > * { white-space: nowrap; }
 .pri { font-family: var(--font-num); letter-spacing: .1em; }
 .pri-3 { color: #e08aa2; }
@@ -275,7 +278,7 @@ body.night .overdue .item { background: rgba(255, 255, 255, .05); }
 .proj-name { font-family: var(--font-display); font-size: 16px; letter-spacing: .06em; flex: 1; line-height: 1.35; word-break: break-word; }
 .proj-pct { font-family: var(--font-num); font-weight: 700; font-size: 18px; color: var(--c); filter: saturate(1.4) brightness(.9); }
 body.night .proj-pct { filter: none; }
-.proj-meta { font-size: 11.5px; color: var(--ink-faint); margin: 3px 0 8px; display: flex; gap: 10px; flex-wrap: wrap; }
+.proj-meta { font-size: 11.5px; color: var(--ink-soft); margin: 3px 0 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 .proj-meta .warn { color: #d9718e; }
 .proj-meta .paused { color: var(--ink-soft); font-weight: 500; }
 .proj.is-paused { opacity: .78; }
@@ -292,7 +295,7 @@ body.night .proj-pct { filter: none; }
 .ms span { flex: 1; min-width: 0; word-break: break-word; }
 .ms.done span { color: var(--ink-faint); text-decoration: line-through; }
 .ms .mini { opacity: 0; }
-.ms:hover .mini { opacity: 1; }
+.ms:hover .mini, .ms:focus-within .mini { opacity: 1; }
 /* 觸控裝置沒有「滑過」：任務和里程碑的小按鈕直接淡淡地顯示，不然找不到 */
 @media (hover: none) { .item-actions, .ms .mini { opacity: .7; } }
 .ms-add { display: flex; gap: 6px; margin-top: 6px; }
@@ -417,7 +420,8 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .modal[hidden] { display: none; }
 body.night .modal { background: rgba(10, 18, 45, .3); }
 @keyframes fadeIn { from { opacity: 0; } }
-.modal-card { padding: 28px 40px 24px; text-align: center; min-width: 300px; animation: cardIn .7s var(--ease) both; background: var(--glass-strong); }
+/* 卡片有 zoom（字體大小）：zoom 會連 100vw 一起放大，跟畫面寬度有關的長度要先除回去，手機上才不會超出畫面 */
+.modal-card { padding: 28px 40px 24px; text-align: center; min-width: min(300px, calc((100vw - 24px) / var(--ui-zoom, 1))); animation: cardIn .7s var(--ease) both; background: var(--glass-strong); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(24px) scale(.92); } }
 .modal-kicker { font-family: var(--font-display); color: var(--sakura); letter-spacing: .4em; font-size: 13px; }
 .modal-lv { font-family: var(--font-num); font-size: 26px; font-weight: 500; color: var(--ink-soft); margin: 6px 0 2px; }
@@ -600,7 +604,7 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 @keyframes syncPulse { 50% { box-shadow: 0 0 0 4px rgba(241, 155, 178, .3); } }
 
 /* ── 上週回顧卡 ── */
-.week-card { width: min(440px, calc(100vw - 24px)); padding: 24px 26px 20px; }
+.week-card { width: min(440px, calc((100vw - 24px) / var(--ui-zoom, 1))); padding: 24px 26px 20px; }
 .week-moods { display: flex; justify-content: center; gap: 6px; margin: 8px 0 14px; }
 .wm { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .wm .stamp-k { width: 32px; height: 32px; font-size: 15px; }
@@ -615,7 +619,7 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .week-mochi { margin: 4px 0 16px; font-size: 13px; color: var(--ink); font-family: var(--font-display); letter-spacing: .04em; }
 
 /* ── 晚間回顧 ── */
-.review-card { width: min(420px, calc(100vw - 24px)); padding: 24px 26px 20px; text-align: center; }
+.review-card { width: min(420px, calc((100vw - 24px) / var(--ui-zoom, 1))); padding: 24px 26px 20px; text-align: center; }
 .review-date { font-family: var(--font-display); font-size: 20px; letter-spacing: .12em; margin: 4px 0 8px; }
 .review-sum { display: flex; justify-content: center; gap: 14px; font-size: 12px; color: var(--ink-soft); margin-bottom: 16px; flex-wrap: wrap; }
 .review-sum b { font-family: var(--font-num); font-size: 16px; color: var(--ink); margin-right: 2px; }
@@ -660,7 +664,7 @@ body.night .pomo { color: #ffd38f; }
 .news-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: #e8607f; vertical-align: 2px; }
 .tab.has-dot span { position: relative; }
 .tab.has-dot span::after { content: ''; position: absolute; top: -1px; right: -8px; width: 6px; height: 6px; border-radius: 50%; background: #e8607f; }
-.news-card { width: min(460px, calc(100vw - 24px)); max-height: min(640px, calc(100dvh - 40px)); display: flex; flex-direction: column; padding: 24px 22px 18px; }
+.news-card { width: min(460px, calc((100vw - 24px) / var(--ui-zoom, 1))); max-height: min(640px, calc((100dvh - 40px) / var(--ui-zoom, 1))); display: flex; flex-direction: column; padding: 24px 22px 18px; }
 .news-title { margin: 6px 0 12px; font-family: var(--font-display); font-weight: 400; font-size: 20px; letter-spacing: .12em; }
 .news-list { overflow-y: auto; text-align: left; display: grid; gap: 14px; margin-bottom: 14px; padding-right: 4px; }
 .news-list h4 { margin: 0 0 6px; font-family: var(--font-num); font-size: 12px; color: var(--ink-faint); display: flex; gap: 8px; align-items: baseline; }
@@ -844,7 +848,7 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 /* 專案：卡片排成格狀 */
 .panel.full [data-page="projects"] { max-width: 1100px; }
 .panel.full #projectForm { max-width: 640px; margin-left: auto; margin-right: auto; }
-.panel.full #projectList, .panel.full #archiveList { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.panel.full #projectList, .panel.full #archiveList { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; align-items: start; }
 .panel.full #projectList > .empty { grid-column: 1 / -1; }
 .panel.full .proj { margin-bottom: 0; }
 
@@ -881,7 +885,16 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
   .panel.full .panel-body { padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); }
   .panel.full .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (prefers-reduced-motion: reduce) { .panel.full { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  /* 系統設定「減少動態效果」：介面上的動畫和轉場都直接跳到結果（小島的 3D 動畫另外處理） */
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* 鍵盤焦點：拿掉預設外框的欄位補一圈柔和的光；放在卡片裡的輸入框改成整張卡片亮起來 */
+:root :is(input, textarea, select):focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+:root :is(.add-form, .coach-say) :is(input, textarea):focus-visible { outline: none; }
+.add-form:focus-within { box-shadow: 0 0 0 2px var(--focus); }
+.coach-say:focus-within { box-shadow: 0 0 0 2px var(--focus), 0 -4px 18px rgba(80, 120, 170, .08); }
 
 /* ── App 模式：像一般 App 一樣用。小島停住藏起來，面板撐滿畫面；手機的分頁列在最下面 ── */
 .app-bar { display: none; }

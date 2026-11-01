@@ -474,7 +474,7 @@ export class CoachView {
       ? `<div class="cchips" data-q="exam">${choices
           .map((d) => `<button type="button" data-v="${esc(d.id)}" class="${a.examId === d.id ? 'on' : ''}" style="--c:#e8899f">${DATE_KINDS[d.kind].kanji}・${esc(d.title)}<small>${d.days ? `還有 ${d.days} 天` : '今天'}</small></button>`)
           .join('')}<button type="button" data-act="examAdd" class="add">＋ 新增</button></div>
-        ${this.examForm ? `<div class="coach-other" data-r="examNew"><input name="examTitle" maxlength="30" autocomplete="off" placeholder="例如：期中考" /><input name="examDate" type="date" min="${today}" /><button class="btn-primary" type="button" data-act="examSave">加入</button></div>` : ''}`
+        ${this.examForm ? `<div class="coach-other" data-r="examNew"><input name="examTitle" maxlength="30" autocomplete="off" placeholder="例如：期中考" aria-label="考試或截止日的名稱" /><input name="examDate" type="date" min="${today}" aria-label="日期" /><button class="btn-primary" type="button" data-act="examSave">加入</button></div>` : ''}`
       : ''
 
     return `<form class="ccard" data-r="ask">

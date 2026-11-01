@@ -147,7 +147,7 @@ body.night .rf-label { background: rgba(255, 255, 255, .06); }
 body.night #rhythmForm select { background: rgba(255, 255, 255, .06); }
 
 /* 編輯面板 */
-.edit-card { width: min(400px, calc(100vw - 24px)); padding: 22px 22px 18px; text-align: left; display: flex; flex-direction: column; gap: 10px; }
+.edit-card { width: min(400px, calc((100vw - 24px) / var(--ui-zoom, 1))); padding: 22px 22px 18px; text-align: left; display: flex; flex-direction: column; gap: 10px; }
 .edit-card .modal-kicker { text-align: center; }
 .ec-title { width: 100%; border: 0; outline: 0; border-radius: 12px; padding: 10px 12px; font-size: 15px; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); }
 .ec-grid { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 6px; }
