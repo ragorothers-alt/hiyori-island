@@ -18,10 +18,12 @@ import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
+import { CoachView } from './ui/coach.js'
+import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
 import { readBackup, restoreBackup } from './sync.js'
 
-const TAB_ORDER = ['tasks', 'schedule', 'habits', 'projects', 'records']
+const TAB_ORDER = ['tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
 export const SIDE_PHONE = '(max-width: 860px) and (max-height: 500px) and (orientation: landscape)'
 export const sheetLayout = () => matchMedia('(max-width: 860px)').matches && !matchMedia(SIDE_PHONE).matches
@@ -101,6 +103,9 @@ export class UI {
     this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
     this.life = new LifeView($('#lifeRoot'), store, viewHooks)
     this.calendar = new CalendarView($('#calendar'), store, viewHooks)
+    this.coach = new CoachView($('#coachRoot'), store, viewHooks)
+    this.dates = new DatesView($('#datesBox'), store, viewHooks)
+    this.dates.render()
     // 開發與截圖用：?tab=habits、?calendar
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
@@ -207,7 +212,7 @@ export class UI {
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
       else if (e.key === 'ArrowRight') $('#nextDay').click()
-      else if (['1', '2', '3', '4', '5'].includes(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
+      else if (/^[1-6]$/.test(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
     })
   }
 
@@ -219,6 +224,7 @@ export class UI {
     if (tab === 'records') this.renderRecords()
     if (tab === 'habits') this.habits.render()
     if (tab === 'schedule') this.schedule.render()
+    if (tab === 'coach') this.coach.render()
   }
 
   togglePanel(force) {
@@ -448,6 +454,16 @@ export class UI {
     })
 
     const onList = (e) => {
+      // 空白時的兩個按鈕：快速加一個、讓ふじ排這天
+      const ea = e.target.closest('[data-act="quickAdd"], [data-act="coachDay"]')
+      if (ea) {
+        if (ea.dataset.act === 'quickAdd') $('#taskTitle').focus()
+        else {
+          this.setTab('coach')
+          this.coach.preset({ scope: this.store.selectedDate === this.store.today ? 'today' : 'day', date: this.store.selectedDate })
+        }
+        return
+      }
       const li = e.target.closest('.item')
       if (!li) return
       const id = li.dataset.id
@@ -548,7 +564,8 @@ export class UI {
 
     $('#taskList').innerHTML = n
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
-      : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。</li>`
+      : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。
+          <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
   }
 
   // 本命狀態列：三個星位，選了是空心金星、完成是實心金星
@@ -1340,6 +1357,8 @@ export class UI {
     this.renderProjects()
     if (this.tab === 'records') this.renderRecords()
     if (this.tab === 'habits') this.habits.render()
+    if (this.tab === 'coach') this.coach.refresh()
+    this.dates?.refresh()
     if (this.calendar.isOpen) this.calendar.render()
   }
 

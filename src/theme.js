@@ -54,6 +54,12 @@ export const MOODS = [
 ]
 export const moodOf = (key) => MOODS.find((m) => m.key === key)
 
+// 重要日子的種類（任務頁的倒數、日曆上的記號）
+export const DATE_KINDS = {
+  exam: { label: '考試', kanji: '考' },
+  deadline: { label: '截止', kanji: '期' },
+  day: { label: '紀念', kanji: '祝' },
+}
 export const FOCUS_MIN = 25
 export const BREAK_MIN = 5
 // 同時進行的專案上限；專案町最多 TOWER_SLOTS 塊地（data/projectTown.js，隨城鎮等級陸續開放），其他專案先在清單裡等空地

@@ -27,7 +27,7 @@ import { Reminders, systemNotify } from './reminders.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { LINES, FUJI_LINES, DUETS } from './data/lines.js'
-import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP } from './theme.js'
+import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS } from './theme.js'
 import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
@@ -1284,6 +1284,15 @@ async function boot() {
     else talk('planApplied', { count, end: planEnd(date) }, 4200, '時段排好了，照自己的步調來。')
     resWork('clock')
   })
+  // ふじ排好了計畫：ふじ說明、もち在旁邊加油
+  store.on('coachApplied', ({ count, days }) => {
+    sfx.chime()
+    talk('coachApplied', { count, days }, 4600, '排好了，照自己的步調來。', fuji)
+    setTimeout(() => talk('coachApplied', { count }, 4200, '', mochi), 2400)
+    resWork('clock')
+  })
+  store.on('coachUndone', ({ count }) => talk('coachUndo', { count }, 4200, '撤銷了，想換個排法再告訴我。', fuji))
+  store.on('dateAdded', (d) => talk('dateAdded', { title: short(d.title), n: d.days }, 4600, '記好了，我陪你留意。', fuji))
   store.on('sleepLogged', ({ date, min, first }) => {
     if (date !== store.today || !first) return
     talk(min < 360 ? 'sleepShort' : 'sleepGood', { hours: Math.round(min / 6) / 10 }, 4200)
@@ -1326,6 +1335,17 @@ async function boot() {
 
   // ── 提醒：日程、排進時段的任務、就寢 ──
   const reminders = new Reminders(store, (e, min, kind = 'event') => {
+    // 重要日子：前一天ふじ提醒，當天もち也來打氣
+    if (kind === 'date') {
+      const today = min === 0
+      sfx.chime()
+      talk(today ? 'dateToday' : 'dateSoon', { title: short(e.title) }, 6000, '', fuji)
+      if (today) setTimeout(() => talk('dateToday', { title: short(e.title) }, 5000, '', mochi), 2600)
+      const title = today ? `今天是「${e.title}」` : `明天就是「${e.title}」`
+      ui.toast({ icon: DATE_KINDS[e.kind]?.kanji || '旗', title, sub: today ? '照自己的步調來就好' : '今天先留點時間準備吧', ms: 9000 })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, '', e.id)
+      return
+    }
     if (kind === 'bed') {
       sfx.chime()
       talk('bedtime', { time: e.start }, 6000, '就寢時間快到了，今天辛苦了。')

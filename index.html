@@ -75,6 +75,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="tasks" role="tab"><span>任務</span><small>きょう</small></button>
       <button class="tab" data-tab="schedule" role="tab"><span>日程</span><small>よてい</small></button>
+      <button class="tab" data-tab="coach" role="tab"><span>教練</span><small>ふじ</small></button>
       <button class="tab" data-tab="habits" role="tab"><span>習慣</span><small>しゅうかん</small></button>
       <button class="tab" data-tab="projects" role="tab"><span>專案</span><small>しごと</small></button>
       <button class="tab" data-tab="records" role="tab"><span>紀錄</span><small>きろく</small></button>
@@ -86,6 +87,7 @@
       <!-- 每頁分成 pg-side／pg-main：平常上下接著排，全螢幕時變成左右兩欄 -->
       <section class="tab-page active" data-page="tasks">
         <div class="pg-side">
+        <div class="dates-box" id="datesBox"></div>
         <div class="bloom-summary">
           <div class="bloom-ring" id="bloomRing"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="16"/><circle cx="20" cy="20" r="16" class="fg" id="bloomArc"/></svg><b id="bloomPct">0%</b></div>
           <div>
@@ -158,6 +160,11 @@
         <details class="rhythm-box" id="rhythmBox"><summary>作息設定<small>せいかつリズム</small></summary><div id="rhythmForm"></div></details>
         </div>
       </section>
+      <!-- 教練：ふじ幫你排一天或一週 -->
+      <section class="tab-page" data-page="coach">
+        <div id="coachRoot"></div>
+      </section>
+
       <!-- 習慣 -->
       <section class="tab-page" data-page="habits">
         <div id="habitsRoot"></div>

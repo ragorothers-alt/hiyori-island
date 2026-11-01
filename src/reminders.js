@@ -58,6 +58,16 @@ export class Reminders {
       changed = true
       this.onRemind({ id: 'bedtime', title: '就寢', start: r.sleep }, 30, 'bed')
     }
+    // 重要日子：前一天和當天，早上 8 點後第一次打開時提醒一次（專案的截止日另外有提醒）
+    if (mins >= 480) {
+      for (const d of this.store.upcomingDates(20, 1)) {
+        const key = `date-${d.id}@${d.date}`
+        if (d.project || sent.includes(key)) continue
+        sent.push(key)
+        changed = true
+        this.onRemind(d, d.days, 'date')
+      }
+    }
     for (const d of Object.keys(this.sent)) {
       if (d !== today) {
         delete this.sent[d]

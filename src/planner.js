@@ -1,10 +1,10 @@
 // 時段安排、最佳化時程與作息：純函式，方便測試。時間一律用「當天第幾分鐘」計算。
 
-const toM = (hhmm) => {
+export const toM = (hhmm) => {
   const [h, m] = String(hhmm).split(':').map(Number)
   return h * 60 + m
 }
-const toHHMM = (m) => {
+export const toHHMM = (m) => {
   const v = Math.max(0, Math.min(1439, Math.round(m)))
   return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`
 }
@@ -139,7 +139,7 @@ function windowOf({ rhythm, date, today, nowMin }) {
 }
 
 // 已佔用的時間：三餐、日程、已排的任務；日程與任務前後各留緩衝
-function busyOf({ rhythm, date, events, tasks, skip }) {
+export function busyOf({ rhythm, date, events, tasks, skip }) {
   const buf = rhythm.buffer || 0
   const busy = []
   for (const b of rhythmBlocks(rhythm, date)) if (b.kind === 'meal') busy.push([b.start, b.end])

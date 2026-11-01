@@ -6,7 +6,7 @@ import { SHOP_ITEMS } from './data/shop.js'
 import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
 import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
 import { BOND_POINTS, actLevel, bondLevel, outfitLevel, outfitOf } from './data/bond.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TOWER_SLOTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM, FOCUS_MIN, BREAK_MIN } from './theme.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TOWER_SLOTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM, FOCUS_MIN, BREAK_MIN, DATE_KINDS } from './theme.js'
 import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
 import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
 import { LIFE_KINDS } from './data/life.js'
@@ -168,6 +168,8 @@ function seed(samples = true) {
     habits: [],
     life: {},
     town: { seen: {}, since: '', plevel: 0 },
+    coach: emptyCoach(),
+    dates: [],
     lotsPlan: 1,
     journal: {},
     dex: {},
@@ -191,6 +193,35 @@ const str = (v, max = 120) => (typeof v === 'string' ? v.slice(0, max) : '')
 const num = (v, min, max, dflt) => (Number.isFinite(+v) ? Math.min(max, Math.max(min, Math.round(+v))) : dflt)
 const ts = (v) => (Number.isFinite(+v) && +v > 0 ? +v : null)
 const ymd = (v, dflt) => (DATE_RE.test(v) ? v : dflt)
+
+// ふじ的排程教練：自己加過的主攻項目、上次的回答（下次預設）、最近 10 次排程（撤銷用）
+const emptyCoach = () => ({ items: [], last: null, plans: [] })
+const COACH_DAYS = [3, 5, 7]
+function cleanCoach(c) {
+  if (!isObj(c)) return emptyCoach()
+  const tags = new Set(TAGS.map((t) => t.id))
+  const labels = (v) => (Array.isArray(v) ? v.map((x) => str(x, 16).trim()).filter(Boolean).slice(0, 12) : [])
+  const items = (Array.isArray(c.items) ? c.items : [])
+    .map((x) => (isObj(x) && str(x.label, 16).trim() ? { label: str(x.label, 16).trim(), tag: tags.has(x.tag) ? x.tag : 'study' } : null))
+    .filter(Boolean)
+    .slice(0, 12)
+  const l = c.last
+  const last = isObj(l)
+    ? { focus: labels(l.focus), slots: labels(l.slots), days: COACH_DAYS.includes(l.days) ? l.days : 5, len: num(l.len, 15, 120, 50) }
+    : null
+  const plans = cleanList(c.plans, (p) => ({
+    id: str(p.id), createdAt: ts(p.createdAt) || Date.now(), title: str(p.title, 40), from: ymd(p.from, ''), to: ymd(p.to, ''), count: num(p.count, 0, 99, 0),
+  })).slice(-10)
+  return { items, last, plans }
+}
+// 重要日子：考試、截止日、紀念日
+function cleanDates(list) {
+  return cleanList(list, (d) => {
+    const title = str(d.title, 30).trim()
+    if (!title || !DATE_RE.test(d.date)) return null
+    return { id: str(d.id), title, date: d.date, kind: DATE_KINDS[d.kind] ? d.kind : 'exam', createdAt: ts(d.createdAt) || Date.now() }
+  }).slice(-60)
+}
 
 function cleanList(list, fn) {
   if (!Array.isArray(list)) return []
@@ -226,6 +257,9 @@ function migrate(s) {
       // 時段安排：預估分鐘數、排進時間軸的開始時間
       dur: t.dur ? num(t.dur, 5, 600, 30) : null,
       at: TIME_RE.test(t.at) ? t.at : null,
+      // coach：ふじ排的（那次排程的 id，撤銷用）；moved：被往後挪了幾次（卡關提醒用）
+      coach: ID_RE.test(t.coach) ? t.coach : null,
+      moved: num(t.moved, 0, 99, 0),
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -454,7 +488,7 @@ function migrate(s) {
     // lotsPlan：專案町的地塊編號版本。舊的塔位（散在島上的 16 個點）對不上新的地，全部先收回，讀進來後再依序排進去
     lotsPlan: 1,
     version: 2, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
-    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, createdAt, updatedAt: ts(s.updatedAt) || 0,
+    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
   }
@@ -1635,6 +1669,109 @@ export class Store {
       fx.push(['milestoneUndone', { project: p, milestone: m }])
     }
     this._finish(fx)
+  }
+
+  // ── ふじ的排程教練 ──
+  // 排程要避開的東西：這幾天的日程（未來的例行公事日程也算）、排了時段的任務
+  coachContext(dates) {
+    const set = new Set(dates)
+    const n = new Date()
+    const events = this.state.events.filter((e) => set.has(e.date))
+    for (const date of dates) {
+      if (date <= this.today) continue
+      for (const r of this.state.routines) {
+        if (r.kind === 'event' && r.startDate <= date && !r.made?.[date] && repeatMatches(r.repeat, date)) events.push({ id: 'r-' + r.id, date, start: r.start, end: r.end, done: false })
+      }
+    }
+    return {
+      today: this.today, nowMin: n.getHours() * 60 + n.getMinutes(), rhythm: this.state.rhythm,
+      events, tasks: this.state.tasks.filter((t) => set.has(t.date) && t.at && !t.done),
+    }
+  }
+  // 套用ふじ排的計畫：一次建好所有任務（有時段、有預估時間）。meta：{ title, answers（下次的預設）, custom（自己加的主攻項目） }
+  applyCoachPlan(res, { title = '', answers = null, custom = [] } = {}) {
+    this._refreshToday()
+    const id = uid()
+    const tags = new Set(TAGS.map((t) => t.id))
+    const fx = []
+    const dates = []
+    for (const d of res?.days || []) {
+      if (!DATE_RE.test(d.date) || d.date < this.today) continue
+      for (const it of d.items || []) {
+        const name = str(it.title, 80).trim()
+        if (!name) continue
+        const t = {
+          id: uid(), title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', done: false, rewarded: false,
+          createdAt: Date.now(), dur: num(it.dur, 5, 600, 30), at: TIME_RE.test(it.at) ? it.at : null, coach: id, moved: 0,
+        }
+        this.state.tasks.push(t)
+        fx.push(['taskAdded', t])
+        if (!dates.includes(d.date)) dates.push(d.date)
+      }
+    }
+    if (!fx.length) return null
+    const c = this.state.coach
+    c.plans = [...c.plans, { id, createdAt: Date.now(), title: str(title, 40), from: dates[0], to: dates[dates.length - 1], count: fx.length }].slice(-10)
+    if (answers) c.last = { focus: answers.focus || [], slots: answers.slots || [], days: answers.days || 5, len: answers.len || 50 }
+    for (const it of custom) {
+      const label = str(it.label, 16).trim()
+      if (!label) continue
+      c.items = [{ label, tag: tags.has(it.tag) ? it.tag : 'study' }, ...c.items.filter((x) => x.label !== label)].slice(0, 12)
+    }
+    this.stats.plansApplied++
+    if (dates.includes(this.today) && !this.day().timebox) {
+      this.day().timebox = 1
+      this._gain(XP.plan, fx, { kind: 'plan' })
+    }
+    fx.push(['coachApplied', { id, count: fx.filter(([k]) => k === 'taskAdded').length, days: dates.length }])
+    this._finish(fx)
+    return id
+  }
+  // 那次排程還沒完成、可以撤銷的任務數
+  coachLeft(id) {
+    return this.state.tasks.filter((t) => t.coach === id && !t.done).length
+  }
+  // 撤銷一次排程：刪掉還沒完成的那幾件，做完的留著
+  undoCoachPlan(id) {
+    const before = this.state.tasks.length
+    this.state.tasks = this.state.tasks.filter((t) => t.coach !== id || t.done)
+    const count = before - this.state.tasks.length
+    this.state.coach.plans = this.state.coach.plans.filter((p) => p.id !== id)
+    this._finish([['coachUndone', { id, count }]])
+    return count
+  }
+  forgetFocus(label) {
+    this.state.coach.items = this.state.coach.items.filter((x) => x.label !== label)
+    this._finish()
+  }
+
+  // ── 重要日子 ──
+  addDate({ title, date, kind = 'exam' }) {
+    title = str(title, 30).trim()
+    if (!title || !DATE_RE.test(date)) return null
+    const d = { id: uid(), title, date, kind: DATE_KINDS[kind] ? kind : 'exam', createdAt: Date.now() }
+    this.state.dates.push(d)
+    this._finish([['dateAdded', { ...d, days: daysBetween(this.today, date) }]])
+    return d
+  }
+  deleteDate(id) {
+    this.state.dates = this.state.dates.filter((d) => d.id !== id)
+    this._finish()
+  }
+  datesOn(date) {
+    return this.state.dates.filter((d) => d.date === date)
+  }
+  // 接下來的重要日子，連同進行中專案的截止日；近的在前，days：還有幾天
+  upcomingDates(limit = 8, horizon = 366) {
+    const out = this.state.dates.filter((d) => d.date >= this.today).map((d) => ({ ...d, days: daysBetween(this.today, d.date) }))
+    for (const p of this.state.projects) {
+      if (!p.deadline || p.completedAt || p.archived || p.pausedAt || p.deadline < this.today) continue
+      out.push({ id: p.id, title: p.name, date: p.deadline, kind: 'deadline', project: true, days: daysBetween(this.today, p.deadline) })
+    }
+    return out
+      .filter((d) => d.days <= horizon)
+      .sort((a, b) => a.date.localeCompare(b.date) || !!a.project - !!b.project)
+      .slice(0, limit)
   }
 
   // ── 專注 / 互動 / 每日任務 ──

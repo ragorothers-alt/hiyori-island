@@ -1391,3 +1391,85 @@ describe('番茄鐘長度與專注時段', () => {
     expect(store.peekDay(TODAY).focusAm).toBe(80)
   })
 })
+
+describe('ふじ的排程教練與重要日子', () => {
+  const res = (date = TODAY) => ({
+    days: [
+      { date, items: [{ title: '數學・預習', tag: 'study', dur: 50, at: '19:30', priority: 2 }, { title: '英文・複習', tag: 'study', dur: 25, at: '20:30', priority: 3 }] },
+      { date: addDays(date, 2), items: [{ title: '數學・練習題', tag: 'study', dur: 50, at: '19:30', priority: 2 }] },
+    ],
+  })
+
+  it('套用：一次建好有時段、有預估時間的任務，記得是哪一次排程；今天第一次套用給 XP', () => {
+    const onApplied = vi.fn()
+    store.on('coachApplied', onApplied)
+    const xp = store.player.xp
+    const id = store.applyCoachPlan(res(), { title: '數學、英文', answers: { focus: ['數學'], slots: ['wdEve'], days: 3, len: 25 }, custom: [{ label: '數學', tag: 'study' }] })
+    const made = store.state.tasks.filter((t) => t.coach === id)
+    expect(made).toHaveLength(3)
+    expect(made[0]).toMatchObject({ title: '數學・預習', date: TODAY, at: '19:30', dur: 50, tag: 'study', priority: 2 })
+    expect(made[1].priority).toBe(3)
+    expect(store.player.xp - xp).toBe(10)
+    expect(store.stats.plansApplied).toBe(1)
+    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ id, count: 3, days: 2 }))
+    expect(store.state.coach.plans).toEqual([expect.objectContaining({ id, title: '數學、英文', from: TODAY, to: addDays(TODAY, 2), count: 3 })])
+    expect(store.state.coach.last).toEqual({ focus: ['數學'], slots: ['wdEve'], days: 3, len: 25 })
+    expect(store.state.coach.items).toEqual([{ label: '數學', tag: 'study' }])
+    // 第二次套用不再給 XP；過去的日子不建
+    store.applyCoachPlan(res(addDays(TODAY, -1)))
+    expect(store.player.xp - xp).toBe(10)
+    expect(store.state.tasks.some((t) => t.date < TODAY && t.coach)).toBe(false)
+  })
+
+  it('撤銷：刪掉還沒完成的，做完的留著；匯出匯入後排程紀錄和任務的來源還在', () => {
+    const id = store.applyCoachPlan(res())
+    const first = store.state.tasks.find((t) => t.coach === id)
+    store.toggleTask(first.id)
+    store.importJSON(store.exportJSON())
+    expect(store.coachLeft(id)).toBe(2)
+    expect(store.state.coach.plans).toHaveLength(1)
+    expect(store.undoCoachPlan(id)).toBe(2)
+    expect(store.state.tasks.filter((t) => t.coach === id)).toHaveLength(1)
+    expect(store.state.coach.plans).toHaveLength(0)
+  })
+
+  it('最近的排程最多留 10 筆、自己加的主攻項目最多 12 個，新的在前', () => {
+    for (let i = 0; i < 12; i++) store.applyCoachPlan(res(), { custom: [{ label: `項目${i}`, tag: 'work' }] })
+    for (let i = 0; i < 2; i++) store.applyCoachPlan(res(), { custom: [{ label: `項目x${i}` }] })
+    expect(store.state.coach.plans).toHaveLength(10)
+    expect(store.state.coach.items).toHaveLength(12)
+    expect(store.state.coach.items[0]).toEqual({ label: '項目x1', tag: 'study' })
+  })
+
+  it('重要日子：新增、倒數、連同專案截止日一起列；過去的不列；刪除', () => {
+    const onAdd = vi.fn()
+    store.on('dateAdded', onAdd)
+    const exam = store.addDate({ title: '期中考', date: addDays(TODAY, 12), kind: 'exam' })
+    store.addDate({ title: '結婚紀念日', date: addDays(TODAY, 1), kind: 'day' })
+    store.addDate({ title: '去年的考試', date: addDays(TODAY, -3) })
+    expect(store.addDate({ title: '', date: TODAY })).toBeNull()
+    expect(store.addDate({ title: '沒有日期', date: 'x' })).toBeNull()
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ title: '期中考', days: 12 }))
+    store.addProject({ name: '官網改版', deadline: addDays(TODAY, 5), milestones: ['切版'] })
+    const up = store.upcomingDates()
+    expect(up.map((d) => [d.title, d.days, d.kind])).toEqual([['結婚紀念日', 1, 'day'], ['官網改版', 5, 'deadline'], ['期中考', 12, 'exam']])
+    expect(up[1].project).toBe(true)
+    expect(store.datesOn(addDays(TODAY, 12))).toHaveLength(1)
+    store.importJSON(store.exportJSON())
+    expect(store.state.dates).toHaveLength(3)
+    store.deleteDate(exam.id)
+    expect(store.upcomingDates().map((d) => d.title)).toEqual(['結婚紀念日', '官網改版'])
+  })
+
+  it('排程的避開清單：這幾天的日程、未來的例行公事日程、排了時段的任務', () => {
+    store.addEvent({ title: '開會', start: '19:00', end: '20:00', date: TODAY })
+    store.addRoutine({ kind: 'event', title: '晚課', repeat: { type: 'daily' }, start: '21:00', end: '22:00', date: TODAY })
+    const t = store.addTask({ title: '寫報告', date: addDays(TODAY, 1), at: '20:00', dur: 30 })
+    store.addTask({ title: '沒排時段', date: addDays(TODAY, 1) })
+    const ctx = store.coachContext([TODAY, addDays(TODAY, 1)])
+    expect(ctx.events.map((e) => e.title || e.start)).toEqual(expect.arrayContaining(['開會', '21:00']))
+    expect(ctx.events.filter((e) => e.date === addDays(TODAY, 1) && e.start === '21:00')).toHaveLength(1)
+    expect(ctx.tasks.map((x) => x.id)).toEqual([t.id])
+    expect(ctx.rhythm).toBe(store.state.rhythm)
+  })
+})
