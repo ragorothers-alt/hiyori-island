@@ -19,6 +19,7 @@ import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
 import { CoachView } from './ui/coach.js'
+import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
 import { readBackup, restoreBackup } from './sync.js'
@@ -33,6 +34,25 @@ const THEME_INFO = {
   day: '一直是白天，島上維持明亮',
   night: '一直是夜晚，星星、燈籠和螢火蟲都會出來',
 }
+// 「這一版的新功能」看過到哪一版（這台裝置自己記）；卡關提醒：不再提醒的任務、今天ふじ說過了沒
+const NEWS_KEY = 'hiyori-news'
+const STUCK_OFF_KEY = 'hiyori-stuck-off'
+const STUCK_SAID_KEY = 'hiyori-stuck-said'
+const newsVersion = () => `${CHANGELOG[0].id}:${CHANGELOG[0].items.length}`
+const readLocal = (k, dflt) => {
+  try {
+    return JSON.parse(localStorage.getItem(k)) ?? dflt
+  } catch {
+    return dflt
+  }
+}
+const writeLocal = (k, v) => {
+  try {
+    localStorage.setItem(k, JSON.stringify(v))
+  } catch {}
+}
+// 回饋：到 GitHub 開一則 issue，先填好版本和裝置大小（不帶任何個人資料）
+const FEEDBACK_URL = 'https://github.com/ragorothers-alt/hiyori-island/issues/new'
 const QUALITY_INFO = {
   auto: '電腦用高畫質，手機用標準，比較省電',
   high: '反鋸齒、白天也有柔光，畫面最細緻',
@@ -107,6 +127,8 @@ export class UI {
     this.coach = new CoachView($('#coachRoot'), store, viewHooks)
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
     this.dates.render()
+    this.applyFontScale()
+    this.renderNewsDot()
     // 開發與截圖用：?tab=habits、?calendar
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
@@ -192,6 +214,7 @@ export class UI {
         this.schedule.closeEdit()
         if (!$('#reviewModal').hidden) $('#reviewLater').click()
         this.closeWeekCard()
+        this.closeNews()
         this.focus.togglePicker(false)
         this.focus.toggleSet(false)
         if (typing) document.activeElement.blur()
@@ -488,6 +511,27 @@ export class UI {
       else if (!act && !e.target.closest('input')) this.hooks.focusTask(id)
     }
     $('#taskList').addEventListener('click', onList)
+    $('#stuckBox').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-act]')
+      if (!b) return
+      const s = this.store
+      const id = b.dataset.id
+      const t = s.state.tasks.find((x) => x.id === id)
+      if (!t) return
+      const act = b.dataset.act
+      if (act === 'split') s.splitTask(id)
+      else if (act === 'later') s.updateTask(id, { date: addDays(s.today, 1), at: null })
+      else if (act === 'drop') return armConfirm(b, '確定放下', () => {
+        s.deleteTask(id)
+        this.hooks.stuck?.('drop', t)
+      })
+      else if (act === 'mute') {
+        writeLocal(STUCK_OFF_KEY, [...readLocal(STUCK_OFF_KEY, []), id].slice(-200))
+        this.renderTasks()
+        return
+      }
+      this.hooks.stuck?.(act, t)
+    })
     $('#overdueBox').addEventListener('click', (e) => {
       if (e.target.closest('[data-act="allToday"]')) {
         this.store.moveToToday(this.store.overdue().map((t) => t.id))
@@ -558,6 +602,7 @@ export class UI {
     this._renderStarBar(tasks)
     $('#taskTitle').placeholder = isToday ? '種下任務，或打「明天 15:00 開會 #工作」' : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
 
+    this._renderStuck(isToday)
     const overdue = isToday ? s.overdue() : []
     $('#overdueBox').innerHTML = overdue.length
       ? `<div class="overdue"><h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><button data-act="allToday">全部移到今天</button></h4><ul class="list">${overdue.map((t) => this._taskItem(t, true)).join('')}</ul></div>`
@@ -567,6 +612,60 @@ export class UI {
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
       : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。
           <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
+  }
+
+  // 卡關小卡：一次一件。挪了好幾次或逾期很久的任務，ふじ問要不要拆小（每天開口一次）
+  _renderStuck(isToday) {
+    const s = this.store
+    const box = $('#stuckBox')
+    const st = isToday && s.state.settings.stuckNudge ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
+    if (!st) {
+      box.innerHTML = ''
+      return
+    }
+    const t = st.task
+    const why = st.moved >= 2 ? `已經往後挪了 ${st.moved} 次` : `已經逾期 ${st.late} 天`
+    box.innerHTML = `<div class="stuck-card"><span class="stamp-k coach-k">藤</span><div>
+      <b>「${esc(t.title)}」好像卡住了</b><p>${why}。拆成小一點的步驟，會比較好開始。</p>
+      <div class="stuck-btns">
+        <button class="btn-primary" data-act="split" data-id="${esc(t.id)}">拆成三小步</button>
+        <button class="btn-ghost" data-act="later" data-id="${esc(t.id)}">排進明天</button>
+        <button class="btn-ghost" data-act="drop" data-id="${esc(t.id)}">先放下</button>
+        <button class="cm-link" data-act="mute" data-id="${esc(t.id)}">不再提醒這件</button>
+      </div></div></div>`
+    if (readLocal(STUCK_SAID_KEY, '') !== s.today) {
+      writeLocal(STUCK_SAID_KEY, s.today)
+      this.hooks.stuck?.('nudge', t, st.moved || st.late)
+    }
+  }
+
+  // ── 字體大小、這一版的新功能 ──
+  applyFontScale() {
+    document.documentElement.style.setProperty('--ui-zoom', this.store.state.settings.fontScale)
+  }
+  // 有沒看過的新版本：設定列和「紀錄」分頁上的小紅點。第一次打開的新使用者不提示
+  renderNewsDot() {
+    let seen = readLocal(NEWS_KEY, null)
+    if (seen == null && Date.now() - (this.store.state.createdAt || Date.now()) < 86400000) {
+      seen = newsVersion()
+      writeLocal(NEWS_KEY, seen)
+    }
+    const fresh = seen !== newsVersion()
+    $('#newsDot').hidden = !fresh
+    $('.tab[data-tab="records"]').classList.toggle('has-dot', fresh)
+  }
+  openNews() {
+    $('#newsList').innerHTML = CHANGELOG.slice(0, 8)
+      .map((e) => `<section><h4>${+e.date.slice(5, 7)}/${+e.date.slice(8)}<b>${esc(e.title)}</b></h4><ul>${e.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>`)
+      .join('')
+    $('#newsModal').hidden = false
+    writeLocal(NEWS_KEY, newsVersion())
+    this.renderNewsDot()
+  }
+  closeNews() {
+    if ($('#newsModal').hidden) return
+    $('#newsModal').hidden = true
+    this.hooks.modalClosed?.()
   }
 
   // 本命狀態列：三個星位，選了是空心金星、完成是實心金星
@@ -871,6 +970,13 @@ export class UI {
     const quality = this.store.state.settings.quality
     $$('#qualityPick button').forEach((b) => b.classList.toggle('on', b.dataset.v === quality))
     $('#qualityInfo').textContent = QUALITY_INFO[quality]
+    const fs = this.store.state.settings.fontScale
+    $$('#fontPick button').forEach((b) => b.classList.toggle('on', +b.dataset.v === fs))
+    const stuck = this.store.state.settings.stuckNudge
+    $('#stuckBtn').classList.toggle('on', stuck)
+    $('#stuckBtn').textContent = stuck ? '開' : '關'
+    $('#newsInfo').textContent = `${CHANGELOG[0].date.slice(5).replace('-', '/')}・${CHANGELOG[0].title}`
+    this.renderNewsDot()
     // 第一次打開時放的範例還在才顯示
     const n = this.store.sampleCount()
     const btn = $('#sampleBtn')
@@ -1203,6 +1309,27 @@ export class UI {
       const b = e.target.closest('[data-v]')
       if (b) this.setTheme(b.dataset.v)
     })
+    $('#fontPick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (!b) return
+      this.store.setSetting('fontScale', +b.dataset.v)
+      this.applyFontScale()
+      this.renderSettings()
+    })
+    $('#stuckBtn').onclick = () => {
+      this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
+      this.renderSettings()
+      this.renderTasks()
+    }
+    $('#newsBtn').onclick = () => this.openNews()
+    $('#newsClose').onclick = () => this.closeNews()
+    $('#newsModal').addEventListener('click', (e) => {
+      if (e.target.id === 'newsModal') this.closeNews()
+    })
+    $('#feedbackBtn').onclick = () => {
+      const body = `## 想說的話\n\n\n\n---\n版本：${CHANGELOG[0].id}\n畫面：${innerWidth}×${innerHeight}・${matchMedia('(pointer: coarse)').matches ? '觸控' : '滑鼠'}`
+      window.open(`${FEEDBACK_URL}?title=${encodeURIComponent('意見回饋：')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener')
+    }
     $('#qualityPick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (!b) return

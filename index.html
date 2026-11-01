@@ -115,6 +115,7 @@
         <div class="quest-mini"><h4>今日のおつとめ</h4><ul id="questMini"></ul></div>
         </div>
         <div class="pg-main">
+        <div id="stuckBox"></div>
         <div id="overdueBox"></div>
         <ul class="list" id="taskList"></ul>
         <details class="routines" id="taskRoutines" hidden><summary></summary><ul></ul></details>
@@ -224,6 +225,11 @@
           <div class="set-row"><div><b>省電模式</b><small>閒置時降低畫面更新率，筆電整天開著也不耗電</small></div><button class="chip-toggle" id="powerBtn"></button></div>
           <div class="set-row theme-row"><div><b>畫質</b><small id="qualityInfo"></small></div>
             <div class="seg" id="qualityPick"><button type="button" data-v="auto">自動</button><button type="button" data-v="high">高</button><button type="button" data-v="standard">標準</button></div></div>
+          <div class="set-row theme-row"><div><b>字體大小</b><small>面板、對話框和提示卡的字</small></div>
+            <div class="seg" id="fontPick"><button type="button" data-v="0.9">小</button><button type="button" data-v="1">標準</button><button type="button" data-v="1.12">大</button><button type="button" data-v="1.25">特大</button></div></div>
+          <div class="set-row"><div><b>卡關提醒</b><small>任務一直往後挪、或逾期好幾天時，ふじ陪你拆小一點</small></div><button class="chip-toggle" id="stuckBtn"></button></div>
+          <div class="set-row"><div><b>這一版的新功能<i class="news-dot" id="newsDot" hidden></i></b><small id="newsInfo"></small></div><button class="chip-toggle" id="newsBtn">看看</button></div>
+          <div class="set-row"><div><b>意見回饋</b><small>想要的功能、遇到的問題，到 GitHub 上告訴我們（需要 GitHub 帳號）</small></div><button class="chip-toggle" id="feedbackBtn">寫回饋</button></div>
           <div class="set-row sync-row" id="cloudRow"></div>
           <div class="set-row sync-row" id="syncRow"><div><b>資料夾同步<span class="sync-dot" id="syncDot"></span></b><small id="syncInfo"></small></div><div class="sync-btns" id="syncBtns"></div></div>
           <div class="set-row" id="backupRow" hidden><div><b>被取代的資料</b><small id="backupInfo"></small></div><button class="chip-toggle" id="backupBtn">還原</button></div>
@@ -283,6 +289,15 @@
         <button type="submit" class="btn-primary" id="reviewSave" disabled>記下來</button>
       </div>
     </form>
+  </div>
+
+  <div class="modal" id="newsModal" hidden>
+    <div class="modal-card news-card glass">
+      <div class="modal-kicker">あたらしいこと</div>
+      <h3 class="news-title">這一版的新功能</h3>
+      <div class="news-list" id="newsList"></div>
+      <button class="btn-primary" id="newsClose">知道了</button>
+    </div>
   </div>
 
   <div class="modal" id="weekModal" hidden>

@@ -73,10 +73,12 @@ export function repeatLabel(rep) {
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
 // focusMin：一輪專注幾分鐘（0 = 不設長度、往上數）；breakMin：休息幾分鐘；focusRounds：連續幾輪（1 = 一次做完）
+// fontScale：面板和對話框的字放大倍率；stuckNudge：任務卡住時ふじ提醒
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
-  focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1,
+  focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true,
 }
+export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 // 畫質：auto＝桌機高、觸控手機標準
 export const QUALITIES = ['auto', 'high', 'standard']
 
@@ -421,6 +423,7 @@ function migrate(s) {
   settings.focusMin = settings.focusMin === 0 ? 0 : num(settings.focusMin, 5, 180, FOCUS_MIN)
   settings.breakMin = num(settings.breakMin, 1, 30, BREAK_MIN)
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
+  if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 
@@ -1232,6 +1235,8 @@ export class Store {
   updateTask(id, patch) {
     const t = this._find('tasks', id)
     if (!t) return
+    // 還沒完成的任務往後挪：記一次（卡關提醒用）
+    if (patch.date && DATE_RE.test(t.date) && patch.date > t.date && !t.done) t.moved = (t.moved || 0) + 1
     Object.assign(t, patch)
     this._finish()
   }
@@ -1242,9 +1247,44 @@ export class Store {
   moveToToday(ids) {
     for (const id of ids) {
       const t = this._find('tasks', id)
-      if (t) t.date = this.today
+      if (!t) continue
+      if (t.date < this.today && !t.done) t.moved = (t.moved || 0) + 1
+      t.date = this.today
     }
     this._finish()
+  }
+  // ── 卡關提醒 ──
+  // 卡住的任務：往後挪了 2 次以上，或逾期 3 天以上（例行公事不算）。off：不再提醒的 id
+  stuckTasks(off = new Set()) {
+    const list = []
+    for (const t of this.state.tasks) {
+      if (t.done || t.routineId || off.has(t.id) || t.date > this.today) continue
+      const late = daysBetween(t.date, this.today)
+      if ((t.moved || 0) >= 2 || late >= 3) list.push({ task: t, moved: t.moved || 0, late })
+    }
+    return list.sort((a, b) => b.moved - a.moved || b.late - a.late)
+  }
+  // 拆成三小步：先開個頭、推進一半、收尾，時間照原本的預估分配；本命留在第一步。原本那件換掉（不給 XP）
+  splitTask(id) {
+    const t = this._find('tasks', id)
+    if (!t || t.done) return null
+    const total = Math.max(30, t.dur || [15, 30, 50][t.priority - 1] || 30)
+    const steps = [['先開個頭', 0.25], ['推進一半', 0.45], ['收尾', 0.3]]
+    const date = t.date < this.today ? this.today : t.date
+    const fx = []
+    const parts = steps.map(([name, share], i) => {
+      const p = {
+        id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: false, createdAt: Date.now() + i,
+        dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0,
+      }
+      fx.push(['taskAdded', p])
+      return p
+    })
+    const at = this.state.tasks.indexOf(t)
+    this.state.tasks.splice(at, 1, ...parts)
+    fx.push(['taskSplit', { task: t, parts }])
+    this._finish(fx)
+    return parts
   }
 
   // ── 日程 ──
@@ -1314,6 +1354,7 @@ export class Store {
     for (const p of plan) {
       const t = this._find('tasks', p.id)
       if (!t || t.done || !TIME_RE.test(p.at)) continue
+      if (t.date < date) t.moved = (t.moved || 0) + 1
       t.date = date
       t.at = p.at
       t.dur ||= p.dur

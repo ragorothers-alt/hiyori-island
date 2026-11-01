@@ -354,6 +354,16 @@ async function boot() {
     setTheme: (t) => sky.setTheme(t),
     // 現在幾點（網址帶 ?hour= 時用那個）
     hourNow: () => sky.hour(),
+    // 卡關提醒：nudge 是第一次看到卡關小卡（n：挪了幾次或逾期幾天），其他是按了哪個選項
+    stuck: (kind, t, n) => {
+      const task = short(t.title)
+      if (kind === 'nudge') talk('stuck', { task, n }, 6000, `「${task}」好像卡住了，拆小一點好嗎？`, fuji)
+      else if (kind === 'split') {
+        talk('stuckSplit', { task }, 5000, '拆好了，先做第一步就好。', fuji)
+        setTimeout(() => talk('stuckSplit', { task }, 4200, '', mochi), 2200)
+      } else if (kind === 'later') talk('stuckLater', { task }, 4600, '明天再看，現在先歇歇吧。', fuji)
+      else if (kind === 'drop') talk('stuckDrop', { task }, 4600, '先放下了，鬆一口氣吧。', fuji)
+    },
     // info：{ round, rounds, free }，連續幾輪的第幾輪、是不是不設長度往上數
     focusStarted: (resumed, taskId, info = {}) => {
       duo.setFocus(true, resumed)
