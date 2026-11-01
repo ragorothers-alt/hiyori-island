@@ -354,13 +354,16 @@ async function boot() {
     setTheme: (t) => sky.setTheme(t),
     // 現在幾點（網址帶 ?hour= 時用那個）
     hourNow: () => sky.hour(),
-    focusStarted: (resumed, taskId) => {
+    // info：{ round, rounds, free }，連續幾輪的第幾輪、是不是不設長度往上數
+    focusStarted: (resumed, taskId, info = {}) => {
       duo.setFocus(true, resumed)
       garden.setFocus(taskId)
       if (!resumed) {
         sfx.chime()
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
-        if (t) talk('focusTask', { task: short(t.title) })
+        if (info.round > 1) talk('focusRound', { round: info.round, rounds: info.rounds })
+        else if (t) talk('focusTask', { task: short(t.title) })
+        else if (info.free) talk('focusFree', {}, undefined, '', fuji)
         else if (!duet('focusStart')) talk('focusStart')
       }
     },
@@ -372,14 +375,16 @@ async function boot() {
         if (duo.focusing) talk('focusTask', { task: short(t.title) })
       }
     },
-    focusFinished: (minutes, taskId) => {
+    focusFinished: (minutes, taskId, info = {}) => {
       duo.setFocus(false)
       garden.setFocus(null)
       sfx.temple()
       // 天燈從小木屋屋頂升起（兩人還在屋裡）；出來後兩人會擊掌慶祝
       fx.skyLantern(duo.inside ? cabin.point('roofTop') : mochi.position.clone().add(new THREE.Vector3(0, 1.6, 0)))
       store.completePomodoro(minutes, taskId)
-      if (!duet('focusEnd')) talk('focusEnd')
+      const multi = info.rounds > 1
+      if (multi && info.last) talk('focusRoundsDone', { rounds: info.rounds })
+      else if (!duet('focusEnd')) talk('focusEnd')
       resWork('library')
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
       if (t) {
@@ -387,10 +392,17 @@ async function boot() {
         if (pos) fx.burst(pos, { colors: ['#fff1b8', '#ffd98a', '#ffffff'], count: 36, speed: 1.4 })
         garden.bounce(t.id)
       }
-      ui.toast({ icon: '灯', title: '專注完成，放一盞天燈', sub: t ? `「${short(t.title, 10)}」長大了一點・休息一下吧` : `+${minutes} 分鐘・接著休息一下吧` })
+      const rest = multi && !info.last ? `休息 ${info.breakMin} 分鐘後接著第 ${info.round + 1} 輪` : '接著休息一下吧'
+      const title = multi ? (info.last ? `${info.rounds} 輪都完成了，放一盞天燈` : `第 ${info.round}/${info.rounds} 輪完成`) : '專注完成，放一盞天燈'
+      ui.toast({ icon: '灯', title, sub: t ? `「${short(t.title, 10)}」長大了一點・${rest}` : `+${minutes} 分鐘・${rest}` })
     },
-    breakFinished: () => {
+    // next：還有下一輪時是 { next, rounds }，計時器接著會自己開始下一輪（台詞交給 focusStarted）
+    breakFinished: (next) => {
       sfx.chime()
+      if (next) {
+        ui.toast({ icon: '風', title: '休息結束', sub: `第 ${next.next}/${next.rounds} 輪開始了` })
+        return
+      }
       talk('breakEnd')
       ui.toast({ icon: '風', title: '休息結束', sub: '準備好了就再開始一輪吧' })
     },

@@ -6,7 +6,7 @@ import { SHOP_ITEMS } from './data/shop.js'
 import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
 import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
 import { BOND_POINTS, actLevel, bondLevel, outfitLevel, outfitOf } from './data/bond.js'
-import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TOWER_SLOTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM } from './theme.js'
+import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TOWER_SLOTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM, FOCUS_MIN, BREAK_MIN } from './theme.js'
 import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
 import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
 import { LIFE_KINDS } from './data/life.js'
@@ -72,7 +72,11 @@ export function repeatLabel(rep) {
 }
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
-export const DEFAULT_SETTINGS = { sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto' }
+// focusMin：一輪專注幾分鐘（0 = 不設長度、往上數）；breakMin：休息幾分鐘；focusRounds：連續幾輪（1 = 一次做完）
+export const DEFAULT_SETTINGS = {
+  sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
+  focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1,
+}
 // 畫質：auto＝桌機高、觸控手機標準
 export const QUALITIES = ['auto', 'high', 'standard']
 
@@ -101,8 +105,12 @@ const emptyStats = () => ({
 })
 // 每日紀錄。stars／high／early（中午前）／routines：完成數；tagMask：完成過的分類（位元）；
 // plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數；
-// habits：習慣完成數；life：生活記錄筆數；urges：忍住的衝動；timebox：排好了時段；habitAll：今天的習慣全做完
-const DAY_NUMS = ['tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox']
+// habits：習慣完成數；life：生活記錄筆數；urges：忍住的衝動；timebox：排好了時段；habitAll：今天的習慣全做完；
+// focusAm／Pm／Eve／Late：專注分鐘落在早上（5–12 點）、下午（12–18）、晚上（18–24）、深夜（0–5）
+const DAY_NUMS = [
+  'tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox',
+  'focusAm', 'focusPm', 'focusEve', 'focusLate',
+]
 const DAY_FLAGS = ['perfect', 'starAll', 'habitAll']
 const emptyDay = () => {
   const d = {}
@@ -376,6 +384,9 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
+  settings.focusMin = settings.focusMin === 0 ? 0 : num(settings.focusMin, 5, 180, FOCUS_MIN)
+  settings.breakMin = num(settings.breakMin, 1, 30, BREAK_MIN)
+  settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 
@@ -1637,7 +1648,11 @@ export class Store {
     const d = this.day()
     d.pomodoros++
     d.focus += minutes
-    this._gain(XP.pomodoro, fx, { kind: 'focus' })
+    // 這次專注落在哪個時段：用中間的時間點算
+    const mid = new Date(Date.now() - minutes * 30000).getHours()
+    d[mid < 5 ? 'focusLate' : mid < 12 ? 'focusAm' : mid < 18 ? 'focusPm' : 'focusEve'] += minutes
+    // XP 依長度：25 分＝原本的份量，短的少一點、長的最多兩倍
+    this._gain(Math.round(XP.pomodoro * Math.min(2, Math.max(0.4, minutes / 25))), fx, { kind: 'focus' })
     this._bondGain(BOND_POINTS.pomodoro, fx)
     this._finish(fx)
   }

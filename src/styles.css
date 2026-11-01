@@ -649,6 +649,37 @@ body.night .focus-task.set { color: #ffd38f; }
 body.night .pomo { color: #ffd38f; }
 @media (max-width: 860px) { .focus-pick { bottom: calc(50dvh + 64px); } .focus-task { display: none; } }
 
+/* ── 專注長度：刻度尺 ── */
+.focus.idle .focus-time { cursor: pointer; border-radius: 6px; }
+.focus.idle .focus-time:hover { color: #d58a3f; }
+body.night .focus.idle .focus-time:hover { color: #ffd38f; }
+.focus-set { text-align: center; padding: 14px 14px 12px; }
+.focus-set h4 { justify-content: center; }
+.fs-time { font-family: var(--font-num); font-size: 40px; font-weight: 700; letter-spacing: .04em; line-height: 1.1; margin: 0 0 4px; }
+.fs-rwrap { position: relative; margin: 0 -6px; }
+.fs-ruler {
+  overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; outline: none; cursor: grab; touch-action: pan-x;
+  mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+}
+.fs-ruler::-webkit-scrollbar { display: none; }
+.fs-ruler.dragging { cursor: grabbing; scroll-snap-type: none; }
+.fs-ruler:focus-visible { box-shadow: inset 0 0 0 2px rgba(255, 217, 138, .55); border-radius: 10px; }
+.fs-track { display: flex; width: max-content; padding: 10px calc(50% - 7px) 18px; }
+.fs-track i { flex: none; width: 14px; height: 26px; display: flex; justify-content: center; position: relative; scroll-snap-align: center; font-style: normal; cursor: pointer; }
+.fs-track i::before { content: ''; width: 2px; height: 9px; border-radius: 1px; background: var(--ink-faint); opacity: .45; }
+.fs-track i.mid::before { height: 14px; opacity: .6; }
+.fs-track i.major::before { height: 20px; opacity: .85; }
+.fs-track i b { position: absolute; top: 24px; font: 600 10.5px var(--font-num); color: var(--ink-faint); white-space: nowrap; }
+.fs-needle { position: absolute; left: 50%; top: 2px; width: 4px; height: 30px; margin-left: -2px; border-radius: 2px; background: var(--gold); box-shadow: 0 0 8px rgba(255, 217, 138, .8); pointer-events: none; }
+.fs-needle::before { content: ''; position: absolute; left: 50%; top: -6px; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--gold); border-bottom: 0; }
+.fs-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 12.5px; color: var(--ink-soft); }
+.fs-row .seg { flex: 1; max-width: 250px; }
+.fs-row .seg button { flex: 1; white-space: nowrap; padding: 5px 6px; }
+.fs-row .seg button:disabled { opacity: .4; cursor: default; }
+.fs-sum { margin: 12px 0 10px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
+#fsStart { width: 100%; margin: 0; padding: 9px; }
+
 /* ── 金平糖 ── */
 .konpeito {
   display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 3px;

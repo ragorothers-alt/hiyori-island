@@ -1345,3 +1345,49 @@ describe('專案町的總平面', () => {
     expect(inTown(LAYOUT.bed.x, LAYOUT.bed.z)).toBe(false)
   })
 })
+
+describe('番茄鐘長度與專注時段', () => {
+  it('長度、休息、輪數存在設定裡，匯出匯入後還在；超出範圍的會被修正', () => {
+    expect(store.state.settings).toMatchObject({ focusMin: 25, breakMin: 5, focusRounds: 1 })
+    store.setSetting('focusMin', 0)
+    store.setSetting('breakMin', 10)
+    store.setSetting('focusRounds', 3)
+    store.importJSON(store.exportJSON())
+    expect(store.state.settings).toMatchObject({ focusMin: 0, breakMin: 10, focusRounds: 3 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 999, breakMin: -3, focusRounds: 9 } }))
+    expect(store.state.settings).toMatchObject({ focusMin: 180, breakMin: 1, focusRounds: 4 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 'abc' } }))
+    expect(store.state.settings.focusMin).toBe(25)
+  })
+
+  it('XP 依長度給：25 分是原本的份量，短的至少四成、長的最多兩倍', () => {
+    const gain = (min) => {
+      const xp = store.player.xp
+      store.completePomodoro(min)
+      return store.player.xp - xp
+    }
+    expect(gain(25)).toBe(15)
+    expect(gain(10)).toBe(6)
+    expect(gain(5)).toBe(6)
+    expect(gain(50)).toBe(30)
+    expect(gain(90)).toBe(30)
+    expect(store.stats.pomodoros).toBe(5)
+    expect(store.stats.focusMinutes).toBe(180)
+  })
+
+  it('專注分鐘依中間的時間點記進早上／下午／晚上／深夜', () => {
+    setDate(TODAY, 10)
+    store.completePomodoro(30)
+    setDate(TODAY, 19)
+    store.completePomodoro(50)
+    // 12:20 結束的 50 分鐘：中間點 11:55，算早上
+    vi.setSystemTime(new Date(2026, 9, 25, 12, 20))
+    store.completePomodoro(50)
+    vi.setSystemTime(new Date(2026, 9, 25, 2, 30))
+    store.completePomodoro(25)
+    const d = store.peekDay(TODAY)
+    expect(d).toMatchObject({ focusAm: 80, focusPm: 0, focusEve: 50, focusLate: 25, focus: 155 })
+    store.importJSON(store.exportJSON())
+    expect(store.peekDay(TODAY).focusAm).toBe(80)
+  })
+})

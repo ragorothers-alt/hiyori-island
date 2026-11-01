@@ -312,6 +312,19 @@
     <ul id="focusPickList"></ul>
   </div>
 
+  <div class="focus-pick focus-set glass" id="focusSet" hidden>
+    <h4>要專注多久？<small>じかん</small></h4>
+    <div class="fs-time" id="fsTime">25:00</div>
+    <div class="fs-rwrap">
+      <div class="fs-ruler" id="fsRuler" tabindex="0" aria-label="專注長度"><div class="fs-track" id="fsTrack"></div></div>
+      <span class="fs-needle"></span>
+    </div>
+    <div class="fs-row"><span>輪數</span><div class="seg" id="fsRounds"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
+    <div class="fs-row"><span>休息</span><div class="seg" id="fsBreak"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
+    <p class="fs-sum" id="fsSum"></p>
+    <button type="button" class="btn-primary" id="fsStart">開始專注</button>
+  </div>
+
   <div class="toasts" id="toasts"></div>
 
   <div class="modal" id="levelModal" hidden>

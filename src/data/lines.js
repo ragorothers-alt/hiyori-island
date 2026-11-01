@@ -1,4 +1,6 @@
 // LINES 為もち台詞，FUJI_LINES 為ふじ台詞，DUETS 為雙人對話
+import { COACH_FUJI, COACH_MOCHI } from './coachLines.js'
+
 export const LINES = {
   greet: {
     morning: [
@@ -1239,3 +1241,7 @@ export const LEVEL_TITLES = [
   '無垠天境庭師',
   '永恆星穹大庭師',
 ]
+
+// 教練、番茄鐘輪數、重要日子、卡關提醒、週報的台詞放在 coachLines.js
+Object.assign(LINES, COACH_MOCHI)
+Object.assign(FUJI_LINES, COACH_FUJI)
