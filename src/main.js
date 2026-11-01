@@ -354,9 +354,9 @@ async function boot() {
     },
     resetView: () => (ui.appMode ? ui.setAppMode(false) : room.active ? room.exit() : world.home()),
     // 切換 App 模式：進 App 時先離開小木屋；回小島時正在專注、兩人已經在屋裡，就直接進屋陪讀
-    appModeChanged: (on) => {
+    appModeChanged: (on, { cabin = true } = {}) => {
       if (on && room.active) room.exit()
-      if (!on && duo.focusing && duo.inside) room.enter()
+      if (!on && cabin && duo.focusing && duo.inside) room.enter()
     },
     // App 模式全螢幕計時上的「到小木屋」：切回小島，兩人會走進屋裡（已經在屋裡就直接進屋）
     goCabin: () => ui.setAppMode(false),

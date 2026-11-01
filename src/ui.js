@@ -472,7 +472,8 @@ export class UI {
   }
 
   // ── App 模式：像一般 App 一樣用。面板撐滿整個畫面，小島停住、藏起來；手機的分頁列移到底下 ──
-  setAppMode(on, { save = true } = {}) {
+  // cabin：回小島時，正在專注、兩人在屋裡的話要不要直接進屋（要飛去看別的地方時不要）
+  setAppMode(on, { save = true, cabin = true } = {}) {
     this.appMode = on
     document.body.classList.toggle('app-mode', on)
     if (save) writeLocal(LAYOUT_KEY, on ? 'app' : 'island')
@@ -486,12 +487,12 @@ export class UI {
     this.renderSettings()
     // 有些說明和按鈕依模式不同（「在島上查看」→「切到小島看看」）：開場第一次畫之前不用
     if (this._stale) this.render()
-    this.hooks.appModeChanged?.(on)
+    this.hooks.appModeChanged?.(on, { cabin })
   }
-  // 要飛到島上某處的按鈕：App 模式先切回小島，等畫面換好再飛過去
+  // 要飛到島上某處的按鈕：App 模式先切回小島（不自動進小木屋），等畫面換好再飛過去
   _onIsland(fn) {
     if (!this.appMode) return fn()
-    this.setAppMode(false)
+    this.setAppMode(false, { cabin: false })
     requestAnimationFrame(() => requestAnimationFrame(fn))
   }
   renderAppBar() {
@@ -1220,7 +1221,10 @@ export class UI {
     const bk = readBackup()
     const choosing = this.cloud?.state === 'conflict' || this.sync?.state === 'conflict'
     $('#backupRow').hidden = !bk || choosing
-    if (bk) $('#backupInfo').textContent = `${when(bk.at)} 的${bk.from === 'local' ? '這台' : bk.from === 'file' ? '同步檔' : '雲端'}版本，同步時被比較新的資料取代，留著備用`
+    if (bk) {
+      const src = { local: '這台', file: '同步檔', tab: '另一個分頁' }[bk.from] || '雲端'
+      $('#backupInfo').textContent = `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
+    }
     const sy = this.sync
     if (!sy) return
     // 手機和 Firefox 不能直接存取檔案：有線上同步就夠了，整列藏起來

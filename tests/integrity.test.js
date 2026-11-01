@@ -1,8 +1,9 @@
 // 資料正確性的回歸測試：多分頁、拆任務、睡眠獎勵、教練的回答、跨日、提醒與壞掉的數字
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Store, dateStr } from '../src/store.js'
+import { Store, addDays, dateStr, readBackup } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
 import { planRules } from '../src/coach.js'
+import { FileSync } from '../src/sync.js'
 
 const KEY = 'hiyori-daily-v1'
 let store
@@ -41,6 +42,82 @@ describe('同一個瀏覽器開兩個分頁', () => {
     store._otherTabSaved({ key: 'hiyori-layout', newValue: '"app"' })
     store._otherTabSaved({ key: KEY, newValue: '{壞掉' })
     expect(store.state.rev).toBe(rev)
+  })
+
+  it('兩邊幾乎同時存檔：不會互相寫來寫去，被蓋掉的那一版留成備份', async () => {
+    store.saveNow()
+    const b = new Store()
+    let writes = 0
+    const real = localStorage.setItem
+    localStorage.setItem = function (k, v) {
+      if (k === KEY) writes++
+      return real.call(this, k, v)
+    }
+    store.addTask({ title: 'A 的任務' })
+    await Promise.resolve()
+    // B 還沒收到 A 的事件就存了
+    b.addTask({ title: 'B 的任務' })
+    await Promise.resolve()
+    // 事件現在才到，而且是過時的：送幾輪都不會再寫
+    const before = writes
+    for (let i = 0; i < 3; i++) {
+      b._otherTabSaved({ key: KEY })
+      store._otherTabSaved({ key: KEY })
+      await Promise.resolve()
+    }
+    delete localStorage.setItem
+    expect(writes).toBe(before)
+    expect(store.state.rev).toBe(b.state.rev)
+    expect(readBackup().from).toBe('tab')
+    expect(readBackup().state.tasks.map((t) => t.title)).toContain('A 的任務')
+  })
+
+  it('這邊剛改、還沒寫出去時就收到事件：這邊的變更不會被丟掉', async () => {
+    store.saveNow()
+    const b = new Store()
+    store.addTask({ title: 'A 的任務' })
+    await Promise.resolve()
+    b.addTask({ title: 'B 的任務' })
+    b._otherTabSaved({ key: KEY })
+    await Promise.resolve()
+    expect(b.state.tasks.map((t) => t.title)).toContain('B 的任務')
+    expect(JSON.parse(localStorage.getItem(KEY)).tasks.map((t) => t.title)).toContain('B 的任務')
+    expect(readBackup().state.tasks.map((t) => t.title)).toContain('A 的任務')
+  })
+
+  it('這邊只有各自推導的變化（例行實例）時，直接換成另一邊那一版', async () => {
+    store.saveNow()
+    const b = new Store()
+    store.addTask({ title: 'A 的任務' })
+    await Promise.resolve()
+    b.save(false)
+    await Promise.resolve()
+    expect(b.state.tasks.map((t) => t.title)).toContain('A 的任務')
+    expect(readBackup()).toBeNull()
+  })
+
+  it('例行公事的實例 id 固定：換成另一個分頁那一版後重新生成，還是同一個 id', () => {
+    store.addRoutine({ title: '澆花', repeat: { type: 'daily' } })
+    const tomorrow = addDays(store.today, 1)
+    store.selectDate(tomorrow)
+    const first = store.tasksOn(tomorrow).find((t) => t.routineId)
+    const snap = JSON.parse(store.exportJSON())
+    snap.tasks = snap.tasks.filter((t) => t.id !== first.id)
+    for (const r of snap.routines) r.made = {}
+    store.replaceState(snap, Date.now(), { soft: true, rev: 'peer-1', peer: true })
+    expect(store.tasksOn(tomorrow).find((t) => t.routineId).id).toBe(first.id)
+  })
+
+  it('另一個分頁同步完改了 base，這邊的同步也跟著更新', () => {
+    const handlers = []
+    globalThis.window ??= globalThis
+    globalThis.document ??= { hidden: true, addEventListener() {} }
+    globalThis.addEventListener = (type, fn) => type === 'storage' && handlers.push(fn)
+    const sync = new FileSync(store)
+    delete globalThis.addEventListener
+    localStorage.setItem('hiyori-sync-base', 'rev-from-other-tab')
+    for (const fn of handlers) fn({ key: 'hiyori-sync-base' })
+    expect(sync.base).toBe('rev-from-other-tab')
   })
 })
 

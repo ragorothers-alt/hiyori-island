@@ -4,33 +4,15 @@
 // 兩種管道共用這套判斷，各自記自己的 base，可以同時開：
 //   FileSync（這個檔案）：資料寫進使用者選的檔案，放在 OneDrive／Dropbox 的同步資料夾裡（不需後端，只有電腦版 Chrome／Edge）
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
-import { newRev } from './store.js'
+import { dropBackup, keepBackup, newRev, readBackup } from './store.js'
 
-const BACKUP_KEY = 'hiyori-backup'
-
-// ── 被取代的那一份（只留最近一份，兩種管道共用） ──
-export function readBackup() {
-  try {
-    const b = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null')
-    return b?.state ? b : null
-  } catch {
-    return null
-  }
-}
-// 存不進去（瀏覽器空間不夠）時回傳 false
-function keepBackup(state, from, at) {
-  try {
-    localStorage.setItem(BACKUP_KEY, JSON.stringify({ from, at, savedAt: Date.now(), state }))
-    return true
-  } catch {
-    return false
-  }
-}
+// 被取代的那一份（只留最近一份）由 store.js 管：兩個分頁同時改了資料時也會用到
+export { readBackup }
 export function restoreBackup(store) {
   const b = readBackup()
   if (!b) return false
   store.replaceState(b.state) // 當成一次新的變更，會再同步出去
-  localStorage.removeItem(BACKUP_KEY)
+  dropBackup()
   return true
 }
 const NO_ROOM = '瀏覽器的儲存空間不夠，沒辦法先備份另一邊，所以先不替換。請先用「匯出資料」存一份'
@@ -64,6 +46,11 @@ export class SyncEngine {
       if (!this._canSync()) return
       clearTimeout(this._timer)
       this._timer = setTimeout(() => this.sync(), delay)
+    })
+    // 同一個瀏覽器的另一個分頁同步完會改 base：跟著更新。不然換成那個分頁的資料後，
+    // 這邊會以為兩邊都改過，下次雲端有新資料時就變成要選邊
+    addEventListener('storage', (e) => {
+      if (e.key === baseKey) this.base = localStorage.getItem(baseKey) || ''
     })
     // 回到這個視窗、或開著時定期看一次：別台裝置可能剛寫過
     addEventListener('focus', () => this.sync())

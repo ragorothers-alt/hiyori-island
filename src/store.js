@@ -25,6 +25,33 @@ const townStages = (stats) => {
 }
 
 const KEY = 'hiyori-daily-v1'
+// 存檔的版本號另外存一份小的：寫之前先看一眼，就知道另一個分頁是不是剛寫過（不用每次讀整份）
+const REV_KEY = 'hiyori-daily-rev'
+const BACKUP_KEY = 'hiyori-backup'
+
+// ── 被取代的那一份（只留最近一份；雲端、資料夾同步和兩個分頁同時改了資料都共用） ──
+export function readBackup() {
+  try {
+    const b = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null')
+    return b?.state ? b : null
+  } catch {
+    return null
+  }
+}
+// from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）。存不進去（瀏覽器空間不夠）時回傳 false
+export function keepBackup(state, from, at) {
+  try {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify({ from, at, savedAt: Date.now(), state }))
+    return true
+  } catch {
+    return false
+  }
+}
+export function dropBackup() {
+  try {
+    localStorage.removeItem(BACKUP_KEY)
+  } catch {}
+}
 
 export function dateStr(d = new Date()) {
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -45,6 +72,8 @@ export const toMin = (hhmm) => {
   return (h || 0) * 60 + (m || 0)
 }
 export const uid = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7)
+// 例行公事某一天的實例：id 固定是「例行公事-日期」（id 最長 40 字，匯入的長 id 才退回隨機）
+const instanceId = (r, date) => (r.id.length <= 29 ? `${r.id}-${date}` : uid())
 // 同步用的版本識別：每次使用者改了資料就換一個。比對「是不是同一版」用它，不比時間大小（各台時鐘可能不準）
 export const newRev = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
 const REV_RE = /^[\w-]{1,40}$/
@@ -527,6 +556,8 @@ export class Store {
   constructor() {
     this.handlers = {}
     this.state = this._load()
+    // 存檔裡現在是哪一版（這邊讀進來、寫出去或換成另一個分頁的那一版）
+    this._diskRev = this.state.rev || ''
     this.today = dateStr()
     this.selectedDate = this.today
     this._pending = []
@@ -545,20 +576,31 @@ export class Store {
   // 同一個瀏覽器開著兩個分頁：另一邊存檔時，這邊換成那一版（跟同步拉回一樣就地更新）。
   // 不然這邊下一次存檔會拿舊資料把整份蓋掉，那邊剛加的東西就不見了
   _otherTabSaved(e) {
-    if (e.key !== KEY || !e.newValue) return
+    if (e.key !== KEY) return
+    // 這邊有還沒寫出去的變更（存檔失敗過）：不換，下次存檔時會先把那一版留成備份
+    if ((this.state.rev || '') !== this._diskRev) return
+    this._adoptDisk()
+  }
+  // 換成存檔裡現在那一版。讀的是「現在存著的」，不是事件帶來的舊內容（兩邊同時存時事件可能過時了）；
+  // 只換記憶體裡的：不寫回去（不然兩個分頁會互相寫來寫去），也不算這邊改了資料
+  _adoptDisk() {
     let obj
     try {
-      obj = JSON.parse(e.newValue)
+      obj = JSON.parse(localStorage.getItem(KEY) || 'null')
     } catch {
-      return
+      return false
     }
-    if (!obj?.rev || obj.rev === this.state.rev) return
-    // 這邊還沒寫出去的變更（最多 0.12 秒）讓給剛存檔的那一邊
-    clearTimeout(this._saveTimer)
+    if (!obj?.rev) return false
+    if (obj.rev === this.state.rev) {
+      this._diskRev = obj.rev
+      return false
+    }
     try {
-      this.replaceState(obj, obj.updatedAt, { soft: true, rev: obj.rev })
+      this.replaceState(obj, obj.updatedAt, { soft: true, rev: obj.rev, peer: true })
+      return true
     } catch (err) {
       console.warn('[hiyori] 讀取另一個分頁的存檔失敗', err)
+      return false
     }
   }
 
@@ -589,8 +631,13 @@ export class Store {
       this.state.rev = newRev()
       this.emit('dirty')
     }
-    clearTimeout(this._saveTimer)
-    this._saveTimer = setTimeout(() => this.saveNow(), 120)
+    // 同一個動作裡的幾次存檔併成一次，而且在這個動作結束前就寫好：另一個分頁的存檔事件插不進中間
+    if (this._saveQueued) return
+    this._saveQueued = true
+    queueMicrotask(() => {
+      this._saveQueued = false
+      this.saveNow()
+    })
   }
   // 版本號一定比上一版大：就算這台電腦的時鐘比別台慢，新的變更也不會被當成舊的
   _nextVersion() {
@@ -598,7 +645,18 @@ export class Store {
   }
   saveNow() {
     try {
+      // 另一個分頁剛寫過、這邊還沒換成那一版（事件還在路上）
+      const disk = localStorage.getItem(REV_KEY)
+      if (disk && disk !== this._diskRev && disk !== this.state.rev) {
+        // 這邊沒改過資料（只是例行實例、跨日這類各自推導的變化）：直接換成那一版
+        if ((this.state.rev || '') === this._diskRev && this._adoptDisk()) return
+        // 兩邊都改了：那一版先留成備份（設定裡可以還原），不會被無聲蓋掉
+        const peer = JSON.parse(localStorage.getItem(KEY) || 'null')
+        if (peer?.rev) keepBackup(peer, 'tab', peer.updatedAt)
+      }
       localStorage.setItem(KEY, JSON.stringify(this.state))
+      localStorage.setItem(REV_KEY, this.state.rev || '')
+      this._diskRev = this.state.rev || ''
     } catch (e) {
       console.warn('[hiyori] 存檔失敗', e)
     }
@@ -1090,7 +1148,8 @@ export class Store {
   }
 
   // ── 例行公事 ──
-  // 只為「今天或之後」且尚未生成過的日期建立實例；使用者刪掉的實例不會再長回來
+  // 只為「今天或之後」且尚未生成過的日期建立實例；使用者刪掉的實例不會再長回來。
+  // 實例的 id 由例行公事和日期決定：兩個分頁各自生成、或換成另一個分頁那一版後重新生成，都是同一個 id（開著的編輯表單還對得上）
   _ensureRoutines(date) {
     const created = []
     if (date < this.today) return created
@@ -1098,11 +1157,11 @@ export class Store {
       if (r.startDate > date || r.made[date] || !repeatMatches(r.repeat, date)) continue
       r.made[date] = true
       if (r.kind === 'task') {
-        const t = { id: uid(), title: r.title, date, priority: r.priority, tag: r.tag, done: false, rewarded: false, createdAt: Date.now(), routineId: r.id }
+        const t = { id: instanceId(r, date), title: r.title, date, priority: r.priority, tag: r.tag, done: false, rewarded: false, createdAt: Date.now(), routineId: r.id }
         this.state.tasks.push(t)
         created.push(t)
       } else {
-        const e = { id: uid(), title: r.title, date, start: r.start, end: r.end, color: r.color, done: false, rewarded: false, routineId: r.id }
+        const e = { id: instanceId(r, date), title: r.title, date, start: r.start, end: r.end, color: r.color, done: false, rewarded: false, routineId: r.id }
         this.state.events.push(e)
         created.push(e)
       }
@@ -1971,7 +2030,8 @@ export class Store {
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
   // 同步拉回時帶著雲端那一版的 updatedAt 和 rev；匯入、還原備份則算一次新的變更
   // soft：同步拉回的新資料（畫面就地更新，不重蓋小鎮、不移動鏡頭）
-  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev() } = {}) {
+  // peer：另一個分頁剛存的那一版。它已經在存檔裡了：不寫回去，也不算這邊改了資料（不觸發同步）
+  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false } = {}) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     const next = migrate(obj)
     next.updatedAt = updatedAt
@@ -1984,10 +2044,11 @@ export class Store {
     this._ensureRoutines(this.today)
     if (this.selectedDate !== this.today) this._ensureRoutines(this.selectedDate)
     this._ensureQuests()
-    this.saveNow()
+    if (peer) this._diskRev = rev
+    else this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready
-    this.emit('dirty')
+    if (!peer) this.emit('dirty')
     this.emit('change')
     this.emit('reload', { soft })
   }
