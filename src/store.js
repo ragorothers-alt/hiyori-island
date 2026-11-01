@@ -12,7 +12,7 @@ import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILEST
 import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
-import { PLAN, inLot, lotsAt, townLevel } from './data/projectTown.js'
+import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
 const townStages = (stats) => {
@@ -264,8 +264,8 @@ function migrate(s) {
       milestones, completedAt: ts(p.completedAt), archived: !!p.archived, onTime: !!p.onTime,
       // 暫停的時間；null = 進行中（已落成的不會暫停）
       pausedAt: ts(p.completedAt) ? null : ts(p.pausedAt),
-      // slot：島上的第幾塊空地，-1 = 還沒上島（空地滿了，先在清單裡）；parked：使用者自己移下島的，不自動補上去
-      slot: num(p.slot, -1, TOWER_SLOTS - 1, 0), parked: !!p.parked,
+      // slot：專案町的第幾塊地，-1 = 還沒分到地（讀進來後馬上會補上）
+      slot: num(p.slot, -1, TOWER_SLOTS - 1, 0),
     }
   })
   // 重新分配塔位：重複的換到空地，空地不夠就先不上島；進行中的專案超過上限的改為收藏
@@ -1459,9 +1459,10 @@ export class Store {
   }
 
   // ── 專案町 ──
-  // { level, points, lots, next }
+  // 努力和需求取大的：沒收藏的專案每個都有一塊地，小鎮長到放得下為止，而且不會縮回去
+  // { level, effort, points, lots, next }
   get projectTown() {
-    return townLevel(this.stats)
+    return townLevel(this.stats, this.activeProjects().length, this.state.town.plevel)
   }
   // 地塊被商店擺設壓到了就先跳過（擺設搬走後就能用）
   _lotBlocked(i) {
@@ -1471,24 +1472,29 @@ export class Store {
   // 讀檔或同步拉回後（或地上的擺設搬走後）：排好地塊，記下目前的等級（之後長大才慶祝）
   settleLots() {
     const t = this.state.town
-    if (!t.plevel) t.plevel = this.projectTown.level
+    t.plevel = this.projectTown.level
     const before = this.state.projects.map((p) => p.slot).join()
     const open = this.projectTown.lots
     for (const p of this.state.projects) if (p.slot >= open) p.slot = -1
     this._fillSlots()
     if (this.state.projects.map((p) => p.slot).join() !== before) this.save(false)
   }
-  // 點數夠了城鎮就升級：多開的地讓清單裡等著的專案上島
+  // 點數夠了、或專案多到地不夠時，城鎮升級；新開的地馬上分給還沒有地的專案
+  // demand：這次是因為專案變多才長的；island：島也跟著變大
   _projectTownCheck(fx) {
     const t = this.state.town
-    const { level } = this.projectTown
+    const town = this.projectTown
     // 還沒記過（剛重置成空島）就安靜記下，不慶祝
-    if (!t.plevel) t.plevel = level
-    if (level <= t.plevel) return
-    const from = t.plevel
-    t.plevel = level
+    if (!t.plevel) t.plevel = town.level
+    if (town.level > t.plevel) {
+      const from = t.plevel
+      t.plevel = town.level
+      fx.push(['projectTownGrew', {
+        level: town.level, from, added: lotsAt(town.level) - lotsAt(from),
+        demand: town.level > town.effort, island: islandRadius(town.level) > islandRadius(from),
+      }])
+    }
     this._fillSlots()
-    fx.push(['projectTownGrew', { level, from, added: lotsAt(level) - lotsAt(from) }])
   }
 
   // ── 專案 ──
@@ -1506,18 +1512,18 @@ export class Store {
   projectStatus(p) {
     return p.completedAt ? 'done' : p.pausedAt ? 'paused' : 'active'
   }
-  // 暫停／繼續：暫停的專案沒有到期提醒，塔的旗子降下來；已落成的不用暫停
+  // 暫停／繼續：暫停的專案沒有到期提醒，房子的旗子降下來；已落成的不用暫停
   pauseProject(id, paused = true) {
     const p = this._find('projects', id)
     if (!p || p.completedAt || !!p.pausedAt === paused) return
     p.pausedAt = paused ? Date.now() : null
     this._finish()
   }
-  // 空出來的空地：讓清單裡等著的專案上島（進行中的優先、再來暫停的、已落成的最後，同狀態先建立的先）；使用者自己移下島的不算
+  // 還沒有地的專案依序分到空地（進行中的優先、再來暫停的、已落成的最後，同狀態先建立的先）
   _fillSlots() {
     const rank = { active: 0, paused: 1, done: 2 }
     const waiting = this.activeProjects()
-      .filter((p) => p.slot < 0 && !p.parked)
+      .filter((p) => p.slot < 0)
       .sort((a, b) => rank[this.projectStatus(a)] - rank[this.projectStatus(b)] || a.createdAt - b.createdAt)
     for (const p of waiting) {
       const slot = this.freeSlot()
@@ -1525,34 +1531,15 @@ export class Store {
       p.slot = slot
     }
   }
-  // 放上島／移下島：自己決定哪些專案有塔
-  placeProject(id) {
-    const p = this._find('projects', id)
-    if (!p || p.archived) return false
-    if (p.slot >= 0) return true
-    const slot = this.freeSlot()
-    if (slot < 0) return false
-    p.slot = slot
-    p.parked = false
-    this._finish()
-    return true
-  }
-  unplaceProject(id) {
-    const p = this._find('projects', id)
-    if (!p || p.slot < 0) return
-    p.slot = -1
-    p.parked = true
-    this._finish()
-  }
   // deadline 可以不設（空字串）：沒有截止日的專案就沒有到期提醒和準時落成獎勵
-  // 島上的空地滿了也能建立：slot 是 -1，先在清單裡，有空地時自動上島
+  // 開放的地用完了，城鎮會長到放得下（_finish 裡的 _projectTownCheck）
   addProject({ name, color = 0, deadline = '', milestones = [] }) {
     if (!this.canAddProject() || !name.trim()) return null
     const slot = this.freeSlot()
     const p = {
       id: uid(), name: name.trim(), color, deadline: DATE_RE.test(deadline) ? deadline : '', slot, createdAt: Date.now(),
       milestones: milestones.map((t) => t.trim()).filter(Boolean).map((t) => ms(t)),
-      completedAt: null, pausedAt: null, archived: false, parked: false,
+      completedAt: null, pausedAt: null, archived: false,
     }
     this.state.projects.push(p)
     this.stats.projectsCreated++
@@ -1578,17 +1565,13 @@ export class Store {
     this._fillSlots()
     this._finish()
   }
-  // 收藏：塔拆掉，空地讓給清單裡等著的專案。放回：有空地就上島，沒有就先在清單裡
+  // 收藏：房子拆掉，地空出來。放回：重新分一塊地（不夠的話城鎮長大）
   archiveProject(id, archived = true) {
     const p = this._find('projects', id)
     if (!p) return false
-    if (!archived) {
-      if (!this.canAddProject()) return false
-      p.slot = this.freeSlot()
-      p.parked = false
-    }
+    if (!archived && !this.canAddProject()) return false
     p.archived = archived
-    if (archived) this._fillSlots()
+    p.slot = -1
     this._finish()
     return true
   }

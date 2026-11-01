@@ -273,7 +273,6 @@ body.night .overdue .item { background: rgba(255, 255, 255, .05); }
 body.night .proj-pct { filter: none; }
 .proj-meta { font-size: 11.5px; color: var(--ink-faint); margin: 3px 0 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 .proj-meta .warn { color: #d9718e; }
-.proj-meta .waiting { color: var(--sky-deep); }
 .proj-meta .paused { color: var(--ink-soft); font-weight: 500; }
 .proj.is-paused { opacity: .78; }
 .proj.is-paused .proj-pct { filter: grayscale(.8); }

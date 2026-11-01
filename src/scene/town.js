@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mat, rng, wobble, tween, ease, wait, glowTexture } from './util.js'
 import { LAYOUT } from './island.js'
+import { ISLAND_BASE_R } from '../data/projectTown.js'
 import { buildIslandBase } from './islandBase.js'
 import { BUILDINGS, RESIDENTS, MOVE_IN } from '../data/town.js'
 import { buildBuilding, buildResident } from './models/town/index.js'
@@ -8,8 +9,8 @@ import { buildBuilding, buildResident } from './models/town/index.js'
 // ひより町：主島後方的街區浮島。每座一棟建築（依階段換模型）和一條越過時之環的拱橋，
 // 2 階起店長住在這裡：在浮島上閒晃、站在店門口，偶爾走過橋到主島找もち和ふじ聊天。
 
-// a：從主島正後方（-z）往右（+x）量的角度；r：到鎮中心的距離；y：浮島頂面高度
-// 全部排在同一圈：外面是雲鯨的軌道（半徑 24.5）和畫面右上角的星之大樹；正後方留空，主島後排的塔會擋住那裡
+// a：從主島正後方（-z）往右（+x）量的角度；r：島半徑 12 時到鎮中心的距離（島變大時一起往外推）；y：浮島頂面高度
+// 全部排在同一圈：外面是雲鯨的軌道（半徑 24.5）和畫面右上角的星之大樹；正後方留空，專案町後排的房子會擋住那裡
 export const DISTRICTS = {
   florist: { a: -20, r: 19.5, y: 0.3 },
   library: { a: 20, r: 19.5, y: 0.3 },
@@ -33,7 +34,8 @@ const play = (dur, fn, opts = {}) => new Promise((res) => tween(dur, fn, { ...op
 function layoutOf(key) {
   const d = DISTRICTS[key]
   const a = d.a * DEG
-  const center = new THREE.Vector3(Math.sin(a) * d.r, d.y, -Math.cos(a) * d.r)
+  const r = d.r + LAYOUT.radius - ISLAND_BASE_R
+  const center = new THREE.Vector3(Math.sin(a) * r, d.y, -Math.cos(a) * r)
   const inward = new THREE.Vector3(-Math.sin(a), 0, Math.cos(a))
   // 建築朝鎮中心、再往鏡頭（+z）偏一點，遠看是 3/4 側面
   const face = inward.clone().lerp(new THREE.Vector3(0, 0, 1), 0.4).normalize()

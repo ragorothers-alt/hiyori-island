@@ -2,12 +2,12 @@ import * as THREE from 'three'
 import { mat, rng, wobble, shadowed } from './util.js'
 import { SEASONS } from './season.js'
 import { buildIslandBase, addGrassDetail, FALL_UNIFORMS } from './islandBase.js'
-import { PLAN, inTown } from '../data/projectTown.js'
+import { PLAN, inTown, ISLAND_BASE_R } from '../data/projectTown.js'
 
 // 島嶼配置（俯視座標 x, z；鏡頭在 +z 方向）
 export const LAYOUT = {
-  // 原本是 9.5，擴島後外圈多出 2.5 的地（新的塔位在這一圈）
-  radius: 12,
+  // 島的半徑：平常是 12；專案町用到外圈的地時島會變大（Island.setRadius，時之環、街區浮島等跟著往外推）
+  radius: ISLAND_BASE_R,
   pond: { x: -3.3, z: 4.0, r: 1.9 },
   bed: { x: 3.4, z: 3.2, r: 2.5 },
   home: { x: 0, z: 1.4 },
@@ -44,13 +44,40 @@ export class Island {
     this.topMat = addGrassDetail(new THREE.MeshStandardMaterial({ color: '#c5e6b4', roughness: 0.82 }))
     this.group = new THREE.Group()
     world.scene.add(this.group)
-    this._terrain()
     this._pond()
-    this._path()
     this._bed()
+    // 跟島的大小有關的部分（草地、岩壁、小徑、草叢野花、漂浮石塊）放在一起，島變大時整組重蓋
+    this.outer = new THREE.Group()
+    this.group.add(this.outer)
+    this._buildOuter()
+    world.add((dt, t) => this.update(dt, t))
+  }
+
+  _buildOuter() {
+    this._terrain()
+    this._path()
     this._grass()
     this._floaters()
-    world.add((dt, t) => this.update(dt, t))
+  }
+
+  // 島長大（或讀到比較大的存檔）：換新的半徑重蓋外圍那一組
+  setRadius(R) {
+    if (R === LAYOUT.radius) return false
+    LAYOUT.radius = R
+    LAYOUT.path.z0 = R - 0.7
+    const old = this.outer
+    old.removeFromParent()
+    old.traverse((o) => {
+      if (o.isInstancedMesh) o.dispose()
+      o.geometry?.dispose()
+      for (const m of o.userData.ownedMaterials || []) m.dispose()
+    })
+    for (const m of [this.tufts.material, this.wildflowers.material]) m.dispose()
+    this.outer = new THREE.Group()
+    this.group.add(this.outer)
+    this._buildOuter()
+    if (this.season) this.setSeason(this.season)
+    return true
   }
 
   _terrain() {
@@ -88,7 +115,7 @@ export class Island {
     const base = buildIslandBase({ radius: R * 0.99, top: -0.62, cliff: 2.4, depth: 13, seed: 0, wob: 0.035, segs: 88, roots: 1.3, falls: [2.0, 0.62], fallTo: -15 })
     this.base = base
 
-    this.group.add(shadowed(grass, false, true), rim, base)
+    this.outer.add(shadowed(grass, false, true), rim, base)
     this.ground = grass
   }
 
@@ -161,7 +188,7 @@ export class Island {
       m.position.set((i % 2 ? 0.22 : -0.22) + (r() - 0.5) * 0.1, 0.03, path.z0 - t * (path.z0 - path.z1))
       m.rotation.y = r() * 3
       m.scale.set(1 + r() * 0.2, 1, 0.85 + r() * 0.2)
-      this.group.add(shadowed(m, false, true))
+      this.outer.add(shadowed(m, false, true))
     }
   }
 
@@ -192,7 +219,8 @@ export class Island {
     const R = LAYOUT.radius - 0.7
     const tufts = []
     this.tuftMix = []
-    while (tufts.length < 270) {
+    const area = (LAYOUT.radius / 12) ** 2
+    while (tufts.length < Math.round(270 * area)) {
       const a = r() * Math.PI * 2
       const d = Math.sqrt(r()) * R
       const x = Math.cos(a) * d
@@ -221,12 +249,12 @@ export class Island {
       }
     }
     grass.receiveShadow = true
-    this.group.add(grass)
+    this.outer.add(grass)
     this.tufts = grass
 
     // 野花小點
     const flowers = []
-    while (flowers.length < 145) {
+    while (flowers.length < Math.round(145 * area)) {
       const a = r() * Math.PI * 2
       const d = Math.sqrt(r()) * R
       const x = Math.cos(a) * d
@@ -244,7 +272,7 @@ export class Island {
       fm.setMatrixAt(k, o.matrix)
       fm.setColorAt(k, c.set(palette[Math.floor(r() * palette.length)]))
     })
-    this.group.add(fm)
+    this.outer.add(fm)
     this.wildflowers = fm
   }
 
@@ -259,15 +287,16 @@ export class Island {
       const top = new THREE.Mesh(new THREE.CylinderGeometry(s * 1.02, s, 0.16, 18), this.topMat)
       g.add(rock, top)
       const a = (i / 7) * Math.PI * 2 + r()
-      const d = 14 + r() * 4
+      const d = LAYOUT.radius + 2 + r() * 4
       g.position.set(Math.cos(a) * d, -3 + r() * 4, Math.sin(a) * d)
-      g.userData = { y: g.position.y, phase: r() * 6, sp: 0.4 + r() * 0.4 }
-      this.group.add(g)
+      g.userData = { y: g.position.y, phase: r() * 6, sp: 0.4 + r() * 0.4, ownedMaterials: rock.userData.ownedMaterials }
+      this.outer.add(g)
       this.floaters.push(g)
     }
   }
 
   setSeason(key) {
+    this.season = key
     const s = SEASONS[key]
     this.grassMat.color.set(s.grass)
     this.rimMat.color.set(s.rim)

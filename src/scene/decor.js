@@ -1,7 +1,15 @@
 import * as THREE from 'three'
 import { mat, rng, shadowed, tween, ease } from './util.js'
 import { LAYOUT } from './island.js'
-import { inTown } from '../data/projectTown.js'
+import { inTown, ISLAND_BASE_R } from '../data/projectTown.js'
+
+// 島變大時（專案町用到外圈的地），島緣和島外的景物往外推 grow()：瀑布的溪流延長到新的島緣、賞月台跟著島緣、
+// 茶屋浮島、雲鯨、星之大樹、紙鶴、彩虹也一起往外。下面的座標都是島半徑 12 時的位置
+const grow = () => LAYOUT.radius - ISLAND_BASE_R
+const outward = (x, z, d = grow()) => {
+  const r = Math.hypot(x, z)
+  return [(x * (r + d)) / r, (z * (r + d)) / r]
+}
 import { buildIslandBase } from './islandBase.js'
 import { UNLOCKS } from '../theme.js'
 import { SEASONS } from './season.js'
@@ -421,6 +429,17 @@ function sakuraGrow() {
 // 擴島（9.5 → 12）後瀑布往外移到新的島緣
 const DROP_X = 2.47
 const DROP_Z = 0.36
+// 溪流最後一段 (11.1, 1.3) → (12.2, 1.48) 的方向；島再變大時沿這個方向延長
+const CREEK_DIR = [0.98686, 0.16149]
+function creekExtension() {
+  const out = []
+  const g = grow()
+  for (let s = 0.7; s < g + 0.35; s += 0.7) {
+    const k = Math.min(s, g)
+    out.push([12.2 + CREEK_DIR[0] * k, 1.48 + CREEK_DIR[1] * k])
+  }
+  return out
+}
 function waterfall() {
   const g = new THREE.Group()
   const creek = new THREE.Group()
@@ -431,6 +450,8 @@ function waterfall() {
   })
   // 從繡球花北側繞往島緣，最後一段跨過草地與外緣（擴島後延長到新的島緣）
   const course = [[8.25, 0.42], [8.65, 0.55], [9.1, 0.72], [9.7, 0.94], [10.4, 1.14], [11.1, 1.3], [12.2, 1.48]]
+  // 島再變大：沿最後一段的方向接到新的島緣
+  for (const [x, z] of creekExtension()) course.push([x, z])
   const vertices = []
   course.forEach(([x, z], i) => {
     const before = course[Math.max(0, i - 1)]
@@ -438,7 +459,7 @@ function waterfall() {
     const dx = after[0] - before[0]
     const dz = after[1] - before[1]
     const d = Math.hypot(dx, dz)
-    for (const side of [-1, 1]) vertices.push(x - 8.3 - side * dz / d * 0.17, 0.055 - i * 0.008, z - 1.2 + side * dx / d * 0.17)
+    for (const side of [-1, 1]) vertices.push(x - 8.3 - side * dz / d * 0.17, 0.055 - (i / (course.length - 1)) * 0.048, z - 1.2 + side * dx / d * 0.17)
   })
   const ribbon = new THREE.BufferGeometry()
   ribbon.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
@@ -448,7 +469,7 @@ function waterfall() {
   g.add(creek)
   // 瀑布本體（水簾、水花、水霧）從新的島緣落下
   const drop = new THREE.Group()
-  drop.position.set(DROP_X, 0, DROP_Z)
+  drop.position.set(DROP_X + CREEK_DIR[0] * grow(), 0, DROP_Z + CREEK_DIR[1] * grow())
   g.add(drop)
   const owned = [water]
   const fallMats = []
@@ -567,7 +588,8 @@ function teahouse() {
   piece(g, new THREE.CylinderGeometry(0.18, 0.2, 0.34, 6), glow, -1.65, 1.18, 0.65)
   piece(g, new THREE.ConeGeometry(0.28, 0.18, 6), mat(VERMILION), -1.65, 1.44, 0.65)
   // 島的左側（後方留給ひより町的街區浮島）
-  g.position.set(-19.6, 3.2, 3.4)
+  const [tx, tz] = outward(-19.6, 3.4)
+  g.position.set(tx, 3.2, tz)
   g.rotation.y = 0.3
   g.userData.glow = { mats: [glow], lights: [], base: 0.3 }
   g.userData.ownedMaterials = [glow, ...base.userData.ownedMaterials]
@@ -652,7 +674,8 @@ function cranes() {
   g.userData.anim = (t) => {
     birds.forEach(({ bird, wings, phase, radius }, i) => {
       const a = t * 0.1 + phase
-      bird.position.set(Math.cos(a) * radius, 10 + Math.sin(t * 0.65 + phase) * 0.7, Math.sin(a) * radius)
+      const r = radius + grow()
+      bird.position.set(Math.cos(a) * r, 10 + Math.sin(t * 0.65 + phase) * 0.7, Math.sin(a) * r)
       bird.rotation.set(0.04 * Math.sin(t + phase), -a, 0.08 * Math.sin(t * 0.7 + phase))
       wings.forEach((wing, j) => { wing.rotation.z = (j ? 1 : -1) * (0.15 + Math.sin(t * 2.7 + i) * 0.32) })
     })
@@ -679,7 +702,7 @@ function rainbow() {
     }
   }
   // 掛在ひより町後方的街區浮島外面
-  g.position.set(0, -5, -28)
+  g.position.set(0, -5, -28 - grow())
   g.scale.setScalar(1.5)
   g.userData.ownedMaterials = [...bands, cloud]
   g.userData.anim = (t, dt, night) => {
@@ -732,13 +755,14 @@ function tsukimidai() {
   g.add(light)
   g.userData.glow = { mats: [glow], lights: [light], base: 0.2 }
   g.userData.ownedMaterials = [glow]
-  return shadowed(at(g, 8.87, 8.37))
+  return shadowed(at(g, ...outward(8.87, 8.37)))
 }
 
 // 雲鯨繞島一圈：水平半徑 ring（身體內外緣都在茶屋浮島與星之大樹之間），角度 φ = 0 在島正後方。
 // 島後方是弧頂，往兩側一路下潛 dive 到前方的雲海裡；弧頂高度與畫面上看得到的角度由 Decor.placeWhale 依預設視角決定。
 // 看得到的那段用 speed 慢慢游，看不到的地方加速到 fast 倍，大部分時間都在畫面裡
-const WHALE = { ring: 24.5, scale: 1.15, dive: 26, speed: 0.027, fast: 6 }
+const WHALE_RING = 24.5
+const WHALE = { ring: WHALE_RING, scale: 1.15, dive: 26, speed: 0.027, fast: 6 }
 
 // φ（-π..π）與時間的對照表：ts[i] 是從 -π 游到第 i 格要花的秒數
 function whaleClock(seen) {
@@ -804,7 +828,8 @@ function whale() {
 
 // 星之大樹：離島中心水平 ring 遠（樹冠內緣也在雲鯨軌道半徑 24.5 外側，不論高度都不會相撞），
 // 樹冠中心在草地上方 canopy、樹冠頂再高 above、半寬 radius（皆為模型原尺寸）
-const SKY = { ring: 32, scale: 1.3, canopy: 6, above: 2.5, radius: 3.9 }
+const SKY_RING = 32
+const SKY = { ring: SKY_RING, scale: 1.3, canopy: 6, above: 2.5, radius: 3.9 }
 
 // 星之大樹模型（models/starTree.js）原點在浮島草地頂面；位置由 Decor.placeSky 依畫面決定，這裡只負責上下漂浮
 function skytree() {
@@ -873,10 +898,12 @@ const BUILDERS = {
 }
 // 升級景觀在島上佔的地面（商店裝飾不能擺在這裡）
 const FOOTPRINTS = {
-  waterfall: [[8.6, 1.1, 0.9], [10.2, 1.2, 0.8], [11.4, 1.4, 0.7]],
-  shrineUp: [[-6.85, -4.0, 1.55]],
-  tsukimidai: [[8.87, 8.37, 1.0]],
+  waterfall: () => [[8.6, 1.1, 0.9], [10.2, 1.2, 0.8], [11.4, 1.4, 0.7], ...creekExtension().map(([x, z]) => [x, z, 0.7])],
+  shrineUp: () => [[-6.85, -4.0, 1.55]],
+  tsukimidai: () => [[...outward(8.87, 8.37), 1.0]],
 }
+// 位置跟著島的大小走、島變大時要重蓋的景物
+const RIM_ITEMS = ['waterfall', 'tsukimidai', 'teahouse', 'rainbow']
 
 // 這些是「一群」散在島上的物件，彈出動畫要逐一套用在子物件上
 const COLLECTIONS = new Set(['hydrangea', 'chochin', 'lilies', 'bonbori'])
@@ -888,7 +915,20 @@ export class Decor {
     this.group = new THREE.Group()
     world.scene.add(this.group)
     this.items = {}
+    this._fitRings()
     world.add((dt, t) => this.update(dt, t))
+  }
+
+  _fitRings() {
+    WHALE.ring = WHALE_RING + grow()
+    SKY.ring = SKY_RING + grow()
+  }
+
+  // 島的半徑變了：重蓋島緣的景物（雲鯨、星之大樹的位置由 main 重新呼叫 placeWhale／placeSky）
+  relayout(level) {
+    this._fitRings()
+    for (const key of RIM_ITEMS) this._remove(key)
+    this.sync(level)
   }
 
   setSeason(key) {
@@ -928,20 +968,24 @@ export class Decor {
           })
           spawned.push(obj)
         }
-      } else if (!want && have) {
-        const geometries = new Set()
-        have.traverse((o) => {
-          if (o.geometry) geometries.add(o.geometry)
-          if (o.isInstancedMesh) o.dispose()
-        })
-        for (const g of geometries) g.dispose()
-        for (const m of have.userData.ownedMaterials ?? []) m.dispose()
-        for (const tex of have.userData.ownedTextures ?? []) tex.dispose()
-        this.group.remove(have)
-        delete this.items[u.key]
-      }
+      } else if (!want && have) this._remove(u.key)
     }
     return spawned
+  }
+
+  _remove(key) {
+    const have = this.items[key]
+    if (!have) return
+    const geometries = new Set()
+    have.traverse((o) => {
+      if (o.geometry) geometries.add(o.geometry)
+      if (o.isInstancedMesh) o.dispose()
+    })
+    for (const g of geometries) g.dispose()
+    for (const m of have.userData.ownedMaterials ?? []) m.dispose()
+    for (const tex of have.userData.ownedTextures ?? []) tex.dispose()
+    this.group.remove(have)
+    delete this.items[key]
   }
 
   // 星之大樹擺在預設視角可見範圍的右上角：cam 是預設視角的相機，area 是可見範圍的右緣與上緣（像素）
@@ -1023,7 +1067,7 @@ export class Decor {
   // 擺放商店裝飾時要避開的地面範圍：[x, z, 半徑]
   footprints() {
     const out = []
-    for (const [key, list] of Object.entries(FOOTPRINTS)) if (this.items[key]) out.push(...list)
+    for (const [key, list] of Object.entries(FOOTPRINTS)) if (this.items[key]) out.push(...list())
     for (const key of ['hydrangea', 'bonbori']) {
       const o = this.items[key]
       if (!o) continue
@@ -1051,7 +1095,8 @@ export class Decor {
         const a = t * 0.025 + 0.6
         const s = Math.sin(a)
         const up = THREE.MathUtils.smoothstep(s, -0.95, -0.3)
-        o.position.set(Math.cos(a) * 18.5, 4.5 + up * 5 + Math.sin(t * 0.4) * 0.4, s * -18.5)
+        const ring = 18.5 + grow()
+        o.position.set(Math.cos(a) * ring, 4.5 + up * 5 + Math.sin(t * 0.4) * 0.4, s * -ring)
       }
       if (typeof o.userData.anim === 'function') o.userData.anim(t, dt, night)
     }

@@ -10,7 +10,7 @@ import { Decor } from './scene/decor.js'
 import { Garden } from './scene/garden.js'
 import { ProjectHouses } from './scene/projectHouses.js'
 import { ProjectTown } from './scene/projectTown.js'
-import { PLAN, inLot, inTown, lotsAt } from './data/projectTown.js'
+import { PLAN, inLot, inTown, lotsAt, islandRadius } from './data/projectTown.js'
 import { TimeRing } from './scene/timeRing.js'
 import { Character } from './scene/character.js'
 import { Duo } from './scene/duo.js'
@@ -73,6 +73,11 @@ async function boot() {
   const sky = new Sky(world)
   if (params.has('hour')) sky.hourOverride = parseFloat(params.get('hour'))
   sky.theme = theme
+  // 島的大小跟著專案町：用到外圈的地時島比較大，先定好再蓋島和島外的東西
+  const islandR = islandRadius(store.state.town.plevel)
+  LAYOUT.radius = islandR
+  LAYOUT.path.z0 = islandR - 0.7
+  world.setIslandRadius(islandR)
   const island = new Island(world)
   const decor = new Decor(world, sky)
   const garden = new Garden(world, sky)
@@ -511,6 +516,25 @@ async function boot() {
     composeView()
     placeSky()
   }
+  // 島換大小：重蓋島、島緣景物、時之環和街區浮島，構圖拉遠；回傳有沒有變
+  const resizeIsland = (R) => {
+    if (!island.setRadius(R)) return false
+    world.setIslandRadius(R)
+    decor.relayout(store.level.level)
+    ring.relayout()
+    ring.sync(store.eventsOn(store.selectedDate), store.selectedDate === store.today)
+    town.reset()
+    town.sync(store.state.town.seen)
+    townView()
+    return true
+  }
+  const fader = document.createElement('div')
+  fader.className = 'stage-fade'
+  document.body.append(fader)
+  const fadeTo = (v) => {
+    fader.style.opacity = v
+    return sleep(480)
+  }
   const flyToDistrict = (key) => {
     const v = town.view(key)
     world.flyTo(v.target, world.fitDistance(v.radius) + 2, { dir: v.dir, elevation: 0.72, duration: 1.5 })
@@ -629,9 +653,22 @@ async function boot() {
     }),
   )
   // 專案町長大：鏡頭飛到新開的地，街道一段段鋪出來、小物冒出來，等著上島的專案在新地上開工
-  store.on('projectTownGrew', ({ level, added }) =>
+  // 專案多到地不夠（demand）時也會長；用到外圈的地時（island）島先變大
+  store.on('projectTownGrew', ({ level, added, demand, island: bigger }) =>
     queueTown(async () => {
       if (level <= ptown.level) return
+      if (bigger) {
+        world.home(1.4)
+        await sleep(1500)
+        await fadeTo(1)
+        resizeIsland(islandRadius(level))
+        world.home(0.01)
+        await sleep(120)
+        await fadeTo(0)
+        sfx.chime()
+        ui.toast({ icon: '島', title: '小島變大了', sub: '外圈多出一圈地，時之環和ひより町也跟著往外移', ms: 5600 })
+        await sleep(2600)
+      }
       const v = ptown.view(level, ptown.level)
       world.flyTo(v.target, world.fitDistance(v.radius) + 2, { elevation: 0.9, duration: 1.5 })
       await sleep(1600)
@@ -644,8 +681,10 @@ async function boot() {
       const town = store.projectTown
       ui.toast({
         icon: '町',
-        title: `專案町長到 Lv.${level}`,
-        sub: `多了 ${added} 塊地${town.next == null ? '・街道全部鋪好了' : `・再 ${town.next - town.points} 點升下一級`}`,
+        title: demand ? `專案町擴建到 Lv.${level}` : `專案町長到 Lv.${level}`,
+        sub: demand
+          ? `專案變多了，多開 ${added} 塊地，每個專案都有房子`
+          : `多了 ${added} 塊地${town.next == null ? '・街道全部鋪好了' : `・再 ${town.next - town.points} 點升下一級`}`,
         ms: 5600,
       })
       react(2, () => {
@@ -962,6 +1001,8 @@ async function boot() {
   store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
   store.on('reload', ({ soft } = {}) => {
     decor.sync(store.level.level)
+    // 讀進來的存檔島的大小可能不一樣（匯入比較小的也照著縮回去）
+    if (resizeIsland(islandRadius(store.state.town.plevel))) townQueue.length = 0
     ptown.setLevel(store.state.town.plevel)
     // 匯入的存檔小鎮可能比較小：整個重蓋。同步拉回的通常只是多了幾筆，小鎮沒變小就照常長，鏡頭也不動
     const seen = store.state.town.seen
@@ -1481,7 +1522,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, ptown, houses, visit: startVisit }
+  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, ptown, houses, resizeIsland, visit: startVisit }
 }
 
 boot()

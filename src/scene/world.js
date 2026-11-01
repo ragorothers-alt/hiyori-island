@@ -12,8 +12,10 @@ const HOME_TARGET = new THREE.Vector3(0, 0.5, 0)
 const UP = new THREE.Vector3(0, 1, 0)
 // 構圖：地平線落在可見區域上方的比例；時之環前緣（含數字標籤）的半徑與它離下緣（Dock／抽屜）至少要留的像素
 const SKY = 0.22
+// 島半徑 12 時的值；島變大時加上多出來的半徑（setIslandRadius）
 const RING_FRONT = 16.4
 const RING_SIDE = 16.1
+const BASE_R = 12
 const MARGIN = 12
 // 閒置時左右慢慢擺動（不整圈轉到背面）：振幅與角速度
 const SWAY = 1.0
@@ -158,19 +160,25 @@ export class World {
     const off = (2 * (shiftY - lens)) / H
     // 時之環前緣 (0, 0, RING_FRONT)：相對鏡頭的上下偏移固定是 -k，只有深度（= ty·sin + dist - rf·cos）跟距離有關；
     // 小鎮把看的中心往後移時（setTownView），前緣離中心更遠
-    const rf = RING_FRONT - this.homeTarget.z
+    const grow = (this.islandR ?? BASE_R) - BASE_R
+    const rf = RING_FRONT + grow - this.homeTarget.z
     const k = ty * cos + rf * sin
     const room = off - (1 - (2 * (bottom - MARGIN)) / H)
     const front = room > 0.02 ? k / (tanF * room) - ty * sin + rf * cos : 90
     // 左右：時之環兩側 (±RING_SIDE, 0, 0) 放進 left..right（深度 = ty·sin + dist）
     const halfW = Math.max(60, (right - left) / 2 - MARGIN)
-    const side = (RING_SIDE * (W / 2)) / (tanF * this.camera.aspect * halfW) - ty * sin
+    const side = ((RING_SIDE + grow) * (W / 2)) / (tanF * this.camera.aspect * halfW) - ty * sin
     const dist = THREE.MathUtils.clamp(Math.max(front, side), 18, 90) / this.zoomOut
     this.view = { elev, dist }
     this.lens = lens
     this.camera.fov = fov
     this.controls.maxDistance = Math.max(52, dist * 1.6) * this.zoomOut
     this._applyShift()
+  }
+
+  // 島的半徑（構圖要把整圈時之環放進畫面）；呼叫後要重新 compose
+  setIslandRadius(R) {
+    this.islandR = R
   }
 
   // 讓畫面中心避開側邊面板：x>0 往左移、y>0 往上移（像素）

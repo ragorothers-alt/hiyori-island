@@ -2,11 +2,16 @@ import * as THREE from 'three'
 import { EVENT_COLORS } from '../theme.js'
 import { toMin } from '../store.js'
 import { textSprite, glowTexture, tween, ease } from './util.js'
+import { LAYOUT } from './island.js'
 
 // 時之環：24 小時環繞小島。0 點在後方、6 點在右、12 點在正前方、18 點在左（俯視順時針）。
-// 圍在島外（島半徑 12）
-const R_IN = 13.5
-const R_OUT = 15.1
+// 圍在島外：內緣離島緣 1.5、寬 1.6（島半徑 12 時是 13.5–15.1；島變大時跟著往外，見 relayout）
+let R_IN = 13.5
+let R_OUT = 15.1
+const fitRadius = () => {
+  R_IN = LAYOUT.radius + 1.5
+  R_OUT = R_IN + 1.6
+}
 const Y = -0.55
 const LANE_H = 0.26
 
@@ -41,41 +46,11 @@ export class TimeRing {
     this.arcs = new Map()
     this.isToday = true
 
-    // 玻璃底環
-    const base = new THREE.Mesh(
-      new THREE.RingGeometry(R_IN, R_OUT, 192, 1),
-      new THREE.MeshStandardMaterial({ color: '#eaf5fc', transparent: true, opacity: 0.5, roughness: 0.15, metalness: 0.1, emissive: '#ffffff', emissiveIntensity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
-    )
-    base.rotation.x = -Math.PI / 2
-    base.position.y = Y
-    this.baseMat = base.material
-    this.group.add(base)
+    this.baseMat = new THREE.MeshStandardMaterial({ color: '#eaf5fc', transparent: true, opacity: 0.5, roughness: 0.15, metalness: 0.1, emissive: '#ffffff', emissiveIntensity: 0.12, depthWrite: false, side: THREE.DoubleSide })
     this.edgeMat = new THREE.MeshStandardMaterial({ color: '#a9d3ee', emissive: '#cfe9fa', emissiveIntensity: 0.35, roughness: 0.3 })
-    for (const r of [R_IN, R_OUT]) {
-      const e = new THREE.Mesh(new THREE.TorusGeometry(r, 0.03, 6, 220), this.edgeMat)
-      e.rotation.x = Math.PI / 2
-      e.position.y = Y
-      this.group.add(e)
-    }
-
-    // 刻度與時刻文字
     this.labels = []
-    const tickGeo = new THREE.BoxGeometry(0.05, 0.03, 0.3)
-    for (let h = 0; h < 24; h++) {
-      const major = h % 3 === 0
-      const tick = new THREE.Mesh(tickGeo, this.edgeMat)
-      const p = ringPos(h * 60, R_OUT + 0.25)
-      tick.position.copy(p)
-      tick.scale.z = major ? 1.6 : 1
-      tick.lookAt(0, Y, 0)
-      this.group.add(tick)
-      if (major) {
-        const sp = textSprite(String(h), { size: 72, color: '#ffffff', scale: 0.62 })
-        sp.position.copy(ringPos(h * 60, R_OUT + 1.0, Y + 0.25))
-        this.labels.push(sp)
-        this.group.add(sp)
-      }
-    }
+    fitRadius()
+    this._buildBase()
 
     // 今日進度弧
     this.progMat = new THREE.MeshBasicMaterial({ color: '#ffd7e3', transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide })
@@ -95,6 +70,56 @@ export class TimeRing {
     this.group.add(this.now)
 
     world.add((dt, t) => this.update(dt, t))
+  }
+
+  // 玻璃底環、內外緣、刻度與時刻文字
+  _buildBase() {
+    const g = (this.base = new THREE.Group())
+    this.group.add(g)
+    const base = new THREE.Mesh(new THREE.RingGeometry(R_IN, R_OUT, 192, 1), this.baseMat)
+    base.rotation.x = -Math.PI / 2
+    base.position.y = Y
+    g.add(base)
+    for (const r of [R_IN, R_OUT]) {
+      const e = new THREE.Mesh(new THREE.TorusGeometry(r, 0.03, 6, 220), this.edgeMat)
+      e.rotation.x = Math.PI / 2
+      e.position.y = Y
+      g.add(e)
+    }
+    this.labels = []
+    const tickGeo = new THREE.BoxGeometry(0.05, 0.03, 0.3)
+    for (let h = 0; h < 24; h++) {
+      const major = h % 3 === 0
+      const tick = new THREE.Mesh(tickGeo, this.edgeMat)
+      const p = ringPos(h * 60, R_OUT + 0.25)
+      tick.position.copy(p)
+      tick.scale.z = major ? 1.6 : 1
+      tick.lookAt(0, Y, 0)
+      g.add(tick)
+      if (major) {
+        const sp = textSprite(String(h), { size: 72, color: '#ffffff', scale: 0.62 })
+        sp.position.copy(ringPos(h * 60, R_OUT + 1.0, Y + 0.25))
+        this.labels.push(sp)
+        g.add(sp)
+      }
+    }
+  }
+
+  // 島的半徑變了：底環、刻度、日程光帶和今日進度弧都照新的半徑重畫
+  relayout() {
+    fitRadius()
+    const old = this.base
+    old.removeFromParent()
+    old.traverse((o) => {
+      o.geometry?.dispose()
+      if (o.isSprite) {
+        o.material.map?.dispose()
+        o.material.dispose()
+      }
+    })
+    this._buildBase()
+    for (const a of this.arcs.values()) this.previewArc(a.e.id, a.m0, a.m1)
+    this._progMin = -1
   }
 
   nowMinutes() {

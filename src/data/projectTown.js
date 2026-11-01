@@ -1,7 +1,8 @@
 // 專案町：每個專案在島上的小鎮蓋一棟房子。
 // 總平面（町心廣場、街道、20 塊地、街燈和樹）由 Codex 規劃並驗證過，原始檔與示意圖在 art/town-plan/；
 // 座標保留原本的精度（最窄處只差 0.01），不要四捨五入。
-// 城鎮依努力長大：每完成一個里程碑 +1 點、每落成一個專案 +3 點，點數到了就升一級——多開幾塊地、街道往外鋪、多些街燈和樹
+// 城鎮依努力長大：每完成一個里程碑 +1 點、每落成一個專案 +3 點，點數到了就升一級——多開幾塊地、街道往外鋪、多些街燈和樹。
+// 也依需求長大：每個沒收藏的專案都要有一塊地，專案比地多時直接升到放得下的那一級；地用到外圈時島會變大
 import PLAN_DATA from './projectTown.plan.json'
 
 // { plaza, growth: 各級累計地數, lots: [{ id, level, x, z, rot, size, height }]（陣列順序就是開放順序）,
@@ -14,19 +15,32 @@ export const PLAN = PLAN_DATA
 export const PROP_R = { lamp: 0.13, tree: 0.38, bench: 0.29, planter: 0.23, sign: 0.17, fountain: 0.6, gate: 0.11 }
 export const GATE_HALF = 0.79
 
-// 各級門檻（點數）
-export const TOWN_POINTS = [0, 5, 15, 30, 50, 80]
+// 各級門檻（點數）；級數跟著總平面的成長表走
+export const TOWN_POINTS = [0, 5, 15, 30, 50, 80, 120, 170].slice(0, PLAN.growth.length)
 export const MAX_TOWN_LEVEL = TOWN_POINTS.length
 
 export const townPoints = (stats) => (stats.milestonesDone || 0) + (stats.projectsDone || 0) * 3
 export const lotsAt = (level) => PLAN.growth[Math.min(Math.max(level, 1), MAX_TOWN_LEVEL) - 1]
 
-// { level, points, lots：可用的地數, next：下一級的門檻（滿級是 null） }
-export function townLevel(stats) {
-  const points = townPoints(stats)
+// 放得下 n 個專案的最低等級
+export function levelFor(n) {
   let level = 1
-  while (level < MAX_TOWN_LEVEL && points >= TOWN_POINTS[level]) level++
-  return { level, points, lots: lotsAt(level), next: level < MAX_TOWN_LEVEL ? TOWN_POINTS[level] : null }
+  while (level < MAX_TOWN_LEVEL && lotsAt(level) < n) level++
+  return level
+}
+
+// 島的半徑：用到外圈那一級的地時，島從 base 長到 expanded（總平面沒有外圈時一直是 12）
+export const ISLAND_BASE_R = PLAN.island?.base ?? 12
+export const islandRadius = (level) => (PLAN.island && level >= PLAN.island.fromLevel ? PLAN.island.expanded : ISLAND_BASE_R)
+
+// need：要有地的專案數；kept：已經長到的等級（小鎮不會縮回去）
+// { level, effort：光看努力的等級, points, lots：可用的地數, next：再升一級的點數門檻（滿級是 null） }
+export function townLevel(stats, need = 0, kept = 1) {
+  const points = townPoints(stats)
+  let effort = 1
+  while (effort < MAX_TOWN_LEVEL && points >= TOWN_POINTS[effort]) effort++
+  const level = Math.max(effort, levelFor(need), Math.min(kept || 1, MAX_TOWN_LEVEL))
+  return { level, effort, points, lots: lotsAt(level), next: level < MAX_TOWN_LEVEL ? TOWN_POINTS[level] : null }
 }
 
 // 點 (x, z) 在不在地塊（依 rot 轉的正方形，四周再加 pad）裡

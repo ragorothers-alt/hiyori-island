@@ -10,7 +10,7 @@ import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/b
 import { LINES, FUJI_LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
-import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt } from './data/projectTown.js'
+import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
@@ -689,8 +689,7 @@ export class UI {
       $('#newProjectBtn').hidden = false
       this.projectColor = (this.projectColor + 1) % PROJECT_COLORS.length
       this._syncPickers()
-      if (p.slot >= 0) this.hooks.focusProject(p.id)
-      else this.toast({ icon: '町', title: '專案町的地都有人用了', sub: '這個專案先放在清單裡；完成里程碑讓小鎮長大會多出地，也可以把別的專案「移下島」' })
+      this.hooks.focusProject(p.id)
     })
 
     const onClick = (e) => {
@@ -724,10 +723,6 @@ export class UI {
         this._moreOpen = null
         s.archiveProject(id, true)
       }
-      else if (act === 'place') {
-        if (s.placeProject(id)) this.hooks.focusProject(id)
-        else this.toast({ icon: '町', title: `專案町開放的 ${s.projectTown.lots} 塊地都蓋了`, sub: `完成里程碑讓小鎮長大會多出地（最多 ${TOWER_SLOTS} 塊）；或先把一個專案「移下島」` })
-      } else if (act === 'unplace') s.unplaceProject(id)
       else if (act === 'restore') {
         if (!s.archiveProject(id, false)) this.toast({ icon: '町', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏其他專案再放回來吧' })
       } else if (act === 'delete') armConfirm(e.target.closest('button'), '確定刪除？', () => s.deleteProject(id))
@@ -771,21 +766,20 @@ export class UI {
   }
 
   // 常用的放外面，其他收進「更多」
-  _projectActions(p, waiting) {
+  _projectActions(p) {
     const b = (act, label) => `<button data-act="${act}">${label}</button>`
     const main = [
-      p.slot >= 0 ? b('view', '在島上查看') : b('place', '放上島'),
+      b('view', '在島上查看'),
       p.completedAt ? '' : p.pausedAt ? b('resume', '繼續') : b('pause', '暫停'),
       p.completedAt || p.pausedAt ? '' : b('deadline', '截止日'),
     ]
     const more = this._moreOpen === p.id
-      ? [b('rename', '改名'), b('color', '換色'), p.slot >= 0 && waiting ? b('unplace', '移下島') : '', b('archive', '收藏'), b('delete', '刪除'), b('more', '收起')]
+      ? [b('rename', '改名'), b('color', '換色'), b('archive', '收藏'), b('delete', '刪除'), b('more', '收起')]
       : [b('more', '更多')]
     return [...main, ...more].join('')
   }
 
-  // waiting：清單裡有還沒上島的專案（才需要「移下島」讓位）
-  _projectCard(p, archived = false, waiting = false) {
+  _projectCard(p, archived = false) {
     const s = this.store
     const prog = s.progress(p)
     const pct = Math.round(prog * 100)
@@ -801,7 +795,7 @@ export class UI {
       )
       .join('')
     const paused = !archived && !!p.pausedAt
-    const tags = archived ? '' : `${paused ? '<span class="paused">暫停中</span>' : ''}${p.slot >= 0 ? '' : '<span class="waiting">還沒上島</span>'}`
+    const tags = paused ? '<span class="paused">暫停中</span>' : ''
     return `<div class="proj ${paused ? 'is-paused' : ''} ${this.hlKey === 'project:' + p.id ? 'hl' : ''}" data-id="${esc(p.id)}" style="--c:${c}">
       <div class="proj-head"><div class="proj-name">${esc(p.name)}</div><div class="proj-pct">${pct}%</div></div>
       <div class="proj-meta">${tags}${paused ? '' : this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>
@@ -811,18 +805,17 @@ export class UI {
       <div class="proj-actions">
         ${archived
           ? `<button data-act="restore">放回島上</button><button data-act="delete">刪除</button>`
-          : this._projectActions(p, waiting)}
+          : this._projectActions(p)}
       </div>
     </div>`
   }
 
   renderProjects() {
     const s = this.store
-    // 進行中的在前、暫停的在後；同狀態裡已經在專案町蓋房子的在前
+    // 進行中的在前，再來暫停的、已落成的
     const all = s.activeProjects()
     const rank = { active: 0, paused: 1, done: 2 }
-    const active = all.sort((a, b) => rank[s.projectStatus(a)] - rank[s.projectStatus(b)] || (a.slot < 0) - (b.slot < 0) || a.createdAt - b.createdAt)
-    const waiting = active.some((p) => p.slot < 0)
+    const active = all.sort((a, b) => rank[s.projectStatus(a)] - rank[s.projectStatus(b)] || a.createdAt - b.createdAt)
     const archived = s.state.projects.filter((p) => p.archived)
     // 狀態篩選：有兩種以上狀態時才出現
     const count = { all: all.length, active: 0, paused: 0, done: 0 }
@@ -837,7 +830,7 @@ export class UI {
       .join('')
     const shown = filter === 'all' ? active : active.filter((p) => s.projectStatus(p) === filter)
     $('#projectList').innerHTML = active.length
-      ? shown.map((p) => this._projectCard(p, false, waiting)).join('')
+      ? shown.map((p) => this._projectCard(p)).join('')
       : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段。</div>`
     $('#archiveBox').hidden = !archived.length
     $('#archiveList').innerHTML = archived.map((p) => this._projectCard(p, true)).join('')
@@ -990,14 +983,14 @@ export class UI {
     const prev = TOWN_POINTS[pt.level - 1]
     const ptPct = pt.next == null ? 100 : Math.round(((pt.points - prev) / (pt.next - prev)) * 100)
     const ptPips = Array.from({ length: MAX_TOWN_LEVEL }, (_, k) => `<i class="${k < pt.level ? 'on' : ''}"></i>`).join('')
-    const ptNext = pt.next == null ? '街道全部鋪好了' : `再 ${pt.next - pt.points} 點升到 Lv.${pt.level + 1}，多 ${lotsAt(pt.level + 1) - pt.lots} 塊地`
+    const ptNext = pt.next == null ? '街道全部鋪好了' : `再 ${pt.next - pt.points} 點升到 Lv.${pt.level + 1}，多 ${lotsAt(pt.level + 1) - pt.lots} 塊地${islandRadius(pt.level + 1) > islandRadius(pt.level) ? '，小島也會變大' : ''}`
     const ptCard = `<button type="button" class="bld ptown" data-ptown style="--bc:#e8a96f" title="每個專案在專案町蓋一棟房子；點一下飛過去看看">
         <span class="bld-k">町</span>
         <span class="bld-n"><b>專案町 Lv.${pt.level}</b><small>地 ${used} / ${pt.lots}・最多 ${TOWER_SLOTS} 塊</small></span>
         <span class="bld-pips">${ptPips}</span>
         <span class="bld-bar"><i style="width:${ptPct}%"></i></span>
         <small class="bld-next">${ptNext}</small>
-        <small class="bld-res">完成一個里程碑 +1 點、落成一個專案 +3 點</small>
+        <small class="bld-res">完成一個里程碑 +1 點、落成一個專案 +3 點；專案多到地不夠時，小鎮也會直接擴建</small>
       </button>`
     $('#townBox').innerHTML = `
       <div class="town-head"><b>${esc(t.title)}</b><small>${t.residents.length} 位居民</small></div>
