@@ -646,7 +646,7 @@ export class UI {
     const form = $('#projectForm')
     $('#newProjectBtn').onclick = () => {
       if (!this.store.canAddProject()) {
-        this.toast({ icon: '塔', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏已完成的專案吧' })
+        this.toast({ icon: '町', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏已完成的專案吧' })
         return
       }
       form.hidden = false
@@ -729,7 +729,7 @@ export class UI {
         else this.toast({ icon: '町', title: `專案町開放的 ${s.projectTown.lots} 塊地都蓋了`, sub: `完成里程碑讓小鎮長大會多出地（最多 ${TOWER_SLOTS} 塊）；或先把一個專案「移下島」` })
       } else if (act === 'unplace') s.unplaceProject(id)
       else if (act === 'restore') {
-        if (!s.archiveProject(id, false)) this.toast({ icon: '塔', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏其他專案再放回來吧' })
+        if (!s.archiveProject(id, false)) this.toast({ icon: '町', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏其他專案再放回來吧' })
       } else if (act === 'delete') armConfirm(e.target.closest('button'), '確定刪除？', () => s.deleteProject(id))
     }
     $('#projectList').addEventListener('click', onClick)
@@ -807,7 +807,7 @@ export class UI {
       <div class="proj-meta">${tags}${paused ? '' : this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>
       <div class="proj-bar">${p.milestones.map((m) => `<i class="${m.done ? 'on' : ''}"></i>`).join('') || '<i></i>'}</div>
       ${archived ? '' : `<ul class="ms-list">${ms}</ul>
-      <form class="ms-add"><input placeholder="新增里程碑（塔會多一層）" maxlength="60" /><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`}
+      <form class="ms-add"><input placeholder="新增里程碑" maxlength="60" /><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`}
       <div class="proj-actions">
         ${archived
           ? `<button data-act="restore">放回島上</button><button data-act="delete">刪除</button>`
@@ -818,7 +818,7 @@ export class UI {
 
   renderProjects() {
     const s = this.store
-    // 進行中的在前、暫停的在後；同狀態裡島上有塔的在前
+    // 進行中的在前、暫停的在後；同狀態裡已經在專案町蓋房子的在前
     const all = s.activeProjects()
     const rank = { active: 0, paused: 1, done: 2 }
     const active = all.sort((a, b) => rank[s.projectStatus(a)] - rank[s.projectStatus(b)] || (a.slot < 0) - (b.slot < 0) || a.createdAt - b.createdAt)
@@ -838,7 +838,7 @@ export class UI {
     const shown = filter === 'all' ? active : active.filter((p) => s.projectStatus(p) === filter)
     $('#projectList').innerHTML = active.length
       ? shown.map((p) => this._projectCard(p, false, waiting)).join('')
-      : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，島上的塔就會蓋高一層。</div>`
+      : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段。</div>`
     $('#archiveBox').hidden = !archived.length
     $('#archiveList').innerHTML = archived.map((p) => this._projectCard(p, true)).join('')
     if (this._keepMsFocus) {
@@ -1232,7 +1232,7 @@ export class UI {
       [st.tasksDone, '朵花綻放（累計任務）'],
       [st.focusMinutes, '分鐘專注'],
       [Math.max(st.bestStreak, s.streak), '天最長連續'],
-      [st.projectsDone, '座塔落成'],
+      [st.projectsDone, '棟房子落成'],
     ]
     $('#statsGrid').innerHTML = stats.map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')
 

@@ -17,7 +17,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="ひより日和" />
-  <meta name="description" content="用 three.js 打造的遊戲化日程與專案管理小島：任務會開花、專案會蓋成塔、日程化成時之環。" />
+  <meta name="description" content="用 three.js 打造的遊戲化日程與專案管理小島：任務會開花、專案在小鎮蓋成房子、日程化成時之環。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -165,7 +165,7 @@
 
       <!-- 專案 -->
       <section class="tab-page" data-page="projects">
-        <button class="btn-ghost wide" id="newProjectBtn">＋ 新專案 · 在島上蓋一座塔</button>
+        <button class="btn-ghost wide" id="newProjectBtn">＋ 新專案 · 在專案町蓋一棟房子</button>
         <form class="add-form project-form" id="projectForm" hidden autocomplete="off">
           <input id="projectName" maxlength="40" placeholder="專案名稱" required />
           <div class="form-row">
@@ -173,7 +173,7 @@
             <label class="date-field" id="projectDeadlineField" hidden>截止 <input type="date" id="projectDeadline" /><button type="button" class="mini" id="projectDeadlineClear" title="不設截止日" aria-label="不設截止日">×</button></label>
             <div class="swatches" id="projectColor"></div>
           </div>
-          <textarea id="projectMilestones" rows="4" placeholder="里程碑，一行一個（每完成一個，塔就蓋高一層）"></textarea>
+          <textarea id="projectMilestones" rows="4" placeholder="里程碑，一行一個（完成越多，房子蓋得越完整）"></textarea>
           <div class="form-row end">
             <button type="button" class="btn-ghost" id="cancelProject">取消</button>
             <button class="btn-primary" type="submit">開始建造</button>

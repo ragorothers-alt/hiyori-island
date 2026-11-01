@@ -8,7 +8,7 @@ import { Island, LAYOUT } from './scene/island.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { Decor } from './scene/decor.js'
 import { Garden } from './scene/garden.js'
-import { Towers } from './scene/towers.js'
+import { ProjectHouses } from './scene/projectHouses.js'
 import { ProjectTown } from './scene/projectTown.js'
 import { PLAN, inLot, inTown, lotsAt } from './data/projectTown.js'
 import { TimeRing } from './scene/timeRing.js'
@@ -76,8 +76,8 @@ async function boot() {
   const island = new Island(world)
   const decor = new Decor(world, sky)
   const garden = new Garden(world, sky)
-  const towers = new Towers(world, sky)
-  // 專案町的街道與小物；房子（目前還是塔）只蓋在已經鋪好路的地上，城鎮升級的演出時才把新地上的房子蓋起來
+  const houses = new ProjectHouses(world, sky)
+  // 專案町的街道與小物；房子只蓋在已經鋪好路的地上，城鎮升級的演出時才把新地上的房子蓋起來
   const ptown = new ProjectTown(world, sky)
   ptown.setLevel(store.state.town.plevel)
   const builtProjects = () => store.towerProjects().filter((p) => p.slot < lotsAt(ptown.level))
@@ -170,7 +170,7 @@ async function boot() {
       if (!c) {
         const el = document.createElement('div')
         el.className = 'proj-chip'
-        c = labels.add(el, () => towers.labelAnchor(p.id), { declutter: true })
+        c = labels.add(el, () => houses.labelAnchor(p.id), { declutter: true })
         chips.set(p.id, c)
       }
       const pct = Math.round(store.progress(p) * 100)
@@ -206,7 +206,7 @@ async function boot() {
   function syncScene(animate = true) {
     garden.sync(store.gardenTasks(store.selectedDate), store.selectedDate, store.today)
     const onLots = builtProjects()
-    const built = towers.sync(onLots, (p) => store.progress(p), animate, store.today)
+    const built = houses.sync(onLots, (p) => store.progress(p), animate, store.today)
     ptown.setLots(new Set(onLots.map((p) => p.slot)))
     for (const b of built) {
       const p = store.state.projects.find((x) => x.id === b.id)
@@ -216,7 +216,7 @@ async function boot() {
           fx.burst(pos, { colors: ['#ffffff', color, '#fff2d6'], count: 34, speed: 1.8, up: 1.2, gravity: -2, size: 0.2 })
         }, 300 + i * 250),
       )
-      const base = towers.anchor(b.id, false)
+      const base = houses.anchor(b.id, false)
       if (base) fx.ripple(base, color, 2.4)
     }
     ring.sync(store.eventsOn(store.selectedDate), store.selectedDate === store.today)
@@ -331,7 +331,7 @@ async function boot() {
       ring.pulse(id)
     },
     focusProject: (id) => {
-      const p = towers.anchor(id, false)
+      const p = houses.anchor(id, false)
       if (p) world.flyTo(p.add(new THREE.Vector3(0, 1.4, 0)), 10)
     },
     // ひより町的建築卡片：還沒開張的就看看它會浮出來的地方
@@ -673,7 +673,7 @@ async function boot() {
   }
 
   // ── 居民偶爾走過橋，到主島找兩人聊天 ──
-  // 主島上走不過去的地方：池塘、花圃、小木屋、塔、升級景觀、擺設（每趟路線開始時拍一次快照）
+  // 主島上走不過去的地方：池塘、花圃、小木屋、專案町的房子與小物、升級景觀、擺設（每趟路線開始時拍一次快照）
   const walkBlocked = () => {
     const { pond, bed, cabin, decor: spots } = LAYOUT
     // 房子擋路（地的四周留給街道），街道和廣場可以走
@@ -691,7 +691,7 @@ async function boot() {
       return false
     }
   }
-  // 兩人斜前方、靠居民走來那一側的空地（站在後面會被塔擋住，兩人也會背對鏡頭）
+  // 兩人斜前方、靠居民走來那一側的空地（站在後面會被房子擋住，兩人也會背對鏡頭）
   const meetSpot = (r) => {
     if (duo.focusing || duo.inside) return null
     const blocked = walkBlocked()
@@ -1088,9 +1088,9 @@ async function boot() {
   store.on('projectOnTime', (p) => {
     setTimeout(() => {
       sfx.chime()
-      const pos = towers.anchor(p.id)
+      const pos = houses.anchor(p.id)
       if (pos) fx.burst(pos, { colors: ['#ffe08a', '#fff6d6', '#ffffff'], count: 50, speed: 1.6 })
-      ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」準時落成`, sub: `在期限前完成・額外 +${XP.onTime} XP` })
+      ui.toast({ icon: '町', title: `「${short(p.name, 12)}」準時落成`, sub: `在期限前完成・額外 +${XP.onTime} XP` })
       talk('onTime', { project: short(p.name) }, 4200, '在期限前落成了。')
     }, 2600)
   })
@@ -1165,17 +1165,17 @@ async function boot() {
   store.on('projectDone', (p) => {
     setTimeout(() => {
       sfx.fanfare()
-      const tower = towers.anchor(p.id, false)
-      fx.fireworks(tower || new THREE.Vector3(), 6)
+      const house = houses.anchor(p.id, false)
+      fx.fireworks(house || new THREE.Vector3(), 6)
       talk('projectDone', { project: short(p.name) }, 4500)
-      ui.toast({ icon: '塔', title: `「${short(p.name, 12)}」落成！`, sub: `${tower ? '整座塔都蓋好了' : '所有里程碑都完成了'}，+${XP.project} XP` })
+      ui.toast({ icon: '町', title: `「${short(p.name, 12)}」落成！`, sub: `${house ? '專案町的房子蓋好了' : '所有里程碑都完成了'}，+${XP.project} XP` })
     }, 1100)
   })
   store.on('xp', ({ amount, coins, kind, id }) => {
     let pos = null
     if (kind === 'task' || kind === 'star') pos = garden.anchor(id)
     else if (kind === 'event') pos = ring.anchor(id)
-    else if (kind === 'milestone' || kind === 'project' || kind === 'onTime') pos = towers.anchor(id)
+    else if (kind === 'milestone' || kind === 'project' || kind === 'onTime') pos = houses.anchor(id)
     // 時間、作息與戒除是ふじ在照顧，經驗值從她頭上冒出來
     else if (kind === 'plan' || kind === 'sleep' || kind === 'quit' || kind === 'urge') pos = fuji.headAnchor()
     pos ||= mochi.headAnchor()
@@ -1481,7 +1481,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, ptown, towers, visit: startVisit }
+  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, ptown, houses, visit: startVisit }
 }
 
 boot()
