@@ -886,6 +886,7 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 /* ── App 模式：像一般 App 一樣用。小島停住藏起來，面板撐滿畫面；手機的分頁列在最下面 ── */
 .app-bar { display: none; }
 .tab-ic { display: none; }
+.tab-ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
 .full-label { display: none; }
 body.app-mode { background: var(--app-bg); }
 body.app-mode #scene { visibility: hidden; }
@@ -920,7 +921,6 @@ body.app-mode .full-btn:hover { color: var(--ink); }
   }
   body.app-mode .tab { padding: 4px 0 2px; gap: 2px; background: none; box-shadow: none; }
   body.app-mode .tab .tab-ic { display: block; }
-  .tab-ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
   body.app-mode .tab small { display: none; }
   body.app-mode .tab span { font-size: 11px; letter-spacing: .04em; }
   body.app-mode .tab.active { background: none; box-shadow: none; color: var(--ink); }
@@ -966,6 +966,76 @@ body.app-mode .full-btn:hover { color: var(--ink); }
 .ff-btns { display: flex; gap: 10px; }
 .ff-btns button { min-width: 112px; padding: 11px 18px; font-size: 14px; margin: 0; }
 .ff-cabin { font-size: 12.5px; }
+
+/* ── App 模式・電腦：左邊側欄放分頁（寬螢幕再加問候和番茄鐘），右邊上方是頁名和日期、下面是內容 ──
+   中等寬度只留圖示側欄、番茄鐘浮在內容下方；太矮的視窗沿用上面的分頁列版面 */
+.app-head, .ab-xp, .tab-n { display: none; }
+.tab-n { font-style: normal; font-family: var(--font-num); font-size: 10.5px; font-weight: 700; line-height: 1; min-width: 18px; padding: 4px 5px; border-radius: 9px; text-align: center; background: var(--sakura-soft); color: #c0607c; }
+body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
+.app-head h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 26px; letter-spacing: .14em; }
+.app-head small { font-family: var(--font-display); font-size: 12px; letter-spacing: .24em; color: var(--sakura); }
+@media (min-width: 861px) and (min-height: 560px) {
+  body.app-mode { --side-w: 84px; --side-bg: #ebe8f2; }
+  body.app-mode.night { --side-bg: #16142a; }
+  body.app-mode .app-bar { display: none; }
+  body.app-mode .panel.full {
+    inset: 0; width: auto; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; background: var(--app-bg);
+    display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: 72px minmax(0, 1fr);
+  }
+  body.app-mode .panel.full .tabs {
+    grid-column: 1; grid-row: 1 / 3; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+    padding: 16px 10px; border-bottom: 0; border-right: 1px solid var(--line); background: var(--side-bg); overflow-y: auto; scrollbar-width: none;
+  }
+  body.app-mode .tab { position: relative; flex-direction: column; gap: 4px; padding: 10px 0 8px; }
+  body.app-mode .tab .tab-ic { display: block; }
+  body.app-mode .tab small { display: none; }
+  body.app-mode .tab span { font-size: 11.5px; letter-spacing: .06em; }
+  body.app-mode .tab.active .tab-ic { color: var(--sakura); }
+  body.app-mode .tab-n { display: block; position: absolute; top: 4px; left: calc(50% + 6px); min-width: 17px; padding: 3px 4px; font-size: 10px; }
+  body.app-mode .panel.full .full-btn { position: static; margin-top: auto; width: auto; height: auto; flex-direction: column; gap: 4px; padding: 10px 0 8px; border-radius: 14px; }
+  body.app-mode .full-btn svg { width: 22px; height: 22px; }
+  body.app-mode .full-label { font-size: 11.5px; letter-spacing: .06em; }
+  /* 頁名和內容對齊（內容最寬 1240px、置中），日期列放在同一列的右邊 */
+  body.app-mode .app-head {
+    grid-column: 2; grid-row: 1; display: flex; align-items: baseline; gap: 12px; align-self: center;
+    width: 100%; max-width: 1296px; margin: 0 auto; padding: 0 28px;
+  }
+  body.app-mode .datebar { top: 8px; left: auto; right: calc(28px + max(0px, (100vw - var(--side-w) - 1296px) / 2)); transform: none; z-index: 45; box-shadow: none; }
+  body.app-mode .panel.full .panel-body { grid-column: 2; grid-row: 2; padding: 4px 28px 112px; }
+  /* 番茄鐘浮在內容區下方正中 */
+  body.app-mode .dock, body.app-mode .focus-pick, body.app-mode .app-chat { left: calc(50% + var(--side-w) / 2); }
+  body.app-mode .app-chat { bottom: 92px; }
+  /* 內容區底下留給番茄鐘的空間，sticky 已經會算進去 */
+  body.app-mode .coach-say { bottom: 0; }
+  body.app-mode .toasts { top: 78px; left: auto; right: 28px; transform: none; align-items: flex-end; }
+  body.app-mode .panel.full [data-page="schedule"] .pg-main { height: calc(100dvh - 196px); }
+}
+@media (min-width: 1240px) and (min-height: 640px) {
+  body.app-mode { --side-w: 232px; }
+  /* 側欄上面：問候、等級和經驗值 */
+  body.app-mode .app-bar { display: block; top: 0; left: 0; right: auto; width: var(--side-w); height: auto; padding: 28px 24px 0; background: none; z-index: 45; }
+  body.app-mode .ab-hi b { font-size: 26px; }
+  body.app-mode .ab-xp { display: block; height: 5px; margin-top: 10px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .ab-xp i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--sky), var(--sakura)); transition: width .6s var(--ease); }
+  body.app-mode .panel.full .tabs { padding: 132px 14px 178px; }
+  body.app-mode .tab { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 14px; }
+  body.app-mode .tab .tab-ic svg { width: 20px; height: 20px; }
+  body.app-mode .tab span { font-size: 14.5px; letter-spacing: .1em; }
+  body.app-mode .tab small { display: inline; font-size: 10.5px; letter-spacing: .12em; }
+  body.app-mode .tab-n { position: static; margin-left: auto; padding: 4px 6px; font-size: 11px; }
+  body.app-mode .panel.full .full-btn { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 14px; }
+  body.app-mode .full-btn svg { width: 20px; height: 20px; }
+  body.app-mode .full-label { font-size: 14.5px; letter-spacing: .1em; }
+  /* 番茄鐘收進側欄最下面：上排計時、下排日曆／白天夜晚／音效 */
+  body.app-mode .dock { left: 14px; bottom: 14px; width: calc(var(--side-w) - 28px); transform: none; flex-wrap: wrap; justify-content: space-around; gap: 6px 0; padding: 10px; border-radius: 18px; box-shadow: none; }
+  body.app-mode .dock #focusBox { flex: 1 1 100%; }
+  body.app-mode .dock .focus-info { flex: 1; min-width: 0; }
+  body.app-mode .dock-sep { flex: 1 1 100%; width: auto; height: 1px; margin: 0; }
+  body.app-mode .focus-pick { left: 14px; bottom: 164px; transform: none; }
+  body.app-mode .panel.full .panel-body { padding-bottom: 40px; }
+  body.app-mode .app-chat { bottom: 24px; }
+  body.app-mode .panel.full [data-page="schedule"] .pg-main { height: calc(100dvh - 124px); }
+}
 
 /* ── 小木屋室內：整個畫面交給屋裡，等級卡、日期列和每日任務先淡出，只留 Dock ── */
 .hud, .datebar, .quests { transition: opacity .4s, background .8s, border-color .8s; }

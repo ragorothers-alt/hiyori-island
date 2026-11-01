@@ -23,6 +23,7 @@ import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
 import { readBackup, restoreBackup } from './sync.js'
+import { doneOn } from './habits.js'
 
 const TAB_ORDER = ['tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
@@ -253,6 +254,9 @@ export class UI {
     this.tab = tab
     $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab))
     $$('.tab-page').forEach((p) => p.classList.toggle('active', p.dataset.page === tab))
+    const tb = $(`.tab[data-tab="${tab}"]`)
+    $('#ahTitle').textContent = tb.querySelector('span').textContent
+    $('#ahKana').textContent = tb.querySelector('small').textContent
     if ($('#panel').classList.contains('collapsed')) this.togglePanel(false)
     if (tab === 'records') this.renderRecords()
     if (tab === 'habits') this.habits.render()
@@ -387,6 +391,16 @@ export class UI {
     const lv = s.level.level
     $('#abGreet').textContent = greeting(new Date().getHours())
     $('#abSub').textContent = `Lv.${lv} ${levelTitle(lv)}${s.streak ? `・連續 ${s.streak} 日` : ''}`
+    const { cur, need } = s.level
+    $('#abXp').style.width = `${(cur / need) * 100}%`
+    $('#abXpBar').title = `${cur} / ${need} XP`
+    // 電腦的側欄：今天還沒做完的任務、還沒打卡的習慣
+    const badge = (el, n) => {
+      el.hidden = !n
+      el.textContent = n > 99 ? '99+' : n
+    }
+    badge($('#tnTasks'), s.tasksOn(s.today).filter((t) => !t.done).length)
+    badge($('#tnHabits'), s.habitsDueToday().filter((h) => !doneOn(h, s.today)).length)
   }
   // App 模式看不到小島上的兩人：她們說的話改成畫面下方的小對話框（一次一句）
   chatter(who, text, ms = 3400) {
