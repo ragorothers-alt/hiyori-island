@@ -11,6 +11,13 @@ export class DatesView {
     this.adding = false
     this.kind = 'exam'
     root.addEventListener('click', (e) => this._click(e))
+    // 專案截止日的小卡是 role="button" 的 div：Enter、空白鍵也要能按
+    root.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) {
+        e.preventDefault()
+        this._click(e)
+      }
+    })
     root.addEventListener('submit', (e) => {
       e.preventDefault()
       const f = e.target

@@ -537,6 +537,8 @@ export class HabitsView {
     if (type === 'slip') this.slipId = null
     else if (type === 'new') this.formOpen = false
     else if (type === 'edit') this.editId = null
+    // 只關這個表單：不要讓 ui.js 接著離開全螢幕
+    e.stopPropagation()
     this.render()
   }
 

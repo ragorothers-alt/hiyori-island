@@ -283,8 +283,8 @@
   </div>
 
   <div class="calendar" id="calendar" hidden></div>
-  <div class="modal" id="editSheet" hidden></div>
-  <div class="modal" id="reviewModal" hidden>
+  <div class="modal" id="editSheet" role="dialog" aria-modal="true" aria-label="編輯" hidden></div>
+  <div class="modal" id="reviewModal" role="dialog" aria-modal="true" aria-label="今天的回顧" hidden>
     <form class="modal-card review-card glass" id="reviewForm">
       <div class="modal-kicker">今日のふりかえり</div>
       <div class="review-date" id="reviewDate"></div>
@@ -299,7 +299,7 @@
     </form>
   </div>
 
-  <div class="modal" id="newsModal" hidden>
+  <div class="modal" id="newsModal" role="dialog" aria-modal="true" aria-label="這一版的新功能" hidden>
     <div class="modal-card news-card glass">
       <div class="modal-kicker">あたらしいこと</div>
       <h3 class="news-title">這一版的新功能</h3>
@@ -308,7 +308,7 @@
     </div>
   </div>
 
-  <div class="modal" id="weekModal" hidden>
+  <div class="modal" id="weekModal" role="dialog" aria-modal="true" aria-label="一週的回顧" hidden>
     <div class="modal-card week-card glass">
       <div class="modal-kicker">先週のふりかえり</div>
       <div class="review-date" id="weekRange"></div>
@@ -356,7 +356,7 @@
   </div>
 
   <!-- App 模式專注時的全螢幕計時 -->
-  <div class="focus-full" id="focusFull" hidden>
+  <div class="focus-full" id="focusFull" role="dialog" aria-modal="true" aria-label="專注計時" hidden>
     <button class="icon-btn ff-min" id="ffMin" title="縮小（計時繼續）"><svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></svg></button>
     <div class="ff-card">
       <div class="ff-kicker" id="ffKicker">專注中</div>
@@ -371,7 +371,7 @@
 
   <div class="toasts" id="toasts"></div>
 
-  <div class="modal" id="levelModal" hidden>
+  <div class="modal" id="levelModal" role="dialog" aria-modal="true" aria-label="升級了" hidden>
     <div class="modal-card glass">
       <div class="modal-kicker">レベルアップ</div>
       <div class="modal-lv">Lv.<b id="modalLv">2</b></div>

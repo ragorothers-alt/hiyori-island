@@ -52,6 +52,9 @@ const writeLocal = (k, v) => {
     localStorage.setItem(k, JSON.stringify(v))
   } catch {}
 }
+// 鍵盤可以停的地方（看得到的）
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const focusables = (root) => [...root.querySelectorAll(FOCUSABLE)].filter((el) => el.getClientRects().length)
 // 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
 const LAYOUT_KEY = 'hiyori-layout'
 const ISLAND_ICON = '<svg viewBox="0 0 24 24"><path d="M3 16.5c3 0 4.5-1.8 9-1.8s6 1.8 9 1.8"/><path d="M6.5 16.5l1.8 3.5h7.4l1.8-3.5"/><path d="M12 14.7V7"/><path d="M12 7c-2.4-1.6-5-1.2-6.5.6 2-.2 3.6.3 4.6 1.4M12 7c2.4-1.6 5-1.2 6.5.6-2-.2-3.6.3-4.6 1.4M12 7c-.8-1.6-2.3-2.6-4-2.8"/></svg>'
@@ -88,9 +91,14 @@ function inlineEdit(el, value, onSave) {
     else onSave(null)
   }
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') finish(true)
-    if (e.key === 'Escape') finish(false)
     e.stopPropagation()
+    // 中文輸入法選字時按的 Enter 不算送出
+    if (e.isComposing || e.keyCode === 229) return
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      finish(true)
+    }
+    if (e.key === 'Escape') finish(false)
   })
   input.addEventListener('blur', () => finish(true))
 }
@@ -159,7 +167,31 @@ export class UI {
   }
 
   _bindChrome() {
-    $$('.tab').forEach((b) => b.addEventListener('click', () => this.setTab(b.dataset.tab)))
+    // 分頁和頁面互相標好（讀螢幕軟體才知道選了哪一頁、對到哪一塊）
+    for (const b of $$('.tab')) {
+      b.id = `tab-${b.dataset.tab}`
+      b.setAttribute('aria-controls', `page-${b.dataset.tab}`)
+      b.addEventListener('click', () => this.setTab(b.dataset.tab))
+    }
+    for (const p of $$('.tab-page')) {
+      p.id = `page-${p.dataset.page}`
+      p.setAttribute('role', 'tabpanel')
+      p.setAttribute('aria-labelledby', `tab-${p.dataset.page}`)
+    }
+    this._markTabs(this.tab)
+    // 焦點在分頁上時，方向鍵是換分頁（橫的分頁列用左右、側欄用上下），不是換日期
+    $('.tabs').addEventListener('keydown', (e) => {
+      if (!e.target.closest('.tab')) return
+      const n = TAB_ORDER.length
+      const i = TAB_ORDER.indexOf(this.tab)
+      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
+      const to = step ? TAB_ORDER[(i + step + n) % n] : e.key === 'Home' ? TAB_ORDER[0] : e.key === 'End' ? TAB_ORDER[n - 1] : null
+      if (!to) return
+      e.preventDefault()
+      e.stopPropagation()
+      this.setTab(to)
+      $(`.tab[data-tab="${to}"]`).focus()
+    })
     $('#prevDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, -1))
     $('#nextDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, 1))
     $('#todayBtn').onclick = () => this.store.selectDate(this.store.today)
@@ -210,27 +242,13 @@ export class UI {
     this._bindFold()
     this._bindSheet()
 
+    this._bindLayers()
     addEventListener('keydown', (e) => {
-      const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)
-      if (e.key === 'Escape') {
-        // 一次關一層：日曆上面還開著對話框（編輯、回顧…）時，只關對話框
-        const modal = $$('.modal').some((m) => !m.hidden)
-        // 全螢幕面板在最底層：上面什麼都沒開、也不是在打字時才離開
-        const covered = modal || typing || this.calendar.isOpen || !$('#shop').hidden
-        this.toggleShop(false)
-        this.closeModal()
-        if (!modal) this.calendar.close()
-        this.schedule.closeEdit()
-        if (!$('#reviewModal').hidden) $('#reviewLater').click()
-        this.closeWeekCard()
-        this.closeNews()
-        this.focus.toggleBig(false)
-        this.focus.togglePicker(false)
-        this.focus.toggleSet(false)
-        if (typing) document.activeElement.blur()
-        if (!covered) this.toggleFull(false)
-      }
-      if (typing || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return
+      const typing = !!document.activeElement?.closest?.('input, textarea, select, [contenteditable]')
+      if (e.key === 'Escape') return this._escape(typing)
+      // 對話框、全螢幕計時或日曆蓋在上面時，快捷鍵先不作用：不然會動到底下看不到的面板
+      if (typing || e.ctrlKey || e.metaKey || e.altKey || this._topLayer()) return
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault()
         this.setTab('tasks')
@@ -250,9 +268,90 @@ export class UI {
     })
   }
 
+  // ── 蓋在面板上的幾層：對話框（DOM 裡越後面越上層）→ App 模式的全螢幕計時 → 日曆 ──
+  _topLayer() {
+    const modal = $$('.modal').filter((m) => !m.hidden).pop()
+    if (modal) return modal
+    if (!$('#focusFull').hidden) return $('#focusFull')
+    return this.calendar.isOpen ? $('#calendar') : null
+  }
+  // Esc 一次只關最上面那一層；什麼都沒開時才放開打字的欄位、離開全螢幕
+  _escape(typing) {
+    const top = this._topLayer()
+    if (top) {
+      const close = {
+        editSheet: () => this.schedule.closeEdit(),
+        reviewModal: () => $('#reviewLater').click(),
+        newsModal: () => this.closeNews(),
+        weekModal: () => this.closeWeekCard(),
+        levelModal: () => this.closeModal(),
+        focusFull: () => this.focus.toggleBig(false),
+        calendar: () => this.calendar.close(),
+      }[top.id]
+      return close?.()
+    }
+    if (!$('#focusPick').hidden || !$('#focusSet').hidden) {
+      this.focus.togglePicker(false)
+      this.focus.toggleSet(false)
+    } else if (!$('#shop').hidden) this.toggleShop(false)
+    else if (typing) document.activeElement.blur()
+    else this.toggleFull(false)
+  }
+  // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）
+  _trapTab(e) {
+    if (e.key !== 'Tab') return
+    const top = this._topLayer()
+    if (!top) return
+    const list = focusables(top)
+    if (!list.length) return e.preventDefault()
+    const i = list.indexOf(document.activeElement)
+    if (i >= 0 && !(e.shiftKey ? i === 0 : i === list.length - 1)) return
+    e.preventDefault()
+    ;(e.shiftKey ? list.at(-1) : list[0]).focus()
+  }
+  // 對話框打開時把焦點移進去，關掉時還給打開前的地方（日曆自己會做）
+  _bindLayers() {
+    addEventListener('keydown', (e) => this._trapTab(e), true)
+    let last = null
+    let prev = null
+    document.addEventListener('focusin', (e) => {
+      if (e.target === last) return
+      prev = last
+      last = e.target
+    })
+    const back = new Map()
+    const watch = new MutationObserver((list) => {
+      for (const { target: el } of list) {
+        if (!el.hidden && !back.has(el)) {
+          back.set(el, el.contains(last) ? prev : last)
+          requestAnimationFrame(() => {
+            if (!el.hidden && !el.contains(document.activeElement)) focusables(el)[0]?.focus({ preventScroll: true })
+          })
+        } else if (el.hidden && back.has(el)) {
+          const to = back.get(el)
+          back.delete(el)
+          // 焦點還在這層裡（或掉到 body）才還回去：關掉的同時打開了別層就不搶
+          const a = document.activeElement
+          if (to?.isConnected && (!a || a === document.body || el.contains(a))) to.focus({ preventScroll: true })
+        }
+      }
+    })
+    for (const el of [...$$('.modal'), $('#focusFull')]) watch.observe(el, { attributes: true, attributeFilter: ['hidden'] })
+  }
+
+  // 選中的分頁：active 樣式、aria-selected，Tab 鍵只停在選中的那一個（其他用方向鍵）
+  _markTabs(tab) {
+    for (const b of $$('.tab')) {
+      const on = b.dataset.tab === tab
+      b.classList.toggle('active', on)
+      b.setAttribute('aria-selected', String(on))
+      b.tabIndex = on ? 0 : -1
+    }
+  }
+
   setTab(tab) {
     this.tab = tab
-    $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab))
+    this._markTabs(tab)
     $$('.tab-page').forEach((p) => p.classList.toggle('active', p.dataset.page === tab))
     const tb = $(`.tab[data-tab="${tab}"]`)
     $('#ahTitle').textContent = tb.querySelector('span').textContent

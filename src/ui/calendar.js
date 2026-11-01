@@ -14,7 +14,7 @@ const MODE_KEY = 'hiyori-cal-mode'
 // 三日檢視只在手機寬度出現（和 calendar.css 的 600px 同步）
 const PHONE = '(max-width: 600px)'
 // 日曆開著時不讓這些快捷鍵傳到底下（它們會動到被蓋住的面板）
-const SWALLOW = /^[1-5nNsSfFvVeE]$/
+const SWALLOW = /^[1-6nNsSfFvVeE]$/
 
 const colorOf = (i) => EVENT_COLORS[(+i || 0) % EVENT_COLORS.length]
 const md = (date) => {
@@ -256,8 +256,8 @@ export class CalendarView {
     if (!this.isOpen) return
     const k = e.key
     const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[k]
-    // 日曆上面還有對話框（編輯、回顧…）：Esc 交給 ui.js 關對話框（日曆留著），其他快捷鍵不讓底下的面板跟著動
-    const modal = [...document.querySelectorAll('.modal')].some((m) => !m.hidden)
+    // 日曆上面還有對話框（編輯、回顧…）或 App 模式的全螢幕計時：Esc 交給 ui.js 關上面那層（日曆留著），其他快捷鍵不讓底下的面板跟著動
+    const modal = [...document.querySelectorAll('.modal, .focus-full')].some((m) => !m.hidden)
     if (modal && k === 'Escape') return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     const a = document.activeElement

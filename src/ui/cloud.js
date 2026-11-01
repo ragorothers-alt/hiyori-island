@@ -36,7 +36,7 @@ export class CloudView {
       if (e.target.matches('.cloud-input')) this.draft = e.target.value
     })
     row.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.matches('.cloud-input')) this._act('join')
+      if (e.key === 'Enter' && !e.isComposing && e.target.matches('.cloud-input')) this._act('join')
     })
     this.render()
   }

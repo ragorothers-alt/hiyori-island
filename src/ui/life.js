@@ -175,6 +175,8 @@ export class LifeView {
         e.preventDefault()
         this._commitEdit(li)
       } else if (e.key === 'Escape') {
+        // 只取消這筆的編輯：不要讓 ui.js 接著離開全螢幕
+        e.stopPropagation()
         this.editing = null
         this._renderList(true)
       }
