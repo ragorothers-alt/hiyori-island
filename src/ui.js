@@ -51,6 +51,10 @@ const writeLocal = (k, v) => {
     localStorage.setItem(k, JSON.stringify(v))
   } catch {}
 }
+// 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
+const LAYOUT_KEY = 'hiyori-layout'
+const ISLAND_ICON = '<svg viewBox="0 0 24 24"><path d="M3 16.5c3 0 4.5-1.8 9-1.8s6 1.8 9 1.8"/><path d="M6.5 16.5l1.8 3.5h7.4l1.8-3.5"/><path d="M12 14.7V7"/><path d="M12 7c-2.4-1.6-5-1.2-6.5.6 2-.2 3.6.3 4.6 1.4M12 7c2.4-1.6 5-1.2 6.5.6-2-.2-3.6.3-4.6 1.4M12 7c-.8-1.6-2.3-2.6-4-2.8"/></svg>'
+const greeting = (h) => (h >= 5 && h < 11 ? '早安' : h >= 11 && h < 17 ? '午安' : h >= 17 && h < 22 ? '晚上好' : '夜深了')
 // 回饋：到 GitHub 開一則 issue，先填好版本和裝置大小（不帶任何個人資料）
 const FEEDBACK_URL = 'https://github.com/ragorothers-alt/hiyori-island/issues/new'
 const QUALITY_INFO = {
@@ -95,6 +99,8 @@ export class UI {
     this.store = store
     this.hooks = hooks
     this.tab = 'tasks'
+    // 先標上 App 模式：底下建番茄鐘時若正在專注，兩人不會先把畫面帶進小木屋
+    document.body.classList.toggle('app-mode', readLocal(LAYOUT_KEY, 'island') === 'app')
     this.priority = 2
     this.tag = 'work'
     this.eventColor = 0
@@ -129,6 +135,7 @@ export class UI {
     this.dates.render()
     this.applyFontScale()
     this.renderNewsDot()
+    this.setAppMode(readLocal(LAYOUT_KEY, 'island') === 'app', { save: false })
     // 開發與截圖用：?tab=habits、?calendar
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
@@ -166,7 +173,8 @@ export class UI {
       this.renderChrome()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
-    $('#fullBtn').onclick = () => this.toggleFull()
+    $('#fullBtn').onclick = () => (this.appMode ? this.setAppMode(false) : this.toggleFull())
+    $('#appBtn').onclick = () => this.setAppMode(true)
     this.toggleFull(false)
     $('#themeBtn').onclick = () => this.toggleTheme()
     this.renderTheme()
@@ -215,6 +223,7 @@ export class UI {
         if (!$('#reviewModal').hidden) $('#reviewLater').click()
         this.closeWeekCard()
         this.closeNews()
+        this.focus.toggleBig(false)
         this.focus.togglePicker(false)
         this.focus.toggleSet(false)
         if (typing) document.activeElement.blur()
@@ -254,6 +263,8 @@ export class UI {
   togglePanel(force) {
     const panel = $('#panel')
     const collapsed = force === undefined ? !panel.classList.contains('collapsed') : force
+    // App 模式的面板就是整個畫面，不收起來
+    if (collapsed && this.appMode) return
     if (collapsed) this.toggleFull(false)
     panel.classList.toggle('collapsed', collapsed)
     document.body.classList.toggle('panel-collapsed', collapsed)
@@ -266,7 +277,7 @@ export class UI {
     let start = null
     let dragged = false
     bar.addEventListener('pointerdown', (e) => {
-      if (!sheetLayout() || e.pointerType === 'mouse') return
+      if (!sheetLayout() || e.pointerType === 'mouse' || this.appMode) return
       start = { x: e.clientX, y: e.clientY }
       dragged = false
     })
@@ -325,18 +336,70 @@ export class UI {
 
   // 全螢幕編輯：面板蓋滿整個畫面，寬螢幕時內容排成左右兩欄
   toggleFull(force) {
+    const full = force ?? !$('#panel').classList.contains('full')
+    // App 模式時面板一直撐滿；回小島要用 setAppMode(false)
+    if (this.appMode && !full) return
+    this._setFull(full)
+  }
+  _setFull(full) {
     const panel = $('#panel')
-    const full = force ?? !panel.classList.contains('full')
     if (full) {
       this.togglePanel(false)
       this.toggleShop(false)
     }
     panel.classList.toggle('full', full)
     document.body.classList.toggle('panel-full', full)
+    this.renderFullBtn()
+  }
+  // 分頁列最右邊的鈕：平常是全螢幕編輯，App 模式時是「小島」
+  renderFullBtn() {
     const b = $('#fullBtn')
+    const full = $('#panel').classList.contains('full')
+    if (this.appMode) {
+      b.innerHTML = `${ISLAND_ICON}<span class="full-label">小島</span>`
+      b.title = '切換到小島'
+      b.setAttribute('aria-pressed', 'false')
+      return
+    }
     b.innerHTML = full ? ICON.shrink : ICON.expand
     b.title = full ? '離開全螢幕 (E / Esc)' : '全螢幕編輯 (E)'
     b.setAttribute('aria-pressed', String(full))
+  }
+
+  // ── App 模式：像一般 App 一樣用。面板撐滿整個畫面，小島停住、藏起來；手機的分頁列移到底下 ──
+  setAppMode(on, { save = true } = {}) {
+    this.appMode = on
+    document.body.classList.toggle('app-mode', on)
+    if (save) writeLocal(LAYOUT_KEY, on ? 'app' : 'island')
+    if (on) this.toggleShop(false)
+    this._setFull(on)
+    if (!on) {
+      this.focus.toggleBig(false)
+      $('#appChat').hidden = true
+    } else if (this.focus.mode !== 'idle') this.focus.toggleBig(true)
+    this.renderAppBar()
+    this.renderSettings()
+    this.hooks.appModeChanged?.(on)
+  }
+  renderAppBar() {
+    if (!this.appMode) return
+    const s = this.store
+    const lv = s.level.level
+    $('#abGreet').textContent = greeting(new Date().getHours())
+    $('#abSub').textContent = `Lv.${lv} ${levelTitle(lv)}${s.streak ? `・連續 ${s.streak} 日` : ''}`
+  }
+  // App 模式看不到小島上的兩人：她們說的話改成畫面下方的小對話框（一次一句）
+  chatter(who, text, ms = 3400) {
+    if (!this.appMode || !text) return
+    const el = $('#appChat')
+    const fuji = who === 'fuji'
+    el.innerHTML = `<span class="stamp-k ${fuji ? 'coach-k' : 'mochi-k'}">${fuji ? '藤' : 'も'}</span><p><b>${fuji ? 'ふじ' : 'もち'}</b>${esc(text)}</p>`
+    el.hidden = false
+    el.classList.remove('show')
+    void el.offsetWidth
+    el.classList.add('show')
+    clearTimeout(this._chatT)
+    this._chatT = setTimeout(() => (el.hidden = true), Math.max(3000, ms || 0) + 600)
   }
 
   // ── 白天／夜晚 ──
@@ -970,6 +1033,8 @@ export class UI {
     const quality = this.store.state.settings.quality
     $$('#qualityPick button').forEach((b) => b.classList.toggle('on', b.dataset.v === quality))
     $('#qualityInfo').textContent = QUALITY_INFO[quality]
+    $$('#layoutPick button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'app') === !!this.appMode))
+    $('#layoutInfo').textContent = this.appMode ? '面板撐滿畫面、小島先休息，像一般 App 一樣用（只改這台裝置）' : '任務在島上開花、兩人在島上陪你（只改這台裝置）'
     const fs = this.store.state.settings.fontScale
     $$('#fontPick button').forEach((b) => b.classList.toggle('on', +b.dataset.v === fs))
     const stuck = this.store.state.settings.stuckNudge
@@ -1309,6 +1374,10 @@ export class UI {
       const b = e.target.closest('[data-v]')
       if (b) this.setTheme(b.dataset.v)
     })
+    $('#layoutPick').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (b) this.setAppMode(b.dataset.v === 'app')
+    })
     $('#fontPick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (!b) return
@@ -1457,6 +1526,7 @@ export class UI {
     $('#soundBtn').title = sound ? '音效：開' : '音效：關'
 
     this.renderQuests()
+    this.renderAppBar()
   }
 
   // 每日任務（每天輪替三個）＋每週挑戰
@@ -1505,7 +1575,8 @@ export class UI {
   // ── 金平糖商店 ──
   toggleShop(force) {
     const open = force ?? $('#shop').hidden
-    // 商店要在島上擺東西，打開時先離開全螢幕
+    // 商店要在島上擺東西，打開時先離開全螢幕（App 模式就先切回小島）
+    if (open && this.appMode) this.setAppMode(false)
     if (open) this.toggleFull(false)
     $('#shop').hidden = !open
     $('#shopBtn').classList.toggle('on', open)
@@ -1629,11 +1700,16 @@ class FocusTimer {
       e.stopPropagation()
       this.togglePicker()
     }
-    // 沒在計時時點時間，打開長度設定（手機上看不到任務標籤，也是從這裡進）
+    // 沒在計時時點時間，打開長度設定（手機上看不到任務標籤，也是從這裡進）；App 模式計時中點時間打開全螢幕計時
     $('#focusTime').onclick = (e) => {
       e.stopPropagation()
       if (this.mode === 'idle') this.toggleSet()
+      else if (this.ui.appMode) this.toggleBig(true)
     }
+    $('#ffToggle').onclick = () => this.toggle()
+    $('#ffStop').onclick = () => this.stop()
+    $('#ffMin').onclick = () => this.toggleBig(false)
+    $('#ffCabin').onclick = () => this.hooks.goCabin?.()
     $('#focusPickList').addEventListener('click', (e) => {
       const b = e.target.closest('[data-tid]')
       if (!b) return
@@ -1857,6 +1933,14 @@ class FocusTimer {
     this._save()
     this.render()
     this.hooks.focusStarted(false, this.taskId, this.info)
+    if (this.ui.appMode) this.toggleBig(true)
+  }
+
+  // App 模式：專注時整個畫面是一個大計時器（縮小後計時繼續，點右下的時間再打開）
+  toggleBig(force) {
+    const open = (force ?? $('#focusFull').hidden) && this.mode !== 'idle'
+    $('#focusFull').hidden = !open
+    if (open) this.render()
   }
 
   // 一輪專注結束：記下分鐘數，接著休息
@@ -1933,5 +2017,23 @@ class FocusTimer {
     const frac = this.mode === 'idle' ? 0 : counting ? (this.elapsed % 3600000) / 3600000 : 1 - this.left / this.total
     $('#focusArc').style.strokeDashoffset = 119.4 * (1 - frac)
     document.title = this.mode === 'idle' ? 'ひより日和 · 日程小島' : `${time} ${this.mode === 'focus' ? '專注中' : '休息中'} · ひより`
+    this._renderBig(time, frac, label, t)
+  }
+
+  _renderBig(time, frac, label, t) {
+    const el = $('#focusFull')
+    if (this.mode === 'idle') {
+      el.hidden = true
+      return
+    }
+    if (el.hidden) return
+    el.classList.toggle('break', this.mode === 'break')
+    $('#ffKicker').textContent = this.paused != null ? '暫停中' : label
+    $('#ffTime').textContent = time
+    $('#ffArc').style.strokeDashoffset = 552.9 * (1 - frac)
+    $('#ffTask').textContent = this.mode === 'break' ? '起來動一動、喝口水' : t ? `◷ ${t.title}` : '不指定任務'
+    $('#ffToggle').textContent = this.paused != null ? '繼續' : '暫停'
+    $('#ffStop').textContent = this.counting ? '做完了' : this.mode === 'break' ? '跳過休息' : '結束'
+    $('#ffCabin').hidden = this.mode !== 'focus'
   }
 }

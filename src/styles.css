@@ -1,5 +1,6 @@
 /* ── ひより日和 · 日系清透 ── */
 :root {
+  --app-bg: #f3f1f7;
   --ink: #3e4a5c;
   --ink-soft: #66768a;
   --ink-faint: #9aa8b8;
@@ -25,6 +26,7 @@
 }
 
 body.night {
+  --app-bg: #1c1a2e;
   --ink: #e9eef8;
   --ink-soft: #bcc7da;
   --ink-faint: #8995ad;
@@ -880,6 +882,90 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
   .panel.full .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) { .panel.full { animation: none; } }
+
+/* ── App 模式：像一般 App 一樣用。小島停住藏起來，面板撐滿畫面；手機的分頁列在最下面 ── */
+.app-bar { display: none; }
+.tab-ic { display: none; }
+.full-label { display: none; }
+body.app-mode { background: var(--app-bg); }
+body.app-mode #scene { visibility: hidden; }
+body.app-mode :is(.hud, .quests, .brand) { display: none; }
+body.app-mode .app-bar { display: flex; align-items: center; position: fixed; top: 0; left: 0; right: 0; height: 76px; padding: 0 28px; z-index: 9; background: var(--app-bg); }
+.ab-hi b { display: block; font-family: var(--font-display); font-weight: 400; font-size: 24px; letter-spacing: .14em; line-height: 1.2; }
+.ab-hi small { font-size: 11.5px; color: var(--ink-faint); letter-spacing: .04em; }
+body.app-mode .datebar { top: 12px; }
+body.app-mode .panel.full { top: 76px; animation: none; }
+body.app-mode .dock { z-index: 46; }
+body.app-mode .dock :is(#shopBtn, #viewBtn, #panelBtn, #appBtn, #roomBtn) { display: none; }
+body.app-mode .focus-pick { z-index: 47; }
+body.app-mode .full-btn { width: auto; padding: 0 12px; display: flex; align-items: center; gap: 5px; color: var(--ink-soft); }
+body.app-mode .full-btn svg { width: 19px; height: 19px; }
+body.app-mode .full-label { display: inline; font-size: 13px; letter-spacing: .08em; }
+body.app-mode .full-btn:hover { color: var(--ink); }
+@media (min-width: 861px) {
+  body.app-mode .panel.full .full-btn { right: 16px; }
+  /* 放在上方列右邊的空位，不蓋到分頁列上的「小島」 */
+  body.app-mode .toasts { top: 10px; left: auto; right: 28px; transform: none; align-items: flex-end; }
+}
+@media (max-width: 860px) {
+  body.app-mode .app-bar { height: 60px; padding: 0 16px; }
+  body.app-mode .ab-hi b { font-size: 19px; }
+  body.app-mode .ab-hi small { font-size: 10.5px; }
+  body.app-mode .datebar { top: 8px; }
+  body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: var(--app-bg); backdrop-filter: none; }
+  body.app-mode .panel::before { display: none; }
+  body.app-mode .panel .tabs {
+    order: 2; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; padding: 5px 2px calc(5px + env(safe-area-inset-bottom));
+    border-bottom: 0; border-top: 1px solid var(--line); background: var(--glass-strong); touch-action: auto;
+  }
+  body.app-mode .tab { padding: 4px 0 2px; gap: 2px; background: none; box-shadow: none; }
+  body.app-mode .tab .tab-ic { display: block; }
+  .tab-ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
+  body.app-mode .tab small { display: none; }
+  body.app-mode .tab span { font-size: 11px; letter-spacing: .04em; }
+  body.app-mode .tab.active { background: none; box-shadow: none; color: var(--ink); }
+  body.app-mode .tab.active .tab-ic { color: var(--sakura); }
+  body.app-mode .tab.has-dot span::after { top: -26px; right: -6px; }
+  body.app-mode .full-btn { flex-direction: column; justify-content: center; gap: 2px; height: auto; padding: 4px 0 2px; border-radius: 12px; }
+  body.app-mode .full-btn svg { width: 22px; height: 22px; }
+  body.app-mode .full-label { font-size: 11px; letter-spacing: .04em; }
+  body.app-mode .panel-body { padding: 12px 14px 96px; }
+  /* 番茄鐘縮成右下角的小膠囊，其他 Dock 按鈕先藏起來（日曆從日期列點） */
+  body.app-mode .dock { left: auto; right: 12px; transform: none; bottom: calc(70px + env(safe-area-inset-bottom)); padding: 4px 8px 4px 4px; }
+  body.app-mode .dock > :not(#focusBox) { display: none; }
+  body.app-mode .focus-pick { bottom: calc(128px + env(safe-area-inset-bottom)); }
+  body.app-mode .toasts { top: 66px; }
+}
+@media (max-width: 860px) and (max-height: 500px) and (orientation: landscape) {
+  body.app-mode .app-bar { display: none; }
+  body.app-mode .panel.full { inset: 0; }
+}
+
+/* App 模式：兩人說的話 */
+.app-chat { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); z-index: 46; display: flex; align-items: center; gap: 9px; max-width: min(460px, calc(100vw - 24px)); padding: 8px 14px 8px 8px; border-radius: 20px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow); pointer-events: none; }
+.app-chat.show { animation: fadeUp .35s var(--ease); }
+.app-chat .stamp-k { width: 30px; height: 30px; flex: none; font-size: 14px; }
+.app-chat .mochi-k { color: #d65f7f; border-color: #e8899f; }
+.app-chat p { margin: 0; font-size: 13px; line-height: 1.5; }
+.app-chat p b { margin-right: 6px; font-size: 11.5px; color: var(--ink-faint); font-weight: 500; }
+@media (max-width: 860px) { .app-chat { left: 12px; right: 12px; transform: none; bottom: calc(128px + env(safe-area-inset-bottom)); max-width: none; } body.app-mode .coach-say { bottom: 62px; } }
+
+/* App 模式：專注時的全螢幕計時 */
+.focus-full { position: fixed; inset: 0; z-index: 48; display: grid; place-items: center; padding: 20px; background: var(--app-bg); animation: fadeIn .3s var(--ease); }
+.ff-min { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; }
+.ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; }
+.ff-kicker { font-family: var(--font-display); font-size: 15px; letter-spacing: .3em; color: var(--sakura); }
+.focus-full.break .ff-kicker { color: #4aa17c; }
+.ff-ring { position: relative; width: min(68vw, 280px); aspect-ratio: 1; }
+.ff-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.ff-ring circle { fill: none; stroke: rgba(140, 170, 200, .18); stroke-width: 7; }
+.ff-ring circle.fg { stroke: var(--sakura); stroke-linecap: round; stroke-dasharray: 552.9; stroke-dashoffset: 552.9; transition: stroke-dashoffset 1s linear, stroke .4s; }
+.focus-full.break .ff-ring circle.fg { stroke: var(--mint); }
+.ff-time { position: absolute; inset: 0; display: grid; place-content: center; font-family: var(--font-num); font-size: clamp(44px, 14vw, 64px); font-weight: 700; letter-spacing: .03em; }
+.ff-task { font-size: 15px; color: var(--ink-soft); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ff-btns { display: flex; gap: 10px; }
+.ff-btns button { min-width: 112px; padding: 11px 18px; font-size: 14px; margin: 0; }
+.ff-cabin { font-size: 12.5px; }
 
 /* ── 小木屋室內：整個畫面交給屋裡，等級卡、日期列和每日任務先淡出，只留 Dock ── */
 .hud, .datebar, .quests { transition: opacity .4s, background .8s, border-color .8s; }

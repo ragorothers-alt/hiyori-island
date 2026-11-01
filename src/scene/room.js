@@ -56,7 +56,8 @@ export class Room {
 
   // instant：重新整理後接著專注，直接在屋裡
   async enter(instant = false) {
-    if (this.active || this.switching) return
+    // App 模式時小島和屋內都不顯示（main 設定 blocked）
+    if (this.active || this.switching || this.blocked?.()) return
     this.switching = true
     this.onToggle?.(true)
     if (!instant) await this._fadeTo(1)

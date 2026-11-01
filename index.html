@@ -54,6 +54,9 @@
     </div>
   </header>
 
+  <!-- ── App 模式的頂欄：問候和等級（日期列疊在它上面） ── -->
+  <div class="app-bar" id="appBar"><div class="ab-hi"><b id="abGreet">午安</b><small id="abSub"></small></div></div>
+
   <!-- ── 上方中央：日期 ── -->
   <div class="datebar glass">
     <button class="icon-btn" id="prevDay" title="前一天" aria-label="前一天">
@@ -73,12 +76,12 @@
   <!-- ── 右側：主面板 ── -->
   <aside class="panel glass" id="panel">
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="tasks" role="tab"><span>任務</span><small>きょう</small></button>
-      <button class="tab" data-tab="schedule" role="tab"><span>日程</span><small>よてい</small></button>
-      <button class="tab" data-tab="coach" role="tab"><span>教練</span><small>ふじ</small></button>
-      <button class="tab" data-tab="habits" role="tab"><span>習慣</span><small>しゅうかん</small></button>
-      <button class="tab" data-tab="projects" role="tab"><span>專案</span><small>しごと</small></button>
-      <button class="tab" data-tab="records" role="tab"><span>紀錄</span><small>きろく</small></button>
+      <button class="tab active" data-tab="tasks" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7.5l2 2 3.2-3.5"/><path d="M5 15.5l2 2 3.2-3.5"/><path d="M13.5 8h6M13.5 16h6"/></svg></i><span>任務</span><small>きょう</small></button>
+      <button class="tab" data-tab="schedule" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg></i><span>日程</span><small>よてい</small></button>
+      <button class="tab" data-tab="coach" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8l-4.5 3.5v-3.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg></i><span>教練</span><small>ふじ</small></button>
+      <button class="tab" data-tab="habits" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 3.5l3 3-3 3"/><path d="M4 11.5V9.5a3 3 0 0 1 3-3h13"/><path d="M7 20.5l-3-3 3-3"/><path d="M20 12.5v2a3 3 0 0 1-3 3H4"/></svg></i><span>習慣</span><small>しゅうかん</small></button>
+      <button class="tab" data-tab="projects" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></i><span>專案</span><small>しごと</small></button>
+      <button class="tab" data-tab="records" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V4.5M19 20v-6.5"/></svg></i><span>紀錄</span><small>きろく</small></button>
       <button class="icon-btn small full-btn" id="fullBtn" title="全螢幕編輯 (E)" aria-pressed="false"></button>
     </nav>
 
@@ -220,6 +223,8 @@
         <h3 class="sec-title">設定<small>せってい</small></h3>
         <div class="settings" id="settingsBox">
           <div class="set-row" id="installRow" hidden><div><b>安裝到桌面</b><small>像 App 一樣從桌面或主畫面打開，離線也能用</small></div><button class="chip-toggle on" id="installBtn">安裝</button></div>
+          <div class="set-row theme-row"><div><b>介面</b><small id="layoutInfo"></small></div>
+            <div class="seg" id="layoutPick"><button type="button" data-v="island">小島</button><button type="button" data-v="app">App</button></div></div>
           <div class="set-row theme-row"><div><b>夜間模式</b><small id="themeInfo"></small></div>
             <div class="seg" id="themePick"><button type="button" data-v="auto">依時間</button><button type="button" data-v="system">跟系統</button><button type="button" data-v="day">白天</button><button type="button" data-v="night">夜晚</button></div></div>
           <div class="set-row"><div><b>省電模式</b><small>閒置時降低畫面更新率，筆電整天開著也不耗電</small></div><button class="chip-toggle" id="powerBtn"></button></div>
@@ -271,6 +276,7 @@
     <button class="icon-btn" id="viewBtn" title="回到全景 (V)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
     <button class="icon-btn" id="themeBtn" title="切換成夜晚 (D)"><svg viewBox="0 0 24 24" class="i-moon"><path d="M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z"/></svg><svg viewBox="0 0 24 24" class="i-sun"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"/></svg></button>
     <button class="icon-btn" id="soundBtn" title="音效"><svg viewBox="0 0 24 24" id="soundIcon"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    <button class="icon-btn" id="appBtn" title="App 模式：像一般 App 一樣用（小島先休息）"><svg viewBox="0 0 24 24"><rect x="6.5" y="3" width="11" height="18" rx="2.5"/><path d="M10.5 17.5h3"/></svg></button>
     <button class="icon-btn" id="panelBtn" title="收合面板"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M14 4v16"/></svg></button>
   </div>
 
@@ -346,6 +352,20 @@
     <p class="fs-sum" id="fsSum"></p>
     <button type="button" class="btn-primary" id="fsStart">開始專注</button>
   </div>
+
+  <!-- App 模式專注時的全螢幕計時 -->
+  <div class="focus-full" id="focusFull" hidden>
+    <button class="icon-btn ff-min" id="ffMin" title="縮小（計時繼續）"><svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></svg></button>
+    <div class="ff-card">
+      <div class="ff-kicker" id="ffKicker">專注中</div>
+      <div class="ff-ring"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="88"/><circle cx="100" cy="100" r="88" class="fg" id="ffArc"/></svg><div class="ff-time" id="ffTime">25:00</div></div>
+      <div class="ff-task" id="ffTask"></div>
+      <div class="ff-btns"><button class="btn-ghost" id="ffStop">結束</button><button class="btn-primary" id="ffToggle">暫停</button></div>
+      <button class="cm-link ff-cabin" id="ffCabin">到小木屋看兩人陪你讀書</button>
+    </div>
+  </div>
+  <!-- App 模式看不到小島：もち和ふじ說的話出現在這裡 -->
+  <div class="app-chat" id="appChat" hidden></div>
 
   <div class="toasts" id="toasts"></div>
 

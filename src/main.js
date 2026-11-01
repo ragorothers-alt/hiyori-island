@@ -101,8 +101,13 @@ async function boot() {
   const FUJI_KEYS = new Set(['reviewAsk', 'reviewDone', 'reschedule', 'reminder', 'eventDone', 'deadlineNear', 'onTime', 'routine', 'overdue', 'wilt', 'planAsk', 'starPick', 'starFull', 'questDone', 'weeklyReady', 'weeklyClaimed', 'charmBuy', 'charmUsed', 'breakEnd', 'tired', 'gift', 'planApplied', 'planFull', 'sleepGood', 'sleepShort', 'bedtime', 'habitSlip', 'quitMilestone'])
   const MOCHI_KEYS = new Set(['shopBuy', 'shopPlace', 'shopPoor', 'taskDone', 'highTaskDone', 'starDone', 'starAll', 'newFlower', 'rareFlower', 'water', 'revive', 'milestone', 'habitDone', 'habitAll', 'urgeResisted', 'lifeLogged'])
   const voice = (key) => (FUJI_KEYS.has(key) ? fuji : MOCHI_KEYS.has(key) ? mochi : pick([mochi, fuji]))
+  // App 模式看不到小島：說的話也送到畫面下方的小對話框（ui 建好後才接上）；閒聊和摸摸不送，免得太吵
+  let chatter = null
+  const QUIET = new Set(['idle', 'pat', 'water', 'season'])
   const talk = (key, vars = {}, ms, fallback = '', who = voice(key), avoid = null) => {
-    who.say(line(key, vars, who.id, avoid) || fallback, ms)
+    const text = line(key, vars, who.id, avoid) || fallback
+    who.say(text, ms)
+    if (!QUIET.has(key.split('.')[0])) chatter?.(who.id, text, ms)
     return who
   }
   // 兩人你一句我一句；pet 的對話用 self／other 代表被摸的那位和另一位
@@ -110,7 +115,9 @@ async function boot() {
     const list = DUETS?.[key]
     if (!list?.length) return false
     const other = self === mochi ? fuji : mochi
-    duo.duet(pick(list).map(([who, text]) => [who === 'self' ? self.id : who === 'other' ? other.id : who, fill(text, vars)]))
+    const lines = pick(list).map(([who, text]) => [who === 'self' ? self.id : who === 'other' ? other.id : who, fill(text, vars)])
+    duo.duet(lines)
+    if (key !== 'pet') chatter?.(...lines[0])
     return true
   }
   const fx = new Particles(world, sky)
@@ -345,7 +352,14 @@ async function boot() {
       const v = ptown.view(ptown.level, 0)
       world.flyTo(v.target, world.fitDistance(v.radius) + 1, { elevation: 0.9, duration: 1.5 })
     },
-    resetView: () => (room.active ? room.exit() : world.home()),
+    resetView: () => (ui.appMode ? ui.setAppMode(false) : room.active ? room.exit() : world.home()),
+    // 切換 App 模式：進 App 時先離開小木屋；回小島時正在專注、兩人已經在屋裡，就直接進屋陪讀
+    appModeChanged: (on) => {
+      if (on && room.active) room.exit()
+      if (!on && duo.focusing && duo.inside) room.enter()
+    },
+    // App 模式全螢幕計時上的「到小木屋」：切回小島，兩人會走進屋裡（已經在屋裡就直接進屋）
+    goCabin: () => ui.setAppMode(false),
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => !room.active && world.home(1.6),
     setSound: (on) => sfx.setEnabled(on),
@@ -422,7 +436,10 @@ async function boot() {
       fuji.say('沒關係，下次再一起專注。')
     },
   }
+  // App 模式時不進小木屋（UI 建立時就會用到，所以看 body 上的標記）
+  room.blocked = () => document.body.classList.contains('app-mode')
   const ui = new UI(store, hooks)
+  chatter = (who, text, ms) => ui.chatter(who, text, ms)
 
   // 小島置中在面板以外的區域
   const panel = document.getElementById('panel')
@@ -444,7 +461,11 @@ async function boot() {
   // 預設視角的構圖：寬螢幕以面板展開時的版面去解，收起時只是左右平移。
   // 手機直式的抽屜佔掉下半部，上半部塞不下天空加整座島：以抽屜收起（全螢幕）去解，
   // 抽屜打開時把島往上推到上半部可見區域的中間，天空暫時被推出畫面
+  // 全螢幕（含 App 模式）時量不到平常的面板大小：先記著，離開全螢幕再算
+  let viewStale = false
   const composeView = () => {
+    viewStale = full()
+    if (viewStale) return
     const dock = document.querySelector('.dock')
     if (wide()) {
       const right = innerWidth - panel.offsetWidth - 20
@@ -500,6 +521,7 @@ async function boot() {
   }
   if (room.active) room.onToggle(true)
   new MutationObserver(() => {
+    if (viewStale) composeView()
     updateShift()
     if (skyStale) placeSky()
     placeRoom()
