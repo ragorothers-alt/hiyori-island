@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mat, rng, wobble, shadowed } from './util.js'
 import { SEASONS } from './season.js'
 import { buildIslandBase, addGrassDetail, FALL_UNIFORMS } from './islandBase.js'
+import { PLAN, inTown } from '../data/projectTown.js'
 
 // 島嶼配置（俯視座標 x, z；鏡頭在 +z 方向）
 export const LAYOUT = {
@@ -15,27 +16,21 @@ export const LAYOUT = {
   // もち的小木屋：中心、佔地半徑、朝向（門朝 +z 轉 rot）、模型放大倍率（讓壓扁的もち擠得過門）
   cabin: { x: -2.55, z: -0.2, r: 1.5, rot: 0.35, scale: 1.25 },
   path: { z0: 11.3, z1: 2.4 },
-  // 專案塔的空地（數量要和 theme.js 的 TOWER_SLOTS 一致）。前 8 塊在島的後半；
-  // 後 8 塊是擴島後的外圈（離中心 10.4，從正後方往兩側 ±22°、±46°、±78°、±106°），避開神社、櫻花樹、繡球花和溪流
-  slots: [
-    [-1.3, -4.2], [1.3, -4.2], [-3.9, -3.4], [3.9, -3.4],
-    [-2.6, -6.6], [2.6, -6.6], [-6.6, -1.2], [6.6, -1.2],
-    [-3.9, -9.64], [3.9, -9.64], [-7.48, -7.22], [7.48, -7.22],
-    [-10.17, -2.16], [10.17, -2.16], [-10.0, 2.87], [10.0, 2.87],
-  ],
+  // 專案町的地：[x, z, rot（正面朝 (sin rot, cos rot)）, 地的邊長]，順序就是開放順序（data/projectTown.js）
+  slots: PLAN.lots.map((l) => [l.x, l.z, l.rot, l.size]),
   // 裝飾的預留位置（避免草叢長在上面）
   decor: [[-6.0, 1.9], [-1.5, 5.6], [0, 7.4], [6.9, 4.6], [-7.0, -4.2]],
 }
 
 const occupied = (x, z) => {
-  const { pond, bed, home, home2, cabin, slots, decor } = LAYOUT
+  const { pond, bed, home, home2, cabin, decor } = LAYOUT
   if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.5) return true
   if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.3) return true
   if (Math.hypot(x - home.x, z - home.z) < 1.2) return true
   if (Math.hypot(x - home2.x, z - home2.z) < 1.2) return true
   if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + 0.1) return true
   if (Math.abs(x) < 0.9 && z > 1.8) return true
-  for (const [sx, sz] of slots) if (Math.hypot(x - sx, z - sz) < 1.35) return true
+  if (inTown(x, z, 0.15)) return true
   for (const [dx, dz] of decor) if (Math.hypot(x - dx, z - dz) < 1.1) return true
   return false
 }

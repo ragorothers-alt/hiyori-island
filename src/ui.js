@@ -10,6 +10,7 @@ import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/b
 import { LINES, FUJI_LINES } from './data/lines.js'
 import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
+import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
@@ -689,7 +690,7 @@ export class UI {
       this.projectColor = (this.projectColor + 1) % PROJECT_COLORS.length
       this._syncPickers()
       if (p.slot >= 0) this.hooks.focusProject(p.id)
-      else this.toast({ icon: '塔', title: '島上的空地都蓋滿了', sub: '這個專案先放在清單裡，有空地時會自動蓋塔；也可以把別的專案「移下島」' })
+      else this.toast({ icon: '町', title: '專案町的地都有人用了', sub: '這個專案先放在清單裡；完成里程碑讓小鎮長大會多出地，也可以把別的專案「移下島」' })
     })
 
     const onClick = (e) => {
@@ -725,7 +726,7 @@ export class UI {
       }
       else if (act === 'place') {
         if (s.placeProject(id)) this.hooks.focusProject(id)
-        else this.toast({ icon: '塔', title: `島上的 ${TOWER_SLOTS} 塊空地都蓋了`, sub: '先把一個專案「移下島」或收藏，再放上來' })
+        else this.toast({ icon: '町', title: `專案町開放的 ${s.projectTown.lots} 塊地都蓋了`, sub: `完成里程碑讓小鎮長大會多出地（最多 ${TOWER_SLOTS} 塊）；或先把一個專案「移下島」` })
       } else if (act === 'unplace') s.unplaceProject(id)
       else if (act === 'restore') {
         if (!s.archiveProject(id, false)) this.toast({ icon: '塔', title: `已經有 ${MAX_PROJECTS} 個進行中的專案`, sub: '先收藏其他專案再放回來吧' })
@@ -983,9 +984,24 @@ export class UI {
         <small class="bld-res">${esc(who)}</small>
       </button>`
     }).join('')
+    // 專案町：等級、地的使用量、升下一級還差幾點
+    const pt = this.store.projectTown
+    const used = this.store.towerProjects().length
+    const prev = TOWN_POINTS[pt.level - 1]
+    const ptPct = pt.next == null ? 100 : Math.round(((pt.points - prev) / (pt.next - prev)) * 100)
+    const ptPips = Array.from({ length: MAX_TOWN_LEVEL }, (_, k) => `<i class="${k < pt.level ? 'on' : ''}"></i>`).join('')
+    const ptNext = pt.next == null ? '街道全部鋪好了' : `再 ${pt.next - pt.points} 點升到 Lv.${pt.level + 1}，多 ${lotsAt(pt.level + 1) - pt.lots} 塊地`
+    const ptCard = `<button type="button" class="bld ptown" data-ptown style="--bc:#e8a96f" title="每個專案在專案町蓋一棟房子；點一下飛過去看看">
+        <span class="bld-k">町</span>
+        <span class="bld-n"><b>專案町 Lv.${pt.level}</b><small>地 ${used} / ${pt.lots}・最多 ${TOWER_SLOTS} 塊</small></span>
+        <span class="bld-pips">${ptPips}</span>
+        <span class="bld-bar"><i style="width:${ptPct}%"></i></span>
+        <small class="bld-next">${ptNext}</small>
+        <small class="bld-res">完成一個里程碑 +1 點、落成一個專案 +3 點</small>
+      </button>`
     $('#townBox').innerHTML = `
       <div class="town-head"><b>${esc(t.title)}</b><small>${t.residents.length} 位居民</small></div>
-      <div class="town-grid">${cards}</div>
+      <div class="town-grid">${ptCard}${cards}</div>
       <p class="hint">每間店綁著一個功能，用得越多就長得越大；點卡片飛過去看看。</p>`
   }
 
@@ -1156,11 +1172,12 @@ export class UI {
       if (b) this.store.setOutfit(b.dataset.outfit, b.dataset.who)
     })
     $('#townBox').addEventListener('click', (e) => {
-      const b = e.target.closest('[data-town]')
+      const b = e.target.closest('[data-town], [data-ptown]')
       if (!b) return
       // 手機上面板蓋住下半部，收起來才看得到浮島
       if (innerWidth <= 860) this.togglePanel(true)
-      this.hooks.focusTown?.(b.dataset.town)
+      if (b.dataset.town) this.hooks.focusTown?.(b.dataset.town)
+      else this.hooks.focusProjectTown?.()
     })
     $('#themePick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')

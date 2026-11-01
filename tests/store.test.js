@@ -6,6 +6,7 @@ import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
 import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS } from '../src/theme.js'
 import { LAYOUT } from '../src/scene/island.js'
+import { PLAN, TOWN_POINTS, townLevel, lotsAt, inLot, onStreet, inTown, propPrints } from '../src/data/projectTown.js'
 
 const TODAY = '2026-10-25'
 const QUEST_IDS = DAILY_QUESTS.map((q) => q.id)
@@ -1071,24 +1072,26 @@ describe('範例資料', () => {
 describe('更多專案與島上的塔位', () => {
   const add = (name, extra = {}) => store.addProject({ name, milestones: ['一'], ...extra })
   const slots = () => store.towerProjects().map((p) => p.slot).sort((a, b) => a - b)
+  // 新的存檔是專案町 Lv.1：開放 4 塊地
+  const OPEN = lotsAt(1)
 
   it('島上的塔位和場景的空地數量一致', () => {
     expect(LAYOUT.slots).toHaveLength(TOWER_SLOTS)
   })
 
   it('空地蓋滿後還能建立專案，先在清單裡；進行中的專案有上限', () => {
-    for (let i = 0; i < TOWER_SLOTS; i++) add(`塔 ${i}`)
+    for (let i = 0; i < OPEN; i++) add(`塔 ${i}`)
     const extra = add('排隊的')
     expect(extra.slot).toBe(-1)
-    expect(store.towerProjects()).toHaveLength(TOWER_SLOTS)
-    expect(slots()).toEqual([...Array(TOWER_SLOTS).keys()])
+    expect(store.towerProjects()).toHaveLength(OPEN)
+    expect(slots()).toEqual([...Array(OPEN).keys()])
     while (store.canAddProject()) add('更多')
     expect(store.activeProjects()).toHaveLength(MAX_PROJECTS)
     expect(add('太多了')).toBeNull()
   })
 
   it('收藏或刪除有塔的專案，空地讓給最早建立、還沒完成的專案', () => {
-    const towers = Array.from({ length: TOWER_SLOTS }, (_, i) => add(`塔 ${i}`))
+    const towers = Array.from({ length: OPEN }, (_, i) => add(`塔 ${i}`))
     const done = add('已完成的')
     store.toggleMilestone(done.id, done.milestones[0].id)
     setDate(TODAY, 13)
@@ -1097,14 +1100,14 @@ describe('更多專案與島上的塔位', () => {
     store.archiveProject(towers[2].id)
     expect(first.slot).toBe(2)
     expect(second.slot).toBe(-1)
-    store.deleteProject(towers[5].id)
-    expect(second.slot).toBe(5)
-    store.deleteProject(towers[6].id)
-    expect(done.slot).toBe(6)
+    store.deleteProject(towers[1].id)
+    expect(second.slot).toBe(1)
+    store.deleteProject(towers[3].id)
+    expect(done.slot).toBe(3)
   })
 
   it('自己移下島的不會被自動補上去；放上島要有空地', () => {
-    const towers = Array.from({ length: TOWER_SLOTS }, (_, i) => add(`塔 ${i}`))
+    const towers = Array.from({ length: OPEN }, (_, i) => add(`塔 ${i}`))
     const waiting = add('等著的')
     expect(store.placeProject(waiting.id)).toBe(false)
     store.unplaceProject(towers[0].id)
@@ -1122,7 +1125,7 @@ describe('更多專案與島上的塔位', () => {
   it('從收藏放回時空地滿了也可以，先在清單裡', () => {
     const old = add('收起來的')
     store.archiveProject(old.id)
-    for (let i = 0; i < TOWER_SLOTS; i++) add(`塔 ${i}`)
+    for (let i = 0; i < OPEN; i++) add(`塔 ${i}`)
     expect(store.archiveProject(old.id, false)).toBe(true)
     expect(old.archived).toBe(false)
     expect(old.slot).toBe(-1)
@@ -1130,12 +1133,13 @@ describe('更多專案與島上的塔位', () => {
 
   it('讀檔時重複或超出的塔位改成先不上島，進行中超過上限的改為收藏', () => {
     const projects = Array.from({ length: MAX_PROJECTS + 2 }, (_, i) => ({ id: `p${i}`, name: `專案 ${i}`, slot: i < 3 ? 0 : i, milestones: [] }))
-    store.importJSON(JSON.stringify({ tasks: [], player: {}, projects }))
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, projects, lotsPlan: 1 }))
     const ps = store.state.projects
     expect(ps.slice(0, 3).map((p) => p.slot)).toEqual([0, 1, 2])
     expect(ps[3].slot).toBe(3)
-    expect(ps[TOWER_SLOTS].slot).toBe(-1)
-    expect(store.towerProjects()).toHaveLength(TOWER_SLOTS)
+    // 還沒開放的地上的專案先下島
+    expect(ps[OPEN].slot).toBe(-1)
+    expect(store.towerProjects()).toHaveLength(OPEN)
     expect(store.activeProjects()).toHaveLength(MAX_PROJECTS)
     expect(ps.filter((p) => p.archived).map((p) => p.id)).toEqual([`p${MAX_PROJECTS}`, `p${MAX_PROJECTS + 1}`])
   })
@@ -1170,7 +1174,7 @@ describe('專案狀態與暫停', () => {
   })
 
   it('空地讓出來時，進行中的專案比暫停的先上島', () => {
-    const towers = Array.from({ length: TOWER_SLOTS }, (_, i) => store.addProject({ name: `塔 ${i}`, milestones: ['一'] }))
+    const towers = Array.from({ length: lotsAt(1) }, (_, i) => store.addProject({ name: `塔 ${i}`, milestones: ['一'] }))
     const paused = store.addProject({ name: '暫停的（比較早）', milestones: ['一'] })
     store.pauseProject(paused.id)
     setDate(TODAY, 13)
@@ -1191,5 +1195,140 @@ describe('專案狀態與暫停', () => {
     const [a, b] = store.state.projects
     expect(a.pausedAt).toBe(123)
     expect(b.pausedAt).toBeNull()
+  })
+})
+
+describe('專案町', () => {
+  const add = (name, n = 1) => store.addProject({ name, milestones: Array.from({ length: n }, (_, i) => `m${i}`) })
+  const finish = (p, k = p.milestones.length) => p.milestones.slice(0, k).forEach((m) => store.toggleMilestone(p.id, m.id))
+
+  it('里程碑 +1、落成專案 +3，點數到了升級、多開地', () => {
+    expect(townLevel({ milestonesDone: 0, projectsDone: 0 })).toEqual({ level: 1, points: 0, lots: 4, next: 5 })
+    expect(townLevel({ milestonesDone: 2, projectsDone: 1 })).toEqual({ level: 2, points: 5, lots: 7, next: 15 })
+    expect(townLevel({ milestonesDone: 60, projectsDone: 10 })).toEqual({ level: 6, points: 90, lots: 20, next: null })
+    expect(TOWN_POINTS).toHaveLength(PLAN.growth.length)
+  })
+
+  it('城鎮升級：發 projectTownGrew，等著的專案自動上新的地', () => {
+    const big = add('大專案', 5)
+    const others = Array.from({ length: lotsAt(1) - 1 }, (_, i) => add(`塔 ${i}`, 2))
+    const waiting = add('等地的')
+    expect(waiting.slot).toBe(-1)
+    expect(store.state.town.plevel).toBe(1)
+    const grew = vi.fn()
+    store.on('projectTownGrew', grew)
+    finish(big, 4)
+    expect(grew).not.toHaveBeenCalled()
+    store.toggleMilestone(big.id, big.milestones[4].id)
+    // 5 個里程碑 + 落成 3 = 8 點 → Lv.2
+    expect(store.projectTown.level).toBe(2)
+    expect(grew).toHaveBeenCalledTimes(1)
+    expect(grew.mock.calls[0][0]).toMatchObject({ level: 2, from: 1, added: 3 })
+    expect(store.state.town.plevel).toBe(2)
+    expect(waiting.slot).toBe(lotsAt(1))
+    expect(others.every((p) => p.slot >= 0)).toBe(true)
+  })
+
+  it('被商店擺設壓到的地先跳過', () => {
+    const lot = PLAN.lots[0]
+    store.state.placed.push({ id: 'x1', key: SHOP_ITEMS[0].key, x: lot.x, z: lot.z, rot: 0 })
+    const p = add('第一個')
+    expect(p.slot).toBe(1)
+  })
+
+  it('舊存檔（散在島上的塔位）讀進來時重新排進專案町，進行中的先排', () => {
+    const projects = [
+      { id: 'done', name: '落成的', slot: 9, completedAt: 5, createdAt: 1, milestones: [{ id: 'm', title: 'm', done: true }] },
+      { id: 'a', name: '進行中', slot: 12, createdAt: 2, milestones: [] },
+      { id: 'b', name: '暫停', slot: 3, pausedAt: 9, createdAt: 3, milestones: [] },
+      { id: 'c', name: '移下島的', slot: -1, parked: true, createdAt: 4, milestones: [] },
+    ]
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, projects }))
+    const slot = (id) => store.state.projects.find((p) => p.id === id).slot
+    expect([slot('a'), slot('b'), slot('done'), slot('c')]).toEqual([0, 1, 2, -1])
+    expect(store.state.lotsPlan).toBe(1)
+    // 已經是新版的存檔就照原本的地
+    store.importJSON(JSON.stringify({ ...store.state, lotsPlan: 1 }))
+    expect(slot('done')).toBe(2)
+  })
+
+  it('剛重置的空島不慶祝，第一次升級才發事件', () => {
+    store.reset()
+    const grew = vi.fn()
+    store.on('projectTownGrew', grew)
+    add('小事')
+    expect(grew).not.toHaveBeenCalled()
+    expect(store.state.town.plevel).toBe(1)
+  })
+})
+
+describe('專案町的總平面', () => {
+  // 正方形地塊的四個角
+  const corners = (l) => {
+    const h = l.size / 2
+    const c = Math.cos(l.rot)
+    const s = Math.sin(l.rot)
+    return [[-h, -h], [h, -h], [h, h], [-h, h]].map(([x, z]) => [l.x + x * c + z * s, l.z - x * s + z * c])
+  }
+
+  it('地塊數、成長級數和場景、theme 一致', () => {
+    expect(PLAN.lots).toHaveLength(TOWER_SLOTS)
+    expect(LAYOUT.slots).toHaveLength(TOWER_SLOTS)
+    expect(PLAN.growth.at(-1)).toBe(TOWER_SLOTS)
+    PLAN.growth.forEach((n, i) => {
+      expect(PLAN.lots.slice(0, n).every((l) => l.level <= i + 1)).toBe(true)
+      expect(PLAN.lots.slice(n).every((l) => l.level > i + 1)).toBe(true)
+    })
+  })
+
+  it('地塊彼此不重疊、在島內、不壓到廣場和街道', () => {
+    PLAN.lots.forEach((a, i) => {
+      for (const [x, z] of corners(a)) expect(Math.hypot(x, z)).toBeLessThanOrEqual(11.0)
+      PLAN.lots.forEach((b, j) => {
+        if (j <= i) return
+        // 朝向都是 90° 的倍數：軸對齊的正方形，間距 ≥ 0.35
+        const gap = Math.max(Math.abs(a.x - b.x) - (a.size + b.size) / 2, Math.abs(a.z - b.z) - (a.size + b.size) / 2)
+        expect(gap).toBeGreaterThanOrEqual(0.35 - 1e-9)
+      })
+      // 地塊內部抽樣：不在任何街道或廣場上
+      const h = a.size / 2 - 0.02
+      for (let u = -h; u <= h; u += h / 4) for (let v = -h; v <= h; v += h / 4) {
+        const c = Math.cos(a.rot)
+        const s = Math.sin(a.rot)
+        expect(onStreet(a.x + u * c + v * s, a.z - u * s + v * c)).toBe(false)
+      }
+    })
+  })
+
+  it('每塊地的正面都接到當級已經鋪好的街道', () => {
+    for (const l of PLAN.lots) {
+      const fx = l.x + Math.sin(l.rot) * (l.size / 2 + 0.25)
+      const fz = l.z + Math.cos(l.rot) * (l.size / 2 + 0.25)
+      expect(onStreet(fx, fz, 0, l.level), l.id).toBe(true)
+    }
+  })
+
+  // 點到地塊（旋轉正方形）的距離，在地裡面是 0
+  const lotDist = (l, x, z) => {
+    const dx = x - l.x
+    const dz = z - l.z
+    const c = Math.cos(l.rot)
+    const s = Math.sin(l.rot)
+    const u = Math.max(0, Math.abs(dx * c - dz * s) - l.size / 2)
+    const v = Math.max(0, Math.abs(dx * s + dz * c) - l.size / 2)
+    return Math.hypot(u, v)
+  }
+
+  it('小物不壓到地塊；inTown 涵蓋地、街道與小物', () => {
+    for (const p of PLAN.props) {
+      for (const [x, z, r] of propPrints(p)) expect(Math.min(...PLAN.lots.map((l) => lotDist(l, x, z))), `${p.type} ${p.x},${p.z}`).toBeGreaterThanOrEqual(r)
+      for (const [x, z] of propPrints(p)) expect(inTown(x, z)).toBe(true)
+    }
+    expect(inTown(PLAN.lots[3].x, PLAN.lots[3].z)).toBe(true)
+    expect(inTown(PLAN.plaza.x, PLAN.plaza.z)).toBe(true)
+    // 前方的小徑、池塘、花圃不屬於專案町
+    expect(inTown(0, 8)).toBe(false)
+    expect(inTown(LAYOUT.pond.x, LAYOUT.pond.z)).toBe(false)
+    expect(inTown(LAYOUT.bed.x, LAYOUT.bed.z)).toBe(false)
   })
 })

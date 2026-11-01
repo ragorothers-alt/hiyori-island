@@ -8,7 +8,9 @@ import { daysBetween } from '../store.js'
 const FLOOR_H = 0.62
 const BASE_H = 0.36
 const MAX_FLOORS = 7
-const TOWER_SCALE = 1.22
+// 塔的底座寬 1.9；放到地上時縮放成「地的邊長 − 0.4」（四周留 0.2 給街道和鄰居）
+const BASE_W = 1.9
+const scaleFor = (size = 2) => (size - 0.4) / BASE_W
 
 const bodyGeo = new THREE.BoxGeometry(1, 0.38, 1)
 const bandGeo = new THREE.BoxGeometry(1.02, 0.11, 1.02)
@@ -28,6 +30,7 @@ class Tower {
     this.floors = []
     this.built = -1
     this.total = 0
+    this.s = 1
 
     const base = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.2, 1.9), mat('#ece6df'))
     base.position.y = 0.1
@@ -201,7 +204,7 @@ class Tower {
           },
           { easing: ease.outBack, delay: (i - prevBuilt) * 0.25 },
         )
-        fresh.push(new THREE.Vector3(0, (y + 0.3) * TOWER_SCALE, 0).add(this.group.position))
+        fresh.push(new THREE.Vector3(0, (y + 0.3) * this.s, 0).add(this.group.position))
       }
     }
     this.spire.visible = done
@@ -256,7 +259,7 @@ export class Towers {
       if (!ids.has(id)) {
         this.towers.delete(id)
         const g = tw.group
-        tween(0.5, (k) => g.scale.setScalar(Math.max(0.001, (1 - k) * TOWER_SCALE)), {
+        tween(0.5, (k) => g.scale.setScalar(Math.max(0.001, (1 - k) * tw.s)), {
           onDone: () => {
             this.group.remove(g)
             tw.dispose()
@@ -267,21 +270,26 @@ export class Towers {
     const built = []
     for (const p of projects) {
       let tw = this.towers.get(p.id)
-      const [x, z] = LAYOUT.slots[p.slot] || [0, 0]
+      // 專案町的地：位置、正面朝街的方向、大小
+      const [x, z, rot = 0, size = 2] = LAYOUT.slots[p.slot] || [0, 0]
       if (!tw) {
         tw = new Tower(p)
+        tw.s = scaleFor(size)
         tw.group.position.set(x, 0, z)
-        tw.group.scale.setScalar(TOWER_SCALE)
+        tw.group.rotation.y = rot
+        tw.group.scale.setScalar(tw.s)
         this.towers.set(p.id, tw)
         this.group.add(tw.group)
         tw.setState(p, progressOf(p), false, today)
         if (animate) {
           tw.group.scale.setScalar(0.001)
-          tween(0.9, (k) => tw.group.scale.setScalar(Math.max(0.001, k * TOWER_SCALE)), { easing: ease.outBack })
+          tween(0.9, (k) => tw.group.scale.setScalar(Math.max(0.001, k * tw.s)), { easing: ease.outBack })
         }
         continue
       }
+      if (tw.s !== scaleFor(size)) tw.group.scale.setScalar((tw.s = scaleFor(size)))
       tw.group.position.set(x, 0, z)
+      tw.group.rotation.y = rot
       const fresh = tw.setState(p, progressOf(p), animate, today)
       if (fresh.length) built.push({ id: p.id, positions: fresh })
     }
@@ -295,12 +303,12 @@ export class Towers {
   anchor(id, top = true) {
     const tw = this.towers.get(id)
     if (!tw) return null
-    return tw.group.position.clone().add(new THREE.Vector3(0, top ? tw.topY() * TOWER_SCALE : 0, 0))
+    return tw.group.position.clone().add(new THREE.Vector3(0, top ? tw.topY() * tw.s : 0, 0))
   }
 
   labelAnchor(id) {
     const tw = this.towers.get(id)
     if (!tw) return null
-    return tw.group.position.clone().add(new THREE.Vector3(0, Math.max(tw.ghostTopY(), tw.topY()) * TOWER_SCALE + 0.3, 0))
+    return tw.group.position.clone().add(new THREE.Vector3(0, Math.max(tw.ghostTopY(), tw.topY()) * tw.s + 0.3, 0))
   }
 }

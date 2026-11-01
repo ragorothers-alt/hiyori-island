@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mat, shadowed, tween, ease } from './util.js'
 import { LAYOUT } from './island.js'
+import { inTown } from '../data/projectTown.js'
 import { SHOP_ITEMS } from '../data/shop.js'
 
 // 金平糖商店的裝飾：模型、擺放位置檢查、擺放預覽
@@ -892,9 +893,9 @@ export const buildItem = (key) => shadowed(BUILD[key]?.() || BUILD.mushroom())
 const BASE_R = 0.42
 export const radiusOf = (key) => SHOP_ITEMS.find((i) => i.key === key)?.r || BASE_R
 
-// 擺放位置是否空著（島內、避開池塘花圃小徑小木屋塔位裝飾與其他擺設）；blocked：升級景觀的佔地 [x, z, r]
+// 擺放位置是否空著（島內、避開池塘花圃小徑小木屋、專案町的地街道小物、裝飾與其他擺設）；blocked：升級景觀的佔地 [x, z, r]
 export function spotFree(x, z, placed = [], ignoreId = null, key = null, blocked = []) {
-  const { pond, bed, home, home2, cabin, slots, decor, radius } = LAYOUT
+  const { pond, bed, home, home2, cabin, decor, radius } = LAYOUT
   const r = radiusOf(key)
   const e = r - BASE_R
   if (Math.hypot(x, z) > radius - 0.8 - e) return false
@@ -904,7 +905,7 @@ export function spotFree(x, z, placed = [], ignoreId = null, key = null, blocked
   if (Math.hypot(x - home2.x, z - home2.z) < 1.1 + e) return false
   if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + r) return false
   if (Math.abs(x) < 0.8 + e && z > 2.1) return false
-  for (const [sx, sz] of slots) if (Math.hypot(x - sx, z - sz) < 1.5 + e) return false
+  if (inTown(x, z, r * 0.8)) return false
   for (const [dx, dz] of decor) if (Math.hypot(x - dx, z - dz) < 1.15 + e) return false
   for (const [bx, bz, br] of blocked) if (Math.hypot(x - bx, z - bz) < br + r) return false
   for (const p of placed) if (p.id !== ignoreId && Math.hypot(x - p.x, z - p.z) < r + radiusOf(p.key) + 0.01) return false

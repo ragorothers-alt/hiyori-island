@@ -12,6 +12,8 @@ export const tagOf = (id) => TAGS.find((t) => t.id === id) || TAGS[2]
 export const PRIORITIES = { 1: { label: '低', xp: 10 }, 2: { label: '中', xp: 15 }, 3: { label: '高', xp: 25 } }
 
 export const EVENT_COLORS = ['#94cbea', '#f4b2c5', '#a9dcc0', '#c7b7ee', '#f5d38e', '#9fd6d4']
+import { PLAN } from './data/projectTown.js'
+
 export const PROJECT_COLORS = ['#f2a3b8', '#88bfe4', '#97d1b1', '#bfa9e6', '#f1c487', '#85cdcb']
 
 export const XP = {
@@ -54,9 +56,9 @@ export const moodOf = (key) => MOODS.find((m) => m.key === key)
 
 export const FOCUS_MIN = 25
 export const BREAK_MIN = 5
-// 同時進行的專案上限；島上只有 TOWER_SLOTS 塊空地（scene/island.js 的 LAYOUT.slots），其他專案先在清單裡等空地
+// 同時進行的專案上限；專案町最多 TOWER_SLOTS 塊地（data/projectTown.js，隨城鎮等級陸續開放），其他專案先在清單裡等空地
 export const MAX_PROJECTS = 30
-export const TOWER_SLOTS = 16
+export const TOWER_SLOTS = PLAN.lots.length
 
 // 等級解鎖的島嶼裝飾（scene/decor.js 依 key 建立）
 export const UNLOCKS = [

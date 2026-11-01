@@ -134,12 +134,12 @@ describe('store 的小鎮', () => {
   })
   it('匯入沒有小鎮紀錄的舊檔：安靜補上，不打招呼', () => {
     store.importJSON(JSON.stringify({ tasks: [], player: { xp: 0, stats: { lifeEntries: 20 } } }))
-    expect(store.state.town).toEqual({ seen: { cafe: 2 }, since: '' })
+    expect(store.state.town).toEqual({ seen: { cafe: 2 }, since: '', plevel: 1 })
     store.flushPending()
     expect(events).toEqual([])
   })
   it('壞掉的小鎮資料會被清洗', () => {
     store.importJSON(JSON.stringify({ tasks: [], player: { xp: 0 }, town: { seen: { florist: 99, nope: 3, post: 'x' }, since: 'yesterday' } }))
-    expect(store.state.town).toEqual({ seen: { florist: 5 }, since: '' })
+    expect(store.state.town).toEqual({ seen: { florist: 5 }, since: '', plevel: 1 })
   })
 })

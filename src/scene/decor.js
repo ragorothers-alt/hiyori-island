@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { mat, rng, shadowed, tween, ease } from './util.js'
 import { LAYOUT } from './island.js'
+import { inTown } from '../data/projectTown.js'
 import { buildIslandBase } from './islandBase.js'
 import { UNLOCKS } from '../theme.js'
 import { SEASONS } from './season.js'
@@ -359,7 +360,7 @@ function limb(g, from, to, radius, material) {
 }
 
 function openGround(x, z, pad = 0, avoidDecor = false) {
-  const { radius, pond, bed, home, home2, cabin, slots, decor } = LAYOUT
+  const { radius, pond, bed, home, home2, cabin, decor } = LAYOUT
   if (Math.hypot(x, z) > radius - pad) return false
   if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.5 + pad) return false
   if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.3 + pad) return false
@@ -367,7 +368,7 @@ function openGround(x, z, pad = 0, avoidDecor = false) {
   if (Math.hypot(x - home2.x, z - home2.z) < 1.2 + pad) return false
   if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + pad) return false
   if (Math.abs(x) < 0.9 + pad && z > 1.8 - pad) return false
-  if (slots.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < 1.35 + pad)) return false
+  if (inTown(x, z, pad)) return false
   if (avoidDecor && decor.some(([dx, dz]) => Math.hypot(x - dx, z - dz) < 1.1 + pad)) return false
   return true
 }

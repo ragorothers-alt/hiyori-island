@@ -12,6 +12,7 @@ import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILEST
 import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
+import { PLAN, inLot, lotsAt, townLevel } from './data/projectTown.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
 const townStages = (stats) => {
@@ -158,7 +159,8 @@ function seed(samples = true) {
     sleep: {},
     habits: [],
     life: {},
-    town: { seen: {}, since: '' },
+    town: { seen: {}, since: '', plevel: 0 },
+    lotsPlan: 1,
     journal: {},
     dex: {},
     weekly: {},
@@ -283,6 +285,8 @@ function migrate(s) {
     }
     if (p.slot >= 0) used.add(p.slot)
   }
+
+  if (s.lotsPlan !== 1) for (const p of projects) p.slot = -1
 
   const ps = isObj(s.player) ? s.player : {}
   const rawStats = isObj(ps.stats) ? ps.stats : {}
@@ -429,13 +433,15 @@ function migrate(s) {
       const v = num(raw[b.key], 0, MAX_STAGE, 0)
       if (v) seen[b.key] = v
     }
-    town = { seen, since: ymd(s.town.since, '') }
+    town = { seen, since: ymd(s.town.since, ''), plevel: num(s.town.plevel, 0, 9, 0) }
   } else {
-    town = { seen: townStages(stats), since: '', welcome: true }
+    town = { seen: townStages(stats), since: '', welcome: true, plevel: 0 }
   }
   const createdAt = ts(s.createdAt) || Date.now()
   if (!(s.version >= 2)) markLegacySamples({ tasks, events, projects }, createdAt)
   return {
+    // lotsPlan：專案町的地塊編號版本。舊的塔位（散在島上的 16 個點）對不上新的地，全部先收回，讀進來後再依序排進去
+    lotsPlan: 1,
     version: 2, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, createdAt, updatedAt: ts(s.updatedAt) || 0,
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
@@ -478,6 +484,7 @@ export class Store {
     this._visit()
     this._quitMilestones(this._pending)
     this._townWelcome()
+    this.settleLots()
     const made = this._ensureRoutines(this.today).length
     if (this._ensureQuests() || made) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
@@ -741,6 +748,7 @@ export class Store {
   }
   _finish(fx = []) {
     this._townCheck(fx)
+    this._projectTownCheck(fx)
     const got = this.state.player.achievements
     const snap = this.statsSnapshot()
     for (const a of ACHIEVEMENTS) {
@@ -1450,10 +1458,45 @@ export class Store {
     }
   }
 
+  // ── 專案町 ──
+  // { level, points, lots, next }
+  get projectTown() {
+    return townLevel(this.stats)
+  }
+  // 地塊被商店擺設壓到了就先跳過（擺設搬走後就能用）
+  _lotBlocked(i) {
+    const lot = PLAN.lots[i]
+    return this.state.placed.some((p) => inLot(lot, p.x, p.z, SHOP_ITEMS.find((s) => s.key === p.key)?.r ?? 0.42))
+  }
+  // 讀檔或同步拉回後（或地上的擺設搬走後）：排好地塊，記下目前的等級（之後長大才慶祝）
+  settleLots() {
+    const t = this.state.town
+    if (!t.plevel) t.plevel = this.projectTown.level
+    const before = this.state.projects.map((p) => p.slot).join()
+    const open = this.projectTown.lots
+    for (const p of this.state.projects) if (p.slot >= open) p.slot = -1
+    this._fillSlots()
+    if (this.state.projects.map((p) => p.slot).join() !== before) this.save(false)
+  }
+  // 點數夠了城鎮就升級：多開的地讓清單裡等著的專案上島
+  _projectTownCheck(fx) {
+    const t = this.state.town
+    const { level } = this.projectTown
+    // 還沒記過（剛重置成空島）就安靜記下，不慶祝
+    if (!t.plevel) t.plevel = level
+    if (level <= t.plevel) return
+    const from = t.plevel
+    t.plevel = level
+    this._fillSlots()
+    fx.push(['projectTownGrew', { level, from, added: lotsAt(level) - lotsAt(from) }])
+  }
+
   // ── 專案 ──
+  // 已開放的地裡第一塊空的
   freeSlot() {
     const used = new Set(this.towerProjects().map((p) => p.slot))
-    for (let i = 0; i < TOWER_SLOTS; i++) if (!used.has(i)) return i
+    const open = this.projectTown.lots
+    for (let i = 0; i < open; i++) if (!used.has(i) && !this._lotBlocked(i)) return i
     return -1
   }
   canAddProject() {
@@ -1679,6 +1722,7 @@ export class Store {
     // 匯入的舊檔沒有小鎮紀錄：照統計直接蓋好就好，不另外打招呼
     delete next.town.welcome
     this.state = next
+    this.settleLots()
     this.today = dateStr()
     this._ensureRoutines(this.today)
     if (this.selectedDate !== this.today) this._ensureRoutines(this.selectedDate)

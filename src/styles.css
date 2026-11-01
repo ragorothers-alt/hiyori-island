@@ -430,7 +430,8 @@ body.night .modal { background: rgba(10, 18, 45, .3); }
 .stage-fade { position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0; background: #fff6ec; transition: opacity .45s ease; }
 body.night .stage-fade { background: #1d1a2a; }
 #roomBtn.on { color: #d58a3f; background: rgba(255, 217, 138, .28); }
-.lbl { position: absolute; left: 0; top: 0; will-change: transform; }
+.lbl { position: absolute; left: 0; top: 0; will-change: transform; transition: opacity .3s; }
+.lbl.lbl-hide { opacity: 0; }
 .bubble {
   transform: translate(-50%, -100%); padding: 8px 14px; border-radius: 16px; font-size: 13px; white-space: nowrap; max-width: 280px;
   background: rgba(255, 255, 255, .92); color: #3e4a5c; box-shadow: 0 8px 24px rgba(70, 110, 160, .2); font-family: var(--font-display); letter-spacing: .06em;
@@ -557,6 +558,7 @@ body.night .stage-fade { background: #1d1a2a; }
 .bld-next, .bld-res { grid-column: 1 / -1; font-size: 10.5px; line-height: 1.4; color: var(--ink-soft); }
 .bld-res { color: var(--ink-faint); }
 .bld.locked { opacity: .62; }
+.bld.ptown { grid-column: 1 / -1; }
 .bld.locked .bld-k { background: color-mix(in srgb, var(--bc) 45%, #c9d2de); box-shadow: none; }
 .town .hint { margin: 8px 2px 0; font-size: 10.5px; color: var(--ink-faint); }
 /* 居民的泡泡：上面一行小小的名字，顏色跟著居民 */

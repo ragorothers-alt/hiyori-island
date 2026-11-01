@@ -9,6 +9,8 @@ import { SEASONS, seasonOf } from './scene/season.js'
 import { Decor } from './scene/decor.js'
 import { Garden } from './scene/garden.js'
 import { Towers } from './scene/towers.js'
+import { ProjectTown } from './scene/projectTown.js'
+import { PLAN, inLot, inTown, lotsAt } from './data/projectTown.js'
 import { TimeRing } from './scene/timeRing.js'
 import { Character } from './scene/character.js'
 import { Duo } from './scene/duo.js'
@@ -75,6 +77,10 @@ async function boot() {
   const decor = new Decor(world, sky)
   const garden = new Garden(world, sky)
   const towers = new Towers(world, sky)
+  // 專案町的街道與小物；房子（目前還是塔）只蓋在已經鋪好路的地上，城鎮升級的演出時才把新地上的房子蓋起來
+  const ptown = new ProjectTown(world, sky)
+  ptown.setLevel(store.state.town.plevel)
+  const builtProjects = () => store.towerProjects().filter((p) => p.slot < lotsAt(ptown.level))
   const ring = new TimeRing(world, sky)
   const labels = new Labels(world)
   const cabin = new Cabin(world, sky)
@@ -150,7 +156,8 @@ async function boot() {
   // ── 專案名牌 & 日程提示 ──
   const chips = new Map()
   function syncChips() {
-    const active = store.towerProjects()
+    // 已落成的房子不掛名牌（整片名牌太擠），點房子可以看是哪個專案
+    const active = builtProjects().filter((p) => store.projectStatus(p) !== 'done')
     const ids = new Set(active.map((p) => p.id))
     for (const [id, c] of chips) {
       if (!ids.has(id)) {
@@ -163,7 +170,7 @@ async function boot() {
       if (!c) {
         const el = document.createElement('div')
         el.className = 'proj-chip'
-        c = labels.add(el, () => towers.labelAnchor(p.id))
+        c = labels.add(el, () => towers.labelAnchor(p.id), { declutter: true })
         chips.set(p.id, c)
       }
       const pct = Math.round(store.progress(p) * 100)
@@ -172,6 +179,9 @@ async function boot() {
       const due = days === null || days > 2 ? '' : days < 0 ? '<i class="due late">逾期</i>' : `<i class="due">${days ? `剩 ${days} 天` : '今天截止'}</i>`
       c.el.classList.toggle('paused', !!p.pausedAt)
       c.el.innerHTML = `${esc(short(p.name, 10))} <b>${pct === 100 ? (p.onTime ? '準時落成' : '落成') : p.pausedAt ? `暫停・${pct}%` : pct + '%'}</b>${due}`
+      // 快到期的名牌優先留著，暫停的讓位
+      c.priority = due ? 2 : p.pausedAt ? 0 : 1
+      labels.resized(c)
     }
   }
 
@@ -195,7 +205,9 @@ async function boot() {
   // ── 場景同步 ──
   function syncScene(animate = true) {
     garden.sync(store.gardenTasks(store.selectedDate), store.selectedDate, store.today)
-    const built = towers.sync(store.towerProjects(), (p) => store.progress(p), animate, store.today)
+    const onLots = builtProjects()
+    const built = towers.sync(onLots, (p) => store.progress(p), animate, store.today)
+    ptown.setLots(new Set(onLots.map((p) => p.slot)))
     for (const b of built) {
       const p = store.state.projects.find((x) => x.id === b.id)
       const color = PROJECT_COLORS[(p?.color ?? 0) % PROJECT_COLORS.length]
@@ -324,6 +336,10 @@ async function boot() {
     },
     // ひより町的建築卡片：還沒開張的就看看它會浮出來的地方
     focusTown: (key) => flyToDistrict(key),
+    focusProjectTown: () => {
+      const v = ptown.view(ptown.level, 0)
+      world.flyTo(v.target, world.fitDistance(v.radius) + 1, { elevation: 0.9, duration: 1.5 })
+    },
     resetView: () => (room.active ? room.exit() : world.home()),
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => !room.active && world.home(1.6),
@@ -612,6 +628,34 @@ async function boot() {
       await sleep(4200)
     }),
   )
+  // 專案町長大：鏡頭飛到新開的地，街道一段段鋪出來、小物冒出來，等著上島的專案在新地上開工
+  store.on('projectTownGrew', ({ level, added }) =>
+    queueTown(async () => {
+      if (level <= ptown.level) return
+      const v = ptown.view(level, ptown.level)
+      world.flyTo(v.target, world.fitDistance(v.radius) + 2, { elevation: 0.9, duration: 1.5 })
+      await sleep(1600)
+      sfx.build()
+      const dur = ptown.setLevel(level, true)
+      await sleep(dur * 1000)
+      syncScene(true)
+      sfx.chime()
+      fx.ripple(v.target.clone().setY(0.05), '#fff1b8', v.radius)
+      const town = store.projectTown
+      ui.toast({
+        icon: '町',
+        title: `專案町長到 Lv.${level}`,
+        sub: `多了 ${added} 塊地${town.next == null ? '・街道全部鋪好了' : `・再 ${town.next - town.points} 點升下一級`}`,
+        ms: 5600,
+      })
+      react(2, () => {
+        const who = pick([mochi, fuji])
+        who.say(townLine(who, 'projectTownGrow', { level }), 4200)
+      })
+      ui.render()
+      await sleep(2600)
+    }),
+  )
   // 舊存檔第一次打開：小島已經照累積的紀錄長成小鎮了
   store.on('townWelcome', (t) => {
     setTimeout(() => {
@@ -631,15 +675,16 @@ async function boot() {
   // ── 居民偶爾走過橋，到主島找兩人聊天 ──
   // 主島上走不過去的地方：池塘、花圃、小木屋、塔、升級景觀、擺設（每趟路線開始時拍一次快照）
   const walkBlocked = () => {
-    const { pond, bed, cabin, slots, decor: spots } = LAYOUT
-    const towersAt = store.towerProjects().map((p) => slots[p.slot]).filter(Boolean)
-    const prints = decor.footprints()
+    const { pond, bed, cabin, decor: spots } = LAYOUT
+    // 房子擋路（地的四周留給街道），街道和廣場可以走
+    const houses = builtProjects().map((p) => PLAN.lots[p.slot])
+    const prints = [...decor.footprints(), ...ptown.footprints()]
     const items = store.state.placed.map((p) => [p.x, p.z, radiusOf(p.key) + 0.15])
     return (x, z) => {
       if (Math.hypot(x - pond.x, z - pond.z) < pond.r + 0.3) return true
       if (Math.hypot(x - bed.x, z - bed.z) < bed.r + 0.15) return true
       if (Math.hypot(x - cabin.x, z - cabin.z) < cabin.r + 0.3) return true
-      for (const [sx, sz] of towersAt) if (Math.hypot(x - sx, z - sz) < 1.15) return true
+      for (const lot of houses) if (inLot(lot, x, z, -0.1)) return true
       for (const [dx, dz] of spots) if (Math.hypot(x - dx, z - dz) < 0.75) return true
       for (const [bx, bz, br] of prints) if (Math.hypot(x - bx, z - bz) < br) return true
       for (const [ix, iz, ir] of items) if (Math.hypot(x - ix, z - iz) < ir) return true
@@ -917,6 +962,7 @@ async function boot() {
   store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
   store.on('reload', ({ soft } = {}) => {
     decor.sync(store.level.level)
+    ptown.setLevel(store.state.town.plevel)
     // 匯入的存檔小鎮可能比較小：整個重蓋。同步拉回的通常只是多了幾筆，小鎮沒變小就照常長，鏡頭也不動
     const seen = store.state.town.seen
     const count = town.count
@@ -1358,6 +1404,23 @@ async function boot() {
     }
   }
 
+  // 專案町的地、街道和小物上原本擺的裝飾，挪到附近的空地，再讓等著的專案上島
+  const prints = () => decor.footprints()
+  for (const p of store.state.placed) {
+    if (!inTown(p.x, p.z, radiusOf(p.key) * 0.8)) continue
+    search: for (let d = 0.5; d < 6; d += 0.25) {
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2
+        const x = p.x + Math.cos(a) * d
+        const z = p.z + Math.sin(a) * d
+        if (!spotFree(x, z, store.state.placed, p.id, p.key, prints())) continue
+        store.moveItem(p.id, +x.toFixed(2), +z.toFixed(2), p.rot)
+        break search
+      }
+    }
+  }
+  store.settleLots()
+
   // ── 開場 ──
   ui.render()
   syncScene(false)
@@ -1418,7 +1481,7 @@ async function boot() {
   store.flushPending()
 
   // 方便除錯：在 console 用 hiyori.store / hiyori.sky.hourOverride = 20
-  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, visit: startVisit }
+  window.hiyori = { store, world, sky, mochi, fuji, duo, cabin, room, fx, decor, ui, placed, fileSync, cloudSync, town, ptown, towers, visit: startVisit }
 }
 
 boot()
