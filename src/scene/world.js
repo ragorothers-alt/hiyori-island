@@ -100,6 +100,8 @@ export class World {
     // 全螢幕面板蓋住場景時：不更新也不畫，畫面停在最後一幀；
     // 只每半秒跑一次 coveredTick(dt)，給不能停的輕量工作（例如天色到了晚上要換深色玻璃）
     this.covered = false
+    // App 模式：整個場景藏起來（不只被蓋住），連補畫都不用；_redraw 會留著，回到小島時補上
+    this.hidden = false
     this.coveredTick = null
     this._lastTick = 0
     // 改了 canvas 尺寸會清空畫面，蓋住時也要補畫一幀
@@ -256,8 +258,42 @@ export class World {
     this.busyUntil = Math.max(this.busyUntil, performance.now() + ms)
   }
 
+  // 藏起來時先在背景把著色器編好、貼圖傳上 GPU：回到小島的第一幀才不會卡一下
+  precompile() {
+    if (this._compiled) return
+    this._compiled = true
+    const r = this.renderer
+    // 場景是畫進 composer 的 render target（線性、不做色調映射），編譯時也要對著它，快取才對得上
+    const prev = r.getRenderTarget()
+    r.setRenderTarget(this.composer.readBuffer)
+    const done = r.compileAsync(this.scene, this.camera)
+    r.setRenderTarget(prev)
+    done.then(() => this._uploadTextures()).catch(() => {})
+  }
+  // 貼圖一次傳一張，等瀏覽器有空檔再傳下一張；已經回到小島就不用了（第一幀會一起傳）
+  _uploadTextures() {
+    const list = new Set()
+    this.scene.traverse((o) => {
+      for (const m of [o.material].flat()) {
+        if (!m) continue
+        for (const v of Object.values(m)) if (v?.isTexture) list.add(v)
+        for (const u of Object.values(m.uniforms || {})) if (u?.value?.isTexture) list.add(u.value)
+      }
+    })
+    const left = [...list]
+    const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 200))
+    const next = (deadline) => {
+      do {
+        if (!this.hidden || !left.length) return
+        this.renderer.initTexture(left.pop())
+      } while (deadline?.timeRemaining() > 8)
+      idle(next)
+    }
+    idle(next)
+  }
+
   _frame(t) {
-    if (this.covered && !this._redraw) {
+    if (this.covered && (this.hidden || !this._redraw)) {
       // dt 用實際經過的秒數：切換外觀時的天色快轉才會照真實時間跑完
       if (t - this._lastTick >= 500) {
         this.coveredTick?.(Math.min((t - this._lastTick) / 1000, 1))

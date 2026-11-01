@@ -454,6 +454,7 @@ async function boot() {
   const full = () => panel.classList.contains('full')
   const updateShift = () => {
     world.covered = full()
+    world.hidden = document.body.classList.contains('app-mode')
     if (full()) return
     const { x, y } = panelShift(panel.classList.contains('collapsed'))
     world.setViewShift(x, y)
@@ -1537,6 +1538,11 @@ async function boot() {
       loader.classList.add('done')
       // 淡出後整個拿掉：只藏起來的話，もち跳跳的無限動畫會在背後一直跑
       setTimeout(() => loader.remove(), 1000)
+      // App 模式開機時不畫小島：等閒下來再在背景編好著色器，之後切回小島就不會卡
+      if (world.hidden) {
+        const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 3000))
+        idle(() => world.precompile(), { timeout: 8000 })
+      }
       setTimeout(() => {
         const g = greetKey()
         const skyDiffers = sky.night > 0.5 !== nightAt(((sky.hour() % 24) + 24) % 24) > 0.5
