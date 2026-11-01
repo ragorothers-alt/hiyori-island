@@ -484,7 +484,15 @@ export class UI {
     } else if (this.focus.mode !== 'idle') this.focus.toggleBig(true)
     this.renderAppBar()
     this.renderSettings()
+    // 有些說明和按鈕依模式不同（「在島上查看」→「切到小島看看」）：開場第一次畫之前不用
+    if (this._stale) this.render()
     this.hooks.appModeChanged?.(on)
+  }
+  // 要飛到島上某處的按鈕：App 模式先切回小島，等畫面換好再飛過去
+  _onIsland(fn) {
+    if (!this.appMode) return fn()
+    this.setAppMode(false)
+    requestAnimationFrame(() => requestAnimationFrame(fn))
   }
   renderAppBar() {
     if (!this.appMode) return
@@ -788,7 +796,7 @@ export class UI {
 
     $('#taskList').innerHTML = n
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
-      : `<li class="empty"><span class="em">ひとつめの種を</span>輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。
+      : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
           <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
   }
 
@@ -999,7 +1007,7 @@ export class UI {
       const mid = e.target.closest('.ms')?.dataset.mid
       if (act === 'ms-toggle') s.toggleMilestone(id, mid)
       else if (act === 'ms-delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteMilestone(id, mid))
-      else if (act === 'view') this.hooks.focusProject(id)
+      else if (act === 'view') this._onIsland(() => this.hooks.focusProject(id))
       else if (act === 'pause' || act === 'resume') s.pauseProject(id, act === 'pause')
       else if (act === 'more') {
         this._moreOpen = this._moreOpen === id ? null : id
@@ -1066,7 +1074,7 @@ export class UI {
   _projectActions(p) {
     const b = (act, label) => `<button data-act="${act}">${label}</button>`
     const main = [
-      b('view', '在島上查看'),
+      b('view', this.appMode ? '切到小島看看' : '在島上查看'),
       p.completedAt ? '' : p.pausedAt ? b('resume', '繼續') : b('pause', '暫停'),
       p.completedAt || p.pausedAt ? '' : b('deadline', '截止日'),
     ]
@@ -1101,7 +1109,7 @@ export class UI {
       <form class="ms-add"><input placeholder="新增里程碑" maxlength="60" /><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`}
       <div class="proj-actions">
         ${archived
-          ? `<button data-act="restore">放回島上</button><button data-act="delete">刪除</button>`
+          ? `<button data-act="restore" title="放回進行中的專案，房子也會回到島上">恢復</button><button data-act="delete">刪除</button>`
           : this._projectActions(p)}
       </div>
     </div>`
@@ -1128,7 +1136,7 @@ export class UI {
     const shown = filter === 'all' ? active : active.filter((p) => s.projectStatus(p) === filter)
     $('#projectList').innerHTML = active.length
       ? shown.map((p) => this._projectCard(p)).join('')
-      : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段。</div>`
+      : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段${this.appMode ? '（回到小島就看得到）' : ''}。</div>`
     $('#archiveBox').hidden = !archived.length
     $('#archiveList').innerHTML = archived.map((p) => this._projectCard(p, true)).join('')
     if (this._keepMsFocus) {
@@ -1260,7 +1268,7 @@ export class UI {
       <div class="bond-bar"><i style="width:${pct}%"></i></div>
       <p class="bond-next">${nextText}${acts.length ? `・已學會 ${acts.join('、')}` : ''}</p>
       ${wardrobe('mochi', s.player.bond.outfit)}${wardrobe('fuji', s.player.bond.outfitFuji)}
-      <p class="hint">摸摸もち和ふじ、專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近。</p>`
+      <p class="hint">${this.appMode ? '專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近（回到小島還能摸摸她們）。' : '摸摸もち和ふじ、專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近。'}</p>`
   }
 
   // ── ひより町：每間店的階段、下一階還差多少、住在那裡的居民 ──
@@ -1290,7 +1298,8 @@ export class UI {
     const ptPct = pt.next == null ? 100 : Math.round(((pt.points - prev) / (pt.next - prev)) * 100)
     const ptPips = Array.from({ length: MAX_TOWN_LEVEL }, (_, k) => `<i class="${k < pt.level ? 'on' : ''}"></i>`).join('')
     const ptNext = pt.next == null ? '街道全部鋪好了' : `再 ${pt.next - pt.points} 點升到 Lv.${pt.level + 1}，多 ${lotsAt(pt.level + 1) - pt.lots} 塊地${islandRadius(pt.level + 1) > islandRadius(pt.level) ? '，小島也會變大' : ''}`
-    const ptCard = `<button type="button" class="bld ptown" data-ptown style="--bc:#e8a96f" title="每個專案在專案町蓋一棟房子；點一下飛過去看看">
+    const fly = this.appMode ? '點一下切回小島、飛過去看看' : '點一下飛過去看看'
+    const ptCard = `<button type="button" class="bld ptown" data-ptown style="--bc:#e8a96f" title="每個專案在專案町蓋一棟房子；${fly}">
         <span class="bld-k">町</span>
         <span class="bld-n"><b>專案町 Lv.${pt.level}</b><small>地 ${used} / ${pt.lots}・最多 ${TOWER_SLOTS} 塊</small></span>
         <span class="bld-pips">${ptPips}</span>
@@ -1301,7 +1310,7 @@ export class UI {
     $('#townBox').innerHTML = `
       <div class="town-head"><b>${esc(t.title)}</b><small>${t.residents.length} 位居民</small></div>
       <div class="town-grid">${ptCard}${cards}</div>
-      <p class="hint">每間店綁著一個功能，用得越多就長得越大；點卡片飛過去看看。</p>`
+      <p class="hint">每間店綁著一個功能，用得越多就長得越大；${this.appMode ? '點卡片會切回小島、飛過去看看' : '點卡片飛過去看看'}。</p>`
   }
 
   // ── 花の図鑑 ──
@@ -1480,10 +1489,12 @@ export class UI {
     $('#townBox').addEventListener('click', (e) => {
       const b = e.target.closest('[data-town], [data-ptown]')
       if (!b) return
-      // 手機上面板蓋住下半部，收起來才看得到浮島
-      if (innerWidth <= 860) this.togglePanel(true)
-      if (b.dataset.town) this.hooks.focusTown?.(b.dataset.town)
-      else this.hooks.focusProjectTown?.()
+      this._onIsland(() => {
+        // 手機上面板蓋住下半部，收起來才看得到浮島
+        if (innerWidth <= 860) this.togglePanel(true)
+        if (b.dataset.town) this.hooks.focusTown?.(b.dataset.town)
+        else this.hooks.focusProjectTown?.()
+      })
     })
     $('#themePick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')

@@ -939,6 +939,9 @@ body.app-mode .full-btn:hover { color: var(--ink); }
   body.app-mode .tab.active { background: none; box-shadow: none; color: var(--ink); }
   body.app-mode .tab.active .tab-ic { color: var(--sakura); }
   body.app-mode .tab.has-dot span::after { top: -26px; right: -6px; }
+  /* 任務、習慣今天還剩幾件：小數字掛在圖示右上角 */
+  body.app-mode .tab { position: relative; }
+  body.app-mode .tab-n { display: block; position: absolute; top: 0; left: calc(50% + 5px); min-width: 16px; padding: 2px 4px; font-size: 9.5px; }
   body.app-mode .full-btn { flex-direction: column; justify-content: center; gap: 2px; height: auto; padding: 4px 0 2px; border-radius: 12px; }
   body.app-mode .full-btn svg { width: 22px; height: 22px; }
   body.app-mode .full-label { font-size: 11px; letter-spacing: .04em; }
