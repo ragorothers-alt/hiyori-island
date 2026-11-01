@@ -502,9 +502,15 @@ export function buildCabinRoom() {
     }
   }
   tileEdge.finish()
-  const hemi = new THREE.HemisphereLight('#fff0d9', '#a396a3', 2.15)
+  // 室內的補光：大部分用不分方向的環境光，半球光只留一小部分。
+  // 全場景的 shader 會用半球光的天空色給輪廓鑲邊光（戶外是天光），屋裡的半球光太強時，
+  // 兩人、地毯的織紋、盆栽的邊都會鑲上一圈刺眼的亮邊（手機沒有反鋸齒，還會碎成光點）
+  const HEMI_SHARE = 0.35
+  const hemi = new THREE.HemisphereLight('#fff0d9', '#a396a3', 2.15 * HEMI_SHARE)
   hemi.name = 'room-fill'
-  group.add(hemi)
+  const ambient = new THREE.AmbientLight('#fff0d9', 2.15 * (1 - HEMI_SHARE))
+  ambient.name = 'room-ambient'
+  group.add(hemi, ambient)
   const sun = new THREE.DirectionalLight('#fff0d7', 1.15)
   sun.name = 'window-key'
   sun.position.set(-1.8, 5.6, -4)
@@ -556,13 +562,17 @@ export function buildCabinRoom() {
   group.userData.anim = (t, dt, state = {}) => {
     const time = Number.isFinite(t) ? Math.max(0, t) : 0
     const n = THREE.MathUtils.clamp(Number.isFinite(state.night) ? state.night : 0, 0, 1)
-    hemi.intensity = 2.15 - n * 1.05
+    const fill = 2.15 - n * 1.05
+    hemi.intensity = fill * HEMI_SHARE
     hemi.color.copy(fillDay).lerp(fillNight, n)
+    ambient.intensity = fill * (1 - HEMI_SHARE)
+    ambient.color.copy(hemi.color)
     sun.intensity = 1.15 - n * 1.02
     skyMaterial.uniforms.top.value.copy(state.skyTop?.isColor ? state.skyTop : dayTop).lerp(nightTop, n)
     skyMaterial.uniforms.bottom.value.copy(state.skyBottom?.isColor ? state.skyBottom : dayBottom).lerp(nightBottom, n)
     practical.emissiveIntensity = 0.35 + n * 0.8
-    lampLight.intensity = 0.18 + n * 0.97
+    // 檯燈就在もち旁邊，夜裡太亮會把她和地毯照到過曝
+    lampLight.intensity = 0.18 + n * 0.45
     const flicker = 1 + 0.045 * Math.sin(time * 3.7) + 0.025 * Math.sin(time * 7.1 + 0.6)
     fireLight.intensity = (0.5 + n * 0.55) * flicker
     fireMaterial.emissiveIntensity = (0.67 + n * 0.1) * flicker

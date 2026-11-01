@@ -10,11 +10,15 @@ const RIM = 0.32
 export const CLOUD_TOP = -13
 
 const chunk = THREE.ShaderChunk
-const direct = 'vec3 irradiance = dotNL * directLight.color;'
-if (chunk.lights_physical_pars_fragment.includes(direct)) {
+// 只有漫射用包裹式的入射光；鏡面反射維持原本的 dotNL。
+// 背光面的鏡面項在「背光又斜看」的邊緣（dotNL、dotNV 都接近 0）分母趨近 0，原本靠入射光是 0 壓住；
+// 包裹式讓背光面也有光，那些邊緣像素會亮到上百倍，細的東西（地毯織紋、盆栽邊、柴薪）全是一顆顆亮點，泛光一暈更明顯
+const diffuse = 'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseContribution ) * ( 1.0 - F );'
+if (chunk.lights_physical_pars_fragment.includes(diffuse)) {
   chunk.lights_physical_pars_fragment = chunk.lights_physical_pars_fragment.replace(
-    direct,
-    `vec3 irradiance = saturate( ( dot( geometryNormal, directLight.direction ) + ${WRAP.toFixed(2)} ) / ${(1 + WRAP).toFixed(2)} ) * directLight.color;`,
+    diffuse,
+    `vec3 hiyoriWrapIrradiance = saturate( ( dot( geometryNormal, directLight.direction ) + ${WRAP.toFixed(2)} ) / ${(1 + WRAP).toFixed(2)} ) * directLight.color;
+	reflectedLight.directDiffuse += hiyoriWrapIrradiance * BRDF_Lambert( material.diffuseContribution ) * ( 1.0 - F );`,
   )
 } else console.warn('[hiyori] shading: lights_physical_pars_fragment 改版了，包裹式漫射沒有套用')
 

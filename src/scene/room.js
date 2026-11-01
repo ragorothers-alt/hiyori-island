@@ -5,8 +5,9 @@ import { buildCabinRoom } from './models/cabinRoom.js'
 // 放在離小島很遠的地方，小島上的 3D 標籤投影時會落在畫面外而自動藏起來
 const ORIGIN = new THREE.Vector3(0, -1000, 0)
 const FADE_MS = 450
-// 室內的色調跟著外面的時段，但沒有太陽光暈，暗角輕一點
-const ROOM_LOOK = { glare: 0, vignette: 0.12 }
+// 室內的色調跟著外面的時段，但沒有太陽光暈，暗角輕一點。
+// 泛光用自己的設定：只讓燈泡、爐火、燈罩這些真正的光源發光（屋裡最亮的牆和兩人約 0.6，燈泡約 1）
+const ROOM_LOOK = { glare: 0, vignette: 0.12, bloom: { strength: 0.42, threshold: 0.8, radius: 0.45, knee: 0.25 } }
 const UP = new THREE.Vector3(0, 1, 0)
 const _v = new THREE.Vector3()
 
