@@ -264,8 +264,10 @@ export function planRules(req) {
     return n
   }
   const plan = new Map(chosen.map((d) => [d.date, []]))
-  if (chunks) chunks.forEach((dur, i) => plan.get(chosen[i % chosen.length].date).push(dur))
-  else for (const d of chosen) for (let i = 0; i < perDay(d); i++) plan.get(d.date).push(len)
+  // 只剩考試當天（或其他天都沒空）：寫的總時數都算放不下，當天照樣只排 15 分鐘
+  let unplaced = chunks && !chosen.length ? chunks.length : 0
+  if (chunks && chosen.length) chunks.forEach((dur, i) => plan.get(chosen[i % chosen.length].date).push(dur))
+  else if (!chunks) for (const d of chosen) for (let i = 0; i < perDay(d); i++) plan.get(d.date).push(len)
 
   // 主攻項目輪流（平滑加權輪替）：考試、截止日前，學習和工作的項目多排一點；同一天盡量不重複
   const prep = (f, date) => exam && date < exam.date && related(f)
@@ -300,7 +302,6 @@ export function planRules(req) {
   }
 
   const out = []
-  let unplaced = 0
   for (const d of info) {
     const items = []
     for (const dur0 of plan.get(d.date) || []) {

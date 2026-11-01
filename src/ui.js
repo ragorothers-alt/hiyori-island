@@ -1706,7 +1706,7 @@ class FocusTimer {
     this._loadLengths()
     try {
       const saved = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null')
-      if (saved && saved.mode !== 'idle') Object.assign(this, saved)
+      if (saved?.mode === 'focus' || saved?.mode === 'break') this._restore(saved)
     } catch {}
     $('#focusBtn').onclick = () => this.toggle()
     $('#focusStop').onclick = () => this.stop()
@@ -1751,6 +1751,20 @@ class FocusTimer {
     this.breakMin = debugMin ? debugMin / 2 : st.breakMin || BREAK_MIN
     this.rounds = this.up ? 1 : st.focusRounds || 1
     this.round = 1
+  }
+
+  // 重新整理前的計時：每個欄位都檢查過才用（壞掉的數字會一路變成 NaN 分鐘）
+  _restore(saved) {
+    const n = (v, lo, hi, dflt) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt)
+    this.mode = saved.mode
+    this.endAt = n(saved.endAt, 0, 8.64e15, 0)
+    this.paused = Number.isFinite(saved.paused) ? Math.max(0, saved.paused) : null
+    this.taskId = typeof saved.taskId === 'string' ? saved.taskId : null
+    this.up = saved.up === true
+    this.focusMin = n(saved.focusMin, 0.05, FREE_MAX, this.focusMin)
+    this.breakMin = n(saved.breakMin, 0.05, 60, this.breakMin)
+    this.rounds = Math.round(n(saved.rounds, 1, 4, 1))
+    this.round = Math.round(n(saved.round, 1, this.rounds, 1))
   }
 
   _save() {

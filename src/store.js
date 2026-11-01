@@ -113,7 +113,8 @@ const DAY_NUMS = [
   'tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox',
   'focusAm', 'focusPm', 'focusEve', 'focusLate',
 ]
-const DAY_FLAGS = ['perfect', 'starAll', 'habitAll']
+// sleep：那天的睡眠已經給過獎勵
+const DAY_FLAGS = ['perfect', 'starAll', 'habitAll', 'sleep']
 const emptyDay = () => {
   const d = {}
   for (const k of DAY_NUMS) d[k] = 0
@@ -202,14 +203,15 @@ const COACH_DAYS = [3, 5, 7]
 function cleanCoach(c) {
   if (!isObj(c)) return emptyCoach()
   const tags = new Set(TAGS.map((t) => t.id))
-  const labels = (v) => (Array.isArray(v) ? v.map((x) => str(x, 16).trim()).filter(Boolean).slice(0, 12) : [])
+  const labels = (v, max = 16, n = 12) => (Array.isArray(v) ? v.map((x) => str(x, max).trim()).filter(Boolean).slice(0, n) : [])
   const items = (Array.isArray(c.items) ? c.items : [])
     .map((x) => (isObj(x) && str(x.label, 16).trim() ? { label: str(x.label, 16).trim(), tag: tags.has(x.tag) ? x.tag : 'study' } : null))
     .filter(Boolean)
     .slice(0, 12)
   const l = c.last
+  // 主攻項目可能是專案名稱（最長 60 字），要整個留著，下次問卷才認得出來
   const last = isObj(l)
-    ? { focus: labels(l.focus), slots: labels(l.slots), days: COACH_DAYS.includes(l.days) ? l.days : 5, len: num(l.len, 15, 120, 50) }
+    ? { focus: labels(l.focus, 60, 50), slots: labels(l.slots), days: COACH_DAYS.includes(l.days) ? l.days : 5, len: num(l.len, 15, 120, 50) }
     : null
   const plans = cleanList(c.plans, (p) => ({
     id: str(p.id), createdAt: ts(p.createdAt) || Date.now(), title: str(p.title, 40), from: ymd(p.from, ''), to: ymd(p.to, ''), count: num(p.count, 0, 99, 0),
@@ -537,6 +539,27 @@ export class Store {
     if (this._ensureQuests() || made) this.save(false)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready
+    globalThis.addEventListener?.('storage', (e) => this._otherTabSaved(e))
+  }
+
+  // 同一個瀏覽器開著兩個分頁：另一邊存檔時，這邊換成那一版（跟同步拉回一樣就地更新）。
+  // 不然這邊下一次存檔會拿舊資料把整份蓋掉，那邊剛加的東西就不見了
+  _otherTabSaved(e) {
+    if (e.key !== KEY || !e.newValue) return
+    let obj
+    try {
+      obj = JSON.parse(e.newValue)
+    } catch {
+      return
+    }
+    if (!obj?.rev || obj.rev === this.state.rev) return
+    // 這邊還沒寫出去的變更（最多 0.12 秒）讓給剛存檔的那一邊
+    clearTimeout(this._saveTimer)
+    try {
+      this.replaceState(obj, obj.updatedAt, { soft: true, rev: obj.rev })
+    } catch (err) {
+      console.warn('[hiyori] 讀取另一個分頁的存檔失敗', err)
+    }
   }
 
   // ── 事件 ──
@@ -1264,7 +1287,8 @@ export class Store {
     }
     return list.sort((a, b) => b.moved - a.moved || b.late - a.late)
   }
-  // 拆成三小步：先開個頭、推進一半、收尾，時間照原本的預估分配；本命留在第一步。原本那件換掉（不給 XP）
+  // 拆成三小步：先開個頭、推進一半、收尾，時間照原本的預估分配；本命和專注過的輪數留在第一步。原本那件換掉（不給 XP）
+  // 原本那件已經領過獎勵（完成後又取消）的話，三小步也算領過，免得拆開再領一次
   splitTask(id) {
     const t = this._find('tasks', id)
     if (!t || t.done) return null
@@ -1274,8 +1298,8 @@ export class Store {
     const fx = []
     const parts = steps.map(([name, share], i) => {
       const p = {
-        id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: false, createdAt: Date.now() + i,
-        dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0,
+        id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: !!t.rewarded, createdAt: Date.now() + i,
+        dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0, pomos: i === 0 ? t.pomos || 0 : 0,
       }
       fx.push(['taskAdded', p])
       return p
@@ -1388,7 +1412,10 @@ export class Store {
     const entry = { bed, wake, q: num(q, 0, 5, 0) }
     this.state.sleep[date] = entry
     const fx = [['sleepLogged', { date, first, min: sleepMinutes(entry) }]]
-    if (first) {
+    // 獎勵記在那天的紀錄上：刪掉再記一次不會再給
+    const d = this.day(date)
+    if (first && !d.sleep) {
+      d.sleep = true
       this.stats.sleepLogs++
       if (date === this.today) this._gain(XP.sleep, fx, { kind: 'sleep' })
     }
@@ -1435,10 +1462,12 @@ export class Store {
     this._finish()
   }
   // 養成：打卡（delta 可以是 -1 收回一次）。過去的日子也能補打卡，但只有今天第一次完成有獎勵
-  checkHabit(id, date = this.today, delta = 1) {
+  checkHabit(id, date = null, delta = 1) {
     const h = this.habit(id)
     if (!h || h.kind !== 'build' || h.archived) return
+    // 先跨日再決定日期：開著過了午夜，第一次打卡要記在新的一天
     this._refreshToday()
+    date ??= this.today
     if (date > this.today) return
     if (date < h.start) {
       // 補開始日以前的卡（剛開始記、但其實已經做了幾天）：開始日往前移，最多 12 週
@@ -1867,6 +1896,8 @@ export class Store {
 
   // ── 專注 / 互動 / 每日任務 ──
   completePomodoro(minutes, taskId = null) {
+    // 分鐘數壞掉（NaN、負的）就當 0：一個 NaN 會讓經驗值、金平糖和統計整個變成 NaN，存檔後歸零
+    minutes = Number.isFinite(+minutes) ? Math.min(600, Math.max(0, +minutes)) : 0
     this._refreshToday()
     const task = taskId ? this._find('tasks', taskId) : null
     if (task) task.pomos = (task.pomos || 0) + 1

@@ -1,6 +1,6 @@
 // 提醒：日程與排進時段的任務開始前 N 分鐘提醒一次、就寢前 30 分鐘提醒準備睡覺（App 內 + 系統通知）。
 // 已提醒過的記錄在 localStorage，重新整理不會重複提醒；改了開始時間會再提醒一次。
-import { dateStr, toMin } from './store.js'
+import { addDays, dateStr, toMin } from './store.js'
 
 const KEY = 'hiyori-reminded'
 
@@ -28,23 +28,31 @@ export class Reminders {
     } catch {}
   }
 
+  // 那天有時間的日程和任務：[項目, 開始時間, 種類, 日期, 分鐘數要加多少（明天的 +1440）]
+  _items(date, offset) {
+    return [
+      ...this.store.eventsOn(date).map((e) => [e, e.start, 'event', date, offset]),
+      ...this.store.tasksOn(date).filter((t) => t.at).map((t) => [t, t.at, 'task', date, offset]),
+    ]
+  }
+
   check(now = new Date()) {
     const lead = this.store.state.settings.remindLead
     const today = dateStr(now)
+    const tomorrow = addDays(today, 1)
     const mins = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60
     const sent = (this.sent[today] ||= [])
     let changed = false
-    const items = lead < 0 ? [] : [
-      ...this.store.eventsOn(today).map((e) => [e, e.start, 'event']),
-      ...this.store.tasksOn(today).filter((t) => t.at).map((t) => [t, t.at, 'task']),
-    ]
-    for (const [item, at, kind] of items) {
+    // 明天一早的項目，提前提醒的時間落在今天晚上：也要跨過午夜提醒（記在明天那份，過了午夜不會再提醒一次）
+    const items = lead < 0 ? [] : [...this._items(today, 0), ...(mins + lead >= 1440 ? this._items(tomorrow, 1440) : [])]
+    for (const [item, at, kind, date, offset] of items) {
       const key = `${item.id}@${at}`
-      if (item.done || sent.includes(key)) continue
-      const start = toMin(at)
+      const done = (this.sent[date] ||= [])
+      if (item.done || done.includes(key)) continue
+      const start = toMin(at) + offset
       // 開始後 1 分鐘內打開 App 仍會補提醒；再晚就不吵了
       if (mins >= start - lead && mins < start + 1) {
-        sent.push(key)
+        done.push(key)
         changed = true
         this.onRemind(kind === 'task' ? { ...item, start: at } : item, Math.max(0, Math.ceil(start - mins)), kind)
       }
@@ -69,7 +77,7 @@ export class Reminders {
       }
     }
     for (const d of Object.keys(this.sent)) {
-      if (d !== today) {
+      if (d !== today && d !== tomorrow) {
         delete this.sent[d]
         changed = true
       }

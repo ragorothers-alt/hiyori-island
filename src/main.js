@@ -1423,8 +1423,10 @@ async function boot() {
   let lastMin = -1
   setInterval(() => {
     ui.tickClock()
+    // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
+    const rolled = store.tick()
     reminders.check()
-    if (store.tick()) return
+    if (rolled) return
     const minute = Math.floor(Date.now() / 60000)
     if (minute !== lastMin) {
       lastMin = minute
