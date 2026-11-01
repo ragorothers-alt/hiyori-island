@@ -142,12 +142,9 @@ export class TimeRing {
     this.isToday = isToday
     this.now.visible = isToday
     this.progress.visible = isToday
-    for (const a of this.arcs.values()) {
-      this.arcGroup.remove(a.mesh)
-      a.mesh.geometry.dispose()
-      a.mesh.material.dispose()
-    }
-    this.arcs.clear()
+    // 每次存檔都會呼叫這裡：沒變的光帶留著用，時間改了才重做形狀、顏色改了才換色
+    const old = this.arcs
+    this.arcs = new Map()
 
     // 重疊的日程分層堆疊
     const lanes = []
@@ -158,15 +155,29 @@ export class TimeRing {
       let lane = lanes.findIndex((end) => end <= m0)
       if (lane < 0) lane = lanes.length
       lanes[lane] = m1
-      const geo = this._arcGeo(m0, m1)
-      const color = new THREE.Color(EVENT_COLORS[e.color % EVENT_COLORS.length])
-      const material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.25, roughness: 0.35, transparent: true, opacity: 0.92 })
-      const mesh = new THREE.Mesh(geo, material)
-      mesh.position.y = Y + 0.06 + lane * LANE_H
-      mesh.userData.pick = { type: 'event', id: e.id }
-      mesh.castShadow = false
-      this.arcGroup.add(mesh)
-      this.arcs.set(e.id, { mesh, e, m0, m1, lane, color })
+      const hex = EVENT_COLORS[e.color % EVENT_COLORS.length]
+      let a = old.get(e.id)
+      old.delete(e.id)
+      if (!a) {
+        const material = new THREE.MeshStandardMaterial({ emissiveIntensity: 0.25, roughness: 0.35, transparent: true, opacity: 0.92 })
+        a = { mesh: new THREE.Mesh(this._arcGeo(m0, m1), material), g: `${m0}-${m1}` }
+        a.mesh.userData.pick = { type: 'event', id: e.id }
+        a.mesh.castShadow = false
+        this.arcGroup.add(a.mesh)
+      } else if (a.g !== `${m0}-${m1}`) this.previewArc(a, m0, m1)
+      if (a.hex !== hex) {
+        a.hex = hex
+        a.color = new THREE.Color(hex)
+        a.mesh.material.emissive.copy(a.color)
+      }
+      a.mesh.position.y = Y + 0.06 + lane * LANE_H
+      Object.assign(a, { e, m0, m1, lane })
+      this.arcs.set(e.id, a)
+    }
+    for (const a of old.values()) {
+      this.arcGroup.remove(a.mesh)
+      a.mesh.geometry.dispose()
+      a.mesh.material.dispose()
     }
     this._styleArcs()
   }
@@ -205,11 +216,13 @@ export class TimeRing {
     if (Math.abs(minutes - a.m1) < edge) return 'end'
     return 'move'
   }
+  // 拖曳中先改形狀（還沒存檔）；g 記著現在的形狀，存檔後 sync 才知道要不要重做
   previewArc(id, m0, m1) {
-    const a = this.arcs.get(id)
+    const a = typeof id === 'string' ? this.arcs.get(id) : id
     if (!a) return
     a.mesh.geometry.dispose()
     a.mesh.geometry = this._arcGeo(m0, m1)
+    a.g = `${m0}-${m1}`
   }
 
   _styleArcs() {

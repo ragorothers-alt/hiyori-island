@@ -258,9 +258,11 @@ export class UI {
     $('#ahTitle').textContent = tb.querySelector('span').textContent
     $('#ahKana').textContent = tb.querySelector('small').textContent
     if ($('#panel').classList.contains('collapsed')) this.togglePanel(false)
+    // 日程的時間軸要在看得到時量高度：切過去時一定重畫
+    if (tab === 'schedule') this._stale?.add('schedule')
+    this._renderPage(tab)
     if (tab === 'records') this.renderRecords()
     if (tab === 'habits') this.habits.render()
-    if (tab === 'schedule') this.schedule.render()
     if (tab === 'coach') this.coach.render()
   }
 
@@ -1568,12 +1570,9 @@ export class UI {
 
   render() {
     this.renderChrome()
-    this._renderRepeatOptions()
-    this.renderTasks()
-    this.renderSchedule()
-    this.renderRemind()
-    this.renderRoutines()
-    this.renderProjects()
+    // 任務、日程、專案只畫正在看的那一頁；其他頁記著，切過去時再畫（藏著的頁面不必每次都重建）
+    this._stale = new Set(['tasks', 'schedule', 'projects'])
+    this._renderPage(this.tab)
     if (this.tab === 'records') this.renderRecords()
     if (this.tab === 'habits') this.habits.render()
     if (this.tab === 'coach') this.coach.refresh()
@@ -1581,9 +1580,21 @@ export class UI {
     if (this.calendar.isOpen) this.calendar.render()
   }
 
+  _renderPage(tab) {
+    if (!this._stale?.delete(tab)) return
+    if (tab === 'projects') return this.renderProjects()
+    if (tab !== 'tasks' && tab !== 'schedule') return
+    this._renderRepeatOptions()
+    this.renderRoutines()
+    if (tab === 'tasks') return this.renderTasks()
+    this.renderSchedule()
+    this.renderRemind()
+  }
+
   tickClock() {
     const n = new Date()
-    $('#clock').textContent = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+    const text = `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`
+    if ($('#clock').textContent !== text) $('#clock').textContent = text
   }
 
   // ── 金平糖商店 ──
@@ -2015,6 +2026,11 @@ class FocusTimer {
         this.hooks.breakFinished(null)
       }
     }
+    // 每 0.25 秒檢查一次是為了準時結束；畫面上的數字一秒才變一次，沒變就不重寫
+    const sec = this.mode === 'idle' ? -1 : Math.floor((this.counting ? this.elapsed : this.left) / 1000)
+    if (sec === this._shown && this.mode === this._shownMode) return
+    this._shown = sec
+    this._shownMode = this.mode
     this.render()
   }
 

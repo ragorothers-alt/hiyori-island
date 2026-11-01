@@ -1431,7 +1431,8 @@ async function boot() {
     if (minute !== lastMin) {
       lastMin = minute
       if (store.selectedDate === store.today) {
-        ui.renderSchedule(false)
+        // 日程頁沒在看就不重畫（切過去時會重畫）
+        if (ui.tab === 'schedule') ui.renderSchedule(false)
         syncNextEvent()
       }
       if (!placing && !duo.focusing) ui.maybeAskReview()
