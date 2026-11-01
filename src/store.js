@@ -727,6 +727,56 @@ export class Store {
       tier: w.activeDays >= 5 || w.tasks >= 20 ? 'great' : w.activeDays >= 3 ? 'good' : 'gentle',
     }
   }
+  // 週報：wk 那週（星期一開始）到 upto 為止（預設到週日或今天）的數字。完成率用那幾天的任務算
+  weekReport(wk = weekKey(this.today), upto = null) {
+    const last = addDays(wk, 6)
+    const end = upto || (last < this.today ? last : this.today)
+    const days = []
+    for (let d = wk; d <= end; d = addDays(d, 1)) days.push(d)
+    const set = new Set(days)
+    const tasks = this.state.tasks.filter((t) => set.has(t.date))
+    const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null }
+    for (const t of tasks) {
+      if (t.done) r.done++
+      if (t.star) r.starTotal++
+    }
+    r.rate = r.total ? r.done / r.total : 0
+    for (const d of days) {
+      const h = this.peekDay(d)
+      r.focus += h.focus
+      r.pomodoros += h.pomodoros
+      r.stars += h.stars
+      if (h.tasks || h.focus || h.habits) r.active++
+    }
+    // 習慣：那幾天該做的次數裡做到了幾次（今天還沒做的不算進去）
+    let need = 0
+    let got = 0
+    for (const h of this.state.habits) {
+      if (h.kind !== 'build' || h.archived) continue
+      for (const d of days) {
+        if (!applies(h, d) || (d === this.today && !doneOn(h, d))) continue
+        need++
+        if (doneOn(h, d)) got++
+      }
+    }
+    if (need) r.habitRate = got / need
+    r.moods = days.map((d) => this.state.journal[d]?.mood || null)
+    return r
+  }
+  // 記憶圖鑑：往回 n 週（不含這週）有在用的週，新的在前
+  weekAlbum(n = 12) {
+    const cur = weekKey(this.today)
+    const out = []
+    for (let i = 1; i <= n; i++) {
+      const r = this.weekReport(addDays(cur, -7 * i))
+      if (r.total || r.focus || r.moods.some(Boolean)) out.push(r)
+    }
+    return out
+  }
+  // 有用過的日子（完成任務、專注或打卡）；週報要累積 3 天才出第一份
+  usedDays() {
+    return Object.values(this.state.history).filter((h) => h.tasks || h.focus || h.habits).length
+  }
   // 這週一還沒看過上週的回顧卡、上週也有在用 → 要顯示
   weekCardDue() {
     const last = addDays(weekKey(this.today), -7)

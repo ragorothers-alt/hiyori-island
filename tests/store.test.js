@@ -1473,3 +1473,33 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(ctx.rhythm).toBe(store.state.rhythm)
   })
 })
+
+describe('週報', () => {
+  // TODAY（2026-10-25）是星期日；這週從 10-19 開始
+  it('本週到目前：完成率用那幾天的任務算，專注、番茄、本命、習慣達成、有在用的日子', () => {
+    setDate('2026-10-21')
+    completeTask('a', { date: '2026-10-21' })
+    const b = store.addTask({ title: 'b', date: '2026-10-21' })
+    store.toggleStar(b.id)
+    store.addTask({ title: 'c', date: '2026-10-20' })
+    store.addTask({ title: '下週的', date: '2026-10-27' })
+    store.completePomodoro(25)
+    store.completePomodoro(50)
+    const r = store.weekReport()
+    expect(r).toMatchObject({ week: '2026-10-19', end: '2026-10-21', days: 3, total: 3, done: 1, focus: 75, pomodoros: 2, starTotal: 1, active: 1, habitRate: null })
+    expect(r.rate).toBeCloseTo(1 / 3)
+    // 指定到哪天為止（跟上週同一段比用）
+    expect(store.weekReport('2026-10-19', '2026-10-20').total).toBe(1)
+  })
+
+  it('記憶圖鑑：往回幾週有在用的才收，新的在前；有用過的日子', () => {
+    setDate('2026-10-07')
+    completeTask('十月第一週')
+    setDate('2026-10-21')
+    completeTask('這週')
+    const album = store.weekAlbum(4)
+    expect(album.map((w) => w.week)).toEqual(['2026-10-05'])
+    expect(album[0].rate).toBe(1)
+    expect(store.usedDays()).toBe(2)
+  })
+})

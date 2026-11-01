@@ -1,11 +1,15 @@
 import './coach.css'
 import { $, esc, ICON } from './dom.js'
-import { TAGS, tagOf, PROJECT_COLORS, DATE_KINDS } from '../theme.js'
+import { TAGS, tagOf, PROJECT_COLORS, DATE_KINDS, moodOf } from '../theme.js'
 import { FUJI_LINES } from '../data/lines.js'
-import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel } from '../coach.js'
+import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel, addDays } from '../coach.js'
+import { buildInsights } from '../insights.js'
+import { PEAKS } from '../planner.js'
 
-// 「教練 · ふじ」分頁的排程：ふじ打招呼 → 問卷（全部點選標籤）→ 你的回答 → ふじ排好的預覽 → 套用／換個排法／改答案。
-// 對話只放在記憶體；套用後的任務記得是哪一次排程，可以整批撤銷。
+// 「教練 · ふじ」分頁，分成兩頁：
+// 排程：ふじ打招呼 → 問卷（全部點選標籤）→ 你的回答 → ふじ排好的預覽 → 套用／換個排法／改答案。
+//   對話只放在記憶體；套用後的任務記得是哪一次排程，可以整批撤銷。
+// 週報：本週到目前、表現分析（跟上週同一段比）、習慣洞察、記憶圖鑑（每週一張卡）。
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)]
 const fill = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '')
@@ -29,6 +33,14 @@ const DAYS = [
   { v: 5, label: '穩定', sub: '5 天' },
   { v: 7, label: '全力', sub: '7 天' },
 ]
+const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)}<small>時</small>${m % 60 ? `${m % 60}<small>分</small>` : ''}` : `${m}<small>分</small>`)
+// 跟上週比：↑ 多了、↓ 少了（數字一樣或上週沒有就不標）
+const delta = (now, before, unit = '') => {
+  if (before == null || now === before) return ''
+  const d = now - before
+  return `<i class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'}${Math.abs(Math.round(d))}${unit}</i>`
+}
 const CLOCK = '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v3.2h3.2"/><path d="M12 8v4.2l2.8 1.8"/></svg>'
 
 export class CoachView {
@@ -36,6 +48,7 @@ export class CoachView {
     this.root = root
     this.store = store
     this.hooks = hooks
+    this.view = 'plan' // plan：排程 | report：週報
     this.step = 'ask' // ask：填問卷 | preview：看預覽 | done：已套用
     this.res = null
     this.planId = null
@@ -285,7 +298,15 @@ export class CoachView {
       this.hooks.setTab?.('schedule')
       return
     } else if (act === 'history') this.history = !this.history
-    else return
+    else if (act === 'view') {
+      this.view = b.dataset.v
+      this.history = false
+      this.root.closest('.panel-body')?.scrollTo({ top: 0 })
+    } else if (act === 'week') return this.hooks.openWeekCard?.(b.dataset.wk)
+    else if (act === 'peak') {
+      this.store.setRhythm({ peak: b.dataset.v })
+      this.hooks.toast?.({ icon: '時', title: `精神最好的時段改成${PEAKS[b.dataset.v].label}`, sub: '之後排程會把重要的事放在這時候' })
+    } else return
     this.render()
   }
 
@@ -338,6 +359,10 @@ export class CoachView {
   }
 
   render() {
+    if (this.view === 'report') {
+      this.root.innerHTML = `<div class="coach">${this._head()}${this._reportHTML()}</div>`
+      return
+    }
     this.hello ||= say(`coachHello.${greetKey()}`, {}, '想排些什麼？用下面的標籤告訴我吧。')
     const parts = [this._head(), this.history ? this._historyHTML() : '', this._msg('fuji', this.hello)]
     if (this.flash) parts.push(this._msg('fuji', this.flash))
@@ -370,10 +395,14 @@ export class CoachView {
 
   _head() {
     const n = this.store.state.coach.plans.length
-    return `<div class="coach-head">
-      <div><b>ふじの相談室</b><small>排程 · けいかく</small></div>
-      <button class="icon-btn small${this.history ? ' on' : ''}" data-act="history" title="最近的排程">${CLOCK}${n ? `<i class="ch-n">${n}</i>` : ''}</button>
-    </div>`
+    const seg = [
+      ['plan', '排程', 'けいかく'],
+      ['report', '週報', 'しゅうほう'],
+    ]
+      .map(([v, label, kana]) => `<button type="button" data-act="view" data-v="${v}" class="${this.view === v ? 'on' : ''}">${label}<small>${kana}</small></button>`)
+      .join('')
+    const hist = this.view === 'plan' ? `<button class="icon-btn small${this.history ? ' on' : ''}" data-act="history" title="最近的排程">${CLOCK}${n ? `<i class="ch-n">${n}</i>` : ''}</button>` : ''
+    return `<div class="coach-head"><div class="seg coach-seg">${seg}</div>${hist}</div>`
   }
   _msg(who, html, extra = '') {
     return `<div class="cmsg ${who}">${who === 'fuji' ? '<span class="stamp-k coach-k">藤</span>' : ''}<p>${html}${extra ? ` ${extra}` : ''}</p></div>`
@@ -480,5 +509,85 @@ export class CoachView {
       <div class="cp-sum"><span><b>${r.picked}</b> 天</span><span><b>${count}</b> 段</span><span><b>${hours(r.totalMin).replace(' 小時', '')}</b> 小時</span>${this.step === 'done' ? `<em>${ICON.check}已套用</em>` : ''}</div>
       ${days}${notes}${btns}
     </div>`
+  }
+
+  // ── 週報 ──
+  _reportHTML() {
+    const s = this.store
+    const today = s.today
+    const w = s.weekReport()
+    // 跟上週同一段（星期一到同一個星期幾）比
+    const prevWk = addDays(w.week, -7)
+    const p = s.weekReport(prevWk, addDays(prevWk, w.days - 1))
+    const used = s.usedDays()
+    const tier = w.active >= 5 || w.done >= 20 ? 'great' : w.active >= 3 ? 'good' : 'gentle'
+    const parts = []
+    parts.push(this._msg('fuji', esc(used < 3 ? say('weekFirst', { days: 3 - used }, '再累積幾天，就有第一份週報。') : say(`weekReport.${tier}`, {}, '這週也辛苦了。'))))
+
+    // 本週到目前
+    const range = `${md(w.week)}–${md(w.end)}`
+    parts.push(`<section class="wr-card wr-now">
+      <h5>本週到目前<small>${range}</small></h5>
+      <div class="wr-stats">
+        <div><b>${Math.round(w.rate * 100)}<small>%</small></b><span>完成率</span></div>
+        <div><b>${fmtMin(w.focus)}</b><span>投入時數</span></div>
+        <div><b>${w.pomodoros}</b><span>完成番茄</span></div>
+        <div><b>${s.streak}</b><span>連續天數</span></div>
+      </div>
+    </section>`)
+    if (used < 3) {
+      parts.push(`<section class="wr-card wr-wait"><span class="stamp-k coach-k">✦</span><div><b>第一份週報準備中</b><p>累積三天的任務和專注，就能生出你的第一份週報。上面的本週數字現在就在跑了。</p></div></section>`)
+    }
+
+    // 本週表現分析
+    const pctNow = Math.round(w.rate * 100)
+    const C = 2 * Math.PI * 34
+    const rows = [
+      ['完成任務', `${w.done}<small> 件</small>`, delta(w.done, p.total || p.done ? p.done : null)],
+      ['還沒完成', `${w.total - w.done}<small> 件</small>`, ''],
+      ['本命完成', `${w.stars}<small> / ${w.starTotal}</small>`, ''],
+      ['專注', `${w.focus}<small> 分</small>`, delta(w.focus, p.focus || null, ' 分')],
+      ['習慣達成', w.habitRate == null ? '<small>—</small>' : `${Math.round(w.habitRate * 100)}<small>%</small>`, ''],
+    ]
+    parts.push(`<section class="wr-card">
+      <h5>本週表現分析<small>跟上週同一段比</small></h5>
+      <div class="wr-perf">
+        <div class="wr-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34"/><circle cx="40" cy="40" r="34" class="fg" style="stroke-dasharray:${C};stroke-dashoffset:${C * (1 - w.rate)}"/></svg><b>${pctNow}<small>%</small></b><span>總體完成度</span></div>
+        <ul>${rows.map(([k, v, d]) => `<li><span>${k}</span><b>${v}</b>${d}</li>`).join('')}</ul>
+      </div>
+    </section>`)
+
+    // 習慣洞察
+    const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today })
+    const guess = list.some((x) => x.guess)
+    parts.push(`<section class="wr-card">
+      <h5>習慣洞察${guess ? '<em class="wr-badge">部分依作息推測</em>' : ''}</h5>
+      <ul class="wr-ins">${list
+        .map(
+          (x) => `<li class="${x.guess ? 'guess' : ''}"><span class="wr-k">${x.kanji}</span><div><b>${esc(x.title)}</b><p>${esc(x.text)}</p>${
+            x.action ? `<button class="btn-ghost" data-act="peak" data-v="${x.action.value}">${esc(x.action.label)}</button>` : ''
+          }</div></li>`,
+        )
+        .join('')}</ul>
+      ${list.some((x) => !x.guess) ? `<p class="wr-tip">ふじ：「${esc(say('insightTip', {}, '先試一小次，感覺合適再留下來。'))}」</p>` : ''}
+    </section>`)
+
+    // 記憶圖鑑：這週＋往回 12 週
+    const album = [w, ...s.weekAlbum(12)]
+    const cards = album
+      .map((r) => {
+        const cur = r.week === w.week
+        const moods = r.moods.map((m) => `<i style="--mc:${moodOf(m)?.color || 'transparent'}"></i>`).join('')
+        return `<button type="button" class="wr-album-card${cur ? ' cur' : ''}" data-act="week" data-wk="${r.week}">
+          <small>${cur ? '這週' : '週'}</small><span class="wr-ar">${md(r.week)} - ${md(addDays(r.week, 6))}</span>
+          <b>${Math.round(r.rate * 100)}<small>%</small></b><span class="wr-ap">${r.pomodoros} 個番茄・${r.done} 朵花</span><span class="wr-am">${moods}</span>
+        </button>`
+      })
+      .join('')
+    parts.push(`<section class="wr-card">
+      <h5>記憶圖鑑<small>像相簿一樣收藏每週的努力軌跡</small></h5>
+      <div class="wr-album">${cards}</div>
+    </section>`)
+    return parts.join('')
   }
 }

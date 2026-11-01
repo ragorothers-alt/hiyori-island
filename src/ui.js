@@ -1,5 +1,5 @@
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH } from './store.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -98,6 +98,7 @@ export class UI {
       closeCalendar: () => this.calendar.close(),
       focusEvent: (id) => hooks.focusEvent(id),
       hoverEvent: (id) => hooks.hoverEvent(id),
+      openWeekCard: (wk) => this.openWeekCard(wk),
     }
     this.schedule = new ScheduleView(store, viewHooks)
     this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
@@ -1060,9 +1061,15 @@ export class UI {
   }
 
   // ── 上週回顧卡 ──
-  openWeekCard() {
+  // wk：哪一週（星期一）；不給就是上週。週報的記憶圖鑑點卡片時會帶週次
+  openWeekCard(wk) {
     const s = this.store
-    const w = s.weekSummary()
+    const lastWk = addDays(weekKey(s.today), -7)
+    this.weekOpen = wk || lastWk
+    const w = s.weekSummary(this.weekOpen)
+    const cur = this.weekOpen === weekKey(s.today)
+    $('#weekModal .modal-kicker').textContent = cur ? '今週のふりかえり' : this.weekOpen === lastWk ? '先週のふりかえり' : 'ふりかえり'
+    $('#weekClose').textContent = this.weekOpen === lastWk ? '收下，開始新的一週' : '收好'
     const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
     $('#weekRange').textContent = `${md(w.week)} – ${md(w.end)}`
     $('#weekMoods').innerHTML = w.days
@@ -1094,7 +1101,8 @@ export class UI {
   closeWeekCard() {
     if ($('#weekModal').hidden) return
     $('#weekModal').hidden = true
-    this.store.seenWeekCard()
+    // 只有上週那張算「看過了」（每週一自動跳出的那張）
+    if (this.weekOpen === addDays(weekKey(this.store.today), -7)) this.store.seenWeekCard()
     this.hooks.modalClosed?.()
   }
 
