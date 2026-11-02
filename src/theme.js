@@ -35,6 +35,8 @@ export const XP = {
   life: 3,
   sleep: 5,
   plan: 10,
+  // 寫專案進度：每個專案每天第一則（一天最多 3 個專案）
+  projectLog: 5,
 }
 
 // 本命：每天最多挑 3 件，完成給雙倍 XP

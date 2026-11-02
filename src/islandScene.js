@@ -970,7 +970,7 @@ export async function createIsland(ctx) {
     let pos = null
     if (kind === 'task' || kind === 'star') pos = garden.anchor(id)
     else if (kind === 'event') pos = ring.anchor(id)
-    else if (kind === 'milestone' || kind === 'project' || kind === 'onTime') pos = houses.anchor(id)
+    else if (kind === 'milestone' || kind === 'project' || kind === 'onTime' || kind === 'projectLog') pos = houses.anchor(id)
     // 時間、作息與戒除是ふじ在照顧，經驗值從她頭上冒出來
     else if (kind === 'plan' || kind === 'sleep' || kind === 'quit' || kind === 'urge') pos = fuji.headAnchor()
     pos ||= mochi.headAnchor()
@@ -1012,6 +1012,12 @@ export async function createIsland(ctx) {
     for (const c of duo.list) c.celebrate()
   }, 1200))
   store.on('lifeLogged', () => resWork('cafe'))
+  // 寫了專案進度：那棟房子泛起一圈光，圖書館的店長偶爾說一句
+  store.on('projectLogged', ({ project }) => {
+    const base = houses.anchor(project.id, false)
+    if (base) fx.ripple(base, PROJECT_COLORS[project.color % PROJECT_COLORS.length], 1.8)
+    resWork('library')
+  })
 
   // 澆花是もち的工作
   mochi.onWater = {

@@ -286,8 +286,18 @@ body.night .proj-pct { filter: none; }
 .proj-filter { margin: 0 0 10px; flex-wrap: wrap; }
 .proj-chip.paused { filter: grayscale(.7); opacity: .85; }
 .proj-bar { height: 8px; border-radius: 6px; background: rgba(140, 170, 200, .16); overflow: hidden; margin-bottom: 8px; display: flex; gap: 2px; }
-.proj-bar i { flex: 1; background: rgba(140, 170, 200, .12); transition: background .5s; }
-.proj-bar i.on { background: var(--c); }
+/* 每個里程碑一格；--f：這個里程碑完成了多少（細項做了幾成也算） */
+.proj-bar i { flex: 1; background: linear-gradient(90deg, var(--c) calc(var(--f, 0) * 100%), rgba(140, 170, 200, .12) 0); }
+.proj-head { cursor: pointer; }
+.proj-sum { display: flex; flex-direction: column; gap: 2px; margin: -2px 0 8px; padding: 7px 10px; border-radius: 12px; background: rgba(140, 170, 200, .1); font-size: 12px; cursor: pointer; }
+.proj-sum .ps-last { line-height: 1.55; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.proj-sum .ps-last small { color: var(--ink-faint); margin-left: 6px; font-size: 11px; white-space: nowrap; }
+.proj-sum .ps-n { font-size: 11px; color: var(--ink-soft); }
+.proj-sum:hover { background: rgba(140, 170, 200, .16); }
+.proj-actions .proj-open { color: var(--ink); font-weight: 500; }
+.ms .ms-n { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-soft); padding: 0 5px; border-radius: 6px; background: rgba(140, 170, 200, .14); }
+.item-meta .proj-tag { display: inline-flex; align-items: center; gap: 4px; }
+.item-meta .proj-tag::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--pc); flex: none; }
 .ms-list { list-style: none; margin: 0; padding: 0; }
 .ms { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; border-radius: 10px; }
 .ms .check { width: 19px; height: 19px; }

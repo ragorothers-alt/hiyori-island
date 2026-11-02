@@ -40,6 +40,63 @@ export function armConfirm(btn, label, fn) {
   }, 3000)
 }
 
+// 把元素就地換成輸入框；按 Enter 或離開時存，Esc 取消（onSave(null)）
+export function inlineEdit(el, value, onSave, maxLength = 60) {
+  const input = document.createElement('input')
+  input.className = 'inline-input'
+  input.value = value
+  input.maxLength = maxLength
+  el.replaceChildren(input)
+  input.focus()
+  input.select()
+  let done = false
+  const finish = (save) => {
+    if (done) return
+    done = true
+    if (save && input.value.trim() && input.value.trim() !== value) onSave(input.value.trim())
+    else onSave(null)
+  }
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation()
+    // 中文輸入法選字時按的 Enter 不算送出
+    if (e.isComposing || e.keyCode === 229) return
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      finish(true)
+    }
+    if (e.key === 'Escape') finish(false)
+  })
+  input.addEventListener('blur', () => finish(true))
+}
+
+// 依 key 重用子節點：內容沒變就不碰，正在輸入的表單與焦點不會被打斷。
+// item：{ k, html } 或 { k, kids }，可加 tag、cls、style
+export function patch(box, items) {
+  const old = new Map()
+  for (const el of box.children) old.set(el.dataset.k, el)
+  let ref = box.firstChild
+  for (const it of items) {
+    let el = old.get(it.k)
+    if (el) old.delete(it.k)
+    else {
+      el = document.createElement(it.tag || 'div')
+      el.dataset.k = it.k
+    }
+    const cls = it.cls || ''
+    if (el.className !== cls) el.className = cls
+    const style = it.style || ''
+    if ((el.getAttribute('style') || '') !== style) el.setAttribute('style', style)
+    if (it.kids) patch(el, it.kids)
+    else if (el._html !== it.html) {
+      el.innerHTML = it.html
+      el._html = it.html
+    }
+    if (el === ref) ref = ref.nextSibling
+    else box.insertBefore(el, ref)
+  }
+  for (const el of old.values()) el.remove()
+}
+
 // 'YYYY-MM-DD' → '10 月 29 日（四）'
 export const WEEK_ZH = ['日', '一', '二', '三', '四', '五', '六']
 export function dateLabel(date, withWeek = true) {

@@ -413,6 +413,11 @@ async function boot() {
     // 不要每筆都說話：第一筆之後每 3 筆說一次
     if (count === 1 || count % 3 === 0) talk('lifeLogged', { kind: lifeKindOf(item.kind).label }, 3400)
   })
+  // 專案進度：每個專案每天第一則說一句，之後安靜記下
+  store.on('projectLogged', ({ project, first }) => {
+    sfx.pop()
+    if (first) talk('projectLog', { project: short(project.name) }, 3800)
+  })
 
   // ── ひより町、專案町長大 ──
   // 有小島時由小島排隊演出（鏡頭飛過去、蓋起來，演到那裡才通知）；還沒有小島就直接通知，之後建小島時照最新的樣子蓋

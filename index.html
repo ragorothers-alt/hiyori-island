@@ -178,6 +178,7 @@
 
       <!-- 專案 -->
       <section class="tab-page" data-page="projects">
+        <div id="projectHome">
         <button class="btn-ghost wide" id="newProjectBtn">＋ 新專案 · 在專案町蓋一棟房子</button>
         <form class="add-form project-form" id="projectForm" hidden autocomplete="off">
           <input id="projectName" maxlength="40" placeholder="專案名稱" required />
@@ -198,6 +199,9 @@
           <summary>已收藏的專案</summary>
           <div id="archiveList"></div>
         </details>
+        </div>
+        <!-- 專案詳情：進度日誌、筆記、里程碑細項（打開某個專案時換掉上面的列表） -->
+        <div id="projectDetail" hidden></div>
       </section>
 
       <!-- 紀錄 -->

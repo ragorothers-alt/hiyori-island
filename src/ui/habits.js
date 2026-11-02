@@ -1,5 +1,5 @@
 import './habits.css'
-import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH } from './dom.js'
+import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, patch } from './dom.js'
 import { EVENT_COLORS } from '../theme.js'
 import {
   HABIT_ICONS, HABIT_TEMPLATES, QUIT_MILESTONES, startOf, applies, countOn, doneOn, streak, bestStreak, rate,
@@ -29,34 +29,6 @@ function freqLabel(days) {
   if (key === '12345') return '平日'
   if (key === '60') return '週末'
   return '週' + s.map((d) => WEEK_ZH[d]).join('')
-}
-
-// 依 key 重用子節點：內容沒變就不碰，正在輸入的表單與焦點不會被打斷。
-// item：{ k, html } 或 { k, kids }，可加 tag、cls、style
-function patch(box, items) {
-  const old = new Map()
-  for (const el of box.children) old.set(el.dataset.k, el)
-  let ref = box.firstChild
-  for (const it of items) {
-    let el = old.get(it.k)
-    if (el) old.delete(it.k)
-    else {
-      el = document.createElement(it.tag || 'div')
-      el.dataset.k = it.k
-    }
-    const cls = it.cls || ''
-    if (el.className !== cls) el.className = cls
-    const style = it.style || ''
-    if ((el.getAttribute('style') || '') !== style) el.setAttribute('style', style)
-    if (it.kids) patch(el, it.kids)
-    else if (el._html !== it.html) {
-      el.innerHTML = it.html
-      el._html = it.html
-    }
-    if (el === ref) ref = ref.nextSibling
-    else box.insertBefore(el, ref)
-  }
-  for (const el of old.values()) el.remove()
 }
 
 export class HabitsView {

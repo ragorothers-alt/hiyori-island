@@ -59,13 +59,27 @@ function readTime(match, offset, evening = false) {
   return { period, minutes: toMinutes(period, h, m, guess) }
 }
 
-export function parseQuick(input, { today = dateStr() } = {}) {
+// projects：[{ id, name }]，給「@專案名」對照用（打開頭幾個字就夠）
+export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
   let text = ` ${input} `
+  // 對到專案時才會多 project（id）和 projectName
   const out = { title: '', kind: 'task', date: null, start: null, end: null, priority: null, tag: null, repeat: null, star: false, chips: [] }
   const take = (re, fn) => {
     text = text.replace(re, (...m) => {
       const r = fn(...m)
       return r === false ? m[0] : ' '
+    })
+  }
+
+  // 專案 @作品集：名字一樣的優先，再來是開頭對得上的（不分大小寫、不管空白）
+  if (projects.length) {
+    const norm = (s) => s.toLowerCase().replace(/\s+/g, '')
+    take(/[@＠](\S+)/g, (_, name) => {
+      const q = norm(name)
+      const p = projects.find((x) => norm(x.name) === q) || projects.find((x) => norm(x.name).startsWith(q))
+      if (!p) return false
+      out.project = p.id
+      out.projectName = p.name
     })
   }
 
@@ -189,5 +203,6 @@ export function describeQuick(p, today) {
   if (p.priority && p.kind === 'task') chips.push(['', '低', '中', '高'][p.priority] + '優先')
   if (p.dur && p.kind === 'task') chips.push(`預估 ${p.dur >= 60 ? `${+(p.dur / 60).toFixed(1)} 小時` : `${p.dur} 分鐘`}`)
   if (p.star && p.kind === 'task') chips.push('★ 本命')
+  if (p.projectName && p.kind === 'task') chips.push(`專案・${p.projectName}`)
   return chips
 }

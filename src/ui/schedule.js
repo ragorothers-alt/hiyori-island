@@ -312,7 +312,8 @@ export class ScheduleView {
           <label>預估時間<select name="dur">${[...new Set([...DURS, taskDur(item)])].sort((a, b) => a - b).map((d) => `<option value="${d}" ${d === taskDur(item) ? 'selected' : ''}>${fmtDur(d)}</option>`).join('')}</select></label>
         </div>
         <div class="form-row"><div class="seg" data-pri>${[1, 2, 3].map((p) => `<button type="button" data-v="${p}" class="${p === ed.priority ? 'on' : ''}">${PRIORITIES[p].label}</button>`).join('')}</div></div>
-        <div class="tag-pick">${TAGS.map((t) => `<button type="button" data-tag="${t.id}" style="--c:${t.color}" class="${t.id === ed.tag ? 'on' : ''}"><i></i>${t.label}</button>`).join('')}</div>`
+        <div class="tag-pick">${TAGS.map((t) => `<button type="button" data-tag="${t.id}" style="--c:${t.color}" class="${t.id === ed.tag ? 'on' : ''}"><i></i>${t.label}</button>`).join('')}</div>
+        ${this._projectPick(item)}`
     $('#editSheet').innerHTML = `<form class="modal-card edit-card glass" autocomplete="off">
       <div class="modal-kicker">${ed.create ? 'あたらしいよてい' : ev ? 'よてい' : 'タスク'}</div>
       <input name="title" class="ec-title" maxlength="${ev ? 60 : 80}" placeholder="${ev ? '日程名稱，例如：牙醫' : '任務名稱'}" value="${esc(item.title)}" required>
@@ -333,6 +334,15 @@ export class ScheduleView {
     if (ed.create) title.focus()
   }
 
+  // 任務歸在哪個專案（收藏起來的專案不列，除非這件本來就歸在那裡）
+  _projectPick(item) {
+    const list = this.store.state.projects.filter((p) => !p.archived || p.id === item.project)
+    if (!list.length) return ''
+    return `<label class="ec-proj">專案<select name="project"><option value="">不歸任何專案</option>${list
+      .map((p) => `<option value="${esc(p.id)}" ${p.id === item.project ? 'selected' : ''}>${esc(p.name)}</option>`)
+      .join('')}</select></label>`
+  }
+
   _saveSheet(form) {
     const s = this.store
     const ed = this.editing
@@ -350,7 +360,8 @@ export class ScheduleView {
       } else s.updateEvent(ed.id, { title, start, end, color: ed.color, date, note })
     } else {
       const at = form.at.value || null
-      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value })
+      const proj = form.elements.project
+      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...(proj ? { project: proj.value || null } : {}) })
     }
     this.closeEdit()
   }

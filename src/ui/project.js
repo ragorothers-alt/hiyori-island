@@ -1,0 +1,847 @@
+import './project.css'
+import { $, $$, esc, ICON, armConfirm, inlineEdit, patch, dateLabel } from './dom.js'
+import { PROJECT_COLORS, tagOf } from '../theme.js'
+import { addDays, daysBetween, parseDate } from '../store.js'
+import {
+  projectTimeline, projectStats, activity, msProgress, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
+  projectMarkdown, NOTE_TEMPLATES, dayOf,
+} from '../projects.js'
+
+// 專案詳情：目標與統計、進度日誌（自己寫的＋自動帶進來的里程碑、任務、專注）、筆記、里程碑的細項與備註、歸在專案的任務。
+// 窄的時候四塊用分頁切換；寬的時候里程碑和任務固定在右欄。
+// 任何資料變動都會重畫：輸入框標了 data-keep，重畫前後把打到一半的字和游標接回去；
+// 筆記編輯中的內容不跟著重畫（打開時拍一張快照當 HTML），打字時隔一下子自動存
+
+const SECS = [['log', '進度'], ['notes', '筆記'], ['ms', '里程碑'], ['tasks', '任務']]
+const MINS = [0, 15, 30, 45, 60, 90, 120, 180]
+const colorOf = (p) => PROJECT_COLORS[p.color % PROJECT_COLORS.length]
+const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8)}`
+const pad = (n) => String(n).padStart(2, '0')
+const hhmm = (ts) => {
+  const d = new Date(ts)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+const dur = (m) => (m < 60 ? `${m} 分` : m % 60 ? `${+(m / 60).toFixed(1)} 小時` : `${m / 60} 小時`)
+const hrs = (m) => (m < 60 ? `${m}<i>分</i>` : `${+(m / 60).toFixed(1)}<i>小時</i>`)
+// 「今天」「昨天」「3 天前」，再久就寫日期
+function ago(date, today) {
+  const d = daysBetween(date, today)
+  if (d <= 0) return '今天'
+  if (d === 1) return '昨天'
+  if (d < 7) return `${d} 天前`
+  return md(date)
+}
+function dayTitle(date, today) {
+  const d = daysBetween(date, today)
+  if (d === 0) return '今天'
+  if (d === 1) return '昨天'
+  return `${date.slice(0, 4) === today.slice(0, 4) ? '' : `${date.slice(0, 4)} 年 `}${dateLabel(date)}`
+}
+const stamp = (ts) => {
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}/${d.getDate()} ${hhmm(ts)}`
+}
+// 使用者改過、還沒存的欄位（重畫時要把它接回去）
+const dirty = (el) =>
+  el.tagName === 'SELECT' ? el.value !== ([...el.options].find((o) => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue
+
+export class ProjectView {
+  constructor(root, store, hooks) {
+    this.root = root
+    this.store = store
+    this.hooks = hooks
+    this.id = null
+    this._reset()
+    root.addEventListener('click', (e) => this._click(e))
+    root.addEventListener('submit', (e) => this._submit(e))
+    root.addEventListener('input', (e) => this._input(e))
+    root.addEventListener('change', (e) => this._change(e))
+    root.addEventListener('keydown', (e) => this._key(e))
+    root.addEventListener('compositionend', (e) => {
+      if (e.target.matches?.('[data-noteq]')) this._query(e.target.value)
+    })
+    // toggle 不會冒泡，用捕捉
+    root.addEventListener('toggle', (e) => {
+      if (e.target.classList?.contains('pt-done')) this.doneOpen = e.target.open
+    }, true)
+    // 關掉分頁或重新整理：還沒存的字先存起來
+    addEventListener('pagehide', () => this._flushAll())
+    // 按著滑鼠或手指的時候先不重畫：欄位失焦時存檔會觸發重畫，正要點的按鈕被換掉，那一下就點空了。
+    // 等 click 跑完再補畫（拖出去沒有 click 的話，過一下子也會補）
+    const flush = () => {
+      clearTimeout(this._laterT)
+      if (!this._later) return
+      this._later = false
+      this.render()
+    }
+    root.addEventListener('pointerdown', () => (this._pressing = true), true)
+    const release = () => {
+      if (!this._pressing) return
+      this._pressing = false
+      this._laterT = setTimeout(flush, 400)
+    }
+    addEventListener('pointerup', release, true)
+    addEventListener('pointercancel', release, true)
+    // 在視窗外放開（收不到 pointerup）也不要一直卡著不重畫
+    addEventListener('blur', release)
+    addEventListener('click', () => setTimeout(flush), true)
+  }
+
+  _reset() {
+    this.sec = 'log' // 窄的時候看哪一塊
+    this.more = false // 「更多」展開了
+    this.dlEdit = false // 正在改截止日
+    this.openMs = new Set() // 展開細項和備註的里程碑
+    this.noteId = null // 打開的筆記
+    this.noteEdit = false
+    this.noteSnap = this.noteBase = null
+    this.noteQuery = ''
+    this.tplOpen = false // 「新筆記」的範本選單
+    this.logDays = 14 // 時間軸先顯示幾天
+    this.editLog = null // 正在改的那則進度
+    this.mins = 0 // 寫進度時選的「花了多久」
+    this.doneOpen = false
+  }
+
+  get project() {
+    return (this.id && this.store.state.projects.find((p) => p.id === this.id)) || null
+  }
+
+  open(id, sec = 'log') {
+    this._flushAll()
+    this.id = id
+    this._reset()
+    if (SECS.some(([k]) => k === sec)) this.sec = sec
+    this.root.replaceChildren()
+  }
+
+  close() {
+    this._flushAll()
+    this._dropEmptyNote()
+    this.id = null
+    this._reset()
+    this.root.replaceChildren()
+  }
+
+  // 回傳 false：專案已經不在了（被刪掉、或同步拉回的資料裡沒有）
+  render() {
+    const p = this.project
+    if (!p) return false
+    if (this._pressing && this.root.childElementCount) {
+      this._later = true
+      return true
+    }
+    const s = this.store
+    const today = s.today
+    const tasks = s.state.tasks
+    if (this.noteId && !p.notes.some((n) => n.id === this.noteId)) this.noteId = this.noteSnap = this.noteBase = null
+    if (this.editLog && !p.logs.some((l) => l.id === this.editLog)) this.editLog = null
+    for (const id of this.openMs) if (!p.milestones.some((m) => m.id === id)) this.openMs.delete(id)
+    this.root.style.setProperty('--c', colorOf(p))
+    this.root.dataset.sec = this.sec
+    const st = projectStats(p, tasks)
+    const note = this.noteId && p.notes.find((n) => n.id === this.noteId)
+    if (note && this.noteEdit) this._syncNote(p, note)
+    const items = [
+      { k: 'top', cls: 'pd-top', html: this._topHTML(p) },
+      ...(this.more ? [{ k: 'more', cls: 'pd-more', html: this._moreHTML(p) }] : []),
+      { k: 'head', cls: 'pd-head', html: this._headHTML(p, today) },
+      { k: 'goal', cls: 'pd-goal-box', html: this._goalHTML(p) },
+      { k: 'stats', cls: 'pd-stats', html: this._statsHTML(p, st, today) },
+      {
+        k: 'body', cls: 'pd-body', kids: [
+          {
+            k: 'main', cls: 'pd-main', kids: [
+              { k: 'tabs', cls: 'seg pd-tabs', html: this._tabsHTML(p) },
+              {
+                k: 'log', cls: 'pd-sec pd-log', kids: [
+                  { k: 'compose', cls: 'pd-compose-box', html: this._composeHTML(p, today) },
+                  { k: 'tl', cls: 'pd-tl', html: this._timelineHTML(p, tasks, today) },
+                ],
+              },
+              {
+                k: 'notes', cls: 'pd-sec pd-notes', kids: note
+                  ? [{ k: `note-${note.id}-${this.noteEdit ? 'e' : 'v'}`, cls: 'pd-note', html: this._noteHTML(note) }]
+                  : [
+                    { k: 'nbar', cls: 'pn-top', html: this._noteBarHTML(p) },
+                    { k: 'nlist', cls: 'pn-box', html: this._noteListHTML(p, today) },
+                  ],
+              },
+            ],
+          },
+          {
+            k: 'side', cls: 'pd-side', kids: [
+              { k: 'ms', cls: 'pd-sec pd-ms', html: this._msHTML(p, today) },
+              { k: 'tasks', cls: 'pd-sec pd-tasks', html: this._tasksHTML(p, today) },
+            ],
+          },
+        ],
+      },
+    ]
+    const kept = this._capture()
+    patch(this.root, items)
+    this._restore(kept)
+    // 搜尋框不放值（打字時才不會被重畫打斷）：從筆記回到列表時，把還在用的關鍵字填回去
+    const q = $('[data-noteq]', this.root)
+    if (q && q !== document.activeElement && q.value !== this.noteQuery) q.value = this.noteQuery
+    this._grow()
+    return true
+  }
+
+  // ── 區塊 ──
+  _topHTML(p) {
+    const island = this.hooks.appMode() ? '切到小島看看' : '在島上查看'
+    return `<button type="button" class="pd-back" data-act="back">${ICON.prev}<span>所有專案</span></button>
+      <span class="sp"></span>
+      ${p.archived ? '' : `<button type="button" class="pd-tbtn" data-act="island">${island}</button>`}
+      <button type="button" class="pd-tbtn" data-act="export" title="把目標、里程碑、任務、筆記和進度日誌存成 Markdown 檔">匯出</button>
+      <button type="button" class="pd-tbtn ${this.more ? 'on' : ''}" data-act="more" aria-expanded="${this.more}">更多</button>`
+  }
+
+  _moreHTML(p) {
+    const b = (act, label) => `<button type="button" data-act="${act}">${label}</button>`
+    if (p.archived) return b('restore', '放回進行中') + b('delete', '刪除')
+    const st = this.store.projectStatus(p)
+    return [
+      b('rename', '改名'), b('color', '換色'),
+      st === 'done' ? '' : b('deadline', p.deadline ? '改截止日' : '設截止日'),
+      st === 'done' ? '' : st === 'paused' ? b('resume', '繼續') : b('pause', '暫停'),
+      b('archive', '收藏'), b('delete', '刪除'),
+    ].join('')
+  }
+
+  _headHTML(p, today) {
+    const s = this.store
+    const pct = Math.round(s.progress(p) * 100)
+    const st = p.archived ? 'archived' : s.projectStatus(p)
+    const meta = []
+    if (st === 'paused') meta.push('<span class="pd-chip">暫停中</span>')
+    if (st === 'archived') meta.push('<span class="pd-chip">已收藏</span>')
+    if (st === 'done') meta.push(`<span class="pd-chip done">${p.onTime ? '✦ 準時落成' : '已落成'}${p.completedAt ? `・${md(dayOf(p.completedAt))}` : ''}</span>`)
+    if (st === 'active' && p.deadline) {
+      const d = daysBetween(today, p.deadline)
+      const txt = d < 0 ? `已逾期 ${-d} 天（${md(p.deadline)}）` : d === 0 ? '今天截止' : `截止 ${md(p.deadline)}・剩 ${d} 天`
+      meta.push(`<span class="${d <= 2 ? 'warn' : ''}">${txt}</span>`)
+    }
+    const born = dayOf(p.createdAt)
+    meta.push(`<span>${md(born)} 開始・第 ${Math.max(1, daysBetween(born, today) + 1)} 天</span>`)
+    const dl = this.dlEdit
+      ? `<form class="pd-dl" data-form="deadline"><input type="date" name="date" data-keep="dl" value="${p.deadline || addDays(today, 14)}" aria-label="截止日">
+          <button class="btn-primary" type="submit">好</button>${p.deadline ? '<button type="button" class="btn-ghost" data-act="dl-clear">不設截止</button>' : ''}
+          <button type="button" class="btn-ghost" data-act="dl-cancel">取消</button></form>`
+      : ''
+    const bar = p.milestones.length ? p.milestones.map((m) => `<i style="--f:${msProgress(m).toFixed(3)}"></i>`).join('') : '<i style="--f:0"></i>'
+    return `<div class="pd-title"><h2 class="pd-name">${esc(p.name)}</h2><div class="pd-pct">${pct}<small>%</small></div></div>
+      <div class="pd-meta">${meta.join('')}</div>${dl}
+      <div class="proj-bar" aria-hidden="true">${bar}</div>`
+  }
+
+  _goalHTML(p) {
+    return `<label class="pd-goal"><span class="pd-k">目標</span><textarea data-keep="goal" data-goal data-grow rows="1" maxlength="300"
+      placeholder="這個專案想做到什麼？寫下完成時的樣子，卡住時回來看看">${esc(p.goal)}</textarea></label>`
+  }
+
+  _statsHTML(p, st, today) {
+    const cell = (v, k, title = '') => `<div${title ? ` title="${title}"` : ''}><b>${v}</b><small>${k}</small></div>`
+    const cells = [
+      cell(`${st.msDone}<i>/${st.msTotal}</i>`, '里程碑'),
+      st.stepsTotal ? cell(`${st.stepsDone}<i>/${st.stepsTotal}</i>`, '細項') : '',
+      cell(`${st.tasksDone}<i>/${st.tasksTotal}</i>`, '任務'),
+      cell(hrs(st.focus), '專注', '歸在這個專案的任務，用番茄鐘專注的時間'),
+      cell(hrs(st.logMins), '投入', '寫進度時記下的時間'),
+      cell(st.logs, '則進度'),
+    ]
+    // 熱度格：一欄是一週（一到日），最右邊是這週
+    const wd = (parseDate(today).getDay() + 6) % 7
+    const heat = activity(p, this.store.state.tasks, today, 77 + wd + 1).map((d) => `<i class="h${d.level}" title="${md(d.date)}"></i>`).join('')
+    const last = st.last ? `最近一次推進：${ago(dayOf(st.last), today)}` : '還沒有推進的紀錄'
+    return `<div class="pd-cells">${cells.join('')}</div>
+      <div class="pd-heat-box"><div class="pd-heat" role="img" aria-label="最近 12 週每天的推進">${heat}</div><small>${last}</small></div>`
+  }
+
+  _tabsHTML(p) {
+    const todo = this.store.state.tasks.filter((t) => t.project === p.id && !t.done).length
+    const n = { log: p.logs.length, notes: p.notes.length, ms: p.milestones.filter((m) => !m.done).length, tasks: todo }
+    return SECS.map(([k, label]) => `<button type="button" class="pd-tab-${k} ${this.sec === k ? 'on' : ''}" data-act="sec" data-v="${k}" aria-pressed="${this.sec === k}">${label}${n[k] ? `<small>${n[k]}</small>` : ''}</button>`).join('')
+  }
+
+  _composeHTML(p, today) {
+    const open = p.milestones.filter((m) => !m.done)
+    const ms = open.length
+      ? `<label class="pc-sel"><span class="pc-k">里程碑</span><select name="ms" data-keep="log-ms"><option value="">不指定</option>${open.map((m) => `<option value="${esc(m.id)}">${esc(m.title)}</option>`).join('')}</select></label>`
+      : ''
+    return `<form class="pd-compose" data-form="log" autocomplete="off">
+      <textarea name="text" data-keep="log-text" data-grow rows="2" maxlength="1000" aria-label="寫下進度"
+        placeholder="今天推進了什麼？做了哪些、卡在哪裡、下一步是什麼"></textarea>
+      <div class="pc-row pc-mins" role="group" aria-label="花了多久"><span class="pc-k">花了</span>${MINS.map((m) => `<button type="button" data-act="mins" data-v="${m}" class="${this.mins === m ? 'on' : ''}" aria-pressed="${this.mins === m}">${m ? dur(m) : '不記'}</button>`).join('')}</div>
+      <div class="pc-row">${ms}
+        <label class="pc-sel"><span class="pc-k">哪天</span><input type="date" name="date" data-keep="log-date" value="${today}" max="${today}"></label>
+        <span class="sp"></span>
+        <button class="btn-primary" type="submit" title="Ctrl＋Enter 也可以送出">記下來</button>
+      </div>
+    </form>`
+  }
+
+  _timelineHTML(p, tasks, today) {
+    const days = projectTimeline(p, tasks)
+    const shown = days.slice(0, this.logDays)
+    const msOf = (id) => p.milestones.find((m) => m.id === id)
+    const item = (it) => {
+      if (it.kind === 'log') {
+        const l = it.log
+        if (this.editLog === l.id) return this._logEditHTML(p, l, today)
+        const m = l.ms && msOf(l.ms)
+        const meta = [
+          dayOf(l.at) === l.date ? hhmm(l.at) : `${md(dayOf(l.at))} 補記`,
+          l.mins ? `<span class="tl-mins">${dur(l.mins)}</span>` : '',
+          m ? `<span class="tl-ms">${esc(m.title)}</span>` : '',
+        ].filter(Boolean).join('')
+        return `<li class="tl-log"><i class="tl-dot"></i><div class="tl-main">${l.text ? `<p class="tl-text">${textHTML(l.text)}</p>` : ''}<div class="tl-meta">${meta}</div></div>
+          <div class="tl-acts"><button type="button" class="mini" data-act="log-edit" data-id="${esc(l.id)}" title="修改">${ICON.edit}</button><button type="button" class="mini" data-act="log-del" data-id="${esc(l.id)}" title="刪除">${ICON.del}</button></div></li>`
+      }
+      if (it.kind === 'ms') return `<li class="tl-ev tl-msdone"><i class="tl-dot">${ICON.check}</i><span>完成里程碑「${esc(it.milestone.title)}」</span><small>${hhmm(it.at)}</small></li>`
+      if (it.kind === 'task') return `<li class="tl-ev"><i class="tl-dot"></i><span>完成任務「${esc(it.task.title)}」</span><small>${hhmm(it.at)}</small></li>`
+      if (it.kind === 'done') return `<li class="tl-ev tl-built"><i class="tl-dot">${ICON.spark}</i><span>${p.onTime ? '準時落成' : '落成'}！所有里程碑都完成了</span></li>`
+      return '<li class="tl-ev tl-start"><i class="tl-dot"></i><span>開始這個專案</span></li>'
+    }
+    const hint = p.logs.length
+      ? ''
+      : `<div class="pd-hint"><b>把每次推進的事記下來</b>做了什麼、卡在哪裡、下一步是什麼。完成的里程碑、歸在這個專案的任務和專注時間，也會自動出現在這裡。</div>`
+    const list = shown.map((d) => {
+      const sum = d.logMins ? `<small>投入 ${dur(d.logMins)}</small>` : ''
+      const focus = d.focus ? `<li class="tl-ev tl-focus"><i class="tl-dot">◷</i><span>專注 ${dur(d.focus)}</span></li>` : ''
+      return `<section class="tl-day"><h4 class="tl-date"><b>${dayTitle(d.date, today)}</b>${sum}</h4><ul>${focus}${d.items.map(item).join('')}</ul></section>`
+    })
+    const more = days.length > shown.length ? `<button type="button" class="btn-ghost wide" data-act="log-more">看更早的紀錄（還有 ${days.length - shown.length} 天）</button>` : ''
+    return hint + list.join('') + more
+  }
+
+  _logEditHTML(p, l, today) {
+    const k = esc(l.id)
+    const mins = [...new Set([...MINS, l.mins])].sort((a, b) => a - b)
+    const ms = p.milestones.length
+      ? `<label class="pc-sel"><span class="pc-k">里程碑</span><select name="ms" data-keep="le-ms-${k}"><option value="">不指定</option>${p.milestones.map((m) => `<option value="${esc(m.id)}" ${l.ms === m.id ? 'selected' : ''}>${esc(m.title)}</option>`).join('')}</select></label>`
+      : ''
+    return `<li class="tl-log editing"><form class="tl-edit" data-form="log-edit" data-id="${k}" autocomplete="off">
+      <textarea name="text" data-keep="le-${k}" data-grow rows="2" maxlength="1000" aria-label="進度內容">${esc(l.text)}</textarea>
+      <div class="pc-row">
+        <label class="pc-sel"><span class="pc-k">花了</span><select name="mins" data-keep="le-mins-${k}">${mins.map((m) => `<option value="${m}" ${m === l.mins ? 'selected' : ''}>${m ? dur(m) : '不記'}</option>`).join('')}</select></label>
+        ${ms}
+        <label class="pc-sel"><span class="pc-k">哪天</span><input type="date" name="date" data-keep="le-date-${k}" value="${l.date}" max="${today}"></label>
+        <span class="sp"></span>
+        <button type="button" class="btn-ghost" data-act="log-cancel">取消</button>
+        <button class="btn-primary" type="submit">儲存</button>
+      </div></form></li>`
+  }
+
+  // 筆記列表上面那一條（搜尋框不放值，打字時不會被重畫打斷）
+  _noteBarHTML(p) {
+    const tpl = this.tplOpen
+      ? `<div class="pn-tpl" role="group" aria-label="從範本開始">${NOTE_TEMPLATES.map((t) => `<button type="button" data-act="note-tpl" data-v="${t.key}">${t.label}</button>`).join('')}</div>`
+      : ''
+    const search = p.notes.length >= 5 ? '<input type="search" class="pn-q" data-keep="note-q" data-noteq placeholder="搜尋筆記" aria-label="搜尋筆記">' : ''
+    return `<div class="pn-head"><button type="button" class="btn-ghost ${this.tplOpen ? 'on' : ''}" data-act="note-new" aria-expanded="${this.tplOpen}">＋ 新筆記</button>${search}</div>${tpl}`
+  }
+
+  _noteListHTML(p, today) {
+    if (!p.notes.length) {
+      return `<div class="pd-hint"><b>把想法、資料和決定收在這裡</b>會議紀錄、參考連結、待辦清單都可以。支援簡單的格式：# 標題、- 清單、- [ ] 待辦。</div>`
+    }
+    const q = this.noteQuery.trim().toLowerCase()
+    const list = [...p.notes]
+      .sort((a, b) => !!b.pinned - !!a.pinned || b.updatedAt - a.updatedAt)
+      .filter((n) => !q || `${n.title}\n${n.body}`.toLowerCase().includes(q))
+    if (!list.length) return `<p class="pd-none">找不到「${esc(this.noteQuery.trim())}」</p>`
+    return `<ul class="pn-list">${list.map((n) => {
+      const td = noteTodos(n.body)
+      const snip = noteSnippet(n)
+      return `<li><button type="button" class="pn-item" data-act="note-open" data-id="${esc(n.id)}">
+        <b>${n.pinned ? '<i class="pn-pin">釘</i>' : ''}${esc(noteTitle(n))}</b>${snip ? `<span>${esc(snip)}</span>` : ''}
+        <small>${ago(dayOf(n.updatedAt), today)}${td.total ? `・待辦 ${td.done}/${td.total}` : ''}</small></button></li>`
+    }).join('')}</ul>`
+  }
+
+  _noteHTML(n) {
+    const back = `<button type="button" class="pn-back" data-act="note-back">${ICON.prev}所有筆記</button>`
+    if (this.noteEdit) {
+      const snap = this.noteSnap || n
+      return `<div class="pn-bar">${back}<span class="sp"></span><span class="pn-saved" aria-live="polite"></span><button type="button" class="btn-primary" data-act="note-view">完成</button></div>
+        <input class="pn-title" data-keep="note-title" maxlength="60" placeholder="標題（可以不寫）" value="${esc(snap.title)}" aria-label="筆記標題">
+        <textarea class="pn-body" data-keep="note-body" data-grow maxlength="10000" placeholder="寫點什麼…" aria-label="筆記內容">${esc(snap.body)}</textarea>
+        <p class="pn-help"># 標題　- 清單　1. 編號　- [ ] 待辦　**粗體**　網址會變成連結</p>`
+    }
+    return `<div class="pn-bar">${back}<span class="sp"></span>
+        <button type="button" class="btn-ghost" data-act="note-pin" aria-pressed="${n.pinned}">${n.pinned ? '取消釘選' : '釘選'}</button>
+        <button type="button" class="btn-ghost" data-act="note-del">刪除</button>
+        <button type="button" class="btn-primary" data-act="note-edit">編輯</button></div>
+      <h3 class="pn-h">${esc(noteTitle(n))}</h3>
+      <div class="pn-view">${n.body.trim() ? noteHTML(n.body) : '<p class="pd-none">還沒有內容，按「編輯」開始寫</p>'}</div>
+      <small class="pn-time">建立 ${stamp(n.createdAt)}・更新 ${stamp(n.updatedAt)}</small>`
+  }
+
+  _msHTML(p, today) {
+    const c = colorOf(p)
+    const doneN = p.milestones.filter((m) => m.done).length
+    const rows = p.milestones.map((m, i) => {
+      const k = esc(m.id)
+      const open = this.openMs.has(m.id)
+      const sd = m.steps.filter((x) => x.done).length
+      const late = m.due && !m.done && m.due < today
+      const tags = [
+        m.steps.length ? `<small class="pm-n">${sd}/${m.steps.length}</small>` : '',
+        m.due ? `<small class="pm-due ${late ? 'late' : ''}">${late ? '逾期・' : ''}${md(m.due)}</small>` : '',
+        m.note ? '<small class="pm-has">註</small>' : '',
+      ].join('')
+      const steps = m.steps.map((x) => `<li class="${x.done ? 'done' : ''}">
+          <button type="button" class="check" data-act="step-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」" style="--c:${c}">${ICON.check}</button>
+          <span class="pm-st" data-act="step-rename" data-id="${k}" data-sid="${esc(x.id)}" title="點一下改名">${esc(x.title)}</span>
+          <button type="button" class="mini" data-act="step-del" data-id="${k}" data-sid="${esc(x.id)}" title="刪除細項">${ICON.del}</button></li>`).join('')
+      const detail = open
+        ? `<div class="pm-detail">
+          ${steps ? `<ul class="pm-steps">${steps}</ul>` : ''}
+          <form class="pm-add" data-form="step" data-id="${k}"><input data-keep="step-${k}" maxlength="80" placeholder="${m.steps.length ? '再加一個細項' : '拆成細項：做完一步勾一步'}" aria-label="新增細項"><button class="mini" type="submit" title="新增細項">${ICON.plus}</button></form>
+          <label class="pm-note"><span class="pc-k">備註</span><textarea data-keep="msnote-${k}" data-msnote="${k}" data-grow rows="1" maxlength="500" placeholder="完成的標準、要注意的事…">${esc(m.note)}</textarea></label>
+          <div class="pm-tools">
+            <label class="pc-sel"><span class="pc-k">期限</span><input type="date" data-msdue="${k}" value="${m.due}" aria-label="「${esc(m.title)}」的期限"></label>
+            <span class="sp"></span>
+            <button type="button" data-act="ms-up" data-id="${k}" ${i === 0 ? 'disabled' : ''} title="往上移" aria-label="往上移">↑</button>
+            <button type="button" data-act="ms-down" data-id="${k}" ${i === p.milestones.length - 1 ? 'disabled' : ''} title="往下移" aria-label="往下移">↓</button>
+            <button type="button" data-act="ms-rename" data-id="${k}">改名</button>
+            <button type="button" data-act="ms-del" data-id="${k}">刪除</button>
+          </div></div>`
+        : ''
+      const bar = !m.done && m.steps.length && !open ? `<div class="pm-bar"><i style="width:${Math.round((sd / m.steps.length) * 100)}%"></i></div>` : ''
+      return `<li class="pm ${m.done ? 'done' : ''} ${open ? 'open' : ''}">
+        <div class="pm-row">
+          <button type="button" class="check" data-act="ms-toggle" data-id="${k}" aria-label="${m.done ? '取消完成' : '完成'}「${esc(m.title)}」" style="--c:${c}">${ICON.check}</button>
+          <button type="button" class="pm-title" data-act="ms-open" data-id="${k}" aria-expanded="${open}"><span class="pm-t">${esc(m.title)}</span>${tags}<i class="pm-chev">${ICON.next}</i></button>
+        </div>${bar}${detail}</li>`
+    }).join('')
+    return `<h3 class="sec-title">里程碑<small>みちしるべ</small><span class="count">${doneN} / ${p.milestones.length}</span></h3>
+      ${rows ? `<ul class="pm-list">${rows}</ul>` : '<p class="pd-hint">把專案切成幾個看得到終點的階段。每完成一個，專案町的房子就會再蓋一段。</p>'}
+      <form class="ms-add" data-form="ms"><input data-keep="ms-new" maxlength="60" placeholder="新增里程碑" aria-label="新增里程碑"><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`
+  }
+
+  _tasksHTML(p, today) {
+    const { todo, done } = this.store.projectTasks(p.id)
+    const row = (t) => {
+      const k = esc(t.id)
+      const late = !t.done && t.date < today
+      const when = t.done ? (t.doneAt ? `${ago(dayOf(t.doneAt), today)}完成` : md(t.date)) : t.date === today ? '今天' : late ? `逾期・${md(t.date)}` : md(t.date)
+      return `<li class="pt ${t.done ? 'done' : ''}">
+        <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
+        <span class="pt-main"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${when}${t.pomos ? `・◷ ${t.pomos}` : ''}</small></span>
+        ${!t.done && t.date === today ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
+        <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯日期、時間和優先度">${ICON.edit}</button>
+        <button type="button" class="mini" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在）">${ICON.minus}</button>
+      </li>`
+    }
+    const name = p.name.replace(/\s+/g, '').slice(0, 6)
+    return `<h3 class="sec-title">任務<small>タスク</small><span class="count">${todo.length ? `還有 ${todo.length} 件` : done.length ? '都完成了' : ''}</span></h3>
+      <form class="pt-add" data-form="task" autocomplete="off">
+        <input name="title" data-keep="task-new" maxlength="80" placeholder="新增一件這個專案的任務" aria-label="新增任務">
+        <input type="date" name="date" data-keep="task-date" value="${today}" aria-label="日期">
+        <button class="mini" type="submit" title="新增">${ICON.plus}</button></form>
+      ${todo.length ? `<ul class="pt-list">${todo.map(row).join('')}</ul>` : ''}
+      ${done.length ? `<details class="pt-done" ${this.doneOpen ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
+      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。專注在這些任務上的時間會記進這個專案。</p>`}`
+  }
+
+  // ── 事件 ──
+  _click(e) {
+    const p = this.project
+    // 改名中的輸入框（點進去移游標）：不算點到外面那層的按鈕
+    if (!p || e.target.closest('.inline-input')) return
+    const s = this.store
+    // 筆記預覽裡的待辦：直接打勾
+    const chk = e.target.closest('.nb-check')
+    if (chk) {
+      const n = p.notes.find((x) => x.id === this.noteId)
+      if (n) s.updateProjectNote(p.id, n.id, { body: toggleNoteLine(n.body, +chk.dataset.line) })
+      return
+    }
+    const b = e.target.closest('[data-act]')
+    if (!b || !this.root.contains(b) || b.disabled) return
+    const act = b.dataset.act
+    const id = b.dataset.id
+    const note = p.notes.find((x) => x.id === this.noteId)
+    switch (act) {
+      case 'back': return this.hooks.close()
+      case 'island': return this.hooks.viewOnIsland(p.id)
+      case 'export': return this._export()
+      case 'more':
+        this.more = !this.more
+        return this.render()
+      case 'rename':
+        this.more = false
+        this.render()
+        return inlineEdit($('.pd-name', this.root), p.name, (v) => (v ? s.updateProject(p.id, { name: v }) : this._redraw('head')), 40)
+      case 'color': return s.updateProject(p.id, { color: (p.color + 1) % PROJECT_COLORS.length })
+      case 'deadline':
+        this.dlEdit = true
+        this.more = false
+        this.render()
+        return $('[data-keep="dl"]', this.root)?.focus()
+      case 'dl-clear':
+        this.dlEdit = false
+        return p.deadline ? s.setDeadline(p.id, '') : this.render()
+      case 'dl-cancel':
+        this.dlEdit = false
+        return this.render()
+      case 'pause':
+      case 'resume':
+        this.more = false
+        return s.pauseProject(p.id, act === 'pause')
+      case 'archive':
+        this.more = false
+        return s.archiveProject(p.id, true)
+      case 'restore':
+        this.more = false
+        if (!s.archiveProject(p.id, false)) this.hooks.toast({ icon: '町', title: '進行中的專案已經滿了', sub: '先收藏其他專案再放回來吧' })
+        return
+      case 'delete': return armConfirm(b, '確定刪除？', () => s.deleteProject(p.id))
+      case 'sec':
+        this.sec = b.dataset.v
+        this.render()
+        return this.root.querySelector('.pd-tabs')?.scrollIntoView({ block: 'nearest' })
+      case 'mins': {
+        this.mins = +b.dataset.v
+        for (const x of $$('[data-act="mins"]', this.root)) {
+          x.classList.toggle('on', +x.dataset.v === this.mins)
+          x.setAttribute('aria-pressed', String(+x.dataset.v === this.mins))
+        }
+        // 下次重畫要照新的選擇重寫
+        const box = $('[data-k="compose"]', this.root)
+        if (box) box._html = null
+        return
+      }
+      case 'log-edit':
+        this.editLog = id
+        this.render()
+        return $(`[data-keep="le-${CSS.escape(id)}"]`, this.root)?.focus()
+      case 'log-cancel':
+        this.editLog = null
+        return this.render()
+      case 'log-del': return armConfirm(b, ICON.check, () => s.deleteProjectLog(p.id, id))
+      case 'log-more':
+        this.logDays += 30
+        return this.render()
+      case 'note-new':
+        this.tplOpen = !this.tplOpen
+        return this.render()
+      case 'note-tpl': {
+        const t = NOTE_TEMPLATES.find((x) => x.key === b.dataset.v) || NOTE_TEMPLATES[0]
+        this.tplOpen = false
+        const n = s.addProjectNote(p.id, { title: t.title, body: t.body })
+        if (!n) return this.hooks.toast({ icon: '筆', title: '這個專案的筆記已經滿了', sub: '整理一下舊的筆記再新增吧' })
+        return this._openNote(n.id, true)
+      }
+      case 'note-open': return this._openNote(id, false)
+      case 'note-edit': return this._openNote(this.noteId, true)
+      case 'note-view': return this._viewNote()
+      case 'note-back': return this._closeNote()
+      case 'note-pin': return note && s.updateProjectNote(p.id, note.id, { pinned: !note.pinned })
+      case 'note-del': return note && armConfirm(b, '確定刪除？', () => s.deleteProjectNote(p.id, note.id))
+      case 'ms-toggle': return s.toggleMilestone(p.id, id)
+      case 'ms-open':
+        if (this.openMs.has(id)) this.openMs.delete(id)
+        else this.openMs.add(id)
+        return this.render()
+      case 'ms-up':
+      case 'ms-down': return s.moveMilestone(p.id, id, act === 'ms-up' ? -1 : 1)
+      case 'ms-rename': {
+        const m = p.milestones.find((x) => x.id === id)
+        const btn = $(`.pm-title[data-id="${CSS.escape(id)}"]`, this.root)
+        if (!m || !btn) return
+        // 標題本身是按鈕，輸入框不能放在按鈕裡：先換成一般的格子
+        const box = document.createElement('span')
+        box.className = 'pm-title pm-renaming'
+        btn.replaceWith(box)
+        return inlineEdit(box, m.title, (v) => (v ? s.updateMilestone(p.id, id, { title: v }) : this._redraw('ms')), 60)
+      }
+      case 'ms-del': return armConfirm(b, '確定刪除？', () => s.deleteMilestone(p.id, id))
+      case 'step-toggle': return s.toggleStep(p.id, id, b.dataset.sid)
+      case 'step-del': return s.deleteStep(p.id, id, b.dataset.sid)
+      case 'step-rename': {
+        const m = p.milestones.find((x) => x.id === id)
+        const step = m?.steps.find((x) => x.id === b.dataset.sid)
+        if (!step) return
+        return inlineEdit(b, step.title, (v) => (v ? s.renameStep(p.id, id, step.id, v) : this._redraw('ms')), 80)
+      }
+      case 'task-toggle': return s.toggleTask(id)
+      case 'task-focus': return this.hooks.startFocus(id)
+      case 'task-edit': return this.hooks.openEdit('task', id)
+      case 'task-unlink': return s.updateTask(id, { project: null })
+    }
+  }
+
+  _submit(e) {
+    const f = e.target.closest('form[data-form]')
+    const p = this.project
+    if (!f || !p) return
+    e.preventDefault()
+    const s = this.store
+    const el = f.elements
+    switch (f.dataset.form) {
+      case 'log': {
+        const text = el.text.value.trim()
+        if (!text && !this.mins) return el.text.focus()
+        const entry = { text, mins: this.mins, date: el.date.value, ms: el.ms?.value || null }
+        // 先清空再存：存完會重畫，清空的欄位不會被當成「打到一半的字」接回去
+        el.text.value = ''
+        el.date.value = s.today
+        if (el.ms) el.ms.value = ''
+        this.mins = 0
+        const box = $('[data-k="compose"]', this.root)
+        if (box) box._html = null
+        s.addProjectLog(p.id, entry)
+        return
+      }
+      case 'log-edit': {
+        this.editLog = null
+        s.updateProjectLog(p.id, f.dataset.id, { text: el.text.value, mins: +el.mins.value, date: el.date.value, ms: el.ms ? el.ms.value || null : undefined })
+        return
+      }
+      case 'deadline':
+        this.dlEdit = false
+        if (el.date.value === p.deadline) return this.render()
+        return s.setDeadline(p.id, el.date.value)
+      case 'ms': {
+        const input = f.querySelector('input')
+        const v = input.value.trim()
+        if (!v) return
+        input.value = ''
+        return s.addMilestone(p.id, v)
+      }
+      case 'step': {
+        const input = f.querySelector('input')
+        const v = input.value.trim()
+        if (!v) return
+        input.value = ''
+        if (!s.addStep(p.id, f.dataset.id, v)) this.hooks.toast({ icon: '細', title: '細項已經滿了', sub: '試著把這個里程碑拆成兩個' })
+        return
+      }
+      case 'task': {
+        const title = el.title.value.trim()
+        if (!title) return el.title.focus()
+        const date = el.date.value || s.today
+        el.title.value = ''
+        s.addTask({ title, date, tag: 'work', project: p.id })
+        if (date !== s.today) this.hooks.toast({ icon: '種', title: `已種在 ${md(date)}`, sub: title })
+      }
+    }
+  }
+
+  _input(e) {
+    const el = e.target
+    if (el.matches('[data-grow]')) this._growOne(el)
+    if (el.matches('.pn-title, .pn-body')) this._queueNoteSave()
+    if (el.matches('[data-noteq]') && !e.isComposing) this._query(el.value)
+  }
+
+  _query(v) {
+    if (v === this.noteQuery) return
+    this.noteQuery = v
+    this.render()
+  }
+
+  _change(e) {
+    const el = e.target
+    const p = this.project
+    if (!p) return
+    if (el.matches('[data-goal]')) return this.store.setProjectGoal(p.id, el.value)
+    if (el.dataset.msnote) return this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })
+    if (el.dataset.msdue) return this.store.updateMilestone(p.id, el.dataset.msdue, { due: el.value })
+  }
+
+  _key(e) {
+    if (e.isComposing || e.keyCode === 229) return
+    const el = e.target
+    // Ctrl／⌘＋Enter 送出進度
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && el.form?.matches('[data-form="log"], [data-form="log-edit"]')) {
+      e.preventDefault()
+      return el.form.requestSubmit()
+    }
+    // 目標只是一兩句話：Enter 就存（Shift＋Enter 換行）
+    if (e.key === 'Enter' && !e.shiftKey && el.matches('[data-goal]')) {
+      e.preventDefault()
+      return el.blur()
+    }
+    if (e.key !== 'Escape') return
+    // Esc 先收掉正在編輯的那一塊（處理了就不再往外傳，面板不會跟著關）
+    if (el.closest('[data-form="log-edit"]')) this.editLog = null
+    else if (el.closest('[data-form="deadline"]')) this.dlEdit = false
+    else if (this.noteEdit && el.closest('.pd-note')) return (e.preventDefault(), this._viewNote())
+    else return
+    e.preventDefault()
+    this.render()
+  }
+
+  // ── 筆記 ──
+  _openNote(nid, edit) {
+    const p = this.project
+    const n = p?.notes.find((x) => x.id === nid)
+    if (!n) return
+    this._flushNote()
+    if (this.noteId && this.noteId !== nid) this._dropEmptyNote()
+    this.noteId = nid
+    this.noteEdit = edit
+    this.noteSnap = edit ? { title: n.title, body: n.body } : null
+    // 編輯器裡的字是從哪一版開始改的（判斷別的地方有沒有動過這篇）
+    this.noteBase = this.noteSnap && { ...this.noteSnap }
+    this.sec = 'notes'
+    this.render()
+    $('.pd-notes', this.root)?.scrollIntoView({ block: 'nearest' })
+    if (!edit) return $('.pn-back', this.root)?.focus({ preventScroll: true })
+    const el = $(n.title || n.body ? '.pn-body' : '.pn-title', this.root)
+    if (!el) return
+    el.focus({ preventScroll: true })
+    el.setSelectionRange?.(el.value.length, el.value.length)
+  }
+  _viewNote() {
+    this._flushNote()
+    if (this._dropEmptyNote()) return this._closeNote()
+    this.noteEdit = false
+    this.noteSnap = this.noteBase = null
+    this.render()
+    $('.pd-note [data-act="note-edit"]', this.root)?.focus({ preventScroll: true })
+  }
+  _closeNote() {
+    this._flushNote()
+    this._dropEmptyNote()
+    this.noteId = this.noteSnap = this.noteBase = null
+    this.noteEdit = false
+    this.render()
+    $('[data-act="note-new"]', this.root)?.focus({ preventScroll: true })
+  }
+  // 標題和內容都空著的筆記（按了新筆記又沒寫）不留
+  _dropEmptyNote() {
+    const p = this.project
+    const n = p?.notes.find((x) => x.id === this.noteId)
+    if (!n || n.title.trim() || n.body.trim()) return false
+    this.noteId = this.noteSnap = this.noteBase = null
+    this.noteEdit = false
+    this.store.deleteProjectNote(p.id, n.id)
+    return true
+  }
+  _queueNoteSave() {
+    clearTimeout(this._noteT)
+    this._noteT = setTimeout(() => this._saveNote(), 600)
+    this._saved('')
+  }
+  _flushNote() {
+    if (this._noteT) this._saveNote()
+  }
+  // 打字時的自動儲存：只存檔不重畫
+  _saveNote() {
+    clearTimeout(this._noteT)
+    this._noteT = null
+    const p = this.project
+    const n = p?.notes.find((x) => x.id === this.noteId)
+    const title = $('.pn-title', this.root)
+    const body = $('.pn-body', this.root)
+    if (!n || !title || !body) return
+    this.noteBase = { title: title.value, body: body.value }
+    if (n.title === title.value && n.body === body.value) return
+    this.store.updateProjectNote(p.id, n.id, { title: title.value, body: body.value }, { quiet: true })
+    this._saved('已自動儲存')
+  }
+  // 編輯中的筆記被別的地方改了（另一個分頁、同步拉回）：這邊沒打新的字就換成新的內容；
+  // 兩邊都改了就把那一版另存成一篇「（另一個版本）」，不會被這邊接下來的自動儲存蓋掉
+  _syncNote(p, n) {
+    const base = this.noteBase
+    if (!base || (n.title === base.title && n.body === base.body)) return
+    this.noteBase = { title: n.title, body: n.body }
+    const title = $('.pn-title', this.root)
+    const body = $('.pn-body', this.root)
+    if (!title || !body) return
+    if (title.value === base.title && body.value === base.body) {
+      title.value = n.title
+      body.value = n.body
+      this._growOne(body)
+      return
+    }
+    const copy = { title: `${noteTitle(n)}（另一個版本）`.slice(0, 60), body: n.body }
+    queueMicrotask(() => this.store.addProjectNote(p.id, copy))
+  }
+  _saved(text) {
+    const el = $('.pn-saved', this.root)
+    if (el) el.textContent = text
+  }
+
+  // 還沒存的字一次存起來（關掉詳情、離開頁面時）
+  _flushAll() {
+    this._flushNote()
+    const p = this.project
+    if (!p) return
+    const goal = $('[data-goal]', this.root)
+    if (goal && dirty(goal)) this.store.setProjectGoal(p.id, goal.value)
+    for (const el of $$('[data-msnote]', this.root)) if (dirty(el)) this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })
+  }
+
+  _export() {
+    // 還在自動儲存倒數的筆記、還沒失焦的目標，先存進去再匯出
+    this._flushAll()
+    const p = this.project
+    if (!p) return
+    const blob = new Blob([projectMarkdown(p, this.store.state.tasks)], { type: 'text/markdown;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${p.name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || 'project'}.md`
+    document.body.append(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+    this.hooks.toast({ icon: '書', title: '已匯出成 Markdown', sub: a.download })
+  }
+
+  // ── 重畫的小工具 ──
+  // inlineEdit 直接改了 DOM：取消時要整塊重寫一次
+  _redraw(k) {
+    const el = $(`[data-k="${k}"]`, this.root)
+    if (el) el._html = null
+    this.render()
+  }
+  _capture() {
+    const keep = new Map()
+    for (const el of $$('[data-keep]', this.root)) if (dirty(el)) keep.set(el.dataset.keep, el.value)
+    const a = document.activeElement
+    let focus = null
+    if (a && this.root.contains(a)) {
+      if (a.dataset.keep) focus = { keep: a.dataset.keep, start: a.selectionStart, end: a.selectionEnd }
+      else if (a.dataset.act) focus = { act: a.dataset.act, id: a.dataset.id, sid: a.dataset.sid, v: a.dataset.v }
+    }
+    return { keep, focus }
+  }
+  _restore({ keep, focus }) {
+    for (const el of $$('[data-keep]', this.root)) {
+      const v = keep.get(el.dataset.keep)
+      if (v !== undefined && el.value !== v) el.value = v
+    }
+    // 焦點所在的元素被換掉了：找新的那個接回去
+    if (!focus || this.root.contains(document.activeElement)) return
+    let sel
+    if (focus.keep) sel = `[data-keep="${CSS.escape(focus.keep)}"]`
+    else {
+      sel = `[data-act="${CSS.escape(focus.act)}"]`
+      for (const k of ['id', 'sid', 'v']) if (focus[k]) sel += `[data-${k}="${CSS.escape(focus[k])}"]`
+    }
+    const el = $(sel, this.root)
+    if (!el) return
+    el.focus({ preventScroll: true })
+    if (focus.keep && focus.start != null) {
+      try {
+        el.setSelectionRange(focus.start, focus.end)
+      } catch {}
+    }
+  }
+  _grow() {
+    for (const el of $$('[data-grow]', this.root)) this._growOne(el)
+  }
+  // 文字框跟著內容長高（藏起來的那幾塊量不到，等看得到時再量）
+  _growOne(el) {
+    if (!el.offsetParent) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight + 2}px`
+  }
+}

@@ -10,13 +10,15 @@ import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
-import { $, $$, esc, ICON, armConfirm } from './ui/dom.js'
+import { $, $$, esc, ICON, armConfirm, inlineEdit } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
 import { CoachView } from './ui/coach.js'
+import { ProjectView } from './ui/project.js'
+import { latestLog, msProgress, projectStats } from './projects.js'
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
@@ -75,34 +77,12 @@ const hhmm = (ts) => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000)
-
-// 把元素就地換成輸入框
-function inlineEdit(el, value, onSave) {
-  const input = document.createElement('input')
-  input.className = 'inline-input'
-  input.value = value
-  input.maxLength = 60
-  el.replaceChildren(input)
-  input.focus()
-  input.select()
-  let done = false
-  const finish = (save) => {
-    if (done) return
-    done = true
-    if (save && input.value.trim() && input.value.trim() !== value) onSave(input.value.trim())
-    else onSave(null)
-  }
-  input.addEventListener('keydown', (e) => {
-    e.stopPropagation()
-    // 中文輸入法選字時按的 Enter 不算送出
-    if (e.isComposing || e.keyCode === 229) return
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      finish(true)
-    }
-    if (e.key === 'Escape') finish(false)
-  })
-  input.addEventListener('blur', () => finish(true))
+// 分鐘 → 「45 分」「1.5 小時」
+const fmtHours = (m) => (m < 60 ? `${m} 分` : `${+(m / 60).toFixed(1)} 小時`)
+// 「今天」「昨天」「3 天前」，再久就寫日期
+const relDay = (date, today) => {
+  const d = daysBetween(date, today)
+  return d <= 0 ? '今天' : d === 1 ? '昨天' : d < 7 ? `${d} 天前` : `${+date.slice(5, 7)}/${+date.slice(8)}`
 }
 
 export class UI {
@@ -144,6 +124,15 @@ export class UI {
     this.coach = new CoachView($('#coachRoot'), store, viewHooks)
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
     this.dates.render()
+    // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
+    this.projectView = new ProjectView($('#projectDetail'), store, {
+      toast: (o) => this.toast(o),
+      close: () => this.closeProject(),
+      viewOnIsland: (id) => this._onIsland(() => hooks.focusProject(id)),
+      startFocus: (id) => this.focus.startWith(id),
+      openEdit: (type, id) => this.schedule.openEdit(type, id),
+      appMode: () => !!this.appMode,
+    })
     this.applyFontScale()
     this.renderNewsDot()
     this.setAppMode(savedAppMode(), { save: false })
@@ -297,6 +286,7 @@ export class UI {
       this.focus.toggleSet(false)
     } else if (!$('#shop').hidden || this._shopWait) this.toggleShop(false)
     else if (typing) document.activeElement.blur()
+    else if (this.tab === 'projects' && this.projectView.id) this.closeProject()
     else this.toggleFull(false)
   }
   // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）
@@ -601,7 +591,7 @@ export class UI {
   _renderQuickPreview() {
     const box = $('#quickPreview')
     const v = $('#taskTitle').value
-    const p = v.trim() ? parseQuick(v, { today: this.store.today }) : null
+    const p = v.trim() ? parseQuick(v, { today: this.store.today, projects: this.store.activeProjects() }) : null
     const chips = p ? describeQuick(p, this.store.today) : []
     if (p?.tag && p.kind === 'task') chips.push(tagOf(p.tag).label)
     box.hidden = !chips.length
@@ -673,7 +663,7 @@ export class UI {
       e.preventDefault()
       const input = $('#taskTitle')
       const s = this.store
-      const p = parseQuick(input.value, { today: s.today })
+      const p = parseQuick(input.value, { today: s.today, projects: s.activeProjects() })
       if (!p.title) {
         input.focus()
         return
@@ -692,7 +682,7 @@ export class UI {
         const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur }
         if (repeat) s.addRoutine({ kind: 'task', ...t, repeat })
         else {
-          const added = s.addTask(t)
+          const added = s.addTask({ ...t, project: p.project })
           if (added && p.star) s.toggleStar(added.id)
         }
         if (date !== s.selectedDate) this.toast({ icon: '種', title: `已種在 ${md}`, sub: p.title })
@@ -734,6 +724,7 @@ export class UI {
         const i = TAGS.findIndex((x) => x.id === t.tag)
         s.updateTask(id, { tag: TAGS[(i + 1) % TAGS.length].id })
       } else if (act === 'today') s.moveToToday([id])
+      else if (act === 'proj') this.openProject(s.state.tasks.find((x) => x.id === id)?.project)
       else if (act === 'focus') this.focus.startWith(id)
       else if (!act && !e.target.closest('input')) this.hooks.focusTask(id)
     }
@@ -785,6 +776,11 @@ export class UI {
     if (t.star) meta.unshift(`<button class="star on" data-act="star" ${t.done ? 'disabled title="本命・已完成"' : 'title="取消本命"'}>★ 本命</button>`)
     else if (!t.done && t.date >= this.store.today) meta.unshift(`<button class="star" data-act="star" title="設為本命：完成給雙倍 XP（每天最多 ${MAX_STARS} 件）">☆</button>`)
     if (t.pomos) meta.push(`<span class="pomo" title="已專注 ${t.pomos} 輪">◷ ${t.pomos}</span>`)
+    const proj = t.project && this.store.state.projects.find((p) => p.id === t.project)
+    if (proj) {
+      const name = proj.name.length > 8 ? `${proj.name.slice(0, 8)}…` : proj.name
+      meta.push(`<button class="proj-tag" data-act="proj" style="--pc:${PROJECT_COLORS[proj.color % PROJECT_COLORS.length]}" title="打開專案「${esc(proj.name)}」">${esc(name)}</button>`)
+    }
     const rt = this.store.routineOf(t)
     if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
     if (t.done && t.doneAt) meta.push(`<span>${hhmm(t.doneAt)} 綻放</span>`)
@@ -1046,7 +1042,9 @@ export class UI {
       const p = s.state.projects.find((x) => x.id === id)
       const act = e.target.closest('[data-act]')?.dataset.act
       const mid = e.target.closest('.ms')?.dataset.mid
-      if (act === 'ms-toggle') s.toggleMilestone(id, mid)
+      // 點標題或摘要也是打開（輸入框、按鈕除外）
+      if (act === 'open' || (!act && e.target.closest('.proj-head, .proj-sum') && !e.target.closest('input'))) this.openProject(id)
+      else if (act === 'ms-toggle') s.toggleMilestone(id, mid)
       else if (act === 'ms-delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteMilestone(id, mid))
       else if (act === 'view') this._onIsland(() => this.hooks.focusProject(id))
       else if (act === 'pause' || act === 'resume') s.pauseProject(id, act === 'pause')
@@ -1115,6 +1113,7 @@ export class UI {
   _projectActions(p) {
     const b = (act, label) => `<button data-act="${act}">${label}</button>`
     const main = [
+      `<button data-act="open" class="proj-open">進度與筆記</button>`,
       b('view', this.appMode ? '切到小島看看' : '在島上查看'),
       p.completedAt ? '' : p.pausedAt ? b('resume', '繼續') : b('pause', '暫停'),
       p.completedAt || p.pausedAt ? '' : b('deadline', '截止日'),
@@ -1135,29 +1134,66 @@ export class UI {
       .map(
         (m) => `<li class="ms ${m.done ? 'done' : ''}" data-mid="${esc(m.id)}">
           <button class="check" data-act="ms-toggle" aria-label="完成" style="--c:${c}">${ICON.check}</button>
-          <span>${esc(m.title)}</span>
+          <span>${esc(m.title)}</span>${m.steps.length && !m.done ? `<small class="ms-n">${m.steps.filter((x) => x.done).length}/${m.steps.length}</small>` : ''}
           <button class="mini" data-act="ms-delete" title="刪除">${ICON.del}</button>
         </li>`,
       )
       .join('')
     const paused = !archived && !!p.pausedAt
     const tags = paused ? '<span class="paused">暫停中</span>' : ''
+    // 最新一則進度和筆記、日誌、專注的數字：點一下打開詳情
+    const last = latestLog(p)
+    const st = projectStats(p, s.state.tasks)
+    const nums = [st.notes && `筆記 ${st.notes}`, st.logs && `進度 ${st.logs} 則`, st.focus && `專注 ${fmtHours(st.focus)}`].filter(Boolean).join('・')
+    const sum = last || nums
+      ? `<div class="proj-sum">${last ? `<span class="ps-last">${esc(last.text || `投入 ${fmtHours(last.mins)}`)}<small>${relDay(last.date, s.today)}</small></span>` : ''}${nums ? `<span class="ps-n">${nums}</span>` : ''}</div>`
+      : ''
+    const bar = p.milestones.map((m) => `<i style="--f:${msProgress(m).toFixed(3)}"></i>`).join('') || '<i style="--f:0"></i>'
     return `<div class="proj ${paused ? 'is-paused' : ''} ${this.hlKey === 'project:' + p.id ? 'hl' : ''}" data-id="${esc(p.id)}" style="--c:${c}">
       <div class="proj-head"><div class="proj-name">${esc(p.name)}</div><div class="proj-pct">${pct}%</div></div>
       <div class="proj-meta">${tags}${paused ? '' : this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>
-      <div class="proj-bar">${p.milestones.map((m) => `<i class="${m.done ? 'on' : ''}"></i>`).join('') || '<i></i>'}</div>
+      <div class="proj-bar">${bar}</div>
+      ${sum}
       ${archived ? '' : `<ul class="ms-list">${ms}</ul>
       <form class="ms-add"><input placeholder="新增里程碑" maxlength="60" /><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`}
       <div class="proj-actions">
         ${archived
-          ? `<button data-act="restore" title="放回進行中的專案，房子也會回到島上">恢復</button><button data-act="delete">刪除</button>`
+          ? `<button data-act="open">打開</button><button data-act="restore" title="放回進行中的專案，房子也會回到島上">恢復</button><button data-act="delete">刪除</button>`
           : this._projectActions(p)}
       </div>
     </div>`
   }
 
+  // ── 專案詳情 ──
+  openProject(id, sec) {
+    this.projectView.open(id, sec)
+    this._stale?.add('projects')
+    if (this.tab === 'projects') this._renderPage('projects')
+    else this.setTab('projects')
+    $('#panel .panel-body')?.scrollTo({ top: 0 })
+    requestAnimationFrame(() => $('#projectDetail .pd-back')?.focus({ preventScroll: true }))
+  }
+  closeProject() {
+    const id = this.projectView.id
+    this.projectView.close()
+    this._stale?.add('projects')
+    this._renderPage('projects')
+    // 回到列表上剛剛那張卡
+    const card = id && $(`.proj[data-id="${CSS.escape(id)}"]`)
+    if (!card) return
+    card.scrollIntoView({ block: 'center' })
+    $('[data-act="open"]', card)?.focus({ preventScroll: true })
+  }
+
   renderProjects() {
     const s = this.store
+    // 打開了某個專案：換成詳情（專案被刪掉、或同步後不見了就回到列表）
+    const pv = this.projectView
+    const open = !!pv.id && s.state.projects.some((p) => p.id === pv.id)
+    $('#projectHome').hidden = open
+    $('#projectDetail').hidden = !open
+    if (open) return pv.render()
+    if (pv.id) pv.close()
     // 進行中的在前，再來暫停的、已落成的
     const all = s.activeProjects()
     const rank = { active: 0, paused: 1, done: 2 }
@@ -1849,6 +1885,11 @@ export class UI {
   }
 
   reveal(type, id) {
+    // 點了島上另一棟房子：先回到專案列表，那張卡才看得到
+    if (type === 'project' && this.projectView.id && this.projectView.id !== id) {
+      this.projectView.close()
+      this._stale?.add('projects')
+    }
     this.setTab({ task: 'tasks', event: 'schedule', project: 'projects' }[type])
     this.highlight(type, id)
     const el =

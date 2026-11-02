@@ -46,6 +46,8 @@ export const ACHIEVEMENTS = [
   { id: 'urge_10', name: 'ひと呼吸', title: '留一口氣', desc: '累計記錄10次「忍住了」', kanji: '忍', cond: { stat: 'urgesResisted', gte: 10 } },
   { id: 'life_30', name: '暮らしの手帖', title: '生活手帖', desc: '累計寫下30筆生活記錄', kanji: '帖', cond: { stat: 'lifeEntries', gte: 30 } },
   { id: 'sleep_7', name: 'おやすみ日誌', title: '晚安日誌', desc: '累計新增7筆睡眠記錄', kanji: '眠', cond: { stat: 'sleepLogs', gte: 7 } },
+  { id: 'project_log_10', name: '工事日誌', title: '十則工程日誌', desc: '累計寫下10則專案進度', kanji: '誌', cond: { stat: 'projectLogs', gte: 10 } },
+  { id: 'project_log_100', name: '積み重ね', title: '百則足跡', desc: '累計寫下100則專案進度', kanji: '積', cond: { stat: 'projectLogs', gte: 100 } },
   { id: 'planner_10', name: '時の設計士', title: '時光設計師', desc: '累計套用10次最佳化時程（每次至少排入1件任務）', kanji: '時', cond: { stat: 'plansApplied', gte: 10 } },
   { id: 'town_neighbor', name: 'はじめてのご近所', title: '第一位鄰居', desc: 'ひより町搬來第1位居民', kanji: '隣', cond: { stat: 'residents', gte: 1 } },
   { id: 'town_six', name: 'にぎやかな町', title: '六戶人家', desc: '六位居民都搬進了ひより町', kanji: '町', cond: { stat: 'residents', gte: 6 } },
