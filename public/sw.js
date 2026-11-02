@@ -66,10 +66,11 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // 同源靜態檔：快取優先（檔名帶 hash，不會過期）
+  // 同源靜態檔：快取優先（檔名帶 hash，不會過期）。不看 Vary：有的伺服器回 Vary: Origin，
+  // 帶 crossorigin 的 <script>／<link> 和存進快取時的請求 Origin 不同，離線時會對不到
   if (url.origin === self.location.origin) {
     event.respondWith(
-      caches.match(req).then(
+      caches.match(req, { ignoreVary: true }).then(
         (hit) =>
           hit ||
           fetch(req).then((res) => {
@@ -82,6 +83,25 @@ self.addEventListener('fetch', (event) => {
       ),
     )
   }
+})
+
+// 頁面已經用到的檔案，請 Service Worker 收進快取（之後離線也能用）。小島（three.js、場景、兩人的模型）是
+// 第一次要看時才下載的，那時 Service Worker 可能還沒接手（第一次打開 App），下載的檔案不會經過上面的 fetch，要頁面來說。
+// App 模式從沒切回小島的裝置不會送來這些檔案，也就不用下載
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'keep' || !Array.isArray(event.data.urls)) return
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(VERSION)
+      for (const url of event.data.urls) {
+        try {
+          if (new URL(url).origin !== self.location.origin || (await cache.match(url, { ignoreVary: true }))) continue
+          const res = await fetch(url)
+          if (res.ok) await cache.put(url, res)
+        } catch {}
+      }
+    })(),
+  )
 })
 
 // 點通知：回到已開啟的視窗，沒有就開新的

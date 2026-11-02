@@ -258,17 +258,17 @@ export class World {
     this.busyUntil = Math.max(this.busyUntil, performance.now() + ms)
   }
 
-  // 藏起來時先在背景把著色器編好、貼圖傳上 GPU：回到小島的第一幀才不會卡一下
+  // 藏起來時先在背景把著色器編好、貼圖傳上 GPU：回到小島的第一幀才不會卡一下（回傳編好的時候）
   precompile() {
-    if (this._compiled) return
-    this._compiled = true
+    if (this._compiled) return this._compiled
     const r = this.renderer
     // 場景是畫進 composer 的 render target（線性、不做色調映射），編譯時也要對著它，快取才對得上
     const prev = r.getRenderTarget()
     r.setRenderTarget(this.composer.readBuffer)
     const done = r.compileAsync(this.scene, this.camera)
     r.setRenderTarget(prev)
-    done.then(() => this._uploadTextures()).catch(() => {})
+    this._compiled = done.then(() => this._uploadTextures()).catch(() => {})
+    return this._compiled
   }
   // 貼圖一次傳一張，等瀏覽器有空檔再傳下一張；已經回到小島就不用了（第一幀會一起傳）
   _uploadTextures() {

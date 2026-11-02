@@ -3,8 +3,6 @@ import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, 
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
-import { renderThumbnails } from './scene/placed.js'
-import { renderFlowerThumbs } from './scene/garden.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
 import { LINES, FUJI_LINES } from './data/lines.js'
@@ -57,6 +55,10 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([ty
 const focusables = (root) => [...root.querySelectorAll(FOCUSABLE)].filter((el) => el.getClientRects().length)
 // 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
 const LAYOUT_KEY = 'hiyori-layout'
+// 這台裝置上次選的是 App 模式（開機時決定要不要先載入小島）
+export const savedAppMode = () => readLocal(LAYOUT_KEY, 'island') === 'app'
+// 商店和花の図鑑的縮圖是用 three.js 拍的，載入前先放透明的圖（版面不會跳）
+const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 const ISLAND_ICON = '<svg viewBox="0 0 24 24"><path d="M3 16.5c3 0 4.5-1.8 9-1.8s6 1.8 9 1.8"/><path d="M6.5 16.5l1.8 3.5h7.4l1.8-3.5"/><path d="M12 14.7V7"/><path d="M12 7c-2.4-1.6-5-1.2-6.5.6 2-.2 3.6.3 4.6 1.4M12 7c2.4-1.6 5-1.2 6.5.6-2-.2-3.6.3-4.6 1.4M12 7c-.8-1.6-2.3-2.6-4-2.8"/></svg>'
 const greeting = (h) => (h >= 5 && h < 11 ? '早安' : h >= 11 && h < 17 ? '午安' : h >= 17 && h < 22 ? '晚上好' : '夜深了')
 // 回饋：到 GitHub 開一則 issue，先填好版本和裝置大小（不帶任何個人資料）
@@ -109,7 +111,7 @@ export class UI {
     this.hooks = hooks
     this.tab = 'tasks'
     // 先標上 App 模式：底下建番茄鐘時若正在專注，兩人不會先把畫面帶進小木屋
-    document.body.classList.toggle('app-mode', readLocal(LAYOUT_KEY, 'island') === 'app')
+    document.body.classList.toggle('app-mode', savedAppMode())
     this.priority = 2
     this.tag = 'work'
     this.eventColor = 0
@@ -144,7 +146,7 @@ export class UI {
     this.dates.render()
     this.applyFontScale()
     this.renderNewsDot()
-    this.setAppMode(readLocal(LAYOUT_KEY, 'island') === 'app', { save: false })
+    this.setAppMode(savedAppMode(), { save: false })
     // 開發與截圖用：?tab=habits、?calendar
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
@@ -293,7 +295,7 @@ export class UI {
     if (!$('#focusPick').hidden || !$('#focusSet').hidden) {
       this.focus.togglePicker(false)
       this.focus.toggleSet(false)
-    } else if (!$('#shop').hidden) this.toggleShop(false)
+    } else if (!$('#shop').hidden || this._shopWait) this.toggleShop(false)
     else if (typing) document.activeElement.blur()
     else this.toggleFull(false)
   }
@@ -472,8 +474,47 @@ export class UI {
   }
 
   // ── App 模式：像一般 App 一樣用。面板撐滿整個畫面，小島停住、藏起來；手機的分頁列移到底下 ──
-  // cabin：回小島時，正在專注、兩人在屋裡的話要不要直接進屋（要飛去看別的地方時不要）
-  setAppMode(on, { save = true, cabin = true } = {}) {
+  // cabin：回小島時，正在專注、兩人在屋裡的話要不要直接進屋（要飛去看別的地方時不要）。
+  // App 模式開機時還沒有小島：第一次切回小島要先下載、建好，這段時間畫面維持 App 模式、可以照常用；
+  // 等的時候又選了別的（例如又切回 App）就不切。回傳最後有沒有換過去
+  setAppMode(on, opts = {}) {
+    const ticket = (this._modeTicket = (this._modeTicket || 0) + 1)
+    if (on || !this.appMode || this.hooks.islandReady()) {
+      this._applyAppMode(on, opts)
+      return Promise.resolve(true)
+    }
+    const ready = this.hooks.ensureIsland()
+    this._islandLoading(ready)
+    return ready.then(
+      () => {
+        if (ticket !== this._modeTicket || !this.appMode) return false
+        this._applyAppMode(false, opts)
+        return true
+      },
+      (err) => {
+        const sub = err?.reload ? '重新整理頁面再試一次' : '連上網路再按一次「小島」；還是不行就重新整理頁面'
+        if (ticket === this._modeTicket) this.toast({ icon: '島', title: '小島沒有載入成功', sub, ms: 6000 })
+        return false
+      },
+    )
+  }
+  // 第一次載入小島時，在通知的位置顯示「準備中」，好了（或失敗）就收掉
+  _islandLoading(ready) {
+    if (this._loadingToast) return
+    const el = (this._loadingToast = document.createElement('div'))
+    el.className = 'toast busy'
+    el.innerHTML = '<div class="t-icon">島</div><div><b>小島準備中…</b><small>第一次打開要下載一下，可以先繼續用</small></div>'
+    $('#toasts').append(el)
+    $('#fullBtn').setAttribute('aria-busy', 'true')
+    const done = () => {
+      this._loadingToast = null
+      $('#fullBtn').removeAttribute('aria-busy')
+      el.classList.add('out')
+      setTimeout(() => el.remove(), 500)
+    }
+    ready.then(done, done)
+  }
+  _applyAppMode(on, { save = true, cabin = true } = {}) {
     this.appMode = on
     document.body.classList.toggle('app-mode', on)
     if (save) writeLocal(LAYOUT_KEY, on ? 'app' : 'island')
@@ -489,11 +530,10 @@ export class UI {
     if (this._stale) this.render()
     this.hooks.appModeChanged?.(on, { cabin })
   }
-  // 要飛到島上某處的按鈕：App 模式先切回小島（不自動進小木屋），等畫面換好再飛過去
+  // 要飛到島上某處的按鈕：App 模式先切回小島（不自動進小木屋；第一次要等小島建好），等畫面換好再飛過去
   _onIsland(fn) {
     if (!this.appMode) return fn()
-    this.setAppMode(false, { cabin: false })
-    requestAnimationFrame(() => requestAnimationFrame(fn))
+    this.setAppMode(false, { cabin: false }).then((ok) => ok && requestAnimationFrame(() => requestAnimationFrame(fn)))
   }
   renderAppBar() {
     if (!this.appMode) return
@@ -1322,17 +1362,37 @@ export class UI {
     const dex = this.store.state.dex
     const order = (f) => RARITY_ORDER.length - RARITY_ORDER.indexOf(f.rarity)
     const list = [...FLOWERS].sort((a, b) => order(a) - order(b))
-    const thumbs = renderFlowerThumbs(FLOWERS.map((f) => f.key))
+    const thumbs = this._dexThumbs
+    if (!thumbs) this._watchDex()
     const found = list.filter((f) => dex[f.key]).length
     $('#dexCount').textContent = `${found} / ${FLOWERS.length}`
     $('#dexGrid').innerHTML = list
       .map((f) => {
         const got = dex[f.key]
         return `<button class="dex-cell ${got ? '' : 'unknown'} ${this.dexSel === f.key ? 'on' : ''}" data-k="${f.key}" style="--rc:${RARITIES[f.rarity].color}">
-          <img src="${thumbs[f.key]}" alt="" draggable="false" /><span>${got ? esc(f.name) : '？？？'}</span></button>`
+          <img src="${thumbs?.[f.key] || BLANK}" alt="" draggable="false" /><span>${got ? esc(f.name) : '？？？'}</span></button>`
       })
       .join('')
     this._renderDexDetail()
+  }
+  // 花的縮圖要用 three.js 拍：捲到圖鑑時才載入（App 模式只是來改設定的話，不用下載小島的程式）
+  _watchDex() {
+    if (this._dexWatch) return
+    const watch = (this._dexWatch = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return
+      watch.disconnect()
+      import('./scene/garden.js')
+        .then(({ renderFlowerThumbs }) => {
+          this._dexThumbs = renderFlowerThumbs(FLOWERS.map((f) => f.key))
+          this.renderDex()
+        })
+        .catch((err) => {
+          console.warn('[hiyori] 花的縮圖載入失敗', err)
+          // 下次畫圖鑑時再試
+          this._dexWatch = null
+        })
+    }))
+    watch.observe($('#dexGrid'))
   }
 
   _renderDexDetail() {
@@ -1713,9 +1773,22 @@ export class UI {
 
   // ── 金平糖商店 ──
   toggleShop(force) {
-    const open = force ?? $('#shop').hidden
-    // 商店要在島上擺東西，打開時先離開全螢幕（App 模式就先切回小島）
-    if (open && this.appMode) this.setAppMode(false)
+    // 正在等小島建好要開商店：再按一次（或 Esc）就是不開了，也不切回小島
+    const open = force ?? (this._shopWait ? false : $('#shop').hidden)
+    if (!open && this._shopWait) {
+      this._shopWait = null
+      this._modeTicket++
+    }
+    // 商店要在島上擺東西，打開時先離開全螢幕；App 模式先切回小島（第一次要等小島建好），換過去再打開
+    if (open && this.appMode) {
+      const wait = (this._shopWait = {})
+      this.setAppMode(false).then((ok) => {
+        if (this._shopWait !== wait) return
+        this._shopWait = null
+        if (ok) this.toggleShop(true)
+      })
+      return
+    }
     if (open) this.toggleFull(false)
     $('#shop').hidden = !open
     $('#shopBtn').classList.toggle('on', open)
@@ -1725,7 +1798,17 @@ export class UI {
   renderShop() {
     const s = this.store
     $('#shopCoins').textContent = s.coins
-    const thumbs = renderThumbnails(SHOP_ITEMS.map((i) => i.key))
+    // 縮圖的模型跟小島在一起（商店只在小島上開，這時已經載好了）
+    const thumbs = this._shopThumbs
+    if (!thumbs && !this._shopThumbsP) {
+      this._shopThumbsP = import('./scene/placed.js')
+        .then(({ renderThumbnails }) => {
+          this._shopThumbs = renderThumbnails(SHOP_ITEMS.map((i) => i.key))
+          if (!$('#shop').hidden) this.renderShop()
+        })
+        .catch((err) => console.warn('[hiyori] 商店縮圖載入失敗', err))
+        .finally(() => (this._shopThumbsP = null))
+    }
     const owned = {}
     for (const p of s.state.placed) owned[p.key] = (owned[p.key] || 0) + 1
     // 買得到的排前面；還沒上架的（等級、季節）排後面
@@ -1744,7 +1827,7 @@ export class UI {
         const badge = i.exclusive ? '<i class="shop-badge wk">週限定</i>' : i.season ? `<i class="shop-badge s-${i.season}">${SEASON_ZH[i.season]}</i>` : ''
         const price = st.lock ? `<span class="price lock">${st.lock}</span>` : st.free ? '<span class="price free">免費</span>' : `<span class="price"><i class="konpeito"></i>${i.price}</span>`
         return `<button class="shop-item ${st.lock ? 'locked' : ''}" data-key="${i.key}" title="${esc(i.desc)}" ${st.ok ? '' : 'disabled'}>
-        ${badge}<img src="${thumbs[i.key]}" alt="" />
+        ${badge}<img src="${thumbs?.[i.key] || BLANK}" alt="" />
         <b>${esc(i.name)}</b><small>${esc(i.jp)}</small>
         ${price}
         ${owned[i.key] ? `<span class="owned">已擺 ${owned[i.key]}</span>` : ''}
