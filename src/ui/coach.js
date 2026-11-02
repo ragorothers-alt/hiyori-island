@@ -1,9 +1,10 @@
 import './coach.css'
 import { $, esc, ICON } from './dom.js'
-import { TAGS, tagOf, PROJECT_COLORS, DATE_KINDS, moodOf } from '../theme.js'
+import { TAGS, tagOf, PROJECT_COLORS, DUE_KINDS, moodOf } from '../theme.js'
 import { FUJI_LINES } from '../data/lines.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel, addDays } from '../coach.js'
 import { buildInsights } from '../insights.js'
+import { aiReady, askAI } from '../ai.js'
 import { PEAKS } from '../planner.js'
 
 // 「教練 · ふじ」分頁，分成兩頁：
@@ -42,6 +43,21 @@ const delta = (now, before, unit = '') => {
   return `<i class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'}${Math.abs(Math.round(d))}${unit}</i>`
 }
 const CLOCK = '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v3.2h3.2"/><path d="M12 8v4.2l2.8 1.8"/></svg>'
+// ふじ的週報洞察：最近一週的那一份存在這台裝置（{ week, at, out }）
+const WEEK_AI_KEY = 'hiyori-ai-week'
+function readWeekAI() {
+  try {
+    const v = JSON.parse(localStorage.getItem(WEEK_AI_KEY) || 'null')
+    return v && typeof v.week === 'string' && v.out && Array.isArray(v.out.tips) ? v : null
+  } catch {
+    return null
+  }
+}
+function saveWeekAI(v) {
+  try {
+    localStorage.setItem(WEEK_AI_KEY, JSON.stringify(v))
+  } catch {}
+}
 
 export class CoachView {
   constructor(root, store, hooks) {
@@ -147,6 +163,7 @@ export class CoachView {
 
   // 任務頁「讓ふじ排這天」
   preset({ scope, date = null }) {
+    this._stop()
     this.a.scope = scope
     this.a.date = date
     this.step = 'ask'
@@ -157,25 +174,41 @@ export class CoachView {
   }
 
   async _run() {
-    if (!this._ready()) return
+    if (!this._ready() || this.thinking) return
     const a = this.a
     const dates = this._dates()
     const exam = this._exam()
-    this.res = await askCoach({
-      dates, focus: this._focusList(), slots: [...a.slots], exam: exam ? { title: exam.title, date: exam.date, only: exam.project ? exam.title : null } : null,
+    const req = {
+      dates, focus: this._focusList(), slots: [...a.slots], exam: exam ? { title: exam.title, date: exam.date, only: exam.project ? exam.title : exam.pid ? exam.projectName : null } : null,
       days: a.days, len: a.len, total: a.total, seed: this.seed, ctx: this.store.coachContext(dates),
-    })
+    }
+    // 設了 Claude 的通行碼就交給 Claude 排（要等一下）；排不出來會自己改用本機規則
+    const ai = aiReady() ? askAI : null
+    const ticket = (this._ticket = (this._ticket || 0) + 1)
+    if (ai) {
+      this.thinking = say('coachThink', {}, '我先找找合適的空檔。')
+      this.step = 'think'
+      this.flash = ''
+      this.render()
+    }
+    const res = await askCoach(req, ai)
+    // 等的時候按了「改答案」或又送出一次：這次的結果不要了
+    if (ticket !== this._ticket) return
+    this.thinking = ''
+    this.res = res
     this.step = 'preview'
     this.flash = ''
     this.reply = this._replyText()
+    if (res.fallback) this.hooks.toast?.({ icon: '藤', title: '這次用平常的方法排', sub: res.why?.message || 'Claude 排的放不進你選的空檔' })
     this.render()
     requestAnimationFrame(() => $('[data-r="reply"]', this.root)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
   }
   _replyText() {
     const r = this.res
-    if (!r.days.length) return [say('coachEmpty', {}, '選的時段裡沒有空檔，換幾個時段試試吧。')]
+    const lead = r.fallback ? [say('aiFallback', {}, '這次沒想出來，先用平常的方法排。')] : []
+    if (!r.days.length) return [...lead, say('coachEmpty', {}, '選的時段裡沒有空檔，換幾個時段試試吧。')]
     const count = r.days.reduce((n, d) => n + d.items.length, 0)
-    const out = [say('coachPlan', { days: r.picked, count, hours: hours(r.totalMin) }, `排了 ${r.picked} 天、${count} 段，先看看。`)]
+    const out = [...lead, say('coachPlan', { days: r.picked, count, hours: hours(r.totalMin) }, `排了 ${r.picked} 天、${count} 段，先看看。`)]
     const exam = this._exam()
     if (exam) out.push(say('coachExam', { title: exam.title, n: exam.days }))
     if (r.unplaced) out.push(say('coachFull', { left: r.unplaced }))
@@ -215,6 +248,8 @@ export class CoachView {
 
   // 一行輸入：「這週的數學複習 3小時」→ 填進問卷，齊了就直接排
   _fromText(text) {
+    // 還在等上一次的 Claude：那一次不要了，照新的話重排（不然舊計畫會配上新的答案）
+    this._stop()
     const p = parseCoachText(text, this.store.today)
     const a = this.a
     if (p.scope === 'day') {
@@ -282,8 +317,10 @@ export class CoachView {
       this.examForm = a.exam && !this._examChoices().length
     } else if (act === 'examAdd') this.examForm = !this.examForm
     else if (act === 'clearTotal') a.total = null
-    else if (act === 'edit') this.step = 'ask'
-    else if (act === 'reroll') {
+    else if (act === 'edit') {
+      this.step = 'ask'
+      this._stop()
+    } else if (act === 'reroll') {
       this.seed++
       this._run()
       return
@@ -303,11 +340,19 @@ export class CoachView {
       this.history = false
       this.root.closest('.panel-body')?.scrollTo({ top: 0 })
     } else if (act === 'week') return this.hooks.openWeekCard?.(b.dataset.wk)
+    else if (act === 'aiWeek') return this._aiWeek()
     else if (act === 'peak') {
       this.store.setRhythm({ peak: b.dataset.v })
       this.hooks.toast?.({ icon: '時', title: `精神最好的時段改成${PEAKS[b.dataset.v].label}`, sub: '之後排程會把重要的事放在這時候' })
     } else return
     this.render()
+  }
+
+  // 不等 Claude 了（改答案、送出新的一句、從任務頁指定一天）：之後回來的結果丟掉
+  _stop() {
+    if (!this.thinking) return
+    this._ticket++
+    this.thinking = ''
   }
 
   _submit(e) {
@@ -367,7 +412,13 @@ export class CoachView {
     const parts = [this._head(), this.history ? this._historyHTML() : '', this._msg('fuji', this.hello)]
     if (this.flash) parts.push(this._msg('fuji', this.flash))
     if (this.step === 'ask') parts.push(this._askHTML())
-    else {
+    else if (this.step === 'think') {
+      // 等 Claude 排的時候：ふじ說一句、三個點在跳；可以先改答案
+      parts.push(
+        this._msg('me', esc(this._summary()), `<button class="cm-link" data-act="edit">改答案</button>`),
+        `<div data-r="reply">${this._msg('fuji', `${esc(this.thinking)}<span class="cm-dots" aria-label="排程中"><i></i><i></i><i></i></span>`)}</div>`,
+      )
+    } else {
       parts.push(this._msg('me', esc(this._summary()), `<button class="cm-link" data-act="edit">改答案</button>`))
       parts.push(`<div data-r="reply">${this.reply.map((t) => this._msg('fuji', esc(t))).join('')}</div>`)
       if (this.res.days.length) parts.push(this._planHTML())
@@ -472,7 +523,7 @@ export class CoachView {
     const choices = this._examChoices()
     const exam = a.exam
       ? `<div class="cchips" data-q="exam">${choices
-          .map((d) => `<button type="button" data-v="${esc(d.id)}" class="${a.examId === d.id ? 'on' : ''}" style="--c:#e8899f">${DATE_KINDS[d.kind].kanji}・${esc(d.title)}<small>${d.days ? `還有 ${d.days} 天` : '今天'}</small></button>`)
+          .map((d) => `<button type="button" data-v="${esc(d.id)}" class="${a.examId === d.id ? 'on' : ''}" style="--c:#e8899f">${DUE_KINDS[d.kind].kanji}・${esc(d.title)}<small>${d.days ? `還有 ${d.days} 天` : '今天'}</small></button>`)
           .join('')}<button type="button" data-act="examAdd" class="add">＋ 新增</button></div>
         ${this.examForm ? `<div class="coach-other" data-r="examNew"><input name="examTitle" maxlength="30" autocomplete="off" placeholder="例如：期中考" aria-label="考試或截止日的名稱" /><input name="examDate" type="date" min="${today}" aria-label="日期" /><button class="btn-primary" type="button" data-act="examSave">加入</button></div>` : ''}`
       : ''
@@ -506,7 +557,7 @@ export class CoachView {
         ? `<div class="cp-btns"><button class="btn-ghost" data-act="edit">改答案</button><button class="btn-ghost" data-act="reroll">換個排法</button><button class="btn-primary" data-act="apply">套用</button></div>`
         : ''
     return `<div class="cplan${this.step === 'done' ? ' applied' : ''}">
-      <div class="cp-sum"><span><b>${r.picked}</b> 天</span><span><b>${count}</b> 段</span><span><b>${hours(r.totalMin).replace(' 小時', '')}</b> 小時</span>${this.step === 'done' ? `<em>${ICON.check}已套用</em>` : ''}</div>
+      <div class="cp-sum"><span><b>${r.picked}</b> 天</span><span><b>${count}</b> 段</span><span><b>${hours(r.totalMin).replace(' 小時', '')}</b> 小時</span>${this.step === 'done' ? `<em>${ICON.check}已套用</em>` : r.ai ? '<em class="cp-by" title="照你的回答和空檔，由 Claude 排的">✦ Claude</em>' : ''}</div>
       ${days}${notes}${btns}
     </div>`
   }
@@ -557,6 +608,8 @@ export class CoachView {
       </div>
     </section>`)
 
+    parts.push(this._aiWeekHTML(w.week))
+
     // 習慣洞察
     const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today })
     const guess = list.some((x) => x.guess)
@@ -589,5 +642,53 @@ export class CoachView {
       <div class="wr-album">${cards}</div>
     </section>`)
     return parts.join('')
+  }
+
+  // ふじ的週報洞察（Claude）：設了通行碼才出現；每週存一份在這台裝置，想更新再按
+  _aiWeekHTML(week) {
+    if (!aiReady()) return ''
+    const c = readWeekAI()
+    const cur = c?.week === week ? c : null
+    let body
+    if (this.weekBusy) body = `<p class="wr-ai-p">ふじ正在讀這週的數字<span class="cm-dots" aria-label="整理中"><i></i><i></i><i></i></span></p>`
+    else if (cur) {
+      const at = new Date(cur.at)
+      body = `<b class="wr-ai-h">${esc(cur.out.headline)}</b><p class="wr-ai-p">${esc(cur.out.text)}</p>
+        ${cur.out.tips.length ? `<ul class="wr-ai-tips">${cur.out.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+        <small class="wr-ai-at">${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')} 整理・<button type="button" class="cm-link" data-act="aiWeek">用現在的數字再看一次</button></small>`
+    } else body = `<p class="wr-ai-p">讓ふじ讀讀這週的數字，說說做得好的地方，和下週可以試的小調整。</p><button type="button" class="btn-ghost" data-act="aiWeek">請ふじ看看這週</button>`
+    const err = this.weekErr ? `<p class="wr-ai-err" role="alert">${esc(this.weekErr)}</p>` : ''
+    return `<section class="wr-card wr-ai"><h5>ふじ的週報洞察<em class="wr-badge">✦ Claude</em></h5>${body}${err}</section>`
+  }
+  async _aiWeek() {
+    if (this.weekBusy) return
+    const s = this.store
+    const w = s.weekReport()
+    const prevWk = addDays(w.week, -7)
+    const p = s.weekReport(prevWk, addDays(prevWk, w.days - 1))
+    const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100)
+    const nums = (r) => ({
+      rate: r2(r.rate), done: r.done, total: r.total, focus: r.focus, pomodoros: r.pomodoros,
+      stars: r.stars, starTotal: r.starTotal, habitRate: r2(r.habitRate), activeDays: r.active, moods: r.moods,
+    })
+    const ins = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today: s.today })
+    const data = {
+      today: s.today, daysSoFar: w.days, streak: s.streak, usedDays: s.usedDays(),
+      week: nums(w), prev: nums(p), insights: ins.map((x) => ({ title: x.title, text: x.text, guess: !!x.guess })),
+    }
+    this.weekBusy = true
+    this.weekErr = ''
+    this.render()
+    try {
+      const out = await askAI('insight', data)
+      const text = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '')
+      const tips = (Array.isArray(out?.tips) ? out.tips : []).map((t) => text(t, 80)).filter(Boolean).slice(0, 3)
+      if (!text(out?.headline, 1) && !text(out?.text, 1)) throw new Error('回答是空的，再試一次')
+      saveWeekAI({ week: w.week, at: Date.now(), out: { headline: text(out.headline, 40), text: text(out.text, 300), tips } })
+    } catch (err) {
+      this.weekErr = err.message
+    }
+    this.weekBusy = false
+    if (this.view === 'report') this.render()
   }
 }

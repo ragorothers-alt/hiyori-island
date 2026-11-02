@@ -2088,7 +2088,7 @@ export class Store {
     for (const date of dates) {
       if (date <= this.today) continue
       for (const r of this.state.routines) {
-        if (r.kind === 'event' && r.startDate <= date && !r.made?.[date] && repeatMatches(r.repeat, date)) events.push({ id: 'r-' + r.id, date, start: r.start, end: r.end, done: false })
+        if (r.kind === 'event' && r.startDate <= date && !r.made?.[date] && repeatMatches(r.repeat, date)) events.push({ id: 'r-' + r.id, date, title: r.title, start: r.start, end: r.end, done: false })
       }
     }
     return {
@@ -2169,17 +2169,35 @@ export class Store {
   datesOn(date) {
     return this.state.dates.filter((d) => d.date === date)
   }
-  // 接下來的重要日子，連同進行中專案的截止日；近的在前，days：還有幾天
+  // 接下來的重要日子，連同進行中專案的截止日和里程碑期限；近的在前，days：還有幾天
+  // 同一天：自己記的重要日子、里程碑、專案截止日
   upcomingDates(limit = 8, horizon = 366) {
     const out = this.state.dates.filter((d) => d.date >= this.today).map((d) => ({ ...d, days: daysBetween(this.today, d.date) }))
     for (const p of this.state.projects) {
       if (!p.deadline || p.completedAt || p.archived || p.pausedAt || p.deadline < this.today) continue
       out.push({ id: p.id, title: p.name, date: p.deadline, kind: 'deadline', project: true, days: daysBetween(this.today, p.deadline) })
     }
+    out.push(...this.milestoneDues())
+    const rank = (d) => (d.project ? 2 : d.pid ? 1 : 0)
     return out
       .filter((d) => d.days <= horizon)
-      .sort((a, b) => a.date.localeCompare(b.date) || !!a.project - !!b.project)
+      .sort((a, b) => a.date.localeCompare(b.date) || rank(a) - rank(b))
       .slice(0, limit)
+  }
+  // 進行中專案裡還沒完成、設了期限的里程碑（今天以後的）；date 有給就只看那一天
+  milestoneDues(date = null) {
+    const out = []
+    for (const p of this.state.projects) {
+      if (p.completedAt || p.archived || p.pausedAt) continue
+      for (const m of p.milestones) {
+        if (m.done || !m.due || m.due < this.today || (date && m.due !== date)) continue
+        out.push({
+          id: m.id, title: m.title, date: m.due, kind: 'milestone', pid: p.id, projectName: p.name,
+          steps: m.steps.length, stepsDone: m.steps.filter((x) => x.done).length, days: daysBetween(this.today, m.due),
+        })
+      }
+    }
+    return out
   }
 
   // ── 專注 / 互動 / 每日任務 ──

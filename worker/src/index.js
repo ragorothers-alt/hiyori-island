@@ -4,6 +4,9 @@
 // 版本識別 rev 是前端每次修改都換一個的隨機字串（savedAt 只是那一版的修改時間，顯示用）。
 // 上傳要帶 base（「我以為雲端現在是哪一版」，空的 vault 是 null），對不上代表別台剛寫過，
 // 回 409 讓前端重新比對，不會蓋掉別台的變更。
+// /v1/ai：ふじ的 AI，經過這裡呼叫 Claude（見 ai.js；金鑰和通行碼都是 Worker 的 secret）。
+import { HttpError } from './http.js'
+import { askAI, checkAI, AI_MAX } from './ai.js'
 
 const ID = /^[0-9a-f]{64}$/
 const REV = /^[\w-]{1,40}$/
@@ -14,16 +17,8 @@ export const MAX_DATA = 1_500_000
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
-}
-
-class HttpError extends Error {
-  constructor(status, message, extra = {}) {
-    super(message)
-    this.status = status
-    this.extra = extra
-  }
 }
 
 export default {
@@ -34,8 +29,10 @@ export default {
     if (req.method !== 'POST') return json({ error: 'not found' }, 404)
     try {
       await limit(env, req, pathname)
-      const text = await req.text()
-      if (text.length > MAX_DATA + 1000) throw new HttpError(413, 'too large')
+      const ai = pathname === '/v1/ai'
+      // AI：通行碼不對就不讀內容
+      if (ai) await checkAI(env, req.headers.get('Authorization'))
+      const text = await readBody(req, ai ? AI_MAX : MAX_DATA + 1000)
       let body
       try {
         body = JSON.parse(text || '{}')
@@ -43,6 +40,7 @@ export default {
         throw new HttpError(400, 'bad json')
       }
       if (!body || typeof body !== 'object') throw new HttpError(400, 'bad request')
+      if (ai) return json(await askAI(env, body))
       const now = Date.now()
       if (pathname === '/v1/create') return json(await create(env.DB, body, now))
       if (pathname === '/v1/pull') return json(await pull(env.DB, body))
@@ -60,9 +58,35 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 }
 
+// 讀請求內容，最多 max 個位元組：超過就停下來回 413，不會先把整份讀進記憶體
+async function readBody(req, max) {
+  if (Number(req.headers.get('Content-Length')) > max) throw new HttpError(413, 'too large')
+  if (!req.body) return ''
+  const reader = req.body.getReader()
+  const chunks = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel().catch(() => {})
+      throw new HttpError(413, 'too large')
+    }
+    chunks.push(value)
+  }
+  const all = new Uint8Array(size)
+  let at = 0
+  for (const c of chunks) {
+    all.set(c, at)
+    at += c.byteLength
+  }
+  return new TextDecoder().decode(all)
+}
+
 // 每個 IP 每分鐘的請求上限（Cloudflare Rate Limiting binding；本機測試沒有就略過）
 async function limit(env, req, pathname) {
-  const limiter = pathname === '/v1/create' ? env.CREATE_LIMIT : env.SYNC_LIMIT
+  const limiter = pathname === '/v1/create' ? env.CREATE_LIMIT : pathname === '/v1/ai' ? env.AI_LIMIT : env.SYNC_LIMIT
   if (!limiter) return
   const { success } = await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'unknown' })
   if (!success) throw new HttpError(429, 'too many requests')

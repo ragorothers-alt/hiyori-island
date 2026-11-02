@@ -62,6 +62,8 @@ export const DATE_KINDS = {
   deadline: { label: '截止', kanji: '期' },
   day: { label: '紀念', kanji: '祝' },
 }
+// 顯示用：倒數裡還會出現專案的里程碑期限（不能自己新增這種）
+export const DUE_KINDS = { ...DATE_KINDS, milestone: { label: '里程碑', kanji: '標' } }
 export const FOCUS_MIN = 25
 export const BREAK_MIN = 5
 // 同時進行的專案上限；專案町最多 TOWER_SLOTS 塊地（data/projectTown.js，隨城鎮等級陸續開放），其他專案先在清單裡等空地

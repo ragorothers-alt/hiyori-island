@@ -4,8 +4,10 @@ import { PROJECT_COLORS, tagOf } from '../theme.js'
 import { addDays, daysBetween, parseDate } from '../store.js'
 import {
   projectTimeline, projectStats, activity, msProgress, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
-  projectMarkdown, NOTE_TEMPLATES, dayOf,
+  projectMarkdown, NOTE_TEMPLATES, dayOf, PROJECT_LIMITS as PL,
 } from '../projects.js'
+import { aiReady, askAI } from '../ai.js'
+import { FUJI_LINES } from '../data/lines.js'
 
 // 專案詳情：目標與統計、進度日誌（自己寫的＋自動帶進來的里程碑、任務、專注）、筆記、里程碑的細項與備註、歸在專案的任務。
 // 窄的時候四塊用分頁切換；寬的時候里程碑和任務固定在右欄。
@@ -41,6 +43,14 @@ const stamp = (ts) => {
   const d = new Date(ts)
   return `${d.getMonth() + 1}/${d.getDate()} ${hhmm(ts)}`
 }
+// ふじ的一句話（lines.js 的 FUJI_LINES）
+const fuji = (key, vars, fallback) => {
+  const list = FUJI_LINES[key]
+  return list?.length ? list[Math.floor(Math.random() * list.length)].replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '') : fallback
+}
+// Claude 回的文字：只留字串、去掉前後空白、截短
+const clip = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
+const clips = (v, n, max) => [...new Set((Array.isArray(v) ? v : []).map((x) => clip(x, n)).filter(Boolean))].slice(0, max)
 // 使用者改過、還沒存的欄位（重畫時要把它接回去）
 const dirty = (el) =>
   el.tagName === 'SELECT' ? el.value !== ([...el.options].find((o) => o.defaultSelected) || el.options[0])?.value : el.value !== el.defaultValue
@@ -101,6 +111,9 @@ export class ProjectView {
     this.editLog = null // 正在改的那則進度
     this.mins = 0 // 寫進度時選的「花了多久」
     this.doneOpen = false
+    // ふじ（Claude）正在做或做好的事：{ kind: 'steps', mid, … } 拆細項、{ kind: 'summary', … } 整理進度
+    // 換專案或關掉時清掉；回來的結果對不上這個物件就丟掉
+    this.ai = null
   }
 
   get project() {
@@ -148,6 +161,7 @@ export class ProjectView {
       { k: 'head', cls: 'pd-head', html: this._headHTML(p, today) },
       { k: 'goal', cls: 'pd-goal-box', html: this._goalHTML(p) },
       { k: 'stats', cls: 'pd-stats', html: this._statsHTML(p, st, today) },
+      ...(this.ai?.kind === 'summary' ? [{ k: 'ai', cls: 'pd-ai', html: this._aiSummaryHTML(p) }] : []),
       {
         k: 'body', cls: 'pd-body', kids: [
           {
@@ -193,6 +207,7 @@ export class ProjectView {
     const island = this.hooks.appMode() ? '切到小島看看' : '在島上查看'
     return `<button type="button" class="pd-back" data-act="back">${ICON.prev}<span>所有專案</span></button>
       <span class="sp"></span>
+      ${aiReady() ? `<button type="button" class="pd-tbtn pd-ai-btn ${this.ai?.kind === 'summary' ? 'on' : ''}" data-act="ai-summary" title="讓ふじ讀進度日誌、里程碑和筆記，整理目前走到哪裡">✦ 整理進度</button>` : ''}
       ${p.archived ? '' : `<button type="button" class="pd-tbtn" data-act="island">${island}</button>`}
       <button type="button" class="pd-tbtn" data-act="export" title="把目標、里程碑、任務、筆記和進度日誌存成 Markdown 檔">匯出</button>
       <button type="button" class="pd-tbtn ${this.more ? 'on' : ''}" data-act="more" aria-expanded="${this.more}">更多</button>`
@@ -387,9 +402,12 @@ export class ProjectView {
       const open = this.openMs.has(m.id)
       const sd = m.steps.filter((x) => x.done).length
       const late = m.due && !m.done && m.due < today
+      // 今天、明天到期的也標出來（前一天和當天會提醒）
+      const near = m.due && !m.done && !late && daysBetween(today, m.due) <= 1
+      const dueText = near ? (m.due === today ? '今天到期' : '明天到期') : `${late ? '逾期・' : ''}${md(m.due)}`
       const tags = [
         m.steps.length ? `<small class="pm-n">${sd}/${m.steps.length}</small>` : '',
-        m.due ? `<small class="pm-due ${late ? 'late' : ''}">${late ? '逾期・' : ''}${md(m.due)}</small>` : '',
+        m.due ? `<small class="pm-due ${late || near ? 'late' : ''}" title="期限 ${m.due}">${dueText}</small>` : '',
         m.note ? '<small class="pm-has">註</small>' : '',
       ].join('')
       const steps = m.steps.map((x) => `<li class="${x.done ? 'done' : ''}">
@@ -400,6 +418,7 @@ export class ProjectView {
         ? `<div class="pm-detail">
           ${steps ? `<ul class="pm-steps">${steps}</ul>` : ''}
           <form class="pm-add" data-form="step" data-id="${k}"><input data-keep="step-${k}" maxlength="80" placeholder="${m.steps.length ? '再加一個細項' : '拆成細項：做完一步勾一步'}" aria-label="新增細項"><button class="mini" type="submit" title="新增細項">${ICON.plus}</button></form>
+          ${this._aiStepsHTML(m)}
           <label class="pm-note"><span class="pc-k">備註</span><textarea data-keep="msnote-${k}" data-msnote="${k}" data-grow rows="1" maxlength="500" placeholder="完成的標準、要注意的事…">${esc(m.note)}</textarea></label>
           <div class="pm-tools">
             <label class="pc-sel"><span class="pc-k">期限</span><input type="date" data-msdue="${k}" value="${m.due}" aria-label="「${esc(m.title)}」的期限"></label>
@@ -445,6 +464,122 @@ export class ProjectView {
       ${todo.length ? `<ul class="pt-list">${todo.map(row).join('')}</ul>` : ''}
       ${done.length ? `<details class="pt-done" ${this.doneOpen ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
       ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。專注在這些任務上的時間會記進這個專案。</p>`}`
+  }
+
+  // ── ふじ（Claude）──
+  // 里程碑展開後的「ふじ幫你拆細項」：想好之後列出來，勾選要的再加進去
+  _aiStepsHTML(m) {
+    if (!aiReady() || m.done) return ''
+    const k = esc(m.id)
+    const a = this.ai?.kind === 'steps' && this.ai.mid === m.id ? this.ai : null
+    if (!a) return `<button type="button" class="pm-ai-btn" data-act="ai-steps" data-id="${k}">✦ ふじ幫你拆細項</button>`
+    if (a.busy) return `<div class="pm-ai" aria-live="polite"><p class="pm-ai-say">ふじ想想怎麼拆<span class="cm-dots"><i></i><i></i><i></i></span></p></div>`
+    const again = `<button type="button" class="btn-ghost" data-act="ai-steps" data-id="${k}">${a.err ? '再試一次' : '再想一次'}</button>`
+    if (a.err) return `<div class="pm-ai"><p class="pm-ai-err" role="alert">${esc(a.err)}</p><div class="pm-ai-acts"><button type="button" class="btn-ghost" data-act="ai-close">關掉</button>${again}</div></div>`
+    const list = a.steps.map((t, i) => `<li><label><input type="checkbox" data-aipick="${i}" ${a.pick.has(i) ? 'checked' : ''}><span>${esc(t)}</span></label></li>`).join('')
+    return `<div class="pm-ai"><p class="pm-ai-say">${esc(a.line)}</p><ul class="pm-ai-list">${list}</ul>${a.tip ? `<p class="pm-ai-tip">✿ ${esc(a.tip)}</p>` : ''}
+      <div class="pm-ai-acts"><button type="button" class="btn-ghost" data-act="ai-close">算了</button>${again}
+        <button type="button" class="btn-primary" data-act="ai-steps-add" data-id="${k}" ${a.pick.size ? '' : 'disabled'}>加入 ${a.pick.size} 個</button></div></div>`
+  }
+
+  // 「整理進度」：目標、統計下面的一張卡，可以存成筆記
+  _aiSummaryHTML(p) {
+    const a = this.ai
+    const close = `<button type="button" class="mini" data-act="ai-close" title="關掉" aria-label="關掉">${ICON.close}</button>`
+    const head = `<div class="pd-ai-head"><b>✦ ふじ整理的進度</b><span class="sp"></span>${close}</div>`
+    if (a.busy) return `${head}<p class="pd-ai-say" aria-live="polite">ふじ正在讀日誌和筆記<span class="cm-dots"><i></i><i></i><i></i></span></p>`
+    if (a.err) return `${head}<p class="pm-ai-err" role="alert">${esc(a.err)}</p><div class="pm-ai-acts"><button type="button" class="btn-ghost" data-act="ai-summary">再試一次</button></div>`
+    const o = a.out
+    const block = (title, list, cls = '') => (list.length ? `<div><h4>${title}</h4><ul class="${cls}">${list.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '')
+    return `${head}<p class="pd-ai-say">${esc(a.line)}</p>
+      <p class="pd-ai-sum">${esc(o.summary)}</p>
+      <div class="pd-ai-cols">${block('最近完成', o.done)}${block('卡住的地方', o.blockers, 'warn')}${block('接下來', o.next, 'next')}</div>
+      <div class="pm-ai-acts">${a.saved ? '<span class="pd-ai-ok">已存成筆記</span>' : '<button type="button" class="btn-ghost" data-act="ai-save">存成筆記</button>'}<button type="button" class="btn-ghost" data-act="ai-summary">重新整理</button></div>`
+  }
+
+  async _aiSteps(p, mid) {
+    const m = p.milestones.find((x) => x.id === mid)
+    if (!m) return
+    const a = (this.ai = { kind: 'steps', mid, busy: true })
+    this.openMs.add(mid)
+    this.render()
+    const data = {
+      project: p.name,
+      goal: p.goal,
+      milestone: { title: m.title, note: m.note, due: m.due || null },
+      existing: m.steps.map((x) => x.title),
+      milestones: p.milestones.map((x) => ({ title: x.title, done: x.done })),
+      recentLogs: [...p.logs].sort((x, y) => y.at - x.at).slice(0, 6).map((l) => ({ date: l.date, text: l.text.slice(0, 300) })),
+    }
+    try {
+      const out = await askAI('steps', data)
+      const have = new Set(m.steps.map((x) => x.title))
+      const steps = clips(out?.steps, PL.stepTitle, 10).filter((t) => !have.has(t))
+      if (!steps.length) throw new Error('這次沒有拆出新的細項，再試一次看看')
+      Object.assign(a, { steps, tip: clip(out.tip, 80), pick: new Set(steps.map((_, i) => i)), line: fuji('aiSteps', { title: m.title }, `「${m.title}」拆好了，挑想加的吧。`) })
+    } catch (err) {
+      a.err = err.message
+    }
+    a.busy = false
+    if (this.ai === a) this.render()
+  }
+  _aiStepsAdd(p, mid) {
+    const a = this.ai
+    if (a?.kind !== 'steps' || a.mid !== mid || !a.steps) return
+    const pick = a.steps.filter((_, i) => a.pick.has(i))
+    this.ai = null
+    let n = 0
+    for (const t of pick) if (this.store.addStep(p.id, mid, t)) n++
+    if (n < pick.length) this.hooks.toast({ icon: '細', title: `細項滿了，只加了 ${n} 個`, sub: '試著把這個里程碑拆成兩個' })
+    this.render()
+  }
+
+  async _aiSummary(p) {
+    const s = this.store
+    const a = (this.ai = { kind: 'summary', busy: true })
+    this.render()
+    const { todo, done } = s.projectTasks(p.id)
+    const st = projectStats(p, s.state.tasks)
+    const msTitle = (id) => p.milestones.find((m) => m.id === id)?.title
+    const data = {
+      today: s.today,
+      project: p.name,
+      goal: p.goal,
+      deadline: p.deadline || null,
+      started: dayOf(p.createdAt),
+      status: p.archived ? 'archived' : s.projectStatus(p),
+      milestones: p.milestones.map((m) => ({
+        title: m.title, done: m.done, doneOn: m.doneAt ? dayOf(m.doneAt) : null, due: m.due || null,
+        steps: m.steps.length ? `${m.steps.filter((x) => x.done).length}/${m.steps.length}` : null, note: m.note.slice(0, 200),
+      })),
+      logs: [...p.logs].sort((x, y) => y.at - x.at).slice(0, 15).map((l) => ({ date: l.date, text: l.text.slice(0, 400), mins: l.mins, milestone: (l.ms && msTitle(l.ms)) || null })),
+      notes: [...p.notes].sort((x, y) => !!y.pinned - !!x.pinned || y.updatedAt - x.updatedAt).slice(0, 3).map((n) => ({ title: noteTitle(n), body: n.body.slice(0, 600) })),
+      tasks: { todo: todo.slice(0, 12).map((t) => ({ title: t.title, date: t.date })), done: done.slice(0, 12).map((t) => t.title) },
+      totals: { focusMinutes: st.focus, loggedMinutes: st.logMins, logs: st.logs },
+    }
+    try {
+      const out = await askAI('summary', data)
+      const o = { summary: clip(out?.summary, 400), done: clips(out?.done, 80, 5), blockers: clips(out?.blockers, 80, 3), next: clips(out?.next, 80, 3) }
+      if (!o.summary) throw new Error('回答是空的，再試一次')
+      Object.assign(a, { out: o, line: fuji('aiSummary', { project: p.name }, `「${p.name}」的進度整理好了。`) })
+    } catch (err) {
+      a.err = err.message
+    }
+    a.busy = false
+    if (this.ai === a) this.render()
+  }
+  // 整理好的進度存成一篇筆記：接下來要做的事變成可以打勾的待辦
+  _aiSave(p) {
+    const a = this.ai
+    if (a?.kind !== 'summary' || !a.out || a.saved) return
+    const o = a.out
+    const list = (title, items, todo = false) => (items.length ? ['', `## ${title}`, ...items.map((x) => `- ${todo ? '[ ] ' : ''}${x}`)] : [])
+    const body = [o.summary, ...list('最近完成', o.done), ...list('卡住的地方', o.blockers), ...list('接下來', o.next, true)].join('\n')
+    const n = this.store.addProjectNote(p.id, { title: `進度整理 ${md(this.store.today)}`, body })
+    if (!n) return this.hooks.toast({ icon: '筆', title: '這個專案的筆記已經滿了', sub: '整理一下舊的筆記再存吧' })
+    a.saved = true
+    this.render()
+    this.hooks.toast({ icon: '筆', title: '存成筆記了', sub: `在「筆記」裡：進度整理 ${md(this.store.today)}` })
   }
 
   // ── 事件 ──
@@ -568,6 +703,22 @@ export class ProjectView {
         if (!step) return
         return inlineEdit(b, step.title, (v) => (v ? s.renameStep(p.id, id, step.id, v) : this._redraw('ms')), 80)
       }
+      case 'ai-steps':
+        if (this.ai?.kind === 'steps' && this.ai.mid === id && this.ai.busy) return
+        return this._aiSteps(p, id)
+      case 'ai-steps-add': return this._aiStepsAdd(p, id)
+      case 'ai-summary':
+        if (this.ai?.kind === 'summary' && this.ai.busy) return
+        // 上面那顆鈕：卡片開著時再按一次是收起來
+        if (b.classList.contains('pd-tbtn') && this.ai?.kind === 'summary') {
+          this.ai = null
+          return this.render()
+        }
+        return this._aiSummary(p)
+      case 'ai-save': return this._aiSave(p)
+      case 'ai-close':
+        this.ai = null
+        return this.render()
       case 'task-toggle': return s.toggleTask(id)
       case 'task-focus': return this.hooks.startFocus(id)
       case 'task-edit': return this.hooks.openEdit('task', id)
@@ -652,6 +803,19 @@ export class ProjectView {
     if (el.matches('[data-goal]')) return this.store.setProjectGoal(p.id, el.value)
     if (el.dataset.msnote) return this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })
     if (el.dataset.msdue) return this.store.updateMilestone(p.id, el.dataset.msdue, { due: el.value })
+    // 拆細項的勾選：只改按鈕上的數字，不整塊重畫（焦點留在勾選框上）
+    if (el.dataset.aipick != null && this.ai?.pick) {
+      const i = +el.dataset.aipick
+      if (el.checked) this.ai.pick.add(i)
+      else this.ai.pick.delete(i)
+      const btn = $('[data-act="ai-steps-add"]', this.root)
+      if (btn) {
+        btn.textContent = `加入 ${this.ai.pick.size} 個`
+        btn.disabled = !this.ai.pick.size
+      }
+      const box = $('[data-k="ms"]', this.root)
+      if (box) box._html = null
+    }
   }
 
   _key(e) {

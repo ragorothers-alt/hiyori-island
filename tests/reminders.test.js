@@ -124,6 +124,70 @@ describe('日程提醒', () => {
   })
 })
 
+describe('里程碑期限', () => {
+  function project(due) {
+    const p = store.addProject({ name: '畢業專題', milestones: ['訪談整理', '寫初稿'] })
+    const [m, other] = p.milestones
+    store.updateMilestone(p.id, m.id, { due })
+    store.addStep(p.id, m.id, '逐字稿')
+    store.addStep(p.id, m.id, '歸納重點')
+    store.toggleStep(p.id, m.id, m.steps[0].id)
+    return { p, m, other }
+  }
+
+  it('前一天和當天早上八點後各提醒一次，帶著專案和細項進度', () => {
+    const { p, m } = project('2026-10-26')
+    reminders.check(at(7, 59))
+    expect(callback).not.toHaveBeenCalled()
+    reminders.check(at(8, 0))
+    reminders.check(at(12, 0))
+    const calls = callback.mock.calls.filter((c) => c[2] === 'date')
+    expect(calls).toHaveLength(1)
+    expect(calls[0][0]).toMatchObject({ id: m.id, title: '訪談整理', pid: p.id, projectName: '畢業專題', kind: 'milestone', steps: 2, stepsDone: 1 })
+    expect(calls[0][1]).toBe(1)
+    vi.setSystemTime(new Date(2026, 9, 26, 9, 0))
+    store._refreshToday()
+    reminders.check(new Date(2026, 9, 26, 9, 0))
+    const today = callback.mock.calls.filter((c) => c[2] === 'date')
+    expect(today).toHaveLength(2)
+    expect(today[1][1]).toBe(0)
+  })
+
+  it('做完的、暫停專案裡的、沒設期限的都不提醒；改了期限會照新日子再提醒', () => {
+    const { p, m, other } = project('2026-10-25')
+    store.toggleMilestone(p.id, m.id)
+    reminders.check(at(9, 0))
+    expect(callback.mock.calls.filter((c) => c[2] === 'date')).toHaveLength(0)
+    store.updateMilestone(p.id, other.id, { due: '2026-10-25' })
+    store.pauseProject(p.id)
+    reminders.check(at(9, 1))
+    expect(callback.mock.calls.filter((c) => c[2] === 'date')).toHaveLength(0)
+    store.pauseProject(p.id, false)
+    reminders.check(at(9, 2))
+    expect(callback.mock.calls.filter((c) => c[2] === 'date')).toHaveLength(1)
+    store.updateMilestone(p.id, other.id, { due: '2026-10-26' })
+    reminders.check(at(9, 3))
+    expect(callback.mock.calls.filter((c) => c[2] === 'date')).toHaveLength(2)
+  })
+
+  it('同一天很多個期限也一個一個提醒到，不被倒數的筆數上限截掉', () => {
+    const p = store.addProject({ name: '大專案', milestones: Array.from({ length: 25 }, (_, i) => `階段 ${i + 1}`) })
+    for (const m of p.milestones) store.updateMilestone(p.id, m.id, { due: '2026-10-26' })
+    reminders.check(at(9, 0))
+    reminders.check(at(9, 1))
+    expect(callback.mock.calls.filter((c) => c[2] === 'date')).toHaveLength(25)
+  })
+
+  it('倒數和日曆都看得到里程碑期限；同一天排在自己記的重要日子後面、專案截止日前面', () => {
+    const { p, m } = project('2026-10-30')
+    store.setDeadline(p.id, '2026-10-30')
+    const exam = store.addDate({ title: '期中考', date: '2026-10-30', kind: 'exam' })
+    expect(store.upcomingDates(8).map((d) => d.id)).toEqual([exam.id, m.id, p.id])
+    expect(store.milestoneDues('2026-10-30').map((d) => d.id)).toEqual([m.id])
+    expect(store.milestoneDues('2026-10-29')).toEqual([])
+  })
+})
+
 describe('任務與就寢提醒', () => {
   it('排進時段的任務也會提醒；完成了就不提醒', () => {
     const task = store.addTask({ title: '寫報告', date: TODAY, at: '14:00', dur: 60 })

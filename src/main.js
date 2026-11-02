@@ -8,7 +8,7 @@ import { Reminders, systemNotify } from './reminders.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
-import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS } from './theme.js'
+import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS } from './theme.js'
 import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
@@ -469,6 +469,19 @@ async function boot() {
   // ── 提醒：日程、排進時段的任務、就寢 ──
   const reminders = new Reminders(store, (e, min, kind = 'event') => {
     // 重要日子：前一天ふじ提醒，當天もち也來打氣
+    // 里程碑期限：一樣前一天ふじ提醒、當天もち打氣；說得出還差幾個細項
+    if (kind === 'date' && e.pid) {
+      const today = min === 0
+      const v = { title: short(e.title), project: short(e.projectName) }
+      sfx.chime()
+      talk(today ? 'msToday' : 'msDue', v, 6000, '', 'fuji')
+      if (today) setTimeout(() => talk('msToday', v, 5000, '', 'mochi'), 2600)
+      const title = `里程碑「${e.title}」${today ? '今天' : '明天'}到期`
+      const left = e.steps ? `細項還差 ${e.steps - e.stepsDone} 個` : today ? '做到哪裡都好，也可以改期限' : '今天先推一小步吧'
+      ui.toast({ icon: DUE_KINDS.milestone.kanji, title, sub: `${e.projectName}・${left}`, ms: 9000 })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, e.projectName, e.id)
+      return
+    }
     if (kind === 'date') {
       const today = min === 0
       sfx.chime()

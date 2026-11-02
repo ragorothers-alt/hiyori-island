@@ -1,6 +1,6 @@
 import './calendar.css'
 import { $, $$, esc, ICON } from './dom.js'
-import { DATE_KINDS, EVENT_COLORS, moodOf, tagOf, WEEK_JP } from '../theme.js'
+import { DATE_KINDS, DUE_KINDS, EVENT_COLORS, moodOf, tagOf, WEEK_JP } from '../theme.js'
 import { addDays, dateStr, daysBetween, minToHHMM, parseDate, repeatMatches, toMin, weekKey } from '../store.js'
 import { applies, countOn, doneOn } from '../habits.js'
 import { awake, DEFAULT_RHYTHM, fmtDur, sleepMinutes, taskDur } from '../planner.js'
@@ -469,6 +469,7 @@ export class CalendarView {
       sum.life.items.length && `<i class="cc-mk mk-life" title="${sum.life.items.length} 筆生活記錄">記</i>`,
       sum.slips && `<i class="cc-mk mk-slip" title="重新開始 ${sum.slips} 次">再</i>`,
       ...s.datesOn(date).map((x) => `<i class="cc-mk mk-date" title="${esc(x.title)}">${DATE_KINDS[x.kind].kanji}</i>`),
+      ...s.milestoneDues(date).map((x) => `<i class="cc-mk mk-date" title="${esc(`${x.projectName}・${x.title}（里程碑期限）`)}">${DUE_KINDS.milestone.kanji}</i>`),
     ]
       .filter(Boolean)
       .join('')
@@ -562,6 +563,7 @@ export class CalendarView {
         const hb = sum.habits
         const chips = [
           ...s.datesOn(date).map((x) => `<span class="cw-chip d" title="${esc(x.title)}"><em>${DATE_KINDS[x.kind].kanji}</em>${esc(x.title)}</span>`),
+          ...s.milestoneDues(date).map((x) => `<span class="cw-chip d" title="${esc(`${x.projectName}・${x.title}（里程碑期限）`)}"><em>${DUE_KINDS.milestone.kanji}</em>${esc(x.title)}</span>`),
           untimed.length &&
             `<span class="cw-chip t${left ? '' : ' ok'}" title="沒排時段的任務：還有 ${left} 件／共 ${untimed.length} 件"><em>未排</em>${left ? left : '✓'}</span>`,
           ghostTasks && `<span class="cw-chip g" title="例行任務 ${ghostTasks} 件（到那天會自動出現）"><em>例行</em>${ghostTasks}</span>`,

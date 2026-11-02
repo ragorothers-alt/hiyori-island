@@ -338,7 +338,93 @@ export function planRules(req) {
   return { days: out, unplaced, totalMin, picked: out.length, notes }
 }
 
-// 換成 AI 的接點（見檔頭）
-export async function askCoach(req) {
-  return planRules(req)
+// ── 交給 Claude 排（經過 Worker，見 src/ai.js）──
+// 這段範圍要排幾天（跟 planRules 一樣：一週想做幾天換算成範圍的天數）
+const wantDays = (req) => (req.dates.length === 1 ? 1 : clamp(Math.round(((req.days || 5) * req.dates.length) / 7), 1, req.dates.length))
+// 送出去的資料：每天選的時段裡的空檔（已經扣掉三餐、日程、已排任務和緩衝），和那天已經有的安排
+export function coachInput(req) {
+  const { ctx } = req
+  const days = req.dates.map((date) => {
+    const d = dayInfo(date, req)
+    // 15 分鐘的空檔也給：考試當天只排 15 分鐘看重點
+    const free = d.wins.flatMap(([a, b]) => gaps(a, b, d.busy)).filter(([p, q]) => q - p >= 15)
+    const name = (x) => String(x.title || '').slice(0, 30)
+    const busy = [
+      ...ctx.events.filter((e) => e.date === date).map((e) => `${e.start}-${e.end} ${name(e)}`.trim()),
+      ...ctx.tasks.filter((t) => t.date === date && t.at && !t.done).map((t) => `${t.at} ${name(t)}`.trim()),
+    ]
+    return { date, weekday: WEEK_ZH[weekday(date)], free: free.map(([p, q]) => `${toHHMM(p)}-${toHHMM(q)}`), busy: busy.slice(0, 12) }
+  })
+  return {
+    today: ctx.today,
+    days,
+    focus: req.focus.map(({ label, tag, milestone }) => (milestone ? { label, tag, milestone } : { label, tag })),
+    targetDays: wantDays(req),
+    len: req.len || 50,
+    total: req.total || null,
+    buffer: ctx.rhythm.buffer || 0,
+    exam: req.exam || null,
+    variation: req.seed || 0,
+  }
+}
+
+// Claude 排好的計畫不直接相信：每段都要整段落在那天的空檔裡、彼此不重疊（含緩衝）、項目是問卷裡選的；
+// 不合格的那段算放不下。天數和總時數也不能超過要的（多排的直接拿掉）。回傳跟 planRules 一樣的格式
+export function fitAI(req, out) {
+  const buf = req.ctx.rhythm.buffer || 0
+  const focus = new Map(req.focus.map((f) => [f.label, f]))
+  // 考試當天那 15 分鐘不算在想做的天數裡（planRules 也是）
+  const maxDays = wantDays(req) + (req.exam && req.dates.includes(req.exam.date) ? 1 : 0)
+  // 寫了總時數：加起來不超過它（切段時以 5 分鐘為單位，留一點進位的餘地）
+  const cap = req.total ? round5(req.total) + 5 : Infinity
+  let sum = 0
+  const seen = new Set()
+  const days = []
+  let unplaced = Number.isInteger(out?.unplaced) ? clamp(out.unplaced, 0, 50) : 0
+  const list = (Array.isArray(out?.days) ? out.days : []).filter((d) => typeof d?.date === 'string').sort((a, b) => a.date.localeCompare(b.date))
+  for (const day of list) {
+    if (!req.dates.includes(day.date) || seen.has(day.date) || days.length >= maxDays) continue
+    seen.add(day.date)
+    const info = dayInfo(day.date, req)
+    const items = []
+    for (const it of Array.isArray(day.items) ? day.items : []) {
+      const f = focus.get(it?.label)
+      const at = typeof it?.at === 'string' && /^\d{1,2}:\d{2}$/.test(it.at) ? Math.ceil(toM(it.at) / 5) * 5 : NaN
+      const dur = clamp(round5(+it?.dur || 0), 0, 180)
+      const fits = (w) => w[0] <= at && at + dur <= w[1]
+      if (!f || !Number.isFinite(at) || dur < 10 || items.length >= 4 || !info.wins.some((w) => gaps(w[0], w[1], info.busy).some(fits))) {
+        unplaced++
+        continue
+      }
+      if (sum + dur > cap) continue
+      sum += dur
+      info.busy.push([at - buf, at + dur + buf])
+      // 標題要以項目開頭：「數學・錯題訂正」
+      let title = String(it.title || '').replace(/\s+/g, ' ').trim().slice(0, 40)
+      if (!title.startsWith(f.label)) title = title ? `${f.label}・${title}`.slice(0, 50) : f.label
+      items.push({ title, label: f.label, tag: f.tag, dur, at: toHHMM(at), priority: it.important ? 3 : 2 })
+    }
+    if (items.length) days.push({ date: day.date, items: items.sort((a, b) => a.at.localeCompare(b.at)) })
+  }
+  const notes = (Array.isArray(out?.notes) ? out.notes : [])
+    .filter((s) => typeof s === 'string' && s.trim())
+    .map((s) => s.trim().slice(0, 60))
+    .slice(0, 3)
+  const totalMin = days.reduce((a, d) => a + d.items.reduce((x, it) => x + it.dur, 0), 0)
+  return { days, unplaced, totalMin, picked: days.length, notes }
+}
+
+// 換成 AI 的接點（見檔頭）：ai 是 src/ai.js 的 askAI（沒設定就是 null，用本機規則）。
+// Claude 沒回、回的排不進去，就改用本機規則，結果標上 fallback（和原因）讓ふじ說明
+export async function askCoach(req, ai = null) {
+  if (!ai) return planRules(req)
+  let why = null
+  try {
+    const res = fitAI(req, await ai('coach', coachInput(req)))
+    if (res.days.length) return { ...res, ai: true }
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err
+    why = err
+  }
+  return { ...planRules(req), fallback: true, why }
 }

@@ -1,0 +1,14 @@
+/* 設定裡的「ふじ的 AI」：通行碼、模型、怎麼設定 Worker */
+.ai-tag { font-style: normal; font-family: var(--font-num); font-size: 10.5px; font-weight: 600; color: #8f78c9; background: color-mix(in srgb, #b9a7e6 18%, transparent); border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
+body.night .ai-tag { color: #cbbcff; }
+.ai-panel { display: flex; flex-direction: column; gap: 8px; }
+.ai-panel .ai-pass { letter-spacing: .04em; text-transform: none; }
+.ai-models { align-self: flex-start; flex-wrap: wrap; }
+.ai-models button { display: flex; flex-direction: column; align-items: center; line-height: 1.25; padding: 5px 12px; }
+.ai-models small { font-size: 10px; color: var(--ink-faint); }
+.ai-how { font-size: 12px; color: var(--ink-soft); }
+.ai-how summary { cursor: pointer; color: #8f78c9; width: fit-content; }
+body.night .ai-how summary { color: #cbbcff; }
+.ai-how p { margin: 6px 0; line-height: 1.65; }
+.ai-how code, .ai-how pre { font-family: var(--font-num); font-size: 11.5px; }
+.ai-how pre { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--field); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }

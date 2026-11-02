@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
-import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, planRules, askCoach } from '../src/coach.js'
+import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, planRules, askCoach, coachInput, fitAI } from '../src/coach.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 10 }
 // 2026-10-26 是星期一
@@ -158,8 +158,103 @@ describe('排程規則', () => {
     expect(planRules(req({ focus: [] })).days).toEqual([])
   })
 
-  it('askCoach 回傳和規則一樣的結果（之後換成 AI 的接點）', async () => {
+  it('askCoach 沒有 AI 時回傳和規則一樣的結果', async () => {
     expect(await askCoach(req())).toEqual(planRules(req()))
+  })
+})
+
+describe('交給 Claude 排', () => {
+  const events = [{ id: 'e', date: '2026-10-27', start: '20:00', end: '21:00', title: '社團會議', done: false }]
+  const tasks = [{ id: 't', date: '2026-10-28', at: '19:30', dur: 60, priority: 2, title: '寫週報', done: false }]
+
+  it('送出去的是選的時段裡、扣掉三餐日程和緩衝之後的空檔，和那天已經有的安排', () => {
+    const d = coachInput(req({ days: 3, exam: { title: '期中考', date: '2026-10-30' }, ctx: { events, tasks } }))
+    expect(d.days.map((x) => x.date)).toEqual(week)
+    const tue = d.days.find((x) => x.date === '2026-10-27')
+    // 平日晚上 19:30–22:30，會議 20:00–21:00 前後各留 10 分鐘（剩 20 分鐘也算，一段最短 20 分）
+    expect(tue.free).toEqual(['19:30-19:50', '21:10-22:30'])
+    expect(tue.busy).toEqual(['20:00-21:00 社團會議'])
+    expect(d.days.find((x) => x.date === '2026-10-28').busy).toEqual(['19:30 寫週報'])
+    expect(d.days.find((x) => x.date === '2026-10-31').free).toEqual(['08:00-12:00', '13:00-18:30'])
+    expect(d).toMatchObject({ targetDays: 3, len: 50, buffer: 10, exam: { title: '期中考' }, variation: 0 })
+    expect(d.focus).toEqual([{ label: '數學', tag: 'study' }, { label: '英文', tag: 'study' }])
+  })
+
+  it('Claude 排的每段都要整段落在空檔裡、不重疊；項目不是問卷裡的、時間壞掉的都算放不下', () => {
+    const out = {
+      days: [
+        { date: '2026-10-27', items: [{ label: '數學', title: '數學・錯題訂正', at: '21:10', dur: 50, important: true }] },
+        {
+          date: '2026-10-29',
+          items: [
+            { label: '英文', title: '單字複習', at: '19:30', dur: 50, important: false },
+            { label: '數學', title: '數學・練習題', at: '20:20', dur: 50, important: false }, // 跟上一段之間沒有留 10 分鐘
+            { label: '國文', title: '國文・作文', at: '21:30', dur: 30, important: false }, // 不在問卷裡
+          ],
+        },
+        { date: '2026-10-30', items: [{ label: '數學', title: '數學・總複習', at: '7:00', dur: 50, important: false }] }, // 時段外
+        { date: '2026-12-25', items: [{ label: '數學', title: '數學', at: '19:30', dur: 50, important: false }] }, // 不在範圍
+        { date: '2026-10-27', items: [{ label: '英文', title: '英文', at: '21:40', dur: 30, important: false }] }, // 同一天重複
+      ],
+      unplaced: 1,
+      notes: ['星期二比較忙，只排晚一點', 3, ''],
+    }
+    const res = fitAI(req({ ctx: { events, tasks } }), out)
+    expect(res.days.map((d) => d.date)).toEqual(['2026-10-27', '2026-10-29'])
+    expect(res.days[0].items[0]).toEqual({ title: '數學・錯題訂正', label: '數學', tag: 'study', dur: 50, at: '21:10', priority: 3 })
+    expect(res.days[1].items).toEqual([{ title: '英文・單字複習', label: '英文', tag: 'study', dur: 50, at: '19:30', priority: 2 }])
+    expect(res.unplaced).toBe(1 + 3)
+    expect(res.totalMin).toBe(100)
+    expect(res.picked).toBe(2)
+    expect(res.notes).toEqual(['星期二比較忙，只排晚一點'])
+  })
+
+  it('多排的天數、超過總時數的段落直接拿掉；考試當天那 15 分鐘不算天數', () => {
+    const seg = (date, at, dur = 50) => ({ date, items: [{ label: '數學', title: '數學・練習', at, dur, important: false }] })
+    const many = { days: ['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'].map((d) => seg(d, '21:30')), unplaced: 0, notes: [] }
+    // 輕量 3 天：一週 7 天只排 3 天
+    expect(fitAI(req({ days: 3 }), many).days.map((d) => d.date)).toEqual(['2026-10-26', '2026-10-27', '2026-10-28'])
+    // 總共 50 分鐘：Claude 排了 250 分鐘也只收 50
+    const t = fitAI(req({ total: 50 }), many)
+    expect(t.totalMin).toBe(50)
+    expect(t.unplaced).toBe(0)
+    // 考試在 10/30：3 天再加考試當天
+    const exam = { ...many, days: [...many.days.slice(0, 3), seg('2026-10-30', '19:30', 15)] }
+    expect(fitAI(req({ days: 3, exam: { title: '期中考', date: '2026-10-30' } }), exam).days.map((d) => d.date)).toEqual(['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-30'])
+  })
+
+  it('沒有標題的日程（未來的例行公事）也送得出去；15 分鐘的空檔也給 Claude 看', () => {
+    const ev = [{ id: 'r-1', date: '2026-10-27', start: '19:30', end: '22:05', done: false }]
+    const d = coachInput(req({ ctx: { events: ev } }))
+    const tue = d.days.find((x) => x.date === '2026-10-27')
+    expect(tue.busy).toEqual(['19:30-22:05'])
+    expect(tue.free).toEqual(['22:15-22:30'])
+  })
+
+  it('Claude 沒回或排不進去：改用本機規則並標上 fallback；排得進去就標 ai', async () => {
+    const r = req()
+    const rules = planRules(r)
+    const fail = await askCoach(r, async () => {
+      throw new Error('通行碼不對')
+    })
+    expect(fail).toMatchObject({ days: rules.days, fallback: true })
+    expect(fail.why.message).toBe('通行碼不對')
+    const empty = await askCoach(r, async () => ({ days: [], unplaced: 0, notes: [] }))
+    expect(empty.fallback).toBe(true)
+    let sent
+    const ok = await askCoach(r, async (task, data) => {
+      sent = [task, data]
+      return { days: [{ date: '2026-10-26', items: [{ label: '數學', title: '數學・預習', at: '20:00', dur: 50, important: false }] }], unplaced: 0, notes: [] }
+    })
+    expect(sent[0]).toBe('coach')
+    expect(sent[1].days).toHaveLength(7)
+    expect(ok.ai).toBe(true)
+    expect(ok.days).toHaveLength(1)
+  })
+
+  it('等 Claude 時被取消（AbortError）不會改用規則', async () => {
+    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' })
+    await expect(askCoach(req(), async () => { throw abort })).rejects.toBe(abort)
   })
 })
 

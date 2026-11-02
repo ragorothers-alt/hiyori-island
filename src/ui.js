@@ -22,6 +22,7 @@ import { latestLog, msProgress, projectStats } from './projects.js'
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
+import { AiView } from './ui/ai.js'
 import { readBackup, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
 
@@ -116,6 +117,7 @@ export class UI {
       focusEvent: (id) => hooks.focusEvent(id),
       hoverEvent: (id) => hooks.hoverEvent(id),
       openWeekCard: (wk) => this.openWeekCard(wk),
+      openProject: (id, sec) => this.openProject(id, sec),
     }
     this.schedule = new ScheduleView(store, viewHooks)
     this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
@@ -133,6 +135,8 @@ export class UI {
       openEdit: (type, id) => this.schedule.openEdit(type, id),
       appMode: () => !!this.appMode,
     })
+    // 設定裡的「ふじ的 AI」（Claude 通行碼、模型）
+    this.aiView = new AiView($('#aiRow'), { toast: (o) => this.toast(o) })
     this.applyFontScale()
     this.renderNewsDot()
     this.setAppMode(savedAppMode(), { save: false })

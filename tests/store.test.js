@@ -1467,7 +1467,8 @@ describe('ふじ的排程教練與重要日子', () => {
     const t = store.addTask({ title: '寫報告', date: addDays(TODAY, 1), at: '20:00', dur: 30 })
     store.addTask({ title: '沒排時段', date: addDays(TODAY, 1) })
     const ctx = store.coachContext([TODAY, addDays(TODAY, 1)])
-    expect(ctx.events.map((e) => e.title || e.start)).toEqual(expect.arrayContaining(['開會', '21:00']))
+    // 未來的例行公事日程也帶著標題（交給 Claude 排時會列出那天已經有的安排）
+    expect(ctx.events.map((e) => e.title)).toEqual(expect.arrayContaining(['開會', '晚課']))
     expect(ctx.events.filter((e) => e.date === addDays(TODAY, 1) && e.start === '21:00')).toHaveLength(1)
     expect(ctx.tasks.map((x) => x.id)).toEqual([t.id])
     expect(ctx.rhythm).toBe(store.state.rhythm)
