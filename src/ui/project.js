@@ -207,6 +207,7 @@ export class ProjectView {
     const island = this.hooks.appMode() ? '切到小島看看' : '在島上查看'
     return `<button type="button" class="pd-back" data-act="back">${ICON.prev}<span>所有專案</span></button>
       <span class="sp"></span>
+      ${p.archived || p.completedAt ? '' : '<button type="button" class="pd-tbtn" data-act="focus" title="用番茄鐘專注在這個專案上，時間會記進專案（計時中按就是換成這個專案）">◷ 專注</button>'}
       ${aiReady() ? `<button type="button" class="pd-tbtn pd-ai-btn ${this.ai?.kind === 'summary' ? 'on' : ''}" data-act="ai-summary" title="讓ふじ讀進度日誌、里程碑和筆記，整理目前走到哪裡">✦ 整理進度</button>` : ''}
       ${p.archived ? '' : `<button type="button" class="pd-tbtn" data-act="island">${island}</button>`}
       <button type="button" class="pd-tbtn" data-act="export" title="把目標、里程碑、任務、筆記和進度日誌存成 Markdown 檔">匯出</button>
@@ -604,6 +605,7 @@ export class ProjectView {
       case 'back': return this.hooks.close()
       case 'island': return this.hooks.viewOnIsland(p.id)
       case 'export': return this._export()
+      case 'focus': return this.hooks.startFocusProject(p.id)
       case 'more':
         this.more = !this.more
         return this.render()

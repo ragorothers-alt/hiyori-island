@@ -666,6 +666,9 @@ body.night .focus-task.set { color: #ffd38f; }
 .focus-pick li button:hover, .focus-pick li button.on { background: rgba(255, 217, 138, .3); }
 .focus-pick li i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
 .focus-pick li small { margin-left: auto; color: var(--ink-faint); font-family: var(--font-num); }
+.focus-pick li.fp-h { margin: 6px 4px 0; font-size: 11px; letter-spacing: .08em; color: var(--ink-faint); display: flex; gap: 6px; align-items: baseline; }
+.focus-pick li.fp-h small { margin: 0; font-family: inherit; font-size: 10.5px; }
+.focus-pick li.empty { padding: 4px 10px 6px; font-size: 12px; color: var(--ink-faint); }
 .pomo { color: #d58a3f; font-family: var(--font-num); }
 body.night .pomo { color: #ffd38f; }
 @media (max-width: 860px) { .focus-pick { bottom: calc(50dvh + 64px); } .focus-task { display: none; } }
@@ -695,12 +698,18 @@ body.night .pomo { color: #ffd38f; }
 .stuck-btns .btn-ghost { padding: 5px 10px; font-size: 12px; }
 
 /* ── 專注長度：刻度尺 ── */
-.focus.idle .focus-time { cursor: pointer; border-radius: 6px; }
-.focus.idle .focus-time:hover { color: #d58a3f; }
-body.night .focus.idle .focus-time:hover { color: #ffd38f; }
-.focus-set { text-align: center; padding: 14px 14px 12px; }
+/* 點時間：沒在計時時打開計時設定，計時中可以換目標 */
+.focus .focus-time { cursor: pointer; border-radius: 6px; }
+.focus .focus-time:hover { color: #d58a3f; }
+body.night .focus .focus-time:hover { color: #ffd38f; }
+.focus-set { text-align: center; padding: 14px 14px 12px; overflow-y: auto; overscroll-behavior: contain; }
 .focus-set h4 { justify-content: center; }
+.fs-mode { width: fit-content; margin: 0 auto 8px; }
+.fs-mode button { padding: 5px 14px; }
 .fs-time { font-family: var(--font-num); font-size: 40px; font-weight: 700; letter-spacing: .04em; line-height: 1.1; margin: 0 0 4px; }
+.fs-time.up::after { content: '↑'; font-size: 22px; margin-left: 4px; color: #d58a3f; vertical-align: 6px; }
+body.night .fs-time.up::after { color: #ffd38f; }
+.fs-target { flex: 1; max-width: 250px; min-width: 0; border: 0; border-radius: 10px; padding: 6px 8px; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--field); text-overflow: ellipsis; }
 .fs-rwrap { position: relative; margin: 0 -6px; }
 .fs-ruler {
   overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; outline: none; cursor: grab; touch-action: pan-x;
@@ -992,6 +1001,9 @@ body.app-mode .full-btn:hover { color: var(--ink); }
 .focus-full.break .ff-ring circle.fg { stroke: var(--mint); }
 .ff-time { position: absolute; inset: 0; display: grid; place-content: center; font-family: var(--font-num); font-size: clamp(44px, 14vw, 64px); font-weight: 700; letter-spacing: .03em; }
 .ff-task { font-size: 15px; color: var(--ink-soft); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 全螢幕計時的目標：看起來像一行字，點了是下拉選單 */
+.ff-target { max-width: min(320px, 100%); border: 0; border-radius: 12px; padding: 6px 12px; font: inherit; font-size: 15px; color: var(--ink-soft); background: var(--field); text-align: center; text-overflow: ellipsis; cursor: pointer; }
+.ff-target:hover { color: var(--ink); }
 .ff-btns { display: flex; gap: 10px; }
 .ff-btns button { min-width: 112px; padding: 11px 18px; font-size: 14px; margin: 0; }
 .ff-cabin { font-size: 12.5px; }

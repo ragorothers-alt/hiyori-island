@@ -1192,8 +1192,8 @@ export async function createIsland(ctx) {
       if (duo.focusing) garden.setFocus(taskId)
       if (taskId) garden.bounce(taskId)
     },
-    // 一輪結束（獎勵在 main.js 已經記好）：兩人出屋、放天燈、綁著的任務的花彈一下
-    focusFinished(taskId) {
+    // 一輪結束（獎勵在 main.js 已經記好）：兩人出屋、放天燈、綁著的任務的花彈一下；目標是專案時那棟房子泛起一圈光
+    focusFinished(taskId, projectId = null) {
       duo.setFocus(false)
       garden.setFocus(null)
       // 天燈從小木屋屋頂升起（兩人還在屋裡）；出來後兩人會擊掌慶祝
@@ -1202,6 +1202,9 @@ export async function createIsland(ctx) {
       const pos = taskId && garden.anchor(taskId)
       if (pos) fx.burst(pos, { colors: ['#fff1b8', '#ffd98a', '#ffffff'], count: 36, speed: 1.4 })
       if (taskId) garden.bounce(taskId)
+      const p = projectId && store.state.projects.find((x) => x.id === projectId)
+      const base = p && houses.anchor(p.id, false)
+      if (base) fx.ripple(base, PROJECT_COLORS[p.color % PROJECT_COLORS.length], 1.8)
     },
     focusStopped() {
       duo.setFocus(false)

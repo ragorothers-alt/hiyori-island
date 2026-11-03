@@ -132,6 +132,7 @@ export class UI {
       close: () => this.closeProject(),
       viewOnIsland: (id) => this._onIsland(() => hooks.focusProject(id)),
       startFocus: (id) => this.focus.startWith(id),
+      startFocusProject: (id) => this.focus.startWith(null, id),
       openEdit: (type, id) => this.schedule.openEdit(type, id),
       appMode: () => !!this.appMode,
     })
@@ -1784,6 +1785,8 @@ export class UI {
 
   render() {
     this.renderChrome()
+    // 番茄鐘的目標可能剛被做完、收藏或刪掉
+    this.focus?.render()
     // 任務、日程、專案只畫正在看的那一頁；其他頁記著，切過去時再畫（藏著的頁面不必每次都重建）
     this._stale = new Set(['tasks', 'schedule', 'projects'])
     this._renderPage(this.tab)
@@ -1938,10 +1941,10 @@ export class UI {
 const FOCUS_KEY = 'hiyori-focus'
 const rawFocus = Number(new URLSearchParams(location.search).get('focus'))
 const debugMin = import.meta.env.DEV && Number.isFinite(rawFocus) && rawFocus > 0 ? rawFocus : 0
-// 長度的刻度尺：0 是 ∞（不設長度、往上數），其他從 10 分到 90 分每 5 分一格
-const RULER = [0, ...Array.from({ length: 17 }, (_, i) => 10 + i * 5)]
+// 倒數長度的刻度尺：10 分到 90 分每 5 分一格（正向計時是另外一個開關）
+const RULER = Array.from({ length: 17 }, (_, i) => 10 + i * 5)
 const RULER_TICK = 14
-// 往上數的專注：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
+// 正向計時（往上數）：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
 const FREE_MIN = 5
 const FREE_MAX = 180
 const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
@@ -1955,7 +1958,9 @@ class FocusTimer {
     this.endAt = 0
     // 暫停時：倒數剩下的毫秒；往上數時是已經過的毫秒
     this.paused = null
+    // 專注的目標：一件任務，或直接是一個專案（兩個只會有一個）
     this.taskId = null
+    this.projectId = null
     this._loadLengths()
     try {
       const saved = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null')
@@ -1967,24 +1972,22 @@ class FocusTimer {
       e.stopPropagation()
       this.togglePicker()
     }
-    // 沒在計時時點時間，打開長度設定（手機上看不到任務標籤，也是從這裡進）；App 模式計時中點時間打開全螢幕計時
+    // 點時間打開計時設定（手機上看不到任務標籤，選目標也是從這裡）；計時中只能換目標。App 模式計時中點時間打開全螢幕計時
     $('#focusTime').onclick = (e) => {
       e.stopPropagation()
-      if (this.mode === 'idle') this.toggleSet()
-      else if (this.ui.appMode) this.toggleBig(true)
+      if (this.mode !== 'idle' && this.ui.appMode) this.toggleBig(true)
+      else this.toggleSet()
     }
+    $('#ffTarget').addEventListener('change', (e) => this.setTarget(e.target.value))
     $('#ffToggle').onclick = () => this.toggle()
     $('#ffStop').onclick = () => this.stop()
     $('#ffMin').onclick = () => this.toggleBig(false)
     $('#ffCabin').onclick = () => this.hooks.goCabin?.()
     $('#focusPickList').addEventListener('click', (e) => {
-      const b = e.target.closest('[data-tid]')
+      const b = e.target.closest('[data-target]')
       if (!b) return
-      this.taskId = b.dataset.tid || null
-      this._save()
       this.togglePicker(false)
-      this.render()
-      this.hooks.focusTaskChanged?.(this.taskId)
+      this.setTarget(b.dataset.target)
     })
     addEventListener('pointerdown', (e) => {
       if (!$('#focusPick').hidden && !e.target.closest('#focusPick, #focusLabel')) this.togglePicker(false)
@@ -1999,7 +2002,7 @@ class FocusTimer {
   // 沒在計時時，長度和輪數跟著設定（開發時可用 ?focus= 縮短）；計時中用開始時記下的那一份
   _loadLengths() {
     const st = this.ui.store.state.settings
-    this.up = !debugMin && st.focusMin === 0
+    this.up = !debugMin && st.focusUp
     this.focusMin = debugMin || st.focusMin || FOCUS_MIN
     this.breakMin = debugMin ? debugMin / 2 : st.breakMin || BREAK_MIN
     this.rounds = this.up ? 1 : st.focusRounds || 1
@@ -2013,6 +2016,7 @@ class FocusTimer {
     this.endAt = n(saved.endAt, 0, 8.64e15, 0)
     this.paused = Number.isFinite(saved.paused) ? Math.max(0, saved.paused) : null
     this.taskId = typeof saved.taskId === 'string' ? saved.taskId : null
+    this.projectId = !this.taskId && typeof saved.projectId === 'string' ? saved.projectId : null
     this.up = saved.up === true
     this.focusMin = n(saved.focusMin, 0.05, FREE_MAX, this.focusMin)
     this.breakMin = n(saved.breakMin, 0.05, 60, this.breakMin)
@@ -2021,8 +2025,8 @@ class FocusTimer {
   }
 
   _save() {
-    const { mode, endAt, paused, taskId, up, focusMin, breakMin, round, rounds } = this
-    localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, up, focusMin, breakMin, round, rounds }))
+    const { mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds } = this
+    localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds }))
   }
 
   // 綁定的任務若已完成或刪除就自動解除
@@ -2030,12 +2034,43 @@ class FocusTimer {
     const t = this.taskId && this.ui.store.state.tasks.find((x) => x.id === this.taskId)
     return t && !t.done ? t : null
   }
+  // 綁定的專案：落成、收藏或刪掉了就自動解除
+  get project() {
+    const p = this.projectId && this.ui.store.state.projects.find((x) => x.id === this.projectId)
+    return p && !p.archived && !p.completedAt ? p : null
+  }
+  // 畫面上寫的目標
+  get targetText() {
+    return this.task ? `◷ ${this.task.title}` : this.project ? `◷ 專案・${this.project.name}` : ''
+  }
   // 往上數中（休息一律倒數）
   get counting() {
     return this.up && this.mode === 'focus'
   }
   get info() {
-    return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin }
+    return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null }
+  }
+  // 可以選的目標：今天還沒做完的任務、進行中的專案（暫停的也可以）
+  _targets() {
+    const s = this.ui.store
+    return {
+      tasks: s.tasksOn(s.today).filter((t) => !t.done),
+      projects: s.state.projects.filter((p) => !p.archived && !p.completedAt),
+    }
+  }
+  _targetKey() {
+    return this.task ? `t:${this.task.id}` : this.project ? `p:${this.project.id}` : ''
+  }
+
+  // key：'t:<任務 id>'、'p:<專案 id>' 或 ''（不指定）
+  setTarget(key) {
+    const [kind, id] = key ? [key.slice(0, 1), key.slice(2)] : ['', '']
+    this.taskId = kind === 't' ? id : null
+    this.projectId = kind === 'p' ? id : null
+    this._save()
+    this.render()
+    if (!$('#focusSet').hidden) this._renderSet()
+    this.hooks.focusTaskChanged?.(this.taskId, this.projectId)
   }
 
   togglePicker(force) {
@@ -2043,34 +2078,50 @@ class FocusTimer {
     $('#focusPick').hidden = !open
     if (!open) return
     this.toggleSet(false)
-    const s = this.ui.store
-    const tasks = s.tasksOn(s.today).filter((t) => !t.done)
-    const cur = this.task?.id
-    $('#focusPickList').innerHTML =
-      `<li><button data-tid="" class="${cur ? '' : 'on'}"><i style="--c:#d8dee8"></i>不指定任務</button></li>` +
-      tasks
-        .map((t) => `<li><button data-tid="${esc(t.id)}" class="${t.id === cur ? 'on' : ''}"><i style="--c:${tagOf(t.tag).color}"></i>${esc(t.title)}${t.pomos ? `<small>◷ ${t.pomos}</small>` : ''}</button></li>`)
-        .join('') +
-      (tasks.length ? '' : '<li class="empty" style="padding:10px">今天沒有待辦的任務</li>')
+    const { tasks, projects } = this._targets()
+    const cur = this._targetKey()
+    const item = (key, color, text, extra = '') => `<li><button data-target="${esc(key)}" class="${key === cur ? 'on' : ''}"><i style="--c:${color}"></i>${text}${extra}</button></li>`
+    $('#focusPickList').innerHTML = [
+      item('', '#d8dee8', '不指定'),
+      '<li class="fp-h">今天的任務</li>',
+      ...tasks.map((t) => item(`t:${t.id}`, tagOf(t.tag).color, esc(t.title), t.pomos ? `<small>◷ ${t.pomos}</small>` : '')),
+      tasks.length ? '' : '<li class="empty">今天沒有待辦的任務</li>',
+      projects.length ? '<li class="fp-h">專案<small>專注的時間記進專案</small></li>' : '',
+      ...projects.map((p) => item(`p:${p.id}`, PROJECT_COLORS[p.color % PROJECT_COLORS.length], esc(p.name), p.pausedAt ? '<small>暫停中</small>' : '')),
+    ].join('')
   }
 
-  // ── 長度設定：刻度尺＋輪數＋休息 ──
+  // ── 計時設定：倒數／正向、刻度尺、目標、輪數、休息（計時中只能換目標）──
   toggleSet(force) {
-    const open = (force ?? $('#focusSet').hidden) && this.mode === 'idle'
-    $('#focusSet').hidden = !open
+    const el = $('#focusSet')
+    const open = force ?? el.hidden
+    el.hidden = !open
     if (!open) return
     this.togglePicker(false)
     this._renderSet()
+    this._syncRuler()
+    this._fit(el)
+  }
+  // 視窗放不下（手機的小島模式只剩上半部、手機橫放）：頂到畫面外就改成從最上面排、裡面捲動
+  _fit(el) {
+    el.style.top = el.style.bottom = el.style.maxHeight = ''
+    if (el.offsetTop >= 8) return
+    el.style.top = '8px'
+    el.style.bottom = 'auto'
+    el.style.maxHeight = 'calc(100dvh - 16px)'
+  }
+  // 刻度尺轉到設定的長度（藏著的時候量不到寬度，切回倒數時再轉一次）
+  _syncRuler() {
     const v = this.ui.store.state.settings.focusMin
     let i = RULER.indexOf(v)
-    if (i < 0) i = RULER.reduce((best, x, k) => (Math.abs(x - v) < Math.abs(RULER[best] - v) ? k : best), 1)
+    if (i < 0) i = RULER.reduce((best, x, k) => (Math.abs(x - v) < Math.abs(RULER[best] - v) ? k : best), 0)
     $('#fsRuler').scrollLeft = i * RULER_TICK
   }
 
   _bindSet() {
     const ruler = $('#fsRuler')
     $('#fsTrack').innerHTML = RULER.map(
-      (v, i) => `<i class="${v % 30 === 0 ? 'major' : v % 10 === 0 ? 'mid' : ''}" data-i="${i}">${v % 30 === 0 ? `<b>${v || '∞'}</b>` : ''}</i>`,
+      (v, i) => `<i class="${v % 30 === 0 ? 'major' : v % 10 === 0 ? 'mid' : ''}" data-i="${i}">${v % 30 === 0 || i === 0 ? `<b>${v}</b>` : ''}</i>`,
     ).join('')
     const nearest = () => Math.max(0, Math.min(RULER.length - 1, Math.round(ruler.scrollLeft / RULER_TICK)))
     let raf = 0
@@ -2078,6 +2129,8 @@ class FocusTimer {
       if (raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
+        // 藏起來（正向計時、關掉視窗）時捲動位置會歸零：那不是使用者選的長度
+        if (!ruler.offsetParent || this.ui.store.state.settings.focusUp) return
         this._setLength(RULER[nearest()])
       })
     })
@@ -2130,6 +2183,14 @@ class FocusTimer {
       const b = e.target.closest('[data-v]')
       if (b) this._setOption('breakMin', +b.dataset.v)
     })
+    // 倒數計時／正向計時
+    $('#fsMode').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (!b) return
+      this._setOption('focusUp', b.dataset.v === 'up')
+      if (b.dataset.v === 'down') this._syncRuler()
+    })
+    $('#fsTarget').addEventListener('change', (e) => this.setTarget(e.target.value))
     $('#fsStart').onclick = () => {
       this.toggleSet(false)
       if (this.mode === 'idle') this.toggle()
@@ -2148,24 +2209,54 @@ class FocusTimer {
 
   _renderSet() {
     const st = this.ui.store.state.settings
+    // 計時中：計時方式、長度、輪數、休息都照開始時的，只能換目標
+    const live = this.mode !== 'idle'
+    const up = live ? this.up : st.focusUp
     const v = st.focusMin
-    $('#fsTime').textContent = v ? `${v}:00` : '∞'
-    for (const b of $$('#fsRounds button')) {
-      b.classList.toggle('on', !!v && +b.dataset.v === st.focusRounds)
-      b.disabled = !v
+    $('#focusSet h4').firstChild.textContent = live ? '計時中・換個目標' : '要怎麼專注？'
+    $('#fsMode').hidden = live
+    for (const b of $$('#fsMode button')) {
+      const on = (b.dataset.v === 'up') === up
+      b.classList.toggle('on', on)
+      b.setAttribute('aria-pressed', String(on))
     }
+    $('#fsTime').textContent = live ? $('#focusTime').textContent : up ? '00:00' : `${v}:00`
+    $('#fsTime').classList.toggle('up', up && this.mode !== 'break')
+    // 正向計時不用選長度和輪數
+    $('#fsRwrap').hidden = up || live
+    $('#fsRoundsRow').hidden = up || live
+    $('#fsBreakRow').hidden = live
+    $('#fsStart').hidden = live
+    for (const b of $$('#fsRounds button')) b.classList.toggle('on', +b.dataset.v === st.focusRounds)
     for (const b of $$('#fsBreak button')) b.classList.toggle('on', +b.dataset.v === st.breakMin)
-    $('#fsSum').textContent = v
-      ? `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪，中間休息 ${st.breakMin} 分` : `，做完休息 ${st.breakMin} 分`}`
-      : `不設長度往上數；按 ■ 結束，滿 ${FREE_MIN} 分鐘就記下來`
+    const target = this.project ? `，時間記進「${this.project.name}」` : ''
+    $('#fsSum').textContent = live
+      ? `換了目標，這一輪的時間就算在新的目標上${target}`
+      : up
+        ? `從 0 開始往上數，做完按 ■；滿 ${FREE_MIN} 分鐘就記下來（最長 ${FREE_MAX / 60} 小時）${target}`
+        : `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪，中間休息 ${st.breakMin} 分` : `，做完休息 ${st.breakMin} 分`}${target}`
+    this._fillTargets($('#fsTarget'))
+  }
+  // 目標的下拉：今天的任務和專案（手機上看不到任務標籤，從這裡選）
+  _fillTargets(sel) {
+    const { tasks, projects } = this._targets()
+    const opt = (key, text) => `<option value="${esc(key)}">${esc(text)}</option>`
+    sel.innerHTML = [
+      opt('', '不指定'),
+      tasks.length ? `<optgroup label="今天的任務">${tasks.map((t) => opt(`t:${t.id}`, t.title)).join('')}</optgroup>` : '',
+      projects.length ? `<optgroup label="專案">${projects.map((p) => opt(`p:${p.id}`, p.name)).join('')}</optgroup>` : '',
+    ].join('')
+    sel.value = this._targetKey()
   }
 
-  startWith(taskId) {
+  // 從任務列表或專案頁按「專注」：計時中就換目標，沒在計時就開始
+  startWith(taskId, projectId = null) {
     this.taskId = taskId
+    this.projectId = taskId ? null : projectId
     if (this.mode === 'focus') {
       this._save()
       this.render()
-      this.hooks.focusTaskChanged?.(taskId)
+      this.hooks.focusTaskChanged?.(this.taskId, this.projectId)
       return
     }
     if (this.mode === 'break') {
@@ -2209,6 +2300,7 @@ class FocusTimer {
     this.paused = null
     this.endAt = this.up ? Date.now() : Date.now() + this.focusMin * 60000
     if (!this.task) this.taskId = null
+    if (this.taskId || !this.project) this.projectId = null
     this.togglePicker(false)
     this.toggleSet(false)
     this._save()
@@ -2221,12 +2313,15 @@ class FocusTimer {
   toggleBig(force) {
     const open = (force ?? $('#focusFull').hidden) && this.mode !== 'idle'
     $('#focusFull').hidden = !open
-    if (open) this.render()
+    if (!open) return
+    this._fillTargets($('#ffTarget'))
+    this.render()
   }
 
   // 一輪專注結束：記下分鐘數，接著休息
   _finishFocus(minutes) {
     const info = { ...this.info, last: this.round >= this.rounds }
+    this.toggleSet(false)
     this.mode = 'break'
     this.paused = null
     this.endAt = Date.now() + this.breakMin * 60000
@@ -2242,6 +2337,7 @@ class FocusTimer {
       return
     }
     const wasFocus = this.mode === 'focus'
+    this.toggleSet(false)
     this.mode = 'idle'
     this.paused = null
     this._loadLengths()
@@ -2262,6 +2358,7 @@ class FocusTimer {
         this.hooks.breakFinished({ next: this.round, rounds: this.rounds })
         this._startFocus()
       } else {
+        this.toggleSet(false)
         this.mode = 'idle'
         this._loadLengths()
         this._save()
@@ -2278,22 +2375,29 @@ class FocusTimer {
 
   render() {
     if (this.mode === 'idle') this._loadLengths()
+    // 目標失效了（任務做完或刪掉、專案落成、收藏或刪掉）：真的解除，之後放回來也不會自己綁回去
+    if ((this.taskId && !this.task) || (this.projectId && !this.project)) {
+      if (!this.task) this.taskId = null
+      if (!this.project) this.projectId = null
+      this._save()
+    }
     const counting = this.counting
-    const time = this.mode === 'idle' && this.up ? '∞' : mmss(counting ? this.elapsed : this.left)
+    const time = this.mode === 'idle' && this.up ? '00:00' : mmss(counting ? this.elapsed : this.left)
+    if (this.mode !== 'idle' && !$('#focusSet').hidden) $('#fsTime').textContent = time
     $('#focusTime').textContent = time
-    $('#focusTime').title = this.mode === 'idle' ? '設定專注長度' : ''
+    $('#focusTime').title = this.mode === 'idle' ? '倒數或正向計時、長度、目標' : this.ui.appMode ? '打開全螢幕計時' : '換專注的目標'
     const box = $('#focusBox')
     box.classList.toggle('running', this.mode === 'focus')
     box.classList.toggle('break', this.mode === 'break')
     box.classList.toggle('idle', this.mode === 'idle')
     const multi = this.rounds > 1
     const label = {
-      idle: this.up ? '往上數 · ∞' : multi ? `${this.focusMin} 分 × ${this.rounds} 輪` : '專注 · しゅうちゅう',
-      focus: multi ? `專注中 · ${this.round}/${this.rounds}` : '專注中',
+      idle: this.up ? '正向計時 · ↑' : multi ? `${this.focusMin} 分 × ${this.rounds} 輪` : '專注 · しゅうちゅう',
+      focus: multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : '專注中',
       break: multi && this.round < this.rounds ? `休息 · 下一輪 ${this.round + 1}/${this.rounds}` : '休息 · きゅうけい',
     }[this.mode]
-    const t = this.task
-    $('#focusLabel').textContent = this.paused != null ? '暫停中' : t && this.mode !== 'break' ? `◷ ${t.title}` : label
+    const t = this.targetText
+    $('#focusLabel').textContent = this.paused != null ? '暫停中' : t && this.mode !== 'break' ? t : label
     $('#focusLabel').classList.toggle('set', !!t && this.mode !== 'break')
     $('#focusIcon').innerHTML = this.mode !== 'idle' && this.paused == null ? ICON.pause : ICON.play
     $('#focusStop').hidden = this.mode === 'idle'
@@ -2303,10 +2407,10 @@ class FocusTimer {
     const frac = this.mode === 'idle' ? 0 : counting ? (this.elapsed % 3600000) / 3600000 : 1 - this.left / this.total
     $('#focusArc').style.strokeDashoffset = 119.4 * (1 - frac)
     document.title = this.mode === 'idle' ? 'ひより日和 · 日程小島' : `${time} ${this.mode === 'focus' ? '專注中' : '休息中'} · ひより`
-    this._renderBig(time, frac, label, t)
+    this._renderBig(time, frac, label)
   }
 
-  _renderBig(time, frac, label, t) {
+  _renderBig(time, frac, label) {
     const el = $('#focusFull')
     if (this.mode === 'idle') {
       el.hidden = true
@@ -2317,7 +2421,14 @@ class FocusTimer {
     $('#ffKicker').textContent = this.paused != null ? '暫停中' : label
     $('#ffTime').textContent = time
     $('#ffArc').style.strokeDashoffset = 552.9 * (1 - frac)
-    $('#ffTask').textContent = this.mode === 'break' ? '起來動一動、喝口水' : t ? `◷ ${t.title}` : '不指定任務'
+    // 專注中可以直接在這裡換目標；休息時寫一句話
+    const brk = this.mode === 'break'
+    $('#ffTask').hidden = !brk
+    $('#ffTask').textContent = '起來動一動、喝口水'
+    const sel = $('#ffTarget')
+    sel.hidden = brk
+    // 選單在打開全螢幕時填好；目標從別的地方換了才重填（正在選的時候不動它）
+    if (!brk && document.activeElement !== sel && sel.value !== this._targetKey()) this._fillTargets(sel)
     $('#ffToggle').textContent = this.paused != null ? '繼續' : '暫停'
     $('#ffStop').textContent = this.counting ? '做完了' : this.mode === 'break' ? '跳過休息' : '結束'
     $('#ffCabin').hidden = this.mode !== 'focus'

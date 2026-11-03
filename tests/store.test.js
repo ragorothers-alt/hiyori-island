@@ -1347,17 +1347,41 @@ describe('專案町的總平面', () => {
 })
 
 describe('番茄鐘長度與專注時段', () => {
-  it('長度、休息、輪數存在設定裡，匯出匯入後還在；超出範圍的會被修正', () => {
-    expect(store.state.settings).toMatchObject({ focusMin: 25, breakMin: 5, focusRounds: 1 })
-    store.setSetting('focusMin', 0)
+  it('計時方式、長度、休息、輪數存在設定裡，匯出匯入後還在；超出範圍的會被修正', () => {
+    expect(store.state.settings).toMatchObject({ focusUp: false, focusMin: 25, breakMin: 5, focusRounds: 1 })
+    store.setSetting('focusUp', true)
+    store.setSetting('focusMin', 50)
     store.setSetting('breakMin', 10)
     store.setSetting('focusRounds', 3)
     store.importJSON(store.exportJSON())
-    expect(store.state.settings).toMatchObject({ focusMin: 0, breakMin: 10, focusRounds: 3 })
-    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 999, breakMin: -3, focusRounds: 9 } }))
-    expect(store.state.settings).toMatchObject({ focusMin: 180, breakMin: 1, focusRounds: 4 })
+    expect(store.state.settings).toMatchObject({ focusUp: true, focusMin: 50, breakMin: 10, focusRounds: 3 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 999, breakMin: -3, focusRounds: 9, focusUp: 'yes' } }))
+    expect(store.state.settings).toMatchObject({ focusUp: false, focusMin: 180, breakMin: 1, focusRounds: 4 })
     store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 'abc' } }))
     expect(store.state.settings.focusMin).toBe(25)
+  })
+
+  it('舊版用長度 0 代表往上數：換成正向計時，倒數長度回到 25 分', () => {
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 0, focusRounds: 2 } }))
+    expect(store.state.settings).toMatchObject({ focusUp: true, focusMin: 25, focusRounds: 2 })
+  })
+
+  it('專注的目標直接選專案：分鐘記進專案；綁了任務時照任務歸屬的專案記', () => {
+    const a = store.addProject({ name: '畢業專題', milestones: ['訪談'] })
+    const b = store.addProject({ name: '作品集', milestones: ['切版'] })
+    store.completePomodoro(40, null, a.id)
+    expect(a.focus[TODAY]).toBe(40)
+    const t = store.addTask({ title: '寫程式', date: TODAY, project: b.id })
+    store.completePomodoro(25, t.id, a.id)
+    expect(a.focus[TODAY]).toBe(40)
+    expect(b.focus[TODAY]).toBe(25)
+    // 沒有歸屬的任務：不會記到選過的專案上
+    const free = store.addTask({ title: '回信', date: TODAY })
+    store.completePomodoro(10, free.id, a.id)
+    expect(a.focus[TODAY]).toBe(40)
+    // 專案已經不在了也不會壞
+    store.completePomodoro(15, null, 'gone')
+    expect(store.stats.pomodoros).toBe(4)
   })
 
   it('XP 依長度給：25 分是原本的份量，短的至少四成、長的最多兩倍', () => {

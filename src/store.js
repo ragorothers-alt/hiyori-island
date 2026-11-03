@@ -102,11 +102,11 @@ export function repeatLabel(rep) {
 }
 
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
-// focusMin：一輪專注幾分鐘（0 = 不設長度、往上數）；breakMin：休息幾分鐘；focusRounds：連續幾輪（1 = 一次做完）
+// focusUp：正向計時（不設長度、往上數）；focusMin：倒數時一輪幾分鐘；breakMin：休息幾分鐘；focusRounds：連續幾輪（1 = 一次做完）
 // fontScale：面板和對話框的字放大倍率；stuckNudge：任務卡住時ふじ提醒
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
-  focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true,
+  focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 // 畫質：auto＝桌機高、觸控手機標準
@@ -500,7 +500,9 @@ function migrate(s) {
     }
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
-  settings.focusMin = settings.focusMin === 0 ? 0 : num(settings.focusMin, 5, 180, FOCUS_MIN)
+  // 舊版用長度 0 代表往上數：換成正向計時，倒數的長度回到預設
+  if (settings.focusMin === 0) settings.focusUp = true
+  settings.focusMin = num(settings.focusMin || FOCUS_MIN, 5, 180, FOCUS_MIN)
   settings.breakMin = num(settings.breakMin, 1, 30, BREAK_MIN)
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
@@ -2201,16 +2203,17 @@ export class Store {
   }
 
   // ── 專注 / 互動 / 每日任務 ──
-  completePomodoro(minutes, taskId = null) {
+  // projectId：專注的目標直接選了專案（沒綁任務時才看）
+  completePomodoro(minutes, taskId = null, projectId = null) {
     // 分鐘數壞掉（NaN、負的）就當 0：一個 NaN 會讓經驗值、金平糖和統計整個變成 NaN，存檔後歸零
     minutes = Number.isFinite(+minutes) ? Math.min(600, Math.max(0, +minutes)) : 0
     this._refreshToday()
     const task = taskId ? this._find('tasks', taskId) : null
     if (task) task.pomos = (task.pomos || 0) + 1
-    // 任務歸在某個專案：專注的分鐘也記到專案上（專案的時間軸和統計用）
-    const proj = task?.project ? this._find('projects', task.project) : null
+    // 任務歸在某個專案、或目標就是專案：專注的分鐘記到專案上（專案的時間軸和統計用）
+    const proj = this._find('projects', task ? task.project : projectId) || null
     if (proj && minutes) proj.focus[this.today] = Math.min(1440, (proj.focus[this.today] || 0) + Math.round(minutes))
-    const fx = [['pomodoro', { minutes, task }]]
+    const fx = [['pomodoro', { minutes, task, project: proj }]]
     this.stats.pomodoros++
     this.stats.focusMinutes += minutes
     const d = this.day()

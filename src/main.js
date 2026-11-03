@@ -133,35 +133,39 @@ async function boot() {
       else if (kind === 'drop') talk('stuckDrop', { task }, 4600, '先放下了，鬆一口氣吧。', 'fuji')
     },
     // 專注以番茄鐘為準：小島只負責兩人進出小木屋、花圃標記；獎勵和台詞在這裡，沒有小島也照常
-    // info：{ round, rounds, free }，連續幾輪的第幾輪、是不是不設長度往上數
+    // info：{ round, rounds, free, projectId }，連續幾輪的第幾輪、是不是正向計時、目標是不是直接選了專案
     focusStarted: (resumed, taskId, info = {}) => {
       scene?.focusStarted(resumed, taskId)
       if (!resumed) {
         sfx.chime()
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
+        const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
         if (info.round > 1) talk('focusRound', { round: info.round, rounds: info.rounds })
-        else if (t) talk('focusTask', { task: short(t.title) })
+        else if (t || p) talk('focusTask', { task: short(t ? t.title : p.name) })
         else if (info.free) talk('focusFree', {}, undefined, '', 'fuji')
         else if (!duet('focusStart')) talk('focusStart')
       }
     },
-    focusTaskChanged: (taskId) => {
+    focusTaskChanged: (taskId, projectId = null) => {
       scene?.focusTaskChanged(taskId)
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
-      if (t && ui.focus.mode === 'focus') talk('focusTask', { task: short(t.title) })
+      const p = !t && projectId && store.state.projects.find((x) => x.id === projectId)
+      if ((t || p) && ui.focus.mode === 'focus') talk('focusTask', { task: short(t ? t.title : p.name) })
     },
     focusFinished: (minutes, taskId, info = {}) => {
       sfx.temple()
-      store.completePomodoro(minutes, taskId)
-      // 兩人出屋、天燈從小木屋屋頂升起
-      scene?.focusFinished(taskId)
+      store.completePomodoro(minutes, taskId, info.projectId)
+      // 兩人出屋、天燈從小木屋屋頂升起；目標是專案的話，那棟房子泛起一圈光
+      scene?.focusFinished(taskId, info.projectId)
       const multi = info.rounds > 1
       if (multi && info.last) talk('focusRoundsDone', { rounds: info.rounds })
       else if (!duet('focusEnd')) talk('focusEnd')
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
+      const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
       const rest = multi && !info.last ? `休息 ${info.breakMin} 分鐘後接著第 ${info.round + 1} 輪` : '接著休息一下吧'
       const title = multi ? (info.last ? `${info.rounds} 輪都完成了，放一盞天燈` : `第 ${info.round}/${info.rounds} 輪完成`) : '專注完成，放一盞天燈'
-      ui.toast({ icon: '灯', title, sub: t ? `「${short(t.title, 10)}」長大了一點・${rest}` : `+${minutes} 分鐘・${rest}` })
+      const sub = t ? `「${short(t.title, 10)}」長大了一點` : p ? `「${short(p.name, 10)}」+${minutes} 分鐘` : `+${minutes} 分鐘`
+      ui.toast({ icon: '灯', title, sub: `${sub}・${rest}` })
     },
     // next：還有下一輪時是 { next, rounds }，計時器接著會自己開始下一輪（台詞交給 focusStarted）
     breakFinished: (next) => {

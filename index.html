@@ -348,14 +348,16 @@
   </div>
 
   <div class="focus-pick focus-set glass" id="focusSet" hidden>
-    <h4>要專注多久？<small>じかん</small></h4>
+    <h4>要怎麼專注？<small>じかん</small></h4>
+    <div class="seg fs-mode" id="fsMode" role="group" aria-label="計時方式"><button type="button" data-v="down">倒數計時</button><button type="button" data-v="up">正向計時</button></div>
     <div class="fs-time" id="fsTime">25:00</div>
-    <div class="fs-rwrap">
+    <div class="fs-rwrap" id="fsRwrap">
       <div class="fs-ruler" id="fsRuler" tabindex="0" aria-label="專注長度"><div class="fs-track" id="fsTrack"></div></div>
       <span class="fs-needle"></span>
     </div>
-    <div class="fs-row"><span>輪數</span><div class="seg" id="fsRounds"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
-    <div class="fs-row"><span>休息</span><div class="seg" id="fsBreak"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
+    <div class="fs-row"><label for="fsTarget">目標</label><select class="fs-target" id="fsTarget"></select></div>
+    <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
+    <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
     <p class="fs-sum" id="fsSum"></p>
     <button type="button" class="btn-primary" id="fsStart">開始專注</button>
   </div>
@@ -367,6 +369,7 @@
       <div class="ff-kicker" id="ffKicker">專注中</div>
       <div class="ff-ring"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="88"/><circle cx="100" cy="100" r="88" class="fg" id="ffArc"/></svg><div class="ff-time" id="ffTime">25:00</div></div>
       <div class="ff-task" id="ffTask"></div>
+      <select class="ff-target" id="ffTarget" aria-label="專注的目標"></select>
       <div class="ff-btns"><button class="btn-ghost" id="ffStop">結束</button><button class="btn-primary" id="ffToggle">暫停</button></div>
       <button class="cm-link ff-cabin" id="ffCabin">到小木屋看兩人陪你讀書</button>
     </div>
