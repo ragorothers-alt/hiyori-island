@@ -1145,7 +1145,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 body.app-mode { --card-bg: #fff; --card-fill: rgba(118, 118, 128, .08); --card-sep: rgba(60, 60, 67, .12); --card-r: 26px; --card-r-s: 18px; }
 body.app-mode.night { --card-bg: #27243c; --card-fill: rgba(160, 160, 190, .1); --card-sep: rgba(255, 255, 255, .1); }
 body.app-mode :is(.td-card, .add-form, .quest-mini, .dayline, .rhythm-box, .ccard, .cplan, .coach-hist, .wr-card, .dt-form, .hb-card, .hb-form, .hb-kind,
-  .proj, .pd-head, .pd-compose, .pd-note, .life-energy, .life-spend, .slp-chart, .week-chart, .bond, .town, .stuck-card, .overdue) {
+  .proj, .pd-sum, .pd-compose, .pd-note, .life-energy, .life-spend, .slp-chart, .week-chart, .bond, .town, .stuck-card, .overdue) {
   --field: var(--card-fill); --glass-border: transparent;
   background: var(--card-bg); border-color: transparent; box-shadow: none; backdrop-filter: none; border-radius: var(--card-r);
 }

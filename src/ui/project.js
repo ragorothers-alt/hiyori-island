@@ -15,6 +15,7 @@ import { FUJI_LINES } from '../data/lines.js'
 // 筆記編輯中的內容不跟著重畫（打開時拍一張快照當 HTML），打字時隔一下子自動存
 
 const SECS = [['log', '進度'], ['notes', '筆記'], ['ms', '里程碑'], ['tasks', '任務']]
+const HEAT_KEY = 'hiyori-pd-heat'
 const MINS = [0, 15, 30, 45, 60, 90, 120, 180]
 const colorOf = (p) => PROJECT_COLORS[p.color % PROJECT_COLORS.length]
 const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8)}`
@@ -67,6 +68,12 @@ export class ProjectView {
     this.hooks = hooks
     this.id = null
     this._reset()
+    // 熱度格展開著（這台裝置記住，換專案也一樣）
+    try {
+      this.heat = localStorage.getItem(HEAT_KEY) === '1'
+    } catch {
+      this.heat = false
+    }
     root.addEventListener('click', (e) => this._click(e))
     root.addEventListener('submit', (e) => this._submit(e))
     root.addEventListener('input', (e) => this._input(e))
@@ -163,9 +170,14 @@ export class ProjectView {
     const items = [
       { k: 'top', cls: 'pd-top', html: this._topHTML(p) },
       ...(this.more ? [{ k: 'more', cls: 'pd-more', html: this._moreHTML(p) }] : []),
-      { k: 'head', cls: 'pd-head', html: this._headHTML(p, today) },
-      { k: 'goal', cls: 'pd-goal-box', html: this._goalHTML(p) },
-      { k: 'stats', cls: 'pd-stats', html: this._statsHTML(p, st, today) },
+      // 標題、進度、目標、統計收成一張小卡，畫面主要留給進度日誌和筆記
+      {
+        k: 'sum', cls: 'pd-sum', kids: [
+          { k: 'head', cls: 'pd-head', html: this._headHTML(p, today) },
+          { k: 'goal', cls: 'pd-goal-box', html: this._goalHTML(p) },
+          { k: 'stats', cls: 'pd-stats', html: this._statsHTML(p, st, today) },
+        ],
+      },
       ...(this.ai?.kind === 'summary' ? [{ k: 'ai', cls: 'pd-ai', html: this._aiSummaryHTML(p) }] : []),
       {
         k: 'body', cls: 'pd-body', kids: [
@@ -253,32 +265,35 @@ export class ProjectView {
       : ''
     const by = msTasks(p, s.state.tasks)
     const bar = p.milestones.length ? p.milestones.map((m) => `<i style="--f:${msProgress(m, by.get(m.id)).toFixed(3)}"></i>`).join('') : '<i style="--f:0"></i>'
-    return `<div class="pd-title"><h2 class="pd-name">${esc(p.name)}</h2><div class="pd-pct">${pct}<small>%</small></div></div>
-      <div class="pd-meta">${meta.join('')}</div>${dl}
-      <div class="proj-bar" aria-hidden="true">${bar}</div>`
+    return `<div class="pd-title"><div class="pd-tl"><h2 class="pd-name">${esc(p.name)}</h2><div class="pd-meta">${meta.join('')}</div></div><div class="pd-pct">${pct}<small>%</small></div></div>
+      ${dl}<div class="proj-bar" aria-hidden="true">${bar}</div>`
   }
 
   _goalHTML(p) {
     return `<label class="pd-goal"><span class="pd-k">目標</span><textarea data-keep="goal" data-goal data-grow rows="1" maxlength="300"
-      placeholder="這個專案想做到什麼？寫下完成時的樣子，卡住時回來看看">${esc(p.goal)}</textarea></label>`
+      placeholder="做完時是什麼樣子？卡住時回來看看">${esc(p.goal)}</textarea></label>`
   }
 
+  // 統計排成一行小字；熱度格平常收著，按「最近一次推進」那顆展開（這台裝置會記住）
   _statsHTML(p, st, today) {
-    const cell = (v, k, title = '') => `<div${title ? ` title="${title}"` : ''}><b>${v}</b><small>${k}</small></div>`
-    const cells = [
-      cell(`${st.msDone}<i>/${st.msTotal}</i>`, '里程碑'),
-      st.stepsTotal ? cell(`${st.stepsDone}<i>/${st.stepsTotal}</i>`, '細項') : '',
-      cell(`${st.tasksDone}<i>/${st.tasksTotal}</i>`, '任務'),
-      cell(hrs(st.focus), '專注', '歸在這個專案的任務，用番茄鐘專注的時間'),
-      cell(hrs(st.logMins), '投入', '寫進度時記下的時間'),
-      cell(st.logs, '則進度'),
+    const n = (v, k, title = '') => `<span${title ? ` title="${title}"` : ''}><b>${v}</b>${k}</span>`
+    const nums = [
+      n(`${st.msDone}<i>/${st.msTotal}</i>`, '里程碑'),
+      st.stepsTotal ? n(`${st.stepsDone}<i>/${st.stepsTotal}</i>`, '細項') : '',
+      n(`${st.tasksDone}<i>/${st.tasksTotal}</i>`, '任務'),
+      n(hrs(st.focus), '專注', '歸在這個專案的任務，用番茄鐘專注的時間'),
+      n(hrs(st.logMins), '投入', '寫進度時記下的時間'),
+      n(st.logs, '則進度'),
     ]
-    // 熱度格：一欄是一週（一到日），最右邊是這週
-    const wd = (parseDate(today).getDay() + 6) % 7
-    const heat = activity(p, this.store.state.tasks, today, 77 + wd + 1).map((d) => `<i class="h${d.level}" title="${md(d.date)}"></i>`).join('')
-    const last = st.last ? `最近一次推進：${ago(dayOf(st.last), today)}` : '還沒有推進的紀錄'
-    return `<div class="pd-cells">${cells.join('')}</div>
-      <div class="pd-heat-box"><div class="pd-heat" role="img" aria-label="最近 12 週每天的推進">${heat}</div><small>${last}</small></div>`
+    const last = st.last ? `最近推進：${ago(dayOf(st.last), today)}` : '還沒有推進的紀錄'
+    let heat = ''
+    if (this.heat) {
+      // 一欄是一週（一到日），最右邊是這週
+      const wd = (parseDate(today).getDay() + 6) % 7
+      const cells = activity(p, this.store.state.tasks, today, 77 + wd + 1).map((d) => `<i class="h${d.level}" title="${md(d.date)}"></i>`).join('')
+      heat = `<div class="pd-heat-box"><div class="pd-heat" role="img" aria-label="最近 12 週每天的推進">${cells}</div><small>最近 12 週，顏色越深那天推進得越多</small></div>`
+    }
+    return `<div class="pd-nums">${nums.join('')}<button type="button" class="pd-last" data-act="heat" aria-expanded="${this.heat}" title="${this.heat ? '收起熱度格' : '看最近 12 週每天的推進'}">${last}<i class="pm-chev">${ICON.next}</i></button></div>${heat}`
   }
 
   _tabsHTML(p) {
@@ -637,6 +652,12 @@ export class ProjectView {
       case 'focus': return this.hooks.startFocusProject(p.id)
       case 'more':
         this.more = !this.more
+        return this.render()
+      case 'heat':
+        this.heat = !this.heat
+        try {
+          localStorage.setItem(HEAT_KEY, this.heat ? '1' : '0')
+        } catch {}
         return this.render()
       case 'rename':
         this.more = false

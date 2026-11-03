@@ -12,43 +12,46 @@
 .pd-more button:hover { color: var(--ink); background: var(--glass-strong); }
 .pd-more button.armed, .pm-tools > button.armed { background: #f7a3b8; color: #fff; }
 
-/* 標題、進度、截止日 */
-.pd-head { padding: 14px 14px 12px 16px; border-radius: 18px; background: var(--field); border: 1px solid var(--glass-border); position: relative; overflow: hidden; }
-.pd-head::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
-.pd-title { display: flex; align-items: flex-start; gap: 10px; }
-.pd-name { flex: 1; min-width: 0; margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 20px; letter-spacing: .06em; line-height: 1.35; word-break: break-word; }
-.pd-pct { font-family: var(--font-num); font-weight: 700; font-size: 26px; line-height: 1.1; color: var(--c); filter: saturate(1.4) brightness(.9); }
-.pd-pct small { font-size: 13px; margin-left: 1px; }
+/* 標題、進度、目標、統計收成一張小卡（畫面主要留給進度日誌和筆記） */
+.pd-sum { display: flex; flex-direction: column; gap: 7px; padding: 11px 14px 9px 16px; border-radius: 18px; background: var(--field); border: 1px solid var(--glass-border); position: relative; overflow: hidden; }
+.pd-sum::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
+.pd-title { display: flex; align-items: center; gap: 10px; }
+.pd-tl { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 12px; }
+.pd-name { min-width: 0; margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 18px; letter-spacing: .06em; line-height: 1.35; word-break: break-word; }
+/* 改名時輸入框佔滿一整行 */
+.pd-name:has(input) { flex: 1 1 100%; }
+.pd-pct { font-family: var(--font-num); font-weight: 700; font-size: 22px; line-height: 1.1; color: var(--c); filter: saturate(1.4) brightness(.9); }
+.pd-pct small { font-size: 12px; margin-left: 1px; }
 body.night .pd-pct { filter: none; }
-.pd-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--ink-soft); margin: 4px 0 10px; }
+.pd-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11.5px; color: var(--ink-soft); }
 .pd-meta .warn { color: #d9718e; }
 .pd-chip { padding: 0 7px; border-radius: 8px; background: rgba(140, 170, 200, .18); }
 .pd-chip.done { background: color-mix(in srgb, var(--gold) 30%, transparent); color: #9a6d16; }
 body.night .pd-chip.done { color: #f3d28a; }
-.pd-head .proj-bar { height: 10px; margin-bottom: 0; }
-.pd-dl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 10px; }
+.pd-head .proj-bar { height: 6px; margin: 7px 0 0; }
+.pd-dl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0; }
 .pd-dl input { border: 0; outline: 0; background: rgba(140, 170, 200, .14); border-radius: 10px; padding: 5px 8px; font-family: var(--font-num); font-size: 13px; }
 .pd-dl .btn-primary { margin-left: 0; padding: 5px 14px; }
 .pd-dl .btn-ghost { padding: 4px 10px; font-size: 12px; }
 
 /* 目標 */
-.pd-goal-box { margin-top: 10px; }
-.pd-goal { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 14px; background: var(--field); cursor: text; }
+.pd-goal { display: flex; gap: 10px; align-items: flex-start; padding: 4px 10px; border-radius: 10px; background: rgba(140, 170, 200, .09); cursor: text; }
 /* 放在卡片裡的文字框：整張卡片亮起來，不另外畫一圈外框 */
 .pd-goal:focus-within, .pd-compose:has(textarea:focus), .pd-note:has(.pn-title:focus, .pn-body:focus), .pn-q:focus { box-shadow: 0 0 0 2px var(--focus); }
 :root :is(.pd-goal, .pd-compose, .pd-note) :is(input, textarea):focus-visible, :root .pn-q:focus-visible { outline: none; }
 .pd-k, .pc-k { font-size: 11.5px; color: var(--ink-faint); letter-spacing: .1em; white-space: nowrap; }
-.pd-goal .pd-k { padding-top: 3px; }
-.pd-goal textarea { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; resize: none; font-size: 13.5px; line-height: 1.6; padding: 0; min-height: 22px; overflow: hidden; }
+.pd-goal .pd-k { padding-top: 2px; }
+.pd-goal textarea { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; resize: none; font-size: 13px; line-height: 1.6; padding: 0; min-height: 21px; overflow: hidden; }
 
-/* 統計和熱度格 */
-.pd-stats { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-.pd-cells { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.pd-cells div { padding: 7px 4px 6px; border-radius: 12px; background: var(--field); display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
-.pd-cells b { font-family: var(--font-num); font-size: 16px; font-weight: 700; white-space: nowrap; }
-.pd-cells b i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--ink-faint); margin-left: 1px; }
-.pd-cells small { font-size: 10.5px; color: var(--ink-soft); white-space: nowrap; }
-.pd-heat-box { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; background: var(--field); }
+/* 統計（一行小字）和熱度格（平常收著） */
+.pd-nums { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; font-size: 11.5px; color: var(--ink-soft); }
+.pd-nums span { white-space: nowrap; }
+.pd-nums b { font-family: var(--font-num); font-size: 13px; font-weight: 700; color: var(--ink); margin-right: 3px; }
+.pd-nums b i { font-style: normal; font-size: 10.5px; font-weight: 500; color: var(--ink-faint); margin-left: 1px; }
+.pd-last { margin-left: auto; display: flex; align-items: center; gap: 2px; font-size: 11.5px; color: var(--ink-soft); padding: 2px 3px 2px 8px; border-radius: 8px; white-space: nowrap; }
+.pd-last:hover { background: rgba(140, 170, 200, .16); color: var(--ink); }
+.pd-last[aria-expanded="true"] .pm-chev { transform: rotate(90deg); }
+.pd-heat-box { display: flex; align-items: flex-end; gap: 12px; padding: 4px 0 2px; }
 .pd-heat { display: grid; grid-template-rows: repeat(7, 9px); grid-auto-flow: column; grid-auto-columns: 9px; gap: 2px; flex: none; }
 .pd-heat i { border-radius: 2px; background: rgba(140, 170, 200, .16); }
 .pd-heat .h1 { background: color-mix(in srgb, var(--c) 35%, transparent); }
@@ -224,12 +227,9 @@ body.night .tl-mins { filter: none; }
 
 /* 寬的時候：里程碑和任務固定在右欄，左邊切換進度／筆記 */
 @media (min-width: 980px) {
-  .panel.full .pd-stats { flex-direction: row; align-items: stretch; }
-  .panel.full .pd-cells { flex: 1; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); }
-  .panel.full .pd-heat-box { flex-direction: column; justify-content: center; align-items: flex-start; gap: 6px; }
   .panel.full .pd-tabs :is(.pd-tab-ms, .pd-tab-tasks) { display: none; }
   .panel.full #projectDetail:is([data-sec="ms"], [data-sec="tasks"]) .pd-tab-log { background: var(--glass-strong); color: var(--ink); box-shadow: 0 1px 4px rgba(80, 120, 170, .14); }
-  .panel.full .pd-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; column-gap: 28px; align-items: start; }
+  .panel.full .pd-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; column-gap: 24px; align-items: start; }
   .panel.full .pd-side .pd-sec { display: block; }
   .panel.full #projectDetail:is([data-sec="ms"], [data-sec="tasks"]) .pd-log { display: block; }
   .panel.full .pd-side { padding-top: 14px; }
