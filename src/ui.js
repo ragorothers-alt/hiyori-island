@@ -61,6 +61,8 @@ const focusables = (root) => [...root.querySelectorAll(FOCUSABLE)].filter((el) =
 const LAYOUT_KEY = 'hiyori-layout'
 // 這台裝置上次選的是 App 模式（開機時決定要不要先載入小島）
 export const savedAppMode = () => readLocal(LAYOUT_KEY, 'island') === 'app'
+// App 模式寬螢幕的側欄收成圖示窄欄（也是每台裝置自己記）
+const SIDE_KEY = 'hiyori-side-mini'
 // 商店和花の図鑑的縮圖是用 three.js 拍的，載入前先放透明的圖（版面不會跳）
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 const ISLAND_ICON = '<svg viewBox="0 0 24 24"><path d="M3 16.5c3 0 4.5-1.8 9-1.8s6 1.8 9 1.8"/><path d="M6.5 16.5l1.8 3.5h7.4l1.8-3.5"/><path d="M12 14.7V7"/><path d="M12 7c-2.4-1.6-5-1.2-6.5.6 2-.2 3.6.3 4.6 1.4M12 7c2.4-1.6 5-1.2 6.5.6-2-.2-3.6.3-4.6 1.4M12 7c-.8-1.6-2.3-2.6-4-2.8"/></svg>'
@@ -215,6 +217,8 @@ export class UI {
     $('#panelBtn').onclick = () => this.togglePanel()
     $('#fullBtn').onclick = () => (this.appMode ? this.setAppMode(false) : this.toggleFull())
     $('#appBtn').onclick = () => this.setAppMode(true)
+    $('#sideBtn').onclick = () => this.toggleSide()
+    this.toggleSide(readLocal(SIDE_KEY, false) === true, { save: false })
     this.toggleFull(false)
     $('#themeBtn').onclick = () => this.toggleTheme()
     this.renderTheme()
@@ -541,6 +545,18 @@ export class UI {
     // 有些說明和按鈕依模式不同（「在島上查看」→「切到小島看看」）：開場第一次畫之前不用
     if (this._stale) this.render()
     this.hooks.appModeChanged?.(on, { cabin })
+  }
+  // App 模式寬螢幕的側欄：展開（問候、分頁名稱、番茄鐘）或收成只有圖示的窄欄，內容區就變寬
+  toggleSide(force, { save = true } = {}) {
+    const mini = force ?? !document.body.classList.contains('side-mini')
+    document.body.classList.toggle('side-mini', mini)
+    if (save) writeLocal(SIDE_KEY, mini)
+    const b = $('#sideBtn')
+    b.title = mini ? '展開側欄' : '收起側欄'
+    b.setAttribute('aria-label', b.title)
+    b.setAttribute('aria-expanded', String(!mini))
+    // 箭頭：收起時朝右（點了會展開），展開時朝左
+    $('#sideArrow').setAttribute('d', mini ? 'M13.5 10l2 2-2 2' : 'M15.5 10l-2 2 2 2')
   }
   // 要飛到島上某處的按鈕：App 模式先切回小島（不自動進小木屋；第一次要等小島建好），等畫面換好再飛過去
   _onIsland(fn) {
