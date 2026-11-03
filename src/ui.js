@@ -23,10 +23,12 @@ import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
+import { TodayView } from './ui/today.js'
 import { readBackup, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
 
-const TAB_ORDER = ['tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
+// 今日總覽只有 App 模式有：小島模式的分頁從任務開始（見 UI._tabs）
+const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
 export const SIDE_PHONE = '(max-width: 860px) and (max-height: 500px) and (orientation: landscape)'
 export const sheetLayout = () => matchMedia('(max-width: 860px)').matches && !matchMedia(SIDE_PHONE).matches
@@ -126,6 +128,16 @@ export class UI {
     this.coach = new CoachView($('#coachRoot'), store, viewHooks)
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
     this.dates.render()
+    this.today = new TodayView($('#todayRoot'), store, {
+      ...viewHooks,
+      addTask: () => {
+        this.store.selectDate(this.store.today)
+        this.setTab('tasks')
+        $('#taskTitle').focus()
+      },
+      startFocus: (id) => this.focus.startWith(id),
+      focusTaskId: () => (this.focus.mode === 'focus' ? this.focus.taskId : null),
+    })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
     this.projectView = new ProjectView($('#projectDetail'), store, {
       toast: (o) => this.toast(o),
@@ -178,10 +190,11 @@ export class UI {
     // 焦點在分頁上時，方向鍵是換分頁（橫的分頁列用左右、側欄用上下），不是換日期
     $('.tabs').addEventListener('keydown', (e) => {
       if (!e.target.closest('.tab')) return
-      const n = TAB_ORDER.length
-      const i = TAB_ORDER.indexOf(this.tab)
+      const tabs = this._tabs()
+      const n = tabs.length
+      const i = tabs.indexOf(this.tab)
       const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
-      const to = step ? TAB_ORDER[(i + step + n) % n] : e.key === 'Home' ? TAB_ORDER[0] : e.key === 'End' ? TAB_ORDER[n - 1] : null
+      const to = step ? tabs[(i + step + n) % n] : e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[n - 1] : null
       if (!to) return
       e.preventDefault()
       e.stopPropagation()
@@ -260,7 +273,7 @@ export class UI {
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
       else if (e.key === 'ArrowRight') $('#nextDay').click()
-      else if (/^[1-6]$/.test(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
+      else if (/^[1-9]$/.test(e.key) && this._tabs()[+e.key - 1]) this.setTab(this._tabs()[+e.key - 1])
     })
   }
 
@@ -346,8 +359,16 @@ export class UI {
     }
   }
 
+  // 現在看得到的分頁（方向鍵、數字鍵照這個順序）
+  _tabs() {
+    return this.appMode ? TAB_ORDER : TAB_ORDER.filter((t) => t !== 'today')
+  }
+
   setTab(tab) {
+    if (tab === 'today' && !this.appMode) tab = 'tasks'
     this.tab = tab
+    // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
+    document.body.dataset.tab = tab
     this._markTabs(tab)
     $$('.tab-page').forEach((p) => p.classList.toggle('active', p.dataset.page === tab))
     const tb = $(`.tab[data-tab="${tab}"]`)
@@ -360,6 +381,7 @@ export class UI {
     if (tab === 'records') this.renderRecords()
     if (tab === 'habits') this.habits.render()
     if (tab === 'coach') this.coach.render()
+    if (tab === 'today') this.today.render()
   }
 
   togglePanel(force) {
@@ -510,6 +532,7 @@ export class UI {
     ready.then(done, done)
   }
   _applyAppMode(on, { save = true, cabin = true } = {}) {
+    const was = !!this.appMode
     this.appMode = on
     document.body.classList.toggle('app-mode', on)
     if (save) writeLocal(LAYOUT_KEY, on ? 'app' : 'island')
@@ -519,6 +542,9 @@ export class UI {
       this.focus.toggleBig(false)
       $('#appChat').hidden = true
     } else if (this.focus.mode !== 'idle') this.focus.toggleBig(true)
+    // 進 App 模式先看今日總覽；回小島時沒有這一頁，換到任務
+    if (on && !was) this.setTab('today')
+    else if (!on && this.tab === 'today') this.setTab('tasks')
     this.renderAppBar()
     this.renderSettings()
     // 有些說明和按鈕依模式不同（「在島上查看」→「切到小島看看」）：開場第一次畫之前不用
@@ -1793,6 +1819,7 @@ export class UI {
     if (this.tab === 'records') this.renderRecords()
     if (this.tab === 'habits') this.habits.render()
     if (this.tab === 'coach') this.coach.refresh()
+    if (this.tab === 'today') this.today.render()
     this.dates?.refresh()
     if (this.calendar.isOpen) this.calendar.render()
   }
@@ -2380,6 +2407,12 @@ class FocusTimer {
       if (!this.task) this.taskId = null
       if (!this.project) this.projectId = null
       this._save()
+    }
+    // 今日總覽的「進行中」算正在專注的那一件：開始、結束或換了一件就重畫
+    const fk = this.mode === 'focus' ? this.taskId : null
+    if (fk !== this._todayKey) {
+      this._todayKey = fk
+      if (this.ui.tab === 'today') this.ui.today?.render()
     }
     const counting = this.counting
     const time = this.mode === 'idle' && this.up ? '00:00' : mmss(counting ? this.elapsed : this.left)

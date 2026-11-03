@@ -938,6 +938,10 @@ body.app-mode .full-btn { width: auto; padding: 0 12px; display: flex; align-ite
 body.app-mode .full-btn svg { width: 19px; height: 19px; }
 body.app-mode .full-label { display: inline; font-size: 13px; letter-spacing: .08em; }
 body.app-mode .full-btn:hover { color: var(--ink); }
+/* 今日總覽只在 App 模式；那一頁自己有日期和標題，上方的頁名和日期列先藏起來 */
+body:not(.app-mode) .tab[data-tab="today"] { display: none; }
+.tab-pre { font-style: normal; }
+body.app-mode[data-tab="today"] :is(.datebar, .app-head) { display: none; }
 @media (min-width: 861px) {
   body.app-mode .panel.full .full-btn { right: 16px; }
   /* 放在上方列右邊的空位，不蓋到分頁列上的「小島」 */
@@ -951,13 +955,14 @@ body.app-mode .full-btn:hover { color: var(--ink); }
   body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: var(--app-bg); backdrop-filter: none; }
   body.app-mode .panel::before { display: none; }
   body.app-mode .panel .tabs {
-    order: 2; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; padding: 5px 2px calc(5px + env(safe-area-inset-bottom));
+    order: 2; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0; padding: 5px 2px calc(5px + env(safe-area-inset-bottom));
     border-bottom: 0; border-top: 1px solid var(--line); background: var(--glass-strong); touch-action: auto;
   }
   body.app-mode .tab { padding: 4px 0 2px; gap: 2px; background: none; box-shadow: none; }
   body.app-mode .tab .tab-ic { display: block; }
   body.app-mode .tab small { display: none; }
   body.app-mode .tab span { font-size: 11px; letter-spacing: .04em; }
+  body.app-mode .tab-pre { display: none; }
   body.app-mode .tab.active { background: none; box-shadow: none; color: var(--ink); }
   body.app-mode .tab.active .tab-ic { color: var(--sakura); }
   body.app-mode .tab.has-dot span::after { top: -26px; right: -6px; }
@@ -1043,6 +1048,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   }
   body.app-mode .datebar { top: 8px; left: auto; right: calc(28px + max(0px, (100vw - var(--side-w) - 1296px) / 2)); transform: none; z-index: 45; box-shadow: none; }
   body.app-mode .panel.full .panel-body { grid-column: 2; grid-row: 2; padding: 4px 28px 112px; }
+  body.app-mode[data-tab="today"] .panel.full .panel-body { grid-row: 1 / 3; padding-top: 20px; }
   /* 番茄鐘浮在內容區下方正中 */
   body.app-mode .dock, body.app-mode .focus-pick, body.app-mode .app-chat { left: calc(50% + var(--side-w) / 2); }
   body.app-mode .app-chat { bottom: 92px; }

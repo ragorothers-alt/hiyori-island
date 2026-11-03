@@ -76,6 +76,8 @@
   <!-- ── 右側：主面板 ── -->
   <aside class="panel glass" id="panel">
     <nav class="tabs" role="tablist">
+      <!-- 今日總覽：只有 App 模式有，也是 App 模式的首頁 -->
+      <button class="tab" data-tab="today" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg></i><span><i class="tab-pre">今日</i>總覽</span><small>まとめ</small></button>
       <button class="tab active" data-tab="tasks" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7.5l2 2 3.2-3.5"/><path d="M5 15.5l2 2 3.2-3.5"/><path d="M13.5 8h6M13.5 16h6"/></svg></i><span>任務</span><small>きょう</small><em class="tab-n" id="tnTasks" hidden></em></button>
       <button class="tab" data-tab="schedule" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg></i><span>日程</span><small>よてい</small></button>
       <button class="tab" data-tab="coach" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8l-4.5 3.5v-3.5H5A1.5 1.5 0 0 1 3.5 15V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg></i><span>教練</span><small>ふじ</small></button>
@@ -88,6 +90,9 @@
     <header class="app-head"><h2 id="ahTitle">任務</h2><small id="ahKana">きょう</small></header>
 
     <div class="panel-body">
+      <!-- 今日總覽（src/ui/today.js） -->
+      <section class="tab-page" data-page="today"><div id="todayRoot"></div></section>
+
       <!-- 任務 -->
       <!-- 每頁分成 pg-side／pg-main：平常上下接著排，全螢幕時變成左右兩欄 -->
       <section class="tab-page active" data-page="tasks">
