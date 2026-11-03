@@ -73,9 +73,22 @@ svg { display: block; }
 .haze { opacity: .7; }
 body.night .haze { opacity: .2; }
 
+/* Liquid Glass：所有的玻璃（小島的面板、等級卡、日期列、Dock、每日任務、彈出的小視窗和提示卡，App 模式的分頁列和側欄）
+   都跟著設定的滑桿走。ui.js applyGlass 依滑桿（0 清透～100 著色）寫 --lg-a（一般）、--lg-a-strong（要讀字的小視窗）、
+   --lg-a-solid（全螢幕面板）的不透明度和 --lg-blur、--lg-sat；預設 50 時跟原本的樣子一樣 */
+body {
+  --lg-a: .52; --lg-a-strong: .82; --lg-a-solid: .94; --lg-blur: 15px; --lg-sat: 180%; --lg-rgb: 255, 255, 255;
+  --lg-bg: rgba(var(--lg-rgb), var(--lg-a)); --lg-bg-strong: rgba(var(--lg-rgb), var(--lg-a-strong)); --lg-bg-solid: rgba(var(--lg-rgb), var(--lg-a-solid));
+  --lg-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+  --lg-shadow: 0 0 0 .5px rgba(70, 60, 110, .12), inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(255, 255, 255, .4), 0 8px 30px rgba(70, 60, 120, .12);
+}
+body.night {
+  --lg-rgb: 34, 44, 82;
+  --lg-shadow: 0 0 0 .5px rgba(255, 255, 255, .12), inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 -1px 0 rgba(255, 255, 255, .05), 0 10px 30px rgba(0, 0, 0, .4);
+}
 .glass {
-  background: var(--glass);
-  backdrop-filter: blur(18px) saturate(150%);
+  background: var(--lg-bg);
+  backdrop-filter: var(--lg-filter);
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow);
   border-radius: var(--radius);
@@ -416,7 +429,7 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .toasts { position: fixed; top: 92px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
 .toast {
   display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 10px; border-radius: 16px; font-size: 13px;
-  background: var(--glass-strong); backdrop-filter: blur(16px); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
+  background: var(--lg-bg-strong); backdrop-filter: var(--lg-filter); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
   animation: toastIn .5s var(--ease) both;
 }
 .toast.out { animation: toastOut .45s var(--ease) forwards; }
@@ -436,7 +449,7 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 body.night .modal { background: rgba(10, 18, 45, .3); }
 @keyframes fadeIn { from { opacity: 0; } }
 /* 卡片有 zoom（字體大小）：zoom 會連 100vw 一起放大，跟畫面寬度有關的長度要先除回去，手機上才不會超出畫面 */
-.modal-card { padding: 28px 40px 24px; text-align: center; min-width: min(300px, calc((100vw - 24px) / var(--ui-zoom, 1))); animation: cardIn .7s var(--ease) both; background: var(--glass-strong); }
+.modal-card { padding: 28px 40px 24px; text-align: center; min-width: min(300px, calc((100vw - 24px) / var(--ui-zoom, 1))); animation: cardIn .7s var(--ease) both; background: var(--lg-bg-strong); }
 @keyframes cardIn { from { opacity: 0; transform: translateY(24px) scale(.92); } }
 .modal-kicker { font-family: var(--font-display); color: var(--sakura); letter-spacing: .4em; font-size: 13px; }
 .modal-lv { font-family: var(--font-num); font-size: 26px; font-weight: 500; color: var(--ink-soft); margin: 6px 0 2px; }
@@ -660,7 +673,7 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .focus-task:hover { color: var(--ink); }
 .focus-task.set { color: #d58a3f; }
 body.night .focus-task.set { color: #ffd38f; }
-.focus-pick { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 41; width: min(340px, calc(100% - 24px)); padding: 12px 12px 8px; background: var(--glass-strong); animation: fadeUp .3s var(--ease); }
+.focus-pick { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 41; width: min(340px, calc(100% - 24px)); padding: 12px 12px 8px; background: var(--lg-bg-strong); animation: fadeUp .3s var(--ease); }
 .focus-pick h4 { margin: 0 4px 8px; font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: .08em; display: flex; gap: 8px; align-items: baseline; }
 .focus-pick h4 small { font-size: 10.5px; color: var(--ink-faint); }
 .focus-pick ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; max-height: 40vh; overflow-y: auto; }
@@ -746,7 +759,7 @@ body.night .fs-time.up::after { color: #ffd38f; }
 body.night .coins b { color: #ffb8cb; }
 .coin-pill { font-family: var(--font-num); font-weight: 600; padding: 3px 10px; border-radius: 10px; background: rgba(247, 168, 192, .16); }
 .shop { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%); z-index: 40; width: min(620px, calc(100% - 24px)); animation: fadeUp .35s var(--ease); }
-.shop-card { padding: 14px 16px 10px; background: var(--glass-strong); max-height: min(70vh, 560px); display: flex; flex-direction: column; }
+.shop-card { padding: 14px 16px 10px; background: var(--lg-bg-strong); max-height: min(70vh, 560px); display: flex; flex-direction: column; }
 .shop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .shop-head h3 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 17px; letter-spacing: .12em; flex: 1; display: flex; align-items: baseline; gap: 8px; }
 .shop-head h3 small { font-size: 11px; color: var(--ink-faint); letter-spacing: .14em; }
@@ -861,7 +874,7 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 /* 撐滿畫面後背後的島會透出一片色塊，改用幾乎不透的底，文字才讀得清楚 */
 .panel.full {
   top: 84px; bottom: 84px; left: 20px; right: 20px; width: auto; z-index: 44; animation: panelFull .4s var(--ease);
-  background: var(--glass-solid); backdrop-filter: blur(28px) saturate(120%);
+  background: var(--lg-bg-solid); backdrop-filter: var(--lg-filter);
 }
 @keyframes panelFull { from { opacity: .5; transform: scale(.985); } }
 .panel.full .panel-body { padding: 20px 28px 32px; }
@@ -925,10 +938,29 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 .tab-ic { display: none; }
 .tab-ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
 .full-label { display: none; }
-body.app-mode { background: var(--app-bg); }
+/* App 模式的底：淡淡的粉、藍、紫光暈（像 iOS 的桌布）。玻璃的側欄和分頁列後面要有東西，調 Liquid Glass 才看得出差別 */
+body.app-mode {
+  --app-wall:
+    radial-gradient(70vmax 60vmax at -10% -10%, rgba(247, 182, 204, .55), transparent 62%),
+    radial-gradient(60vmax 55vmax at -5% 108%, rgba(150, 196, 240, .5), transparent 60%),
+    radial-gradient(55vmax 50vmax at 108% -5%, rgba(196, 178, 240, .42), transparent 60%),
+    radial-gradient(60vmax 50vmax at 104% 104%, rgba(255, 214, 190, .38), transparent 60%),
+    var(--app-bg);
+  background: var(--app-wall);
+}
+body.app-mode.night {
+  --app-wall:
+    radial-gradient(70vmax 60vmax at -10% -10%, rgba(214, 96, 140, .26), transparent 62%),
+    radial-gradient(60vmax 55vmax at -5% 108%, rgba(70, 110, 210, .3), transparent 60%),
+    radial-gradient(55vmax 50vmax at 108% -5%, rgba(130, 90, 210, .26), transparent 60%),
+    radial-gradient(60vmax 50vmax at 104% 104%, rgba(60, 140, 180, .18), transparent 60%),
+    var(--app-bg);
+}
 body.app-mode #scene { visibility: hidden; }
+/* App 模式的底是透明的（後面是桌布）：小島上的名牌和光暈也要藏起來，不然會從卡片之間透出來 */
+body.app-mode :is(#labels, .haze) { display: none; }
 body.app-mode :is(.hud, .quests, .brand) { display: none; }
-body.app-mode .app-bar { display: flex; align-items: center; position: fixed; top: 0; left: 0; right: 0; height: 76px; padding: 0 28px; z-index: 9; background: var(--app-bg); }
+body.app-mode .app-bar { display: flex; align-items: center; position: fixed; top: 0; left: 0; right: 0; height: 76px; padding: 0 28px; z-index: 9; background: transparent; }
 .ab-hi b { display: block; font-family: var(--font-display); font-weight: 400; font-size: 24px; letter-spacing: .14em; line-height: 1.2; }
 .ab-hi small { font-size: 11.5px; color: var(--ink-faint); letter-spacing: .04em; }
 body.app-mode .datebar { top: 12px; }
@@ -946,20 +978,11 @@ body.app-mode .full-btn:hover { color: var(--ink); }
 body.app-mode[data-tab="today"] :is(.datebar, .app-head) { display: none; }
 /* App 模式的分頁列和側欄照 iOS 27 的 Liquid Glass（Apple iOS 27 UI Kit 的 Tab Bar／Sidebar）：
    浮起來的毛玻璃、0.5px 的亮邊；選到的那一格墊一塊灰色膠囊，主色用櫻花粉代替 iOS 的藍 */
-/* 透明度跟著設定的 Liquid Glass 滑桿（--lg-t：0 清透～1 著色，ui.js applyGlass）：越清透底色越淡、模糊越少、顏色越飽和 */
-body.app-mode {
-  --lg-t: .5;
-  --lg-bg: rgba(255, 255, 255, calc(.14 + var(--lg-t) * .8));
-  --lg-filter: blur(calc(4px + var(--lg-t) * 24px)) saturate(calc(220% - var(--lg-t) * 80%));
-  --lg-sel: rgba(118, 118, 128, .14); --lg-hover: rgba(118, 118, 128, .08); --tint: #d6587c;
-  --lg-shadow: 0 0 0 .5px rgba(70, 60, 110, .12), inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(255, 255, 255, .4), 0 8px 30px rgba(70, 60, 120, .12);
-}
+/* 玻璃的透明度跟著設定的 Liquid Glass 滑桿（--lg-bg、--lg-filter 定義在最上面的 body） */
+body.app-mode { --lg-sel: rgba(118, 118, 128, .14); --lg-hover: rgba(118, 118, 128, .08); --tint: #d6587c; }
 /* 浮在內容上的番茄鐘膠囊也是同一種玻璃（寬螢幕收進側欄時另外設） */
 body.app-mode .dock { border: 0; background: var(--lg-bg); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-shadow); }
-body.app-mode.night {
-  --lg-bg: rgba(46, 43, 72, calc(.18 + var(--lg-t) * .76)); --lg-sel: rgba(150, 150, 175, .22); --lg-hover: rgba(150, 150, 175, .12); --tint: #ffa3bd;
-  --lg-shadow: 0 0 0 .5px rgba(255, 255, 255, .12), inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 -1px 0 rgba(255, 255, 255, .05), 0 10px 30px rgba(0, 0, 0, .4);
-}
+body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); --lg-hover: rgba(150, 150, 175, .12); --tint: #ffa3bd; }
 @media (min-width: 861px) {
   body.app-mode .panel.full .full-btn { right: 16px; }
   /* 放在上方列右邊的空位，不蓋到分頁列上的「小島」 */
@@ -970,7 +993,7 @@ body.app-mode.night {
   body.app-mode .ab-hi b { font-size: 19px; }
   body.app-mode .ab-hi small { font-size: 10.5px; }
   body.app-mode .datebar { top: 8px; }
-  body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: var(--app-bg); backdrop-filter: none; }
+  body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: transparent; backdrop-filter: none; }
   body.app-mode .panel::before { display: none; }
   /* 分頁列：iOS 27 的浮動玻璃膠囊（高 62、每格 54、選到的墊灰色膠囊），離畫面邊緣一點，內容從底下捲過去 */
   body.app-mode .panel .tabs {
@@ -1004,7 +1027,7 @@ body.app-mode.night {
 }
 
 /* App 模式：兩人說的話 */
-.app-chat { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); z-index: 46; display: flex; align-items: center; gap: 9px; max-width: min(460px, calc(100vw - 24px)); padding: 8px 14px 8px 8px; border-radius: 20px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow); pointer-events: none; }
+.app-chat { position: fixed; left: 50%; bottom: 100px; transform: translateX(-50%); z-index: 46; display: flex; align-items: center; gap: 9px; max-width: min(460px, calc(100vw - 24px)); padding: 8px 14px 8px 8px; border-radius: 20px; background: var(--lg-bg-strong); backdrop-filter: var(--lg-filter); border: 1px solid var(--glass-border); box-shadow: var(--shadow); pointer-events: none; }
 .app-chat.show { animation: fadeUp .35s var(--ease); }
 .app-chat .stamp-k { width: 30px; height: 30px; flex: none; font-size: 14px; }
 .app-chat .mochi-k { color: #d65f7f; border-color: #e8899f; }
@@ -1043,7 +1066,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   body.app-mode { --side-w: 92px; }
   body.app-mode .app-bar { display: none; }
   body.app-mode .panel.full {
-    inset: 0; width: auto; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; background: var(--app-bg);
+    inset: 0; width: auto; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; background: transparent;
     display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: 72px minmax(0, 1fr);
   }
   /* 側欄：iPadOS 27 浮在畫面上的玻璃面板（離邊緣 10px、大圓角）；窄的時候只有圖示，一格一格是膠囊 */
@@ -1156,8 +1179,9 @@ body.app-mode :is(#taskList, .overdue .list) > .item.starred:not(.done) { box-sh
 /* 區塊標題大一點（iOS 的 prominent header） */
 body.app-mode .sec-title { font-size: 17px; margin: 22px 4px 10px; }
 
-/* 設定的 Liquid Glass：上面是預覽（富士山的圖上疊一排玻璃按鈕，字壓在玻璃後面），下面是 iOS 的滑桿；只有 App 模式有 */
-body:not(.app-mode) #glassRow { display: none; }
+/* 拖 Liquid Glass 滑桿時玻璃要馬上跟著變：先關掉轉場（平常的 .8s 是給白天夜晚切換用的） */
+body.glass-adjusting, body.glass-adjusting * { transition: none !important; }
+/* 設定的 Liquid Glass：上面是預覽（富士山的圖上疊一排玻璃按鈕，字壓在玻璃後面），下面是 iOS 的滑桿 */
 .glass-row { flex-wrap: wrap; }
 .glass-row > div:first-child { flex: 1 1 100%; }
 .glass-prev {

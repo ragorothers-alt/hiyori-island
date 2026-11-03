@@ -902,13 +902,19 @@ export class UI {
   }
 
   // ── 字體大小、這一版的新功能 ──
-  // Liquid Glass 的透明度（0 清透～100 著色）：App 模式的分頁列、側欄和番茄鐘用 --lg-t 算出底色和模糊（styles.css）。
-  // 正在拖滑桿時照滑桿的值，不被重畫拉回存檔的值
+  // Liquid Glass 的透明度（0 清透～100 著色）：所有玻璃的底色不透明度、模糊、飽和度都從這裡來（styles.css 的 --lg-*）。
+  // 越清透底色越淡、模糊越少、顏色越鮮；50 時跟原本的樣子一樣。正在拖滑桿時照滑桿的值，不被重畫拉回存檔的值
   applyGlass(v = this.store.state.settings.glass) {
     const r = $('#glassRange')
     if (document.activeElement === r) v = +r.value
     else r.value = v
-    document.body.style.setProperty('--lg-t', v / 100)
+    const t = v / 100
+    const st = document.body.style
+    st.setProperty('--lg-a', (0.14 + t * 0.8).toFixed(3))
+    st.setProperty('--lg-a-strong', Math.min(0.96, 0.4 + t * 0.84).toFixed(3))
+    st.setProperty('--lg-a-solid', Math.min(0.97, 0.62 + t * 0.64).toFixed(3))
+    st.setProperty('--lg-blur', `${(4 + t * 22).toFixed(1)}px`)
+    st.setProperty('--lg-sat', `${Math.round(220 - t * 80)}%`)
     r.style.setProperty('--p', `${v}%`)
   }
 
@@ -1660,9 +1666,15 @@ export class UI {
       this.applyFontScale()
       this.renderSettings()
     })
-    // 拖的時候只換畫面，放開（或用方向鍵調）才存
-    $('#glassRange').addEventListener('input', (e) => this.applyGlass(+e.target.value))
-    $('#glassRange').addEventListener('change', (e) => this.store.setSetting('glass', +e.target.value))
+    // 拖的時候只換畫面（轉場先關掉，玻璃才會馬上跟著變），放開（或用方向鍵調）才存
+    $('#glassRange').addEventListener('input', (e) => {
+      document.body.classList.add('glass-adjusting')
+      this.applyGlass(+e.target.value)
+    })
+    $('#glassRange').addEventListener('change', (e) => {
+      this.store.setSetting('glass', +e.target.value)
+      requestAnimationFrame(() => document.body.classList.remove('glass-adjusting'))
+    })
     $('#stuckBtn').onclick = () => {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()
