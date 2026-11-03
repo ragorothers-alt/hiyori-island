@@ -18,7 +18,7 @@ import { LifeView } from './ui/life.js'
 import { CalendarView } from './ui/calendar.js'
 import { CoachView } from './ui/coach.js'
 import { ProjectView } from './ui/project.js'
-import { latestLog, msProgress, projectStats } from './projects.js'
+import { latestLog, msProgress, msSteps, msTasks, projectStats } from './projects.js'
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
@@ -1185,14 +1185,17 @@ export class UI {
     const pct = Math.round(prog * 100)
     const c = PROJECT_COLORS[p.color % PROJECT_COLORS.length]
     const doneN = p.milestones.filter((m) => m.done).length
+    // 每個里程碑底下的任務：完成的任務和細項一樣推進里程碑
+    const by = msTasks(p, s.state.tasks)
     const ms = p.milestones
-      .map(
-        (m) => `<li class="ms ${m.done ? 'done' : ''}" data-mid="${esc(m.id)}">
+      .map((m) => {
+        const n = msSteps(m, by.get(m.id))
+        return `<li class="ms ${m.done ? 'done' : ''}" data-mid="${esc(m.id)}">
           <button class="check" data-act="ms-toggle" aria-label="完成" style="--c:${c}">${ICON.check}</button>
-          <span>${esc(m.title)}</span>${m.steps.length && !m.done ? `<small class="ms-n">${m.steps.filter((x) => x.done).length}/${m.steps.length}</small>` : ''}
+          <span>${esc(m.title)}</span>${n.total && !m.done ? `<small class="ms-n" title="細項和歸在這裡的任務做了幾件">${n.done}/${n.total}</small>` : ''}
           <button class="mini" data-act="ms-delete" title="刪除">${ICON.del}</button>
-        </li>`,
-      )
+        </li>`
+      })
       .join('')
     const paused = !archived && !!p.pausedAt
     const tags = paused ? '<span class="paused">暫停中</span>' : ''
@@ -1203,7 +1206,7 @@ export class UI {
     const sum = last || nums
       ? `<div class="proj-sum">${last ? `<span class="ps-last">${esc(last.text || `投入 ${fmtHours(last.mins)}`)}<small>${relDay(last.date, s.today)}</small></span>` : ''}${nums ? `<span class="ps-n">${nums}</span>` : ''}</div>`
       : ''
-    const bar = p.milestones.map((m) => `<i style="--f:${msProgress(m).toFixed(3)}"></i>`).join('') || '<i style="--f:0"></i>'
+    const bar = p.milestones.map((m) => `<i style="--f:${msProgress(m, by.get(m.id)).toFixed(3)}"></i>`).join('') || '<i style="--f:0"></i>'
     return `<div class="proj ${paused ? 'is-paused' : ''} ${this.hlKey === 'project:' + p.id ? 'hl' : ''}" data-id="${esc(p.id)}" style="--c:${c}">
       <div class="proj-head"><div class="proj-name">${esc(p.name)}</div><div class="proj-pct">${pct}%</div></div>
       <div class="proj-meta">${tags}${paused ? '' : this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>

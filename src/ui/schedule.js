@@ -3,6 +3,7 @@ import { $, esc, ICON, armConfirm, WEEK_ZH } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
 import { addDays, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
+import { taskMilestone } from '../projects.js'
 
 // 日程分頁：週條、早晨的睡眠小卡、排程列、還沒排時段的任務、可拖曳的一日時間軸、作息設定與編輯面板
 
@@ -334,13 +335,25 @@ export class ScheduleView {
     if (ed.create) title.focus()
   }
 
-  // 任務歸在哪個專案（收藏起來的專案不列，除非這件本來就歸在那裡）
+  // 任務歸在哪個專案、算在哪個里程碑（收藏起來的專案不列，除非這件本來就歸在那裡）
   _projectPick(item) {
     const list = this.store.state.projects.filter((p) => !p.archived || p.id === item.project)
     if (!list.length) return ''
+    const ms = this._msOptions(item, item.project)
     return `<label class="ec-proj">專案<select name="project"><option value="">不歸任何專案</option>${list
       .map((p) => `<option value="${esc(p.id)}" ${p.id === item.project ? 'selected' : ''}>${esc(p.name)}</option>`)
-      .join('')}</select></label>`
+      .join('')}</select></label>
+      <label class="ec-proj ec-ms" ${ms ? '' : 'hidden'}>里程碑<select name="ms">${ms}</select></label>`
+  }
+  // 里程碑的選項：「自動」後面寫出現在會算在哪一個；那個專案沒有里程碑就是空字串
+  _msOptions(item, pid) {
+    const p = pid ? this.store.state.projects.find((x) => x.id === pid) : null
+    if (!p?.milestones.length) return ''
+    const auto = taskMilestone(p, { ...item, ms: null })
+    const sel = pid === item.project ? item.ms : null
+    return `<option value="">自動${auto ? `（${esc(auto.title)}）` : ''}</option>${p.milestones
+      .map((m) => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''}>${m.done ? '✓ ' : ''}${esc(m.title)}</option>`)
+      .join('')}`
   }
 
   _saveSheet(form) {
@@ -361,7 +374,8 @@ export class ScheduleView {
     } else {
       const at = form.at.value || null
       const proj = form.elements.project
-      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...(proj ? { project: proj.value || null } : {}) })
+      const ms = proj ? { project: proj.value || null, ms: form.elements.ms?.value || null } : {}
+      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...ms })
     }
     this.closeEdit()
   }
@@ -522,6 +536,16 @@ export class ScheduleView {
     sheet.addEventListener('submit', (e) => {
       e.preventDefault()
       this._saveSheet(e.target)
+    })
+    // 換專案：里程碑的選項跟著換成那個專案的
+    sheet.addEventListener('change', (e) => {
+      if (e.target.name !== 'project' || this.editing?.type !== 'task') return
+      const item = s.state.tasks.find((t) => t.id === this.editing.id)
+      const box = sheet.querySelector('.ec-ms')
+      if (!item || !box) return
+      const ms = this._msOptions(item, e.target.value)
+      box.querySelector('select').innerHTML = ms
+      box.hidden = !ms
     })
     sheet.addEventListener('click', (e) => {
       if (e.target === sheet) return this.closeEdit()

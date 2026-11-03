@@ -3,7 +3,7 @@ import { $, $$, esc, ICON, armConfirm, inlineEdit, patch, dateLabel } from './do
 import { PROJECT_COLORS, tagOf } from '../theme.js'
 import { addDays, daysBetween, parseDate } from '../store.js'
 import {
-  projectTimeline, projectStats, activity, msProgress, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
+  projectTimeline, projectStats, activity, msProgress, msSteps, msTasks, taskMilestone, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
   projectMarkdown, NOTE_TEMPLATES, dayOf, PROJECT_LIMITS as PL,
 } from '../projects.js'
 import { aiReady, askAI } from '../ai.js'
@@ -32,6 +32,11 @@ function ago(date, today) {
   if (d === 1) return '昨天'
   if (d < 7) return `${d} 天前`
   return md(date)
+}
+// 任務的日期：做完的寫什麼時候完成，還沒做的寫哪天（過了就標逾期）
+function taskWhen(t, today) {
+  if (t.done) return t.doneAt ? `${ago(dayOf(t.doneAt), today)}完成` : md(t.date)
+  return t.date === today ? '今天' : t.date < today ? `逾期・${md(t.date)}` : md(t.date)
 }
 function dayTitle(date, today) {
   const d = daysBetween(date, today)
@@ -246,7 +251,8 @@ export class ProjectView {
           <button class="btn-primary" type="submit">好</button>${p.deadline ? '<button type="button" class="btn-ghost" data-act="dl-clear">不設截止</button>' : ''}
           <button type="button" class="btn-ghost" data-act="dl-cancel">取消</button></form>`
       : ''
-    const bar = p.milestones.length ? p.milestones.map((m) => `<i style="--f:${msProgress(m).toFixed(3)}"></i>`).join('') : '<i style="--f:0"></i>'
+    const by = msTasks(p, s.state.tasks)
+    const bar = p.milestones.length ? p.milestones.map((m) => `<i style="--f:${msProgress(m, by.get(m.id)).toFixed(3)}"></i>`).join('') : '<i style="--f:0"></i>'
     return `<div class="pd-title"><h2 class="pd-name">${esc(p.name)}</h2><div class="pd-pct">${pct}<small>%</small></div></div>
       <div class="pd-meta">${meta.join('')}</div>${dl}
       <div class="proj-bar" aria-hidden="true">${bar}</div>`
@@ -398,16 +404,21 @@ export class ProjectView {
   _msHTML(p, today) {
     const c = colorOf(p)
     const doneN = p.milestones.filter((m) => m.done).length
+    const by = msTasks(p, this.store.state.tasks)
     const rows = p.milestones.map((m, i) => {
       const k = esc(m.id)
       const open = this.openMs.has(m.id)
       const sd = m.steps.filter((x) => x.done).length
+      // 細項和歸在這裡的任務一起算：做完一件，里程碑就推進一點
+      const mt = by.get(m.id)
+      const n = msSteps(m, mt)
+      const nTip = [m.steps.length && `細項 ${sd}/${m.steps.length}`, mt.length && `任務 ${n.done - sd}/${mt.length}`].filter(Boolean).join('・')
       const late = m.due && !m.done && m.due < today
       // 今天、明天到期的也標出來（前一天和當天會提醒）
       const near = m.due && !m.done && !late && daysBetween(today, m.due) <= 1
       const dueText = near ? (m.due === today ? '今天到期' : '明天到期') : `${late ? '逾期・' : ''}${md(m.due)}`
       const tags = [
-        m.steps.length ? `<small class="pm-n">${sd}/${m.steps.length}</small>` : '',
+        n.total ? `<small class="pm-n" title="${nTip}">${n.done}/${n.total}</small>` : '',
         m.due ? `<small class="pm-due ${late || near ? 'late' : ''}" title="期限 ${m.due}">${dueText}</small>` : '',
         m.note ? '<small class="pm-has">註</small>' : '',
       ].join('')
@@ -420,6 +431,7 @@ export class ProjectView {
           ${steps ? `<ul class="pm-steps">${steps}</ul>` : ''}
           <form class="pm-add" data-form="step" data-id="${k}"><input data-keep="step-${k}" maxlength="80" placeholder="${m.steps.length ? '再加一個細項' : '拆成細項：做完一步勾一步'}" aria-label="新增細項"><button class="mini" type="submit" title="新增細項">${ICON.plus}</button></form>
           ${this._aiStepsHTML(m)}
+          ${this._msTasksHTML(mt, today)}
           <label class="pm-note"><span class="pc-k">備註</span><textarea data-keep="msnote-${k}" data-msnote="${k}" data-grow rows="1" maxlength="500" placeholder="完成的標準、要注意的事…">${esc(m.note)}</textarea></label>
           <div class="pm-tools">
             <label class="pc-sel"><span class="pc-k">期限</span><input type="date" data-msdue="${k}" value="${m.due}" aria-label="「${esc(m.title)}」的期限"></label>
@@ -430,7 +442,7 @@ export class ProjectView {
             <button type="button" data-act="ms-del" data-id="${k}">刪除</button>
           </div></div>`
         : ''
-      const bar = !m.done && m.steps.length && !open ? `<div class="pm-bar"><i style="width:${Math.round((sd / m.steps.length) * 100)}%"></i></div>` : ''
+      const bar = !m.done && n.total && !open ? `<div class="pm-bar"><i style="width:${Math.round((n.done / n.total) * 100)}%"></i></div>` : ''
       return `<li class="pm ${m.done ? 'done' : ''} ${open ? 'open' : ''}">
         <div class="pm-row">
           <button type="button" class="check" data-act="ms-toggle" data-id="${k}" aria-label="${m.done ? '取消完成' : '完成'}「${esc(m.title)}」" style="--c:${c}">${ICON.check}</button>
@@ -442,15 +454,30 @@ export class ProjectView {
       <form class="ms-add" data-form="ms"><input data-keep="ms-new" maxlength="60" placeholder="新增里程碑" aria-label="新增里程碑"><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`
   }
 
+  // 展開的里程碑裡：歸在這裡的任務（還沒做的照日期，做完的新的在前），在這裡也能直接打勾
+  _msTasksHTML(list, today) {
+    if (!list.length) return ''
+    const todo = list.filter((t) => !t.done).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
+    const done = list.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
+    const row = (t) => {
+      const k = esc(t.id)
+      return `<li class="${t.done ? 'done' : ''}">
+        <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
+        <span class="pm-st pm-tk"><span>${esc(t.title)}</span><small>${taskWhen(t, today)}</small></span>
+        <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯（也可以換到別的里程碑）">${ICON.edit}</button></li>`
+    }
+    return `<div class="pm-tasks"><span class="pc-k">任務</span><ul class="pm-steps">${[...todo, ...done].map(row).join('')}</ul></div>`
+  }
+
   _tasksHTML(p, today) {
     const { todo, done } = this.store.projectTasks(p.id)
     const row = (t) => {
       const k = esc(t.id)
       const late = !t.done && t.date < today
-      const when = t.done ? (t.doneAt ? `${ago(dayOf(t.doneAt), today)}完成` : md(t.date)) : t.date === today ? '今天' : late ? `逾期・${md(t.date)}` : md(t.date)
+      const m = taskMilestone(p, t)
       return `<li class="pt ${t.done ? 'done' : ''}">
         <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
-        <span class="pt-main"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${when}${t.pomos ? `・◷ ${t.pomos}` : ''}</small></span>
+        <span class="pt-main"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></span>
         ${!t.done && t.date === today ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯日期、時間和優先度">${ICON.edit}</button>
         <button type="button" class="mini" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在）">${ICON.minus}</button>
@@ -464,7 +491,7 @@ export class ProjectView {
         <button class="mini" type="submit" title="新增">${ICON.plus}</button></form>
       ${todo.length ? `<ul class="pt-list">${todo.map(row).join('')}</ul>` : ''}
       ${done.length ? `<details class="pt-done" ${this.doneOpen ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
-      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。專注在這些任務上的時間會記進這個專案。</p>`}`
+      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。做完的任務會推進里程碑，專注在這些任務上的時間會記進這個專案。</p>`}`
   }
 
   // ── ふじ（Claude）──
@@ -541,6 +568,7 @@ export class ProjectView {
     this.render()
     const { todo, done } = s.projectTasks(p.id)
     const st = projectStats(p, s.state.tasks)
+    const by = msTasks(p, s.state.tasks)
     const msTitle = (id) => p.milestones.find((m) => m.id === id)?.title
     const data = {
       today: s.today,
@@ -551,7 +579,8 @@ export class ProjectView {
       status: p.archived ? 'archived' : s.projectStatus(p),
       milestones: p.milestones.map((m) => ({
         title: m.title, done: m.done, doneOn: m.doneAt ? dayOf(m.doneAt) : null, due: m.due || null,
-        steps: m.steps.length ? `${m.steps.filter((x) => x.done).length}/${m.steps.length}` : null, note: m.note.slice(0, 200),
+        steps: m.steps.length ? `${m.steps.filter((x) => x.done).length}/${m.steps.length}` : null,
+        tasks: by.get(m.id).length ? `${by.get(m.id).filter((t) => t.done).length}/${by.get(m.id).length}` : null, note: m.note.slice(0, 200),
       })),
       logs: [...p.logs].sort((x, y) => y.at - x.at).slice(0, 15).map((l) => ({ date: l.date, text: l.text.slice(0, 400), mins: l.mins, milestone: (l.ms && msTitle(l.ms)) || null })),
       notes: [...p.notes].sort((x, y) => !!y.pinned - !!x.pinned || y.updatedAt - x.updatedAt).slice(0, 3).map((n) => ({ title: noteTitle(n), body: n.body.slice(0, 600) })),

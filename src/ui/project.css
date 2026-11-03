@@ -185,6 +185,11 @@ body.night .tl-mins { filter: none; }
 .pm-steps li.done .pm-st { color: var(--ink-faint); text-decoration: line-through; }
 .pm-steps .mini { width: 22px; height: 22px; opacity: 0; }
 .pm-steps li:hover .mini, .pm-steps li:focus-within .mini { opacity: 1; }
+.pm-tasks { display: flex; flex-direction: column; gap: 3px; }
+.pm-tk { cursor: default; display: flex; flex-direction: column; }
+.pm-tk small { font-size: 10.5px; color: var(--ink-faint); }
+.pm-steps li.done .pm-tk { text-decoration: none; }
+.pm-steps li.done .pm-tk > span { text-decoration: line-through; }
 .pm-add, .pt-add { display: flex; gap: 6px; }
 .pm-add input, .pt-add input { flex: 1; min-width: 0; border: 0; outline: 0; background: rgba(140, 170, 200, .12); border-radius: 10px; padding: 5px 9px; font-size: 12.5px; }
 .pt-add input[type=date] { flex: none; width: auto; }
@@ -209,6 +214,8 @@ body.night .tl-mins { filter: none; }
 .pt.done .pt-t { color: var(--ink-faint); text-decoration: line-through; }
 .pt-main small { font-size: 10.5px; color: var(--ink-soft); }
 .pt-main small.late { color: #d9718e; }
+.pt-ms { margin-left: 6px; color: var(--ink-faint); }
+.pt-ms::before { content: "▸ "; }
 .pt-star { font-style: normal; color: var(--gold); margin-right: 3px; }
 .pt .mini { width: 24px; height: 24px; opacity: 0; }
 .pt:hover .mini, .pt:focus-within .mini { opacity: 1; }

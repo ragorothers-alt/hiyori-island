@@ -309,8 +309,9 @@ function migrate(s) {
       // coach：ふじ排的（那次排程的 id，撤銷用）；moved：被往後挪了幾次（卡關提醒用）
       coach: ID_RE.test(t.coach) ? t.coach : null,
       moved: num(t.moved, 0, 99, 0),
-      // project：歸在哪個專案（下面清完專案後，對不上的拿掉）
+      // project：歸在哪個專案；ms：自己選的里程碑，null＝自動（下面清完專案後，對不上的拿掉）
       project: ID_RE.test(t.project) ? t.project : null,
+      ms: ID_RE.test(t.ms) ? t.ms : null,
     }
   })
   const events = cleanList(s.events, (e) => {
@@ -390,9 +391,13 @@ function migrate(s) {
       mine: !!p.mine,
     }
   })
-  // 任務歸屬的專案已經不在了（被刪掉、或匯入的檔案對不上）：拿掉歸屬，任務照留
-  const pids = new Set(projects.map((p) => p.id))
-  for (const t of tasks) if (t.project && !pids.has(t.project)) t.project = null
+  // 任務歸屬的專案已經不在了（被刪掉、或匯入的檔案對不上）：拿掉歸屬，任務照留；
+  // 選的里程碑不在那個專案裡：改回自動
+  const msOf = new Map(projects.map((p) => [p.id, new Set(p.milestones.map((m) => m.id))]))
+  for (const t of tasks) {
+    if (t.project && !msOf.has(t.project)) t.project = null
+    if (t.ms && !msOf.get(t.project)?.has(t.ms)) t.ms = null
+  }
   // 重新分配塔位：重複的換到空地，空地不夠就先不上島；進行中的專案超過上限的改為收藏
   const used = new Set()
   let active = 0
@@ -764,9 +769,9 @@ export class Store {
       .filter((x) => x.days >= 0 && x.days <= 2)
       .sort((a, b) => a.days - b.days)
   }
-  // 里程碑完成的比例；還沒完成的里程碑，細項做了幾成也算進去（房子跟著多蓋一點）
+  // 里程碑完成的比例；還沒完成的里程碑，細項和歸在底下的任務做了幾成也算進去（房子跟著多蓋一點）
   progress(p) {
-    return projectProgress(p)
+    return projectProgress(p, this.state.tasks)
   }
   get bond() {
     return bondLevel(this.state.player.bond.pts)
@@ -1250,11 +1255,12 @@ export class Store {
   }
 
   // ── 任務 ──
-  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null }) {
+  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null }) {
+    const p = project ? this._find('projects', project) : null
     const t = {
       id: uid(), title: title.trim(), date, priority, tag, done: false, rewarded: false, createdAt: Date.now(),
       dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: TIME_RE.test(at) ? at : null,
-      project: project && this._find('projects', project) ? project : null,
+      project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null,
     }
     if (!t.title) return null
     this.state.tasks.push(t)
@@ -1375,6 +1381,12 @@ export class Store {
     if (patch.date && DATE_RE.test(t.date) && patch.date > t.date && !t.done) t.moved = (t.moved || 0) + 1
     // 歸到的專案要真的存在；null／空字串＝不歸任何專案
     if ('project' in patch && !(patch.project && this._find('projects', patch.project))) patch = { ...patch, project: null }
+    // 換了專案，里程碑就改回自動；選的里程碑要在（換過之後的）那個專案裡，null＝自動
+    const pid = 'project' in patch ? patch.project : t.project
+    if ('ms' in patch || pid !== t.project) {
+      const ms = 'ms' in patch ? patch.ms : null
+      patch = { ...patch, ms: this._find('projects', pid)?.milestones.some((m) => m.id === ms) ? ms : null }
+    }
     Object.assign(t, patch)
     this._finish()
   }
@@ -1422,6 +1434,7 @@ export class Store {
       const p = {
         id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: !!t.rewarded, createdAt: Date.now() + i,
         dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0, pomos: i === 0 ? t.pomos || 0 : 0,
+        project: t.project || null, ms: t.ms || null,
       }
       fx.push(['taskAdded', p])
       return p
@@ -1856,7 +1869,7 @@ export class Store {
   // 刪掉專案時，歸在它底下的任務留著，只是不再歸屬
   deleteProject(id) {
     this.state.projects = this.state.projects.filter((p) => p.id !== id)
-    for (const t of this.state.tasks) if (t.project === id) t.project = null
+    for (const t of this.state.tasks) if (t.project === id) t.project = t.ms = null
     this._fillSlots()
     this._finish()
   }
@@ -1881,8 +1894,9 @@ export class Store {
     const p = this._find('projects', pid)
     if (!p) return
     p.milestones = p.milestones.filter((m) => m.id !== mid)
-    // 進度日誌裡標著這個里程碑的，留著字、拿掉標記
+    // 進度日誌裡標著這個里程碑的，留著字、拿掉標記；選了它的任務改回自動
     for (const l of p.logs) if (l.ms === mid) l.ms = null
+    for (const t of this.state.tasks) if (t.ms === mid) t.ms = null
     const fx = []
     this._completeProject(p, fx)
     this._finish(fx)
@@ -2328,7 +2342,7 @@ export class Store {
     this.state.projects = drop(this.state.projects, x.projects)
     // 自己加的任務歸在被清掉的範例專案：任務留著，只拿掉歸屬
     const gone = new Set(x.projects.map((p) => p.id))
-    for (const t of this.state.tasks) if (gone.has(t.project)) t.project = null
+    for (const t of this.state.tasks) if (gone.has(t.project)) t.project = t.ms = null
     const n = x.tasks.length + x.events.length + x.projects.length
     if (n) this._finish()
     return n

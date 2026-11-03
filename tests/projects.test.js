@@ -4,8 +4,8 @@ import { Store, addDays } from '../src/store.js'
 import { parseQuick, describeQuick } from '../src/parse.js'
 import { XP } from '../src/theme.js'
 import {
-  activity, msProgress, noteHTML, noteSnippet, noteTitle, noteTodos, projectMarkdown, projectProgress, projectStats, projectTimeline,
-  textHTML, toggleNoteLine, latestLog,
+  activity, msProgress, msSteps, msTasks, noteHTML, noteSnippet, noteTitle, noteTodos, projectMarkdown, projectProgress, projectStats, projectTimeline,
+  taskMilestone, textHTML, toggleNoteLine, latestLog,
 } from '../src/projects.js'
 
 const TODAY = '2026-11-02'
@@ -211,6 +211,96 @@ describe('任務歸在專案', () => {
     expect(store.state.tasks.find((x) => x.id === t.id)).toMatchObject({ title: '畫流程圖', project: null })
   })
 
+  it('完成的任務推進里程碑：沒選的算下一個還沒完成的里程碑，和細項一樣各算一步', () => {
+    const p = newProject(['一', '二'])
+    const a = p.milestones[0]
+    const t1 = store.addTask({ title: '查資料', project: p.id, date: TODAY })
+    expect(t1.ms).toBeNull()
+    expect(taskMilestone(p, t1)).toBe(a)
+    expect(store.progress(p)).toBe(0)
+    vi.advanceTimersByTime(60000)
+    store.toggleTask(t1.id)
+    // 一：1 件任務做完，加上里程碑本身的勾 → 1/2；二：0
+    expect(msProgress(a, msTasks(p, store.state.tasks).get(a.id))).toBe(0.5)
+    expect(store.progress(p)).toBe(0.25)
+    // 細項和任務一起算：兩個細項做完一個、再一件還沒做的任務 → 做完 2／共 4 步，加上里程碑的勾是 2/5
+    const s1 = store.addStep(p.id, a.id, '列大綱')
+    store.addStep(p.id, a.id, '找參考')
+    store.toggleStep(p.id, a.id, s1.id)
+    const t2 = store.addTask({ title: '寫初稿', project: p.id, date: TODAY })
+    expect(msSteps(a, msTasks(p, store.state.tasks).get(a.id))).toEqual({ done: 2, total: 4 })
+    expect(store.progress(p)).toBeCloseTo(0.2)
+    // 任務都做完也不會自己勾掉里程碑（里程碑本身的勾算最後一步）
+    store.toggleTask(t2.id)
+    expect(a.done).toBe(false)
+    expect(store.progress(p)).toBeCloseTo(0.3)
+  })
+
+  it('里程碑勾掉以後：以前做完的任務留在原本的里程碑，還沒做的改算下一個', () => {
+    const p = newProject(['一', '二'])
+    const [a, b] = p.milestones
+    const done = store.addTask({ title: '做完的', project: p.id, date: TODAY })
+    const todo = store.addTask({ title: '還沒做', project: p.id, date: TODAY })
+    vi.advanceTimersByTime(60000)
+    store.toggleTask(done.id)
+    vi.advanceTimersByTime(60000)
+    store.toggleMilestone(p.id, a.id)
+    expect(taskMilestone(p, done)).toBe(a)
+    expect(taskMilestone(p, todo)).toBe(b)
+    expect(store.progress(p)).toBe(0.5)
+    vi.advanceTimersByTime(60000)
+    store.toggleTask(todo.id)
+    expect(taskMilestone(p, todo)).toBe(b)
+    expect(store.progress(p)).toBe(0.75)
+    // 里程碑都勾完：沒有下一個了，還沒做的任務不算在任何里程碑
+    store.toggleMilestone(p.id, b.id)
+    expect(taskMilestone(p, store.addTask({ title: '收尾', project: p.id }))).toBeNull()
+    expect(store.progress(p)).toBe(1)
+  })
+
+  it('自己選里程碑：要在同一個專案裡；換專案、刪掉里程碑都改回自動；拆成三小步也跟著', () => {
+    const p = newProject(['一', '二'])
+    const q = store.addProject({ name: '另一個', milestones: ['甲'] })
+    const [a, b] = p.milestones
+    const t = store.addTask({ title: '先做後面的', project: p.id, ms: b.id, date: TODAY })
+    expect(t.ms).toBe(b.id)
+    expect(taskMilestone(p, t)).toBe(b)
+    expect(store.addTask({ title: '別的專案的', project: p.id, ms: q.milestones[0].id }).ms).toBeNull()
+    store.toggleTask(t.id)
+    expect(store.progress(p)).toBe(0.25)
+    store.toggleTask(t.id)
+    store.updateTask(t.id, { ms: 'nope' })
+    expect(t.ms).toBeNull()
+    store.updateTask(t.id, { ms: a.id })
+    expect(t.ms).toBe(a.id)
+    // 只改日期：選的里程碑不動
+    store.updateTask(t.id, { date: addDays(TODAY, 1) })
+    expect(t.ms).toBe(a.id)
+    const parts = store.splitTask(t.id)
+    expect(parts.map((x) => [x.project, x.ms])).toEqual([[p.id, a.id], [p.id, a.id], [p.id, a.id]])
+    const u = parts[0]
+    store.updateTask(u.id, { project: q.id })
+    expect(u).toMatchObject({ project: q.id, ms: null })
+    store.updateTask(u.id, { project: p.id, ms: b.id })
+    expect(u.ms).toBe(b.id)
+    store.deleteMilestone(p.id, b.id)
+    expect(u.ms).toBeNull()
+    store.updateTask(parts[1].id, { project: null })
+    expect(parts[1]).toMatchObject({ project: null, ms: null })
+  })
+
+  it('存檔：選的里程碑匯出再匯入還在；對不上的、舊存檔沒有的都改回自動', () => {
+    const p = newProject(['一', '二'])
+    const t = store.addTask({ title: '任務', project: p.id, ms: p.milestones[1].id })
+    expect(roundTrip().state.tasks.find((x) => x.id === t.id).ms).toBe(p.milestones[1].id)
+    const raw = JSON.parse(store.exportJSON())
+    raw.tasks.push({ id: 't8', title: '對不上', project: p.id, ms: 'gone' }, { id: 't9', title: '舊的', project: p.id })
+    const other = new Store()
+    other.importJSON(JSON.stringify(raw))
+    expect(other.state.tasks.find((x) => x.id === 't8').ms).toBeNull()
+    expect(other.state.tasks.find((x) => x.id === 't9').ms).toBeNull()
+  })
+
   it('一行輸入的 @專案（開頭幾個字就夠，對不上就留在標題裡）', () => {
     const projects = [{ id: 'p1', name: '作品集 網站' }, { id: 'p2', name: '英文' }]
     const a = parseQuick('切版 @作品集 明天', { today: TODAY, projects })
@@ -337,13 +427,13 @@ describe('存檔、匯入與時間軸', () => {
     store.addTask({ title: '任務', project: p.id, date: TODAY })
     const md = projectMarkdown(p, store.state.tasks)
     expect(md).toContain('# 畢業專題')
-    expect(md).toContain(`進度 ${Math.round(projectProgress(p) * 100)}%`)
+    expect(md).toContain(`進度 ${Math.round(projectProgress(p, store.state.tasks) * 100)}%`)
     expect(md).toContain('> 交出去')
     expect(md).toContain('- [ ] 一')
     expect(md).toContain('  - [ ] 細項')
     expect(md).toMatch(/- \[x\] 二（完成於 11\/2）/)
     expect(md).toContain('### 筆記')
     expect(md).toContain('- 推進（1 小時 30 分）')
-    expect(md).toContain('- [ ] 任務（11/2）')
+    expect(md).toContain('- [ ] 任務（11/2・一）')
   })
 })

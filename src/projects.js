@@ -15,20 +15,45 @@ const plus = (date, n) => {
 // 時間戳記是哪一天（本地時間）
 export const dayOf = (ts) => ymd(new Date(ts))
 
-// 一個里程碑完成了多少：打勾＝1；還沒打勾但有細項時算細項做完的比例。
+// 一個里程碑完成了多少：打勾＝1；還沒打勾時，細項和歸在它底下的任務各算一步，看做完了幾步。
 // 里程碑本身的勾算最後一步，所以細項全做完、里程碑卻沒勾（被取消了）時不會到 100%
-export function msProgress(m) {
+export function msProgress(m, tasks = []) {
   if (m.done) return 1
-  const steps = m.steps || []
-  if (!steps.length) return 0
-  return steps.filter((s) => s.done).length / (steps.length + 1)
+  const { done, total } = msSteps(m, tasks)
+  return total ? done / (total + 1) : 0
 }
-export function projectProgress(p) {
+// 里程碑底下做了幾步（細項＋任務）
+export function msSteps(m, tasks = []) {
+  const steps = m.steps || []
+  return { done: steps.filter((s) => s.done).length + tasks.filter((t) => t.done).length, total: steps.length + tasks.length }
+}
+export function projectProgress(p, tasks = []) {
   const n = p.milestones.length
-  return n ? p.milestones.reduce((a, m) => a + msProgress(m), 0) / n : 0
+  if (!n) return 0
+  const by = msTasks(p, tasks)
+  return p.milestones.reduce((a, m) => a + msProgress(m, by.get(m.id)), 0) / n
 }
 
 const linkedTo = (p, tasks) => tasks.filter((t) => t.project === p.id)
+
+// 任務算在哪個里程碑：編輯時選了就照選的；沒選的自動歸——
+// 還沒完成的算「下一個還沒完成的里程碑」，已完成的算「它完成的那時候，還沒完成的第一個里程碑」
+// （之後里程碑一個個勾掉，以前做完的任務也不會跑到下一個去）
+export function taskMilestone(p, t) {
+  const picked = t.ms && p.milestones.find((m) => m.id === t.ms)
+  if (picked) return picked
+  const at = t.done && t.doneAt ? t.doneAt : Infinity
+  return p.milestones.find((m) => !(m.done && (m.doneAt || 0) <= at)) || null
+}
+// 每個里程碑底下的任務：Map(里程碑 id → [任務])
+export function msTasks(p, tasks = []) {
+  const by = new Map(p.milestones.map((m) => [m.id, []]))
+  for (const t of linkedTo(p, tasks)) {
+    const m = taskMilestone(p, t)
+    if (m) by.get(m.id).push(t)
+  }
+  return by
+}
 
 // 時間軸：自己寫的進度、完成的里程碑、綁在專案上的任務、專注的分鐘、開工和落成，依日期分組（新的在前）。
 // 回傳 [{ date, items: [{ kind: 'log'|'ms'|'task'|'done'|'start', at, ... }], logMins, focus }]
@@ -218,7 +243,7 @@ export const NOTE_TEMPLATES = [
 const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8)}`
 export function projectMarkdown(p, tasks = []) {
   const L = []
-  const pct = Math.round(projectProgress(p) * 100)
+  const pct = Math.round(projectProgress(p, tasks) * 100)
   L.push(`# ${p.name}`, '')
   const meta = [`進度 ${pct}%`]
   if (p.deadline) meta.push(`截止 ${p.deadline}`)
@@ -239,7 +264,10 @@ export function projectMarkdown(p, tasks = []) {
   const linked = linkedTo(p, tasks).sort((a, b) => a.date.localeCompare(b.date))
   if (linked.length) {
     L.push('## 任務', '')
-    for (const t of linked) L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${md(t.date)}）`)
+    for (const t of linked) {
+      const m = taskMilestone(p, t)
+      L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${md(t.date)}${m ? `・${m.title}` : ''}）`)
+    }
     L.push('')
   }
   const notes = [...(p.notes || [])].sort((a, b) => !!b.pinned - !!a.pinned || b.updatedAt - a.updatedAt)
