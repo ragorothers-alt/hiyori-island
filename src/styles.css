@@ -951,7 +951,7 @@ body.app-mode {
   --lg-shadow: 0 0 0 .5px rgba(70, 60, 110, .12), inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(255, 255, 255, .4), 0 8px 30px rgba(70, 60, 120, .12);
 }
 /* 浮在內容上的番茄鐘膠囊也是同一種玻璃（寬螢幕收進側欄時另外設） */
-body.app-mode .dock { border: 0; background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); -webkit-backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow); }
+body.app-mode .dock { border: 0; background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow); }
 body.app-mode.night {
   --lg-bg: rgba(46, 43, 72, .62); --lg-sel: rgba(150, 150, 175, .22); --lg-hover: rgba(150, 150, 175, .12); --tint: #ffa3bd;
   --lg-shadow: 0 0 0 .5px rgba(255, 255, 255, .12), inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 -1px 0 rgba(255, 255, 255, .05), 0 10px 30px rgba(0, 0, 0, .4);
@@ -972,7 +972,7 @@ body.app-mode.night {
   body.app-mode .panel .tabs {
     position: absolute; z-index: 5; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); height: 62px;
     grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0; padding: 4px; border: 0; border-radius: 31px;
-    background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); -webkit-backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow); touch-action: auto;
+    background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow); touch-action: auto;
   }
   body.app-mode .tab { position: relative; height: 54px; padding: 0; gap: 3px; justify-content: center; border-radius: 27px; background: none; box-shadow: none; color: var(--ink); }
   body.app-mode .tab:hover { background: var(--lg-hover); }
@@ -1046,7 +1046,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   body.app-mode .panel.full .tabs {
     grid-column: 1; grid-row: 1 / 3; display: flex; flex-direction: column; align-items: stretch; gap: 2px;
     margin: 10px 0 10px 10px; padding: 10px 6px; border: 0; border-radius: 28px;
-    background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); -webkit-backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow);
+    background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow);
     overflow-y: auto; scrollbar-width: none;
   }
   body.app-mode .tab { position: relative; flex-direction: column; gap: 4px; padding: 9px 0 7px; border-radius: 22px; color: var(--ink); }
@@ -1102,7 +1102,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   body.app-mode:not(.side-mini) .full-btn svg { width: 21px; height: 21px; color: var(--tint); }
   body.app-mode:not(.side-mini) .full-label { font-size: 15px; font-weight: 500; letter-spacing: .08em; }
   /* 番茄鐘收進側欄最下面：上排計時、下排日曆／白天夜晚／音效 */
-  body.app-mode:not(.side-mini) .dock { left: 20px; bottom: 20px; width: calc(var(--side-w) - 30px); transform: none; flex-wrap: wrap; justify-content: space-around; gap: 6px 0; padding: 10px; border-radius: 20px; border: 0; background: var(--lg-hover); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none; }
+  body.app-mode:not(.side-mini) .dock { left: 20px; bottom: 20px; width: calc(var(--side-w) - 30px); transform: none; flex-wrap: wrap; justify-content: space-around; gap: 6px 0; padding: 10px; border-radius: 20px; border: 0; background: var(--lg-hover); backdrop-filter: none; box-shadow: none; }
   body.app-mode:not(.side-mini) .dock #focusBox { flex: 1 1 100%; }
   body.app-mode:not(.side-mini) .dock .focus-info { flex: 1; min-width: 0; }
   body.app-mode:not(.side-mini) .dock-sep { flex: 1 1 100%; width: auto; height: 1px; margin: 0; }

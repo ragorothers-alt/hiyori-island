@@ -44,7 +44,7 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
 .td-card {
   min-width: 0; padding: 18px 20px; border-radius: 22px; background: color-mix(in srgb, var(--glass-strong) 92%, transparent);
   border: 1px solid var(--glass-border); box-shadow: 0 10px 32px rgba(120, 110, 170, .1), 0 1px 4px rgba(120, 110, 170, .06);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); animation: fadeUp .4s var(--ease) both;
+  backdrop-filter: blur(10px); animation: fadeUp .4s var(--ease) both;
 }
 .td-h { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .td-h > svg { width: 24px; height: 24px; flex: none; fill: none; stroke: var(--sakura); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
