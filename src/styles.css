@@ -1112,6 +1112,46 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   body.app-mode:not(.side-mini) .panel.full [data-page="schedule"] .pg-main { height: calc(100dvh - 124px); }
 }
 
+/* ── App 模式的卡片：照 iOS 27 的 inset grouped（Apple iOS 27 UI Kit 的 Lists）──
+   實心的卡片（白天白色、夜晚比底色亮一階的靛紫）、圓角 26、沒有框線和陰影；卡片裡的小項目改用淡灰色的底（iOS 的 fill）取代框線。
+   卡片上把 --field／--glass-border 換掉，裡面用到這兩個的東西就跟著換；卡片自己的底色另外寫死 */
+body.app-mode { --card-bg: #fff; --card-fill: rgba(118, 118, 128, .08); --card-sep: rgba(60, 60, 67, .12); --card-r: 26px; --card-r-s: 18px; }
+body.app-mode.night { --card-bg: #27243c; --card-fill: rgba(160, 160, 190, .1); --card-sep: rgba(255, 255, 255, .1); }
+body.app-mode :is(.td-card, .add-form, .quest-mini, .dayline, .rhythm-box, .ccard, .cplan, .coach-hist, .wr-card, .dt-form, .hb-card, .hb-form, .hb-kind,
+  .proj, .pd-head, .pd-compose, .pd-note, .life-energy, .life-spend, .slp-chart, .week-chart, .bond, .town, .stuck-card, .overdue) {
+  --field: var(--card-fill); --glass-border: transparent;
+  background: var(--card-bg); border-color: transparent; box-shadow: none; backdrop-filter: none; border-radius: var(--card-r);
+}
+/* 小張的（統計、設定列、成就章、重要日子）圓角小一點 */
+body.app-mode :is(.stat, .set-row, .stamp, .dt-chip) {
+  --field: var(--card-fill); --glass-border: transparent;
+  background: var(--card-bg); border-color: transparent; box-shadow: none; border-radius: var(--card-r-s);
+}
+/* 本來就帶顏色的卡片：顏色疊在實心底上 */
+body.app-mode .td-quote { background: linear-gradient(150deg, color-mix(in srgb, #fde6ee 75%, var(--card-bg)), var(--card-bg) 70%); }
+body.app-mode.night .td-quote { background: linear-gradient(150deg, color-mix(in srgb, #f19bb2 16%, var(--card-bg)), var(--card-bg) 70%); }
+body.app-mode .stuck-card { background: color-mix(in srgb, #b9a7e6 16%, var(--card-bg)); }
+body.app-mode .overdue { background: color-mix(in srgb, #f6b4c8 16%, var(--card-bg)); padding: 10px 6px 6px; }
+body.app-mode .overdue h4 { padding: 0 8px; }
+body.app-mode .dt-chip.soon { background: color-mix(in srgb, #e8899f 14%, var(--card-bg)); }
+body.app-mode :is(.hb-card:hover, .hb-card.open) { background: color-mix(in srgb, var(--ink) 3%, var(--card-bg)); }
+body.app-mode .hb-card.done { background: color-mix(in srgb, var(--mc) 15%, var(--card-bg)); }
+body.app-mode :is(.hb-card.done:hover, .hb-card.done.open) { background: color-mix(in srgb, var(--mc) 19%, var(--card-bg)); }
+/* 焦點和標記的外框照舊 */
+body.app-mode .add-form:focus-within { box-shadow: 0 0 0 2px var(--focus); }
+body.app-mode .proj.hl { box-shadow: 0 0 0 2px var(--c); }
+/* 教練的輸入框浮在內容上：實心底、留一點陰影 */
+body.app-mode .coach-say { background: var(--card-bg); border-color: transparent; border-radius: 22px; }
+/* 任務列表變成 iOS 的分組列表：一整張卡片，一列一列用細線隔開（線從標題開始）；本命在左邊一道金色 */
+body.app-mode #taskList { background: var(--card-bg); border-radius: var(--card-r); overflow: hidden; }
+body.app-mode :is(#taskList, .overdue .list) { gap: 0; }
+body.app-mode :is(#taskList, .overdue .list) > .item { position: relative; border: 0; border-radius: 0; background: transparent; padding: 12px 14px; }
+body.app-mode :is(#taskList, .overdue .list) > :is(.item:hover, .item.hl) { background: var(--card-fill); }
+body.app-mode :is(#taskList, .overdue .list) > .item + .item::before { content: ''; position: absolute; top: 0; left: 48px; right: 0; height: .5px; background: var(--card-sep); }
+body.app-mode :is(#taskList, .overdue .list) > .item.starred:not(.done) { box-shadow: inset 3px 0 0 rgba(232, 190, 90, .85); }
+/* 區塊標題大一點（iOS 的 prominent header） */
+body.app-mode .sec-title { font-size: 17px; margin: 22px 4px 10px; }
+
 /* ── 小木屋室內：整個畫面交給屋裡，等級卡、日期列和每日任務先淡出，只留 Dock ── */
 .hud, .datebar, .quests { transition: opacity .4s, background .8s, border-color .8s; }
 body.in-room .hud, body.in-room .datebar, body.in-room .quests { opacity: 0; pointer-events: none; }
