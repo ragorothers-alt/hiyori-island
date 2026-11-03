@@ -1589,4 +1589,15 @@ describe('卡關提醒與設定', () => {
     store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { fontScale: 3 } }))
     expect(store.state.settings.fontScale).toBe(1)
   })
+
+  it('Liquid Glass 的透明度預設 50，匯出匯入後還在，超出 0～100 的夾回範圍', () => {
+    expect(store.state.settings.glass).toBe(50)
+    store.setSetting('glass', 15)
+    store.importJSON(store.exportJSON())
+    expect(store.state.settings.glass).toBe(15)
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { glass: 180 } }))
+    expect(store.state.settings.glass).toBe(100)
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { glass: 'x' } }))
+    expect(store.state.settings.glass).toBe(50)
+  })
 })

@@ -104,9 +104,10 @@ export function repeatLabel(rep) {
 // remindLead：日程開始前幾分鐘提醒（-1 = 不提醒）
 // focusUp：正向計時（不設長度、往上數）；focusMin：倒數時一輪幾分鐘；breakMin：休息幾分鐘；focusRounds：連續幾輪（1 = 一次做完）
 // fontScale：面板和對話框的字放大倍率；stuckNudge：任務卡住時ふじ提醒
+// glass：App 模式 Liquid Glass 的透明度（0 清透～100 著色）
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
-  focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true,
+  focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true, glass: 50,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 // 畫質：auto＝桌機高、觸控手機標準
@@ -506,6 +507,7 @@ function migrate(s) {
   settings.breakMin = num(settings.breakMin, 1, 30, BREAK_MIN)
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
+  settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 

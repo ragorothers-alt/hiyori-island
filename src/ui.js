@@ -152,6 +152,7 @@ export class UI {
     // 設定裡的「ふじ的 AI」（Claude 通行碼、模型）
     this.aiView = new AiView($('#aiRow'), { toast: (o) => this.toast(o) })
     this.applyFontScale()
+    this.applyGlass()
     this.renderNewsDot()
     this.setAppMode(savedAppMode(), { save: false })
     // 開發與截圖用：?tab=habits、?calendar
@@ -901,6 +902,16 @@ export class UI {
   }
 
   // ── 字體大小、這一版的新功能 ──
+  // Liquid Glass 的透明度（0 清透～100 著色）：App 模式的分頁列、側欄和番茄鐘用 --lg-t 算出底色和模糊（styles.css）。
+  // 正在拖滑桿時照滑桿的值，不被重畫拉回存檔的值
+  applyGlass(v = this.store.state.settings.glass) {
+    const r = $('#glassRange')
+    if (document.activeElement === r) v = +r.value
+    else r.value = v
+    document.body.style.setProperty('--lg-t', v / 100)
+    r.style.setProperty('--p', `${v}%`)
+  }
+
   applyFontScale() {
     document.documentElement.style.setProperty('--ui-zoom', this.store.state.settings.fontScale)
   }
@@ -1649,6 +1660,9 @@ export class UI {
       this.applyFontScale()
       this.renderSettings()
     })
+    // 拖的時候只換畫面，放開（或用方向鍵調）才存
+    $('#glassRange').addEventListener('input', (e) => this.applyGlass(+e.target.value))
+    $('#glassRange').addEventListener('change', (e) => this.store.setSetting('glass', +e.target.value))
     $('#stuckBtn').onclick = () => {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()
@@ -1818,6 +1832,8 @@ export class UI {
 
   render() {
     this.renderChrome()
+    // 另一台裝置改了 Liquid Glass 的透明度，同步過來就跟著換
+    this.applyGlass()
     // 番茄鐘的目標可能剛被做完、收藏或刪掉
     this.focus?.render()
     // 任務、日程、專案只畫正在看的那一頁；其他頁記著，切過去時再畫（藏著的頁面不必每次都重建）

@@ -946,14 +946,18 @@ body.app-mode .full-btn:hover { color: var(--ink); }
 body.app-mode[data-tab="today"] :is(.datebar, .app-head) { display: none; }
 /* App 模式的分頁列和側欄照 iOS 27 的 Liquid Glass（Apple iOS 27 UI Kit 的 Tab Bar／Sidebar）：
    浮起來的毛玻璃、0.5px 的亮邊；選到的那一格墊一塊灰色膠囊，主色用櫻花粉代替 iOS 的藍 */
+/* 透明度跟著設定的 Liquid Glass 滑桿（--lg-t：0 清透～1 著色，ui.js applyGlass）：越清透底色越淡、模糊越少、顏色越飽和 */
 body.app-mode {
-  --lg-bg: rgba(255, 255, 255, .62); --lg-sel: rgba(118, 118, 128, .14); --lg-hover: rgba(118, 118, 128, .08); --tint: #d6587c;
+  --lg-t: .5;
+  --lg-bg: rgba(255, 255, 255, calc(.14 + var(--lg-t) * .8));
+  --lg-filter: blur(calc(4px + var(--lg-t) * 24px)) saturate(calc(220% - var(--lg-t) * 80%));
+  --lg-sel: rgba(118, 118, 128, .14); --lg-hover: rgba(118, 118, 128, .08); --tint: #d6587c;
   --lg-shadow: 0 0 0 .5px rgba(70, 60, 110, .12), inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(255, 255, 255, .4), 0 8px 30px rgba(70, 60, 120, .12);
 }
 /* 浮在內容上的番茄鐘膠囊也是同一種玻璃（寬螢幕收進側欄時另外設） */
-body.app-mode .dock { border: 0; background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow); }
+body.app-mode .dock { border: 0; background: var(--lg-bg); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-shadow); }
 body.app-mode.night {
-  --lg-bg: rgba(46, 43, 72, .62); --lg-sel: rgba(150, 150, 175, .22); --lg-hover: rgba(150, 150, 175, .12); --tint: #ffa3bd;
+  --lg-bg: rgba(46, 43, 72, calc(.18 + var(--lg-t) * .76)); --lg-sel: rgba(150, 150, 175, .22); --lg-hover: rgba(150, 150, 175, .12); --tint: #ffa3bd;
   --lg-shadow: 0 0 0 .5px rgba(255, 255, 255, .12), inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 -1px 0 rgba(255, 255, 255, .05), 0 10px 30px rgba(0, 0, 0, .4);
 }
 @media (min-width: 861px) {
@@ -972,7 +976,7 @@ body.app-mode.night {
   body.app-mode .panel .tabs {
     position: absolute; z-index: 5; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); height: 62px;
     grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 0; padding: 4px; border: 0; border-radius: 31px;
-    background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow); touch-action: auto;
+    background: var(--lg-bg); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-shadow); touch-action: auto;
   }
   body.app-mode .tab { position: relative; height: 54px; padding: 0; gap: 3px; justify-content: center; border-radius: 27px; background: none; box-shadow: none; color: var(--ink); }
   body.app-mode .tab:hover { background: var(--lg-hover); }
@@ -1046,7 +1050,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   body.app-mode .panel.full .tabs {
     grid-column: 1; grid-row: 1 / 3; display: flex; flex-direction: column; align-items: stretch; gap: 2px;
     margin: 10px 0 10px 10px; padding: 10px 6px; border: 0; border-radius: 28px;
-    background: var(--lg-bg); backdrop-filter: blur(18px) saturate(180%); box-shadow: var(--lg-shadow);
+    background: var(--lg-bg); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-shadow);
     overflow-y: auto; scrollbar-width: none;
   }
   body.app-mode .tab { position: relative; flex-direction: column; gap: 4px; padding: 9px 0 7px; border-radius: 22px; color: var(--ink); }
@@ -1151,6 +1155,35 @@ body.app-mode :is(#taskList, .overdue .list) > .item + .item::before { content: 
 body.app-mode :is(#taskList, .overdue .list) > .item.starred:not(.done) { box-shadow: inset 3px 0 0 rgba(232, 190, 90, .85); }
 /* 區塊標題大一點（iOS 的 prominent header） */
 body.app-mode .sec-title { font-size: 17px; margin: 22px 4px 10px; }
+
+/* 設定的 Liquid Glass：上面是預覽（富士山的圖上疊一排玻璃按鈕，字壓在玻璃後面），下面是 iOS 的滑桿；只有 App 模式有 */
+body:not(.app-mode) #glassRow { display: none; }
+.glass-row { flex-wrap: wrap; }
+.glass-row > div:first-child { flex: 1 1 100%; }
+.glass-prev {
+  position: relative; flex: 1 1 100%; height: 150px; border-radius: 22px; overflow: hidden;
+  background: var(--td-hero-day) 80% 55% / cover no-repeat, linear-gradient(160deg, #d3e4f6, #f5dce7);
+}
+body.night .glass-prev { background-image: var(--td-hero-night), linear-gradient(160deg, #2b2850, #4a3a63); }
+.glass-prev p { position: absolute; left: 20px; bottom: 34px; margin: 0; font-size: 26px; font-weight: 700; letter-spacing: .06em; white-space: nowrap; color: var(--ink); }
+.gp-bar { position: absolute; left: 14px; right: 14px; bottom: 14px; display: flex; gap: 10px; }
+.gp-bar > span { height: 44px; border-radius: 22px; display: flex; align-items: center; background: var(--lg-bg); backdrop-filter: var(--lg-filter); box-shadow: var(--lg-shadow); color: var(--ink); }
+.gp-btn { width: 44px; flex: none; justify-content: center; }
+.gp-search { flex: 1; gap: 8px; padding: 0 16px; font-size: 15px; color: var(--ink-soft); }
+.gp-bar svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.glass-slider { flex: 1 1 100%; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 22px; background: var(--field); cursor: pointer; }
+.glass-slider svg { width: 28px; height: 24px; flex: none; fill: none; stroke: var(--ink-faint); stroke-width: 1.6; }
+.glass-slider .gs-tint rect { fill: color-mix(in srgb, var(--ink-faint) 45%, transparent); }
+.glass-slider .gs-tint rect + rect { fill: var(--ink-faint); }
+#glassRange { --p: 50%; flex: 1; min-width: 0; height: 28px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+#glassRange::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--tint) var(--p), rgba(118, 118, 128, .22) var(--p)); }
+#glassRange::-webkit-slider-thumb { -webkit-appearance: none; width: 40px; height: 26px; margin-top: -10px; border-radius: 13px; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .08); }
+#glassRange::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(118, 118, 128, .22); }
+#glassRange::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--tint); }
+#glassRange::-moz-range-thumb { width: 40px; height: 26px; border: 0; border-radius: 13px; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .08); }
+#glassRange:focus-visible { outline: none; }
+#glassRange:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--focus); }
+#glassRange:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--focus); }
 
 /* ── 小木屋室內：整個畫面交給屋裡，等級卡、日期列和每日任務先淡出，只留 Dock ── */
 .hud, .datebar, .quests { transition: opacity .4s, background .8s, border-color .8s; }

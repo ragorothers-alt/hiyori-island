@@ -61,8 +61,9 @@ export class TodayView {
     this.root = root
     this.store = store
     this.hooks = hooks
-    root.style.setProperty('--td-hero-day', `url("${heroDay}")`)
-    root.style.setProperty('--td-hero-night', `url("${heroNight}")`)
+    // 插畫掛在整頁上：設定裡 Liquid Glass 的預覽也用這張
+    document.documentElement.style.setProperty('--td-hero-day', `url("${heroDay}")`)
+    document.documentElement.style.setProperty('--td-hero-night', `url("${heroNight}")`)
     root.addEventListener('click', (e) => this._click(e))
     // 「現在」的紅線、進行中的件數跟著時間走：看得到的時候每分鐘重畫。
     // 正按著某個按鈕時先不重畫（不然放開時按鈕已經換掉，這一下就不算），放開再補
