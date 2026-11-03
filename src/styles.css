@@ -166,15 +166,17 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 }
 .panel.dragging { transition: none; }
 .panel.collapsed { transform: translateX(calc(100% + 30px)); opacity: 0; pointer-events: none; }
-.tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)) auto; align-items: center; gap: 3px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+.tabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) auto; align-items: center; gap: 3px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
 .tab { padding: 8px 4px 6px; border-radius: 14px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--ink-soft); transition: background .2s, color .2s; }
 .tab span { font-size: 14px; font-weight: 500; letter-spacing: .08em; }
-.tab small { font-family: var(--font-display); font-size: 10px; color: var(--ink-faint); letter-spacing: .1em; white-space: nowrap; }
+/* 側邊面板排 7 個分頁，假名縮小一點（「しゅうかん」才放得下）；全螢幕時分頁比較寬 */
+.tab small { font-family: var(--font-display); font-size: 9px; color: var(--ink-faint); letter-spacing: 0; white-space: nowrap; }
+.panel.full .tab small { font-size: 10px; letter-spacing: .1em; }
 .tab:hover { background: var(--glass-hover); }
 .tab.active { background: var(--glass-strong); color: var(--ink); box-shadow: 0 2px 10px rgba(80, 120, 170, .1); }
 .tab.active small { color: var(--sakura); }
 /* 六個分頁：窄的面板上假名縮小、不留字距，「しゅうかん」才放得下 */
-@media (max-width: 1100px) { .tab span { letter-spacing: .04em; } .tab small { font-size: 9px; letter-spacing: 0; } }
+@media (max-width: 1100px) { .tab span { letter-spacing: .04em; } }
 .panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 22px; scrollbar-width: thin; scrollbar-color: rgba(120, 150, 190, .3) transparent; }
 .tab-page { display: none; animation: fadeUp .45s var(--ease); }
 .tab-page.active { display: block; }
@@ -878,7 +880,7 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
   body.panel-full .hud, body.panel-full .quests { opacity: 0; pointer-events: none; }
   /* 提示改到左上角（等級卡的位置），不擋分頁列 */
   body.panel-full .toasts { top: 14px; left: 20px; transform: none; align-items: flex-start; }
-  .panel.full .tabs { position: relative; grid-template-columns: repeat(6, 104px); justify-content: center; padding: 8px 56px; }
+  .panel.full .tabs { position: relative; grid-template-columns: repeat(7, 100px); justify-content: center; padding: 8px 56px; }
   .panel.full .full-btn { position: absolute; right: 12px; top: calc(50% - 15px); }
 }
 @media (min-width: 861px) and (max-width: 979px) {
@@ -938,9 +940,9 @@ body.app-mode .full-btn { width: auto; padding: 0 12px; display: flex; align-ite
 body.app-mode .full-btn svg { width: 19px; height: 19px; }
 body.app-mode .full-label { display: inline; font-size: 13px; letter-spacing: .08em; }
 body.app-mode .full-btn:hover { color: var(--ink); }
-/* 今日總覽只在 App 模式；那一頁自己有日期和標題，上方的頁名和日期列先藏起來 */
-body:not(.app-mode) .tab[data-tab="today"] { display: none; }
-.tab-pre { font-style: normal; }
+/* 今日總覽的分頁平常叫「總覽」，App 模式電腦的側欄放得下才叫「今日總覽」。
+   那一頁自己有日期和標題：App 模式時上方的頁名和日期列先藏起來（小島模式的日期列是島上的，留著） */
+.tab-pre { font-style: normal; display: none; }
 body.app-mode[data-tab="today"] :is(.datebar, .app-head) { display: none; }
 @media (min-width: 861px) {
   body.app-mode .panel.full .full-btn { right: 16px; }
@@ -962,7 +964,6 @@ body.app-mode[data-tab="today"] :is(.datebar, .app-head) { display: none; }
   body.app-mode .tab .tab-ic { display: block; }
   body.app-mode .tab small { display: none; }
   body.app-mode .tab span { font-size: 11px; letter-spacing: .04em; }
-  body.app-mode .tab-pre { display: none; }
   body.app-mode .tab.active { background: none; box-shadow: none; color: var(--ink); }
   body.app-mode .tab.active .tab-ic { color: var(--sakura); }
   body.app-mode .tab.has-dot span::after { top: -26px; right: -6px; }
@@ -1036,6 +1037,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   body.app-mode .tab .tab-ic { display: block; }
   body.app-mode .tab small { display: none; }
   body.app-mode .tab span { font-size: 11.5px; letter-spacing: .06em; }
+  body.app-mode .tab-pre { display: inline; }
   body.app-mode .tab.active .tab-ic { color: var(--sakura); }
   body.app-mode .tab-n { display: block; position: absolute; top: 4px; left: calc(50% + 6px); min-width: 17px; padding: 3px 4px; font-size: 10px; }
   body.app-mode .panel.full .full-btn { position: static; margin-top: auto; width: auto; height: auto; flex-direction: column; gap: 4px; padding: 10px 0 8px; border-radius: 14px; }

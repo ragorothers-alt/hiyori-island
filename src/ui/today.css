@@ -11,7 +11,9 @@
   mask-image: linear-gradient(90deg, transparent 0, #000 32%, #000 92%, transparent), linear-gradient(180deg, transparent 0, #000 14%, #000 66%, transparent);
   mask-composite: intersect;
 }
-body.night .td::before { background-image: var(--td-hero-night); opacity: .9; }
+/* 用混合模式疊上去：白天的淡底色（multiply）、夜晚的深底色（screen）都會融進背後，小島模式半透明的面板上也看不到一塊底 */
+.td::before { mix-blend-mode: multiply; }
+body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode: screen; }
 @container (max-width: 520px) { .td::before { width: 100%; right: -16px; opacity: .6; } }
 .td > * { position: relative; z-index: 1; }
 
@@ -181,9 +183,18 @@ body.night .td-claim { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   .td-lead { font-size: 14px; letter-spacing: .08em; }
   .td-hero { min-height: 0; padding-bottom: 18px; }
   .td-card { padding: 16px; }
-  .td-ring { width: 124px; height: 124px; }
-  .td-ring b { font-size: 28px; }
-  .td-counts { padding-left: 14px; }
+  .td-h h3 { font-size: 17px; letter-spacing: .08em; gap: 0 8px; }
+  .td-h h3 small { font-size: 10.5px; letter-spacing: .1em; }
+  .td-more { padding-left: 6px; font-size: 12px; }
+  .td-prog { position: relative; gap: 14px; flex-wrap: nowrap; }
+  .td-ring { width: 112px; height: 112px; }
+  .td-ring b { font-size: 26px; }
+  .td-ring em { display: none; }
+  .td-counts { padding-left: 12px; min-width: 0; gap: 10px; }
+  .td-counts li { gap: 6px; font-size: 13px; }
+  .td-counts span { min-width: 3.2em; }
+  .td-prog-add { position: absolute; left: 0; right: 0; bottom: 8px; }
+  .td-prog:has(.td-prog-add) { padding-bottom: 36px; }
   .td-t { gap: 10px; }
   .td-n { margin-left: 12px; }
   .td-dur { display: none; }

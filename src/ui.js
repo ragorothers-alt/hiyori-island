@@ -27,7 +27,6 @@ import { TodayView } from './ui/today.js'
 import { readBackup, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
 
-// 今日總覽只有 App 模式有：小島模式的分頁從任務開始（見 UI._tabs）
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
 export const SIDE_PHONE = '(max-width: 860px) and (max-height: 500px) and (orientation: landscape)'
@@ -190,11 +189,10 @@ export class UI {
     // 焦點在分頁上時，方向鍵是換分頁（橫的分頁列用左右、側欄用上下），不是換日期
     $('.tabs').addEventListener('keydown', (e) => {
       if (!e.target.closest('.tab')) return
-      const tabs = this._tabs()
-      const n = tabs.length
-      const i = tabs.indexOf(this.tab)
+      const n = TAB_ORDER.length
+      const i = TAB_ORDER.indexOf(this.tab)
       const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
-      const to = step ? tabs[(i + step + n) % n] : e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[n - 1] : null
+      const to = step ? TAB_ORDER[(i + step + n) % n] : e.key === 'Home' ? TAB_ORDER[0] : e.key === 'End' ? TAB_ORDER[n - 1] : null
       if (!to) return
       e.preventDefault()
       e.stopPropagation()
@@ -273,7 +271,7 @@ export class UI {
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
       else if (e.key === 'ArrowRight') $('#nextDay').click()
-      else if (/^[1-9]$/.test(e.key) && this._tabs()[+e.key - 1]) this.setTab(this._tabs()[+e.key - 1])
+      else if (/^[1-7]$/.test(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
     })
   }
 
@@ -359,13 +357,7 @@ export class UI {
     }
   }
 
-  // 現在看得到的分頁（方向鍵、數字鍵照這個順序）
-  _tabs() {
-    return this.appMode ? TAB_ORDER : TAB_ORDER.filter((t) => t !== 'today')
-  }
-
   setTab(tab) {
-    if (tab === 'today' && !this.appMode) tab = 'tasks'
     this.tab = tab
     // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
     document.body.dataset.tab = tab
@@ -542,9 +534,8 @@ export class UI {
       this.focus.toggleBig(false)
       $('#appChat').hidden = true
     } else if (this.focus.mode !== 'idle') this.focus.toggleBig(true)
-    // 進 App 模式先看今日總覽；回小島時沒有這一頁，換到任務
+    // 進 App 模式先看今日總覽（小島模式照舊從任務開始，總覽在第一個分頁）
     if (on && !was) this.setTab('today')
-    else if (!on && this.tab === 'today') this.setTab('tasks')
     this.renderAppBar()
     this.renderSettings()
     // 有些說明和按鈕依模式不同（「在島上查看」→「切到小島看看」）：開場第一次畫之前不用
