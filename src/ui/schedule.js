@@ -429,6 +429,11 @@ export class ScheduleView {
       e.preventDefault()
       const f = e.target
       const q = +(f.querySelector('[data-q] .on')?.dataset.v || 0)
+      // 就寢和起床同一個時間（多半是還沒改到）：先不記，卡片留著讓人改
+      if (f.bed.value === f.wake.value) {
+        this.hooks.toast({ icon: '眠', title: '就寢和起床是同一個時間', sub: '改一下起床時間再記' })
+        return f.wake.focus()
+      }
       card.innerHTML = ''
       s.logSleep(s.today, { bed: f.bed.value, wake: f.wake.value, q })
     })

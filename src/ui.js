@@ -2090,6 +2090,8 @@ class FocusTimer {
     try {
       const saved = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null')
       if (saved?.mode === 'focus' || saved?.mode === 'break') this._restore(saved)
+      // 還沒開始、只先選好了目標：重新整理後也還記得
+      else this._restoreTarget(saved)
     } catch {}
     // 另一個分頁開始、暫停、換目標或結束了計時：這邊跟著換成同一個。
     // 不然兩邊各自倒數，到點時各記一次專注（同一輪的 sid 一樣，store 那邊也只會記一次）
@@ -2154,6 +2156,10 @@ class FocusTimer {
     this.round = Math.round(n(saved.round, 1, this.rounds, 1))
     this.sid = typeof saved.sid === 'string' && /^[\w-]{1,40}$/.test(saved.sid) ? saved.sid : null
   }
+  _restoreTarget(saved) {
+    this.taskId = typeof saved?.taskId === 'string' ? saved.taskId : null
+    this.projectId = !this.taskId && typeof saved?.projectId === 'string' ? saved.projectId : null
+  }
 
   _save() {
     const { mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid } = this
@@ -2174,6 +2180,8 @@ class FocusTimer {
       this.mode = 'idle'
       this.paused = null
       this._loadLengths()
+      // 另一個分頁只是換了目標（還沒開始）：這邊也換成同一個
+      this._restoreTarget(saved)
     }
     this._shown = null
     this.toggleSet(false)

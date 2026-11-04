@@ -427,10 +427,10 @@ async function boot() {
     talk('urgeResisted', { habit: short(habit.name), days }, 3800)
   })
   store.on('habitSlip', ({ habit, days }) => talk('habitSlip', { habit: short(habit.name), days }, 5200, '沒關係，我會陪你慢慢來。'))
-  store.on('quitMilestone', ({ habit, days }) => {
+  store.on('quitMilestone', ({ habit, days, xp }) => {
     setTimeout(() => {
       sfx.fanfare()
-      ui.toast({ icon: '断', title: `「${short(habit.name, 10)}」戒除滿 ${days} 天`, sub: `走到一個里程碑了・+${XP.quitMilestone} XP`, ms: 5200 })
+      ui.toast({ icon: '断', title: `「${short(habit.name, 10)}」戒除滿 ${days} 天`, sub: xp ? `走到一個里程碑了・+${XP.quitMilestone} XP` : '又走回這個里程碑了，慢慢來', ms: 5200 })
       if (!duet('quitMilestone', { habit: short(habit.name), days })) talk('quitMilestone', { habit: short(habit.name), days }, 4800)
     }, 1200)
   })

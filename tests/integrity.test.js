@@ -304,6 +304,98 @@ describe('跨過午夜的提前提醒', () => {
     r.check(new Date(2026, 10, 3, 0, 1))
     expect(remind).toHaveBeenCalledTimes(1)
   })
+
+  it('明天一早的例行日程（明天才會生成）：今天晚上也提醒得到', () => {
+    store.setSetting('remindLead', 10)
+    store.addRoutine({ title: '晨跑', kind: 'event', start: '00:05', end: '00:40', repeat: { type: 'daily' } })
+    expect(store.eventsOn('2026-11-03')).toHaveLength(0)
+    const remind = vi.fn()
+    new Reminders(store, remind).check(new Date(2026, 10, 2, 23, 55))
+    expect(remind).toHaveBeenCalledOnce()
+    expect(remind.mock.calls[0][0].title).toBe('晨跑')
+  })
+
+  it('兩個分頁各有一個提醒：另一個分頁剛提醒過的不會再響一次', () => {
+    store.setSetting('remindLead', 10)
+    store.addEvent({ title: '開會', date: '2026-11-02', start: '15:00', end: '16:00' })
+    const a = vi.fn()
+    const b = vi.fn()
+    const tabA = new Reminders(store, a)
+    const tabB = new Reminders(store, b)
+    tabA.check(new Date(2026, 10, 2, 14, 51))
+    tabB.check(new Date(2026, 10, 2, 14, 51))
+    expect(a).toHaveBeenCalledOnce()
+    expect(b).not.toHaveBeenCalled()
+  })
+})
+
+describe('灌不了的統計、改不了的欄位', () => {
+  it('生活記錄、專案進度加了又刪：累計筆數跟著扣回來，當天的經驗也不會再給一次', () => {
+    const xp0 = store.player.xp
+    const a = store.addLife(store.today, { text: '午餐' })
+    const xp1 = store.player.xp
+    expect(store.stats.lifeEntries).toBe(1)
+    store.deleteLife(store.today, a.id)
+    expect(store.stats.lifeEntries).toBe(0)
+    for (let i = 0; i < 5; i++) store.deleteLife(store.today, store.addLife(store.today, { text: `再一次 ${i}` }).id)
+    expect(store.stats.lifeEntries).toBe(0)
+    // 一天最多給 3 次經驗：刪掉不會把次數還回來
+    expect(store.player.xp - xp0).toBeLessThanOrEqual((xp1 - xp0) * 3)
+    store.deleteLife(store.today, 'nope')
+    expect(store.stats.lifeEntries).toBe(0)
+
+    const p = store.addProject({ name: '進度', milestones: ['一'] })
+    const log = store.addProjectLog(p.id, { text: '做了一點' })
+    expect(store.stats.projectLogs).toBe(1)
+    store.deleteProjectLog(p.id, log.id)
+    store.deleteProjectLog(p.id, log.id)
+    expect(store.stats.projectLogs).toBe(0)
+  })
+
+  it('戒除里程碑：破戒後重新走到同一個里程碑照樣慶祝，但經驗只給第一次', () => {
+    const h = store.addHabit({ kind: 'quit', name: '熬夜' })
+    const seen = []
+    store.on('quitMilestone', (e) => seen.push(e))
+    const day = (n) => {
+      vi.setSystemTime(new Date(2026, 10, 2 + n, 10))
+      store.tick()
+    }
+    day(1)
+    expect(seen.at(-1)).toMatchObject({ days: 1, xp: true })
+    const xp = store.player.xp
+    store.slipHabit(h.id)
+    day(2)
+    expect(seen.at(-1)).toMatchObject({ days: 1, xp: false })
+    expect(store.player.xp).toBe(xp)
+  })
+
+  it('就寢和起床同一個時間不記（不會變成睡了 24 小時）；舊存檔裡這種紀錄讀進來時拿掉', () => {
+    expect(store.logSleep(store.today, { bed: '23:00', wake: '23:00' })).toBe(false)
+    expect(store.state.sleep[store.today]).toBeUndefined()
+    expect(store.logSleep(store.today, { bed: '23:00', wake: '07:00' })).toBe(true)
+    const snap = JSON.parse(store.exportJSON())
+    snap.sleep['2026-11-01'] = { bed: '01:00', wake: '01:00', q: 3 }
+    store.importJSON(JSON.stringify(snap))
+    expect(store.state.sleep['2026-11-01']).toBeUndefined()
+    expect(store.state.sleep[store.today]).toMatchObject({ bed: '23:00', wake: '07:00' })
+  })
+
+  it('update 類只改認得的欄位：完成狀態、id 這些改不了，值也照規則清洗', () => {
+    const t = store.addTask({ title: '原本的', date: store.today })
+    const xp = store.player.xp
+    store.updateTask(t.id, { title: '  改名  ', done: true, rewarded: true, id: 'hack', priority: 9, tag: 'nope', at: '25:99', dur: 9999 })
+    expect(t).toMatchObject({ id: expect.not.stringMatching('hack'), title: '改名', done: false, priority: 3, at: null, dur: 600 })
+    expect(t.tag).not.toBe('nope')
+    expect(store.player.xp).toBe(xp)
+    const e = store.addEvent({ title: '會', date: store.today, start: '10:00', end: '11:00' })
+    store.updateEvent(e.id, { start: '12:00', end: '11:00', done: true, color: 'x' })
+    expect(e).toMatchObject({ start: '12:00', end: '13:00', done: false })
+    expect(Number.isFinite(e.color)).toBe(true)
+    const p = store.addProject({ name: '專案', milestones: ['一'] })
+    store.updateProject(p.id, { name: '   ', milestones: [], completedAt: 1 })
+    expect(p).toMatchObject({ name: '專案', completedAt: null })
+    expect(p.milestones).toHaveLength(1)
+  })
 })
 
 describe('壞掉的數字', () => {

@@ -36,15 +36,28 @@ export class Reminders {
     ]
   }
 
+  // 另一個分頁可能剛提醒過：先把存著的併進來，同一件事兩個分頁只提醒一次
+  _merge() {
+    for (const [d, keys] of Object.entries(load())) {
+      if (!Array.isArray(keys)) continue
+      const mine = (this.sent[d] ||= [])
+      for (const k of keys) if (!mine.includes(k)) mine.push(k)
+    }
+  }
+
   check(now = new Date()) {
+    this._merge()
     const lead = this.store.state.settings.remindLead
     const today = dateStr(now)
     const tomorrow = addDays(today, 1)
     const mins = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60
     const sent = (this.sent[today] ||= [])
     let changed = false
-    // 明天一早的項目，提前提醒的時間落在今天晚上：也要跨過午夜提醒（記在明天那份，過了午夜不會再提醒一次）
-    const items = lead < 0 ? [] : [...this._items(today, 0), ...(mins + lead >= 1440 ? this._items(tomorrow, 1440) : [])]
+    // 明天一早的項目，提前提醒的時間落在今天晚上：也要跨過午夜提醒（記在明天那份，過了午夜不會再提醒一次）。
+    // 明天的例行日程平常要到明天才生成，這時先生成出來，才提醒得到
+    const early = lead >= 0 && mins + lead >= 1440
+    if (early) this.store.prepareRoutines?.(tomorrow)
+    const items = lead < 0 ? [] : [...this._items(today, 0), ...(early ? this._items(tomorrow, 1440) : [])]
     for (const [item, at, kind, date, offset] of items) {
       const key = `${item.id}@${at}`
       const done = (this.sent[date] ||= [])

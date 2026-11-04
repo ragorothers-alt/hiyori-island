@@ -188,6 +188,11 @@ export class LifeView {
       const bed = el.bed.value
       const wake = el.wake.value
       if (!bed || !wake) return (bed ? el.wake : el.bed).focus()
+      // 就寢和起床同一個時間：多半是還沒改到起床時間
+      if (bed === wake) {
+        this.hooks.toast?.({ icon: '眠', title: '就寢和起床是同一個時間', sub: '改一下起床時間再記' })
+        return el.wake.focus()
+      }
       this.sleepDirty = false
       s.logSleep(this.date, { bed, wake, q: this.sleepQ })
       this._fillSleep(true)

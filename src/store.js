@@ -269,6 +269,37 @@ const num = (v, min, max, dflt) => (Number.isFinite(+v) ? Math.min(max, Math.max
 const ts = (v) => (Number.isFinite(+v) && +v > 0 ? +v : null)
 const ymd = (v, dflt) => (DATE_RE.test(v) ? v : dflt)
 
+// update 類的動作只收認得的欄位，值照讀存檔時的規則清洗。完成狀態、經驗值、花這些只能透過各自的動作改
+// （不然傳錯一個欄位就能跳過給經驗的邏輯，或把 id 改掉）
+function cleanPatch(rec, patch, fields) {
+  const out = {}
+  if (!isObj(patch)) return out
+  for (const [k, clean] of Object.entries(fields)) if (k in patch) out[k] = clean(patch[k], rec)
+  return out
+}
+const TASK_PATCH = {
+  title: (v, t) => str(v).trim() || t.title,
+  date: (v, t) => ymd(v, t.date),
+  priority: (v, t) => num(v, 1, 3, t.priority),
+  tag: (v, t) => (TAGS.some((x) => x.id === v) ? v : t.tag),
+  at: (v) => (TIME_RE.test(v) ? v : null),
+  dur: (v, t) => (v ? num(v, 5, 600, t.dur || 30) : null),
+  project: (v) => (ID_RE.test(v) ? v : null),
+  ms: (v) => (ID_RE.test(v) ? v : null),
+}
+const EVENT_PATCH = {
+  title: (v, e) => str(v).trim() || e.title,
+  date: (v, e) => ymd(v, e.date),
+  start: (v, e) => (TIME_RE.test(v) ? v : e.start),
+  end: (v, e) => (TIME_RE.test(v) ? v : e.end),
+  color: (v, e) => num(v, 0, 99, e.color),
+  note: (v) => str(v, 200),
+}
+const PROJECT_PATCH = {
+  name: (v, p) => str(v, 60).trim() || p.name,
+  color: (v, p) => num(v, 0, 99, p.color),
+}
+
 // ふじ的排程教練：自己加過的主攻項目、上次的回答（下次預設）、最近 10 次排程（撤銷用）
 const emptyCoach = () => ({ items: [], last: null, plans: [] })
 const COACH_DAYS = [3, 5, 7]
@@ -547,7 +578,8 @@ function migrate(s) {
   const sleep = {}
   if (isObj(s.sleep)) {
     for (const [d, v] of Object.entries(s.sleep)) {
-      if (DATE_RE.test(d) && isObj(v) && TIME_RE.test(v.bed) && TIME_RE.test(v.wake)) sleep[d] = { bed: v.bed, wake: v.wake, q: num(v.q, 0, 5, 0) }
+      // 就寢＝起床的舊紀錄（會被算成睡了 24 小時）不留
+      if (DATE_RE.test(d) && isObj(v) && TIME_RE.test(v.bed) && TIME_RE.test(v.wake) && v.bed !== v.wake) sleep[d] = { bed: v.bed, wake: v.wake, q: num(v.q, 0, 5, 0) }
     }
   }
   const counts = (o) => {
@@ -569,6 +601,8 @@ function migrate(s) {
       target: num(h.target, 1, 99, 1), unit: str(h.unit, 6).trim() || '次', days: weekdays(h.days),
       start: ymd(h.start, today), createdAt: ts(h.createdAt) || Date.now(), archived: !!h.archived,
       log: counts(h.log), urges: counts(h.urges), slips, ms: num(h.ms, 0, 9999, 0), paid: ymd(h.paid, ''),
+      // 戒除里程碑給過經驗的最高天數（舊存檔沒有：當成這段乾淨期走到的都給過了）
+      msPaid: num(h.msPaid, 0, 9999, num(h.ms, 0, 9999, 0)),
     }
   })
   // 生活記錄：{ 日期: { items: [{ id, t, kind, text, amount }], energy } }
@@ -1147,6 +1181,12 @@ export class Store {
   }
 
   // ── 日期 ──
+  // 先把某一天的例行公事生成出來（提醒要看明天一早的例行日程時用）。實例的 id 固定，兩個分頁各做一次也不會重複
+  prepareRoutines(date) {
+    if (!this._ensureRoutines(date).length) return
+    this.save(false)
+    this.emit('change')
+  }
   selectDate(date) {
     this.selectedDate = date
     if (this._ensureRoutines(date).length) this.save(false)
@@ -1481,6 +1521,7 @@ export class Store {
   updateTask(id, patch) {
     const t = this._find('tasks', id)
     if (!t) return
+    patch = cleanPatch(t, patch, TASK_PATCH)
     // 還沒完成的任務往後挪：記一次（卡關提醒用）
     if (patch.date && DATE_RE.test(t.date) && patch.date > t.date && !t.done) t.moved = (t.moved || 0) + 1
     // 歸到的專案要真的存在；null／空字串＝不歸任何專案
@@ -1579,7 +1620,9 @@ export class Store {
   updateEvent(id, patch) {
     const e = this._find('events', id)
     if (!e) return
-    Object.assign(e, patch)
+    Object.assign(e, cleanPatch(e, patch, EVENT_PATCH))
+    // 結束要在開始之後（跟讀存檔時一樣：不然補成一小時）
+    if (toMin(e.end) <= toMin(e.start)) e.end = minToHHMM(Math.min(toMin(e.start) + 60, 1439))
     this._finish()
   }
   deleteEvent(id) {
@@ -1644,9 +1687,10 @@ export class Store {
     this._finish([['rhythmChanged', this.state.rhythm]])
   }
   // 睡眠記在醒來那天
+  // 回傳有沒有記下來。就寢和起床同一個時間（多半是還沒改到）不記：不然會被當成睡了 24 小時
   logSleep(date, { bed, wake, q = 0 }) {
     this._refreshToday()
-    if (!TIME_RE.test(bed) || !TIME_RE.test(wake) || date > this.today) return
+    if (!TIME_RE.test(bed) || !TIME_RE.test(wake) || bed === wake || date > this.today) return false
     const first = !this.state.sleep[date]
     const entry = { bed, wake, q: num(q, 0, 5, 0) }
     this.state.sleep[date] = entry
@@ -1659,6 +1703,7 @@ export class Store {
       if (date === this.today) this._gain(XP.sleep, fx, { kind: 'sleep' })
     }
     this._finish(fx)
+    return true
   }
   deleteSleep(date) {
     delete this.state.sleep[date]
@@ -1678,7 +1723,7 @@ export class Store {
     const h = {
       id: uid(), name, kind: kind === 'quit' ? 'quit' : 'build', icon: String(icon || '').slice(0, 2) || (kind === 'quit' ? '禁' : '習'),
       color: num(color, 0, 99, 0), target: num(target, 1, 99, 1), unit: String(unit || '次').trim().slice(0, 6) || '次', days: weekdays(days),
-      start: this.today, createdAt: Date.now(), archived: false, log: {}, urges: {}, slips: [], ms: 0, paid: '',
+      start: this.today, createdAt: Date.now(), archived: false, log: {}, urges: {}, slips: [], ms: 0, paid: '', msPaid: 0,
     }
     this.state.habits.push(h)
     this._finish([['habitAdded', h]])
@@ -1771,7 +1816,8 @@ export class Store {
     h.ms = Math.max(h.ms, ...QUIT_MILESTONES.filter((m) => m <= days))
     this._finish()
   }
-  // 戒除里程碑（1、3、7、14…天）：跨日時檢查，每段乾淨期每個里程碑只發一次
+  // 戒除里程碑（1、3、7、14…天）：跨日時檢查。每段乾淨期走到都會慶祝一次，
+  // 但經驗值每個里程碑只給一次（不然每天破戒一次，隔天就能再領一次「1 天」的經驗）
   _quitMilestones(fx) {
     for (const h of this.state.habits) {
       if (h.kind !== 'quit' || h.archived) continue
@@ -1779,8 +1825,12 @@ export class Store {
       const m = Math.max(0, ...QUIT_MILESTONES.filter((x) => x <= days))
       if (m > h.ms) {
         h.ms = m
-        this._gain(XP.quitMilestone, fx, { kind: 'quit', id: h.id })
-        fx.push(['quitMilestone', { habit: h, days: m }])
+        const xp = m > (h.msPaid || 0)
+        if (xp) {
+          h.msPaid = m
+          this._gain(XP.quitMilestone, fx, { kind: 'quit', id: h.id })
+        }
+        fx.push(['quitMilestone', { habit: h, days: m, xp }])
       }
     }
   }
@@ -1830,7 +1880,11 @@ export class Store {
   deleteLife(date, id) {
     const day = this.state.life[date]
     if (!day) return
+    const n = day.items.length
     day.items = day.items.filter((x) => x.id !== id)
+    if (day.items.length === n) return
+    // 刪掉的不算數：不然加了又刪就能一直灌累計筆數（成就、小鎮）。當天給經驗的次數照舊（刪掉再加不會再給）
+    this.stats.lifeEntries = Math.max(0, this.stats.lifeEntries - 1)
     if (!day.items.length && !day.energy) delete this.state.life[date]
     this._finish()
   }
@@ -1953,6 +2007,7 @@ export class Store {
   updateProject(id, patch) {
     const p = this._find('projects', id)
     if (!p) return
+    patch = cleanPatch(p, patch, PROJECT_PATCH)
     if ('name' in patch) this._authored(p)
     Object.assign(p, patch)
     this._finish()
@@ -2167,7 +2222,11 @@ export class Store {
   deleteProjectLog(pid, lid) {
     const p = this._find('projects', pid)
     if (!p) return
+    const n = p.logs.length
     p.logs = p.logs.filter((x) => x.id !== lid)
+    if (p.logs.length === n) return
+    // 跟生活記錄一樣：刪掉的進度不算進累計筆數
+    this.stats.projectLogs = Math.max(0, this.stats.projectLogs - 1)
     this._finish()
   }
   addProjectNote(pid, { title = '', body = '' } = {}) {
