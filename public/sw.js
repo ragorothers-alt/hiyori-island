@@ -1,5 +1,8 @@
 // ひより日和 Service Worker：離線可用 + 提醒通知
+// 快取名稱和這次建置的檔案清單，建置時由 vite.config.js 填進來（開發時不註冊 Service Worker，維持原樣）。
+// 每次部署換一個新快取：舊快取裡新版還用得到的檔案（例如沒變的 three.js）搬過來，其他的整個丟掉，帶 hash 的舊檔不會一直累積
 const VERSION = 'hiyori-v1'
+const BUILD = []
 const SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './icons/icon-192.png', './icons/icon-512.png']
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com']
 
@@ -23,7 +26,19 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       // 同一個網域可能還有別的網站（例如 GitHub Pages），只清自己的舊快取
-      for (const key of await caches.keys()) if (key.startsWith('hiyori-') && key !== VERSION) await caches.delete(key)
+      const cache = await caches.open(VERSION)
+      const keep = new Set(BUILD.map((f) => new URL(f, self.registration.scope).href))
+      for (const key of await caches.keys()) {
+        if (!key.startsWith('hiyori-') || key === VERSION) continue
+        // 小島的檔案是第一次看小島時才收的：新版還用得到的先搬過來，更新後離線也還打得開
+        const old = await caches.open(key)
+        for (const req of await old.keys()) {
+          if (!keep.has(req.url) || (await cache.match(req, { ignoreVary: true }))) continue
+          const res = await old.match(req)
+          if (res) await cache.put(req, res)
+        }
+        await caches.delete(key)
+      }
       await self.clients.claim()
     })(),
   )

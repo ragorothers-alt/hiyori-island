@@ -27,6 +27,8 @@ function greetKey() {
 // 開機：資料、介面、提醒、同步。小島（three.js 場景、兩人的模型）在 islandScene.js，
 // App 模式開機時不載入：介面先出來，第一次切回小島才下載、建好（只建一次）；小島模式一開始就載入
 async function boot() {
+  // 小島的模型和貼圖很多：預設只記 250 筆載入紀錄，滿了之後的檔案就收不進離線快取（keepOffline）
+  performance.setResourceTimingBufferSize?.(2000)
   const params = new URLSearchParams(location.search)
   // 小島模式：先開始下載小島，和下面建介面同時進行
   let islandMod = null
@@ -572,14 +574,20 @@ async function boot() {
   let islandP = null
   let started = false
   // 小島用到的檔案（three.js、場景、模型、貼圖）請 Service Worker 收進快取：第一次打開 App 時它可能還沒接手，
-  // 這些檔案沒經過它，不說的話下次離線就打不開小島。等貼圖和模型都載完再說
+  // 這些檔案沒經過它，不說的話下次離線就打不開小島。已經載完的先送，之後才載完的（慢的模型、貼圖）載完一個送一個
+  let keeping = false
   const keepOffline = () => {
-    if (!('serviceWorker' in navigator) || !import.meta.env.PROD) return
-    setTimeout(() => {
-      const dir = new URL('assets/', location.href).href
-      const urls = performance.getEntriesByType('resource').map((e) => e.name).filter((u) => u.startsWith(dir))
-      navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'keep', urls }))
-    }, 10000)
+    if (!('serviceWorker' in navigator) || !import.meta.env.PROD || keeping) return
+    keeping = true
+    const dir = new URL('assets/', location.href).href
+    const send = (entries) => {
+      const urls = entries.map((e) => e.name).filter((u) => u.startsWith(dir))
+      if (urls.length) navigator.serviceWorker.ready.then((reg) => reg.active?.postMessage({ type: 'keep', urls }))
+    }
+    send(performance.getEntriesByType('resource'))
+    try {
+      new PerformanceObserver((list) => send(list.getEntries())).observe({ type: 'resource' })
+    } catch {}
   }
   const ensureIsland = () =>
     (islandP ??= loadIsland()
