@@ -2075,6 +2075,8 @@ const RULER_TICK = 14
 // 正向計時（往上數）：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
 const FREE_MIN = 5
 const FREE_MAX = 180
+// 計時在關掉頁面、手機鎖著時早就結束了：結束後一小時內回來照常記，再晚就不照全長記進今天
+const LATE = 60 * 60000
 const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
 
 class FocusTimer {
@@ -2132,7 +2134,26 @@ class FocusTimer {
     this._bindSet()
     setInterval(() => this.tick(), 250)
     this.render()
-    if (this.mode === 'focus' && this.paused == null && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
+    if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
+  }
+
+  // 這一段（專注、休息）本來該結束的時間過了太久：例如晚上開始專注後關掉，兩天後才打開
+  _stale() {
+    if (this.mode === 'idle' || this.paused != null) return false
+    const end = this.counting ? this.endAt + FREE_MAX * 60000 : this.endAt
+    return Date.now() - end > LATE
+  }
+  // 不記專注、不接著開下一輪，回到待機，跟使用者說一聲
+  _expire() {
+    const wasFocus = this.mode === 'focus'
+    this.toggleSet(false)
+    this.toggleBig(false)
+    this.mode = 'idle'
+    this.paused = null
+    this._loadLengths()
+    this._save()
+    this.render()
+    this.hooks.focusExpired?.(wasFocus)
   }
 
   // 沒在計時時，長度和輪數跟著設定（開發時可用 ?focus= 縮短）；計時中用開始時記下的那一份
@@ -2520,6 +2541,7 @@ class FocusTimer {
 
   tick() {
     if (this.mode === 'idle' || this.paused != null) return
+    if (this._stale()) return this._expire()
     if (this.counting) {
       if (this.elapsed >= FREE_MAX * 60000) this._finishFocus(FREE_MAX)
     } else if (Date.now() >= this.endAt) {

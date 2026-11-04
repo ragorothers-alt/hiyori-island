@@ -181,6 +181,15 @@ async function boot() {
       scene?.focusStopped()
       say('fuji', '沒關係，下次再一起專注。')
     },
+    // 計時結束很久以後才回來（關掉頁面、手機鎖著）：不照全長記進今天
+    focusExpired: (wasFocus) => {
+      scene?.focusStopped()
+      ui.toast(
+        wasFocus
+          ? { icon: '時', title: '上一輪專注沒有記進去', sub: '計時結束一個多小時後才回來，不確定那段時間在不在專注。下次結束時回來看一下就會記好' }
+          : { icon: '風', title: '休息早就結束了', sub: '準備好了就再開始一輪吧' },
+      )
+    },
     // 另一個分頁結束或停掉了計時：兩人走出小木屋就好（台詞、天燈那一邊已經放過了）
     focusSynced: () => scene?.focusStopped(),
   }
