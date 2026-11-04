@@ -443,7 +443,7 @@ export class ProjectView {
       ].join('')
       const steps = m.steps.map((x) => `<li class="${x.done ? 'done' : ''}">
           <button type="button" class="check" data-act="step-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」" style="--c:${c}">${ICON.check}</button>
-          <span class="pm-st" data-act="step-rename" data-id="${k}" data-sid="${esc(x.id)}" title="點一下改名">${esc(x.title)}</span>
+          <span class="pm-st" role="button" tabindex="0" data-act="step-rename" data-id="${k}" data-sid="${esc(x.id)}" title="點一下改名" aria-label="改名「${esc(x.title)}」">${esc(x.title)}</span>
           <button type="button" class="mini" data-act="step-del" data-id="${k}" data-sid="${esc(x.id)}" title="刪除細項">${ICON.del}</button></li>`).join('')
       const detail = open
         ? `<div class="pm-detail">
@@ -882,6 +882,11 @@ export class ProjectView {
       e.preventDefault()
       return el.form.requestSubmit()
     }
+    // 細項名稱是可以點的字（點了換成輸入框）：鍵盤用 Enter／空白鍵也能改
+    if ((e.key === 'Enter' || e.key === ' ') && el.matches('span[role="button"][data-act]')) {
+      e.preventDefault()
+      return el.click()
+    }
     // 目標只是一兩句話：Enter 就存（Shift＋Enter 換行）
     if (e.key === 'Enter' && !e.shiftKey && el.matches('[data-goal]')) {
       e.preventDefault()
@@ -1028,8 +1033,10 @@ export class ProjectView {
     const a = document.activeElement
     let focus = null
     if (a && this.root.contains(a)) {
+      // 正在改名的輸入框在可以點的字裡面（細項名稱）：重畫後焦點回到那個字上
+      const t = a.dataset.act || a.dataset.keep ? a : a.closest('[data-act]')
       if (a.dataset.keep) focus = { keep: a.dataset.keep, start: a.selectionStart, end: a.selectionEnd }
-      else if (a.dataset.act) focus = { act: a.dataset.act, id: a.dataset.id, sid: a.dataset.sid, v: a.dataset.v }
+      else if (t) focus = { act: t.dataset.act, id: t.dataset.id, sid: t.dataset.sid, v: t.dataset.v }
     }
     return { keep, focus }
   }

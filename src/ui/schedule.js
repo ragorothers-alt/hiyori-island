@@ -231,7 +231,7 @@ export class ScheduleView {
         return `<div class="blk ${ev ? 'ev' : 'tk'} ${item.done ? 'done' : ''} ${others ? 'clash' : ''} ${past && !item.done ? 'past' : ''} ${short}"
           data-type="${ev ? 'event' : 'task'}" data-id="${esc(b.id)}" data-start="${b.start}" data-end="${b.end}" style="${pos};--c:${c}">
           <button class="check" data-act="toggle" aria-label="切換完成狀態" style="--c:${c}">${ICON.check}</button>
-          <div class="blk-txt"><b>${ev ? '' : item.star ? '<em class="star">★</em>' : ''}${esc(item.title)}</b><small><span class="blk-time">${time}</span>${meta ? `・${meta}` : ''}</small></div>
+          <button type="button" class="blk-txt" data-edit><b>${ev ? '' : item.star ? '<em class="star">★</em>' : ''}${esc(item.title)}</b><small><span class="blk-time">${time}</span>${meta ? `・${meta}` : ''}</small></button>
           <i class="blk-resize" data-resize title="拖曳調整長度"></i>
         </div>`
       })
@@ -290,8 +290,16 @@ export class ScheduleView {
     this._sheet({ title: '', date: this.store.selectedDate, start: hm(minute), end: hm(Math.min(1439, minute + 60)), note: '' })
   }
   closeEdit() {
+    const id = this.editing?.id
     $('#editSheet').hidden = true
     this.editing = null
+    // 存了之後時間軸重畫，原本的按鈕被換掉：焦點還到同一件的標題上（鍵盤才不會掉回頁首）
+    if (id) {
+      requestAnimationFrame(() => {
+        const a = document.activeElement
+        if (!a || a === document.body) $(`.blk[data-id="${CSS.escape(id)}"] [data-edit]`)?.focus({ preventScroll: true })
+      })
+    }
   }
 
   _sheet(item) {
@@ -479,6 +487,12 @@ export class ScheduleView {
       } else if (e.target.closest('.dl-lane')) this._startDrag(e, { kind: 'empty' })
     })
     line.addEventListener('click', (e) => {
+      // 用鍵盤（Enter／空白鍵）按時段的標題：打開編輯。滑鼠和手指的點擊交給拖曳那邊分辨是點還是拖
+      const ed = e.target.closest('[data-edit]')
+      if (ed && e.detail === 0) {
+        const blk = ed.closest('.blk')
+        return this.openEdit(blk.dataset.type, blk.dataset.id)
+      }
       const b = e.target.closest('[data-act="toggle"]')
       if (!b) return
       const blk = b.closest('.blk')
