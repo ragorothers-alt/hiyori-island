@@ -40,6 +40,21 @@ export class World {
     renderer.shadowMap.type = THREE.PCFShadowMap
     renderer.toneMapping = THREE.NeutralToneMapping
     renderer.toneMappingExposure = 1.05
+    // 系統收走了 WebGL（iOS 切到背景、顯示卡重置）：瀏覽器還回來時 three.js 會自己重建（實測模型和貼圖都回得來）。
+    // 有的瀏覽器不會還：畫面看得到、卻一直沒還就請使用者重新整理（onContextGone）
+    this.onContextGone = () => {}
+    let lostTimer = 0
+    const waitRestore = () => {
+      clearTimeout(lostTimer)
+      lostTimer = setTimeout(() => {
+        if (!renderer.getContext().isContextLost()) return
+        // 在背景時不算：回到前景後再等一輪
+        if (document.hidden) return waitRestore()
+        this.onContextGone()
+      }, 8000)
+    }
+    canvas.addEventListener('webglcontextlost', waitRestore)
+    canvas.addEventListener('webglcontextrestored', () => clearTimeout(lostTimer))
 
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 900)

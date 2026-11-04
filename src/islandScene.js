@@ -44,6 +44,7 @@ export async function createIsland(ctx) {
   await Promise.race([document.fonts?.ready, sleep(2500)])
 
   const world = new World(document.getElementById('scene'))
+  world.onContextGone = () => ui.toast({ icon: '島', title: '小島的畫面不見了', sub: '系統收回了顯示資源，重新整理頁面就會回來', ms: 9000 })
   ctx.started()
   const sky = new Sky(world)
   if (params.has('hour')) sky.hourOverride = parseFloat(params.get('hour'))
