@@ -42,6 +42,8 @@ export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version
 // 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
 const SLOW_SAVE = 8
 const SAVE_WAIT = 400
+// 例行公事「哪幾天生成過」記最近幾天（日期倒退回前一兩天時不會再生一次）
+const MADE_KEEP = 3
 
 // ── 被取代的資料：留最近 BACKUPS 份，新的在前（雲端、資料夾同步、兩個分頁同時改了資料、匯入和重置前都共用）──
 // 只留一份的話，同步取代了一次、接著又匯入，第一次被取代的那份就不見了
@@ -899,7 +901,8 @@ export class Store {
   get streak() {
     const p = this.state.player
     if (!p.lastActive) return 0
-    return p.lastActive === this.today || p.lastActive === addDays(this.today, -1) ? p.streak : 0
+    // 最後活動的日子比今天還晚（日期倒退了）：也還在連續中
+    return p.lastActive >= addDays(this.today, -1) ? p.streak : 0
   }
   day(date = this.today) {
     return (this.state.history[date] ||= emptyDay())
@@ -1154,7 +1157,8 @@ export class Store {
   }
   _touchStreak() {
     const p = this.state.player
-    if (p.lastActive === this.today) return
+    // 今天（或日期倒退前的那一天）已經算過了
+    if (p.lastActive >= this.today) return
     p.streak = p.lastActive === addDays(this.today, -1) ? p.streak + 1 : 1
     p.lastActive = this.today
     p.stats.bestStreak = Math.max(p.stats.bestStreak, p.streak)
@@ -1291,7 +1295,8 @@ export class Store {
   // 每天第一次打開：好感度 +2；好感度夠高時もち會送幾顆金平糖
   _visit() {
     const b = this.state.player.bond
-    if (b.visit === this.today) return
+    // 今天來過了；日期倒退（記的是比今天晚的日子）也不再給一次
+    if (b.visit >= this.today) return
     b.visit = this.today
     this._bondGain(BOND_POINTS.visit, this._pending)
     if (this.bond.level >= actLevel('gift') && b.gift !== this.today) {
@@ -1393,9 +1398,13 @@ export class Store {
   _ensureRoutines(date) {
     const created = []
     if (date < this.today) return created
+    let have = null
     for (const r of this.state.routines) {
       if (r.startDate > date || r.made[date] || !repeatMatches(r.repeat, date)) continue
       r.made[date] = true
+      // 那一天的實例已經在了（日期倒退：搭飛機往西飛、改了時區）：不再生一份同 id 的
+      have ??= new Set([...this.state.tasks, ...this.state.events].map((x) => x.id))
+      if (have.has(instanceId(r, date))) continue
       if (r.kind === 'task') {
         const t = { id: instanceId(r, date), title: r.title, date, priority: r.priority, tag: r.tag, done: false, rewarded: false, createdAt: Date.now(), routineId: r.id }
         this.state.tasks.push(t)
@@ -1406,7 +1415,9 @@ export class Store {
         created.push(e)
       }
     }
-    for (const r of this.state.routines) for (const d of Object.keys(r.made)) if (d < this.today) delete r.made[d]
+    // 生成過的紀錄留最近幾天：日期倒退回前一兩天時，使用者刪掉的那天的實例也不會再冒出來
+    const keep = addDays(this.today, -MADE_KEEP)
+    for (const r of this.state.routines) for (const d of Object.keys(r.made)) if (d < keep) delete r.made[d]
     return created
   }
   routineOf(item) {

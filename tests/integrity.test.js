@@ -200,6 +200,30 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
   })
 })
 
+describe('日期倒退（搭飛機往西飛、改了時區）', () => {
+  it('回到前一天：例行公事不多生同 id 的一份、刪掉的不再冒出來，連續天數和來訪獎勵不重算', () => {
+    store.addRoutine({ title: '澆花', repeat: { type: 'daily' } })
+    const first = store.tasksOn(store.today).find((t) => t.routineId)
+    store.deleteTask(first.id)
+    store.toggleTask(store.addTask({ title: '11/2 的' }).id)
+    vi.setSystemTime(new Date(2026, 10, 3, 9))
+    store.tick()
+    store.toggleTask(store.addTask({ title: '11/3 的' }).id)
+    expect(store.streak).toBe(2)
+    const visit = store.state.player.bond.visit
+    vi.setSystemTime(new Date(2026, 10, 2, 22))
+    store.tick()
+    expect(store.today).toBe('2026-11-02')
+    const ids = store.state.tasks.map((t) => t.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(store.tasksOn('2026-11-02').some((t) => t.routineId)).toBe(false)
+    expect(store.streak).toBe(2)
+    store.toggleTask(store.addTask({ title: '倒退後的' }).id)
+    expect(store.streak).toBe(2)
+    expect(store.state.player.bond.visit).toBe(visit)
+  })
+})
+
 describe('拆成三小步', () => {
   it('專注過的輪數留在第一步', () => {
     const t = store.addTask({ title: '寫報告' })
