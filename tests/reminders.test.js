@@ -111,7 +111,9 @@ describe('日程提醒', () => {
     reminders.check(new Date(2026, 9, 26, 8, 50))
     expect(callback).toHaveBeenNthCalledWith(2, tomorrow, 10, 'event')
     expect(callback).toHaveBeenCalledTimes(2)
+    // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）
     expect(JSON.parse(localStorage.getItem('hiyori-reminded'))).toEqual({
+      '2026-10-25': [`${event.id}@09:00`],
       '2026-10-26': [`${tomorrow.id}@09:00`],
     })
   })
@@ -198,6 +200,45 @@ describe('任務與就寢提醒', () => {
     expect(callback.mock.calls[0][0].id).toBe(task.id)
     expect(callback.mock.calls[0][0].start).toBe('14:00')
     expect(callback.mock.calls[0].slice(1)).toEqual([10, 'task'])
+  })
+
+  it('電腦睡著時開始了：醒來後 15 分鐘內補提醒；平常打開 App 只補開始後 1 分鐘內的', () => {
+    const task = store.addTask({ title: '線上課', date: TODAY, at: '14:00', dur: 60 })
+    // 一直開著、每 30 秒檢查：開始 2 分鐘後就不吵了
+    const openCb = vi.fn()
+    const open = new Reminders(store, openCb)
+    open.check(at(14, 1, 30))
+    open.check(at(14, 2))
+    expect(openCb.mock.calls.map((c) => c[0].id)).not.toContain(task.id)
+    localStorage.clear()
+    // 睡著：13:00 檢查過，下一次是 14:05
+    reminders.check(at(13, 0))
+    reminders.check(at(14, 5))
+    expect(callback.mock.calls.map((c) => c[0].id)).toContain(task.id)
+    // 剛打開的 App（沒有上一次）在 14:05：不補
+    localStorage.clear()
+    const fresh = vi.fn()
+    new Reminders(store, fresh).check(at(14, 5))
+    expect(fresh.mock.calls.map((c) => c[0].id)).not.toContain(task.id)
+  })
+
+  it('就寢在午夜後（00:25）：23:55 起的提醒跨過午夜也對得上，只提醒一次', () => {
+    store.setRhythm({ sleep: '00:25' })
+    reminders.check(at(23, 54))
+    expect(callback).not.toHaveBeenCalled()
+    // 23:55 沒開著，過了午夜才打開
+    reminders.check(new Date(2026, 9, 26, 0, 2))
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(callback.mock.calls[0][2]).toBe('bed')
+    reminders.check(new Date(2026, 9, 26, 0, 4))
+    expect(callback).toHaveBeenCalledTimes(1)
+    // 午夜前提醒過了，過了午夜也不再提醒
+    const other = vi.fn()
+    localStorage.clear()
+    const r2 = new Reminders(store, other)
+    r2.check(at(23, 58))
+    r2.check(new Date(2026, 9, 26, 0, 1))
+    expect(other.mock.calls.filter((c) => c[2] === 'bed')).toHaveLength(1)
   })
 
   it('就寢前 30 分鐘提醒一次，可以關掉；不受日程提醒設定影響', () => {

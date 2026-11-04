@@ -3,6 +3,9 @@
 import { addDays, dateStr, toMin } from './store.js'
 
 const KEY = 'hiyori-reminded'
+// 兩次檢查隔了這麼久，代表電腦睡著、手機鎖著時錯過了：剛開始不久的（LATE 分鐘內）還是補提醒
+const GAP = 2 * 60000
+const LATE = 15
 
 function load() {
   try {
@@ -58,26 +61,35 @@ export class Reminders {
     const early = lead >= 0 && mins + lead >= 1440
     if (early) this.store.prepareRoutines?.(tomorrow)
     const items = lead < 0 ? [] : [...this._items(today, 0), ...(early ? this._items(tomorrow, 1440) : [])]
+    // 開始後 1 分鐘內打開 App 仍會補提醒；再晚就不吵了。
+    // 不過上次檢查是很久以前（電腦睡著時開始了）：剛開始 15 分鐘內的照樣補提醒
+    const slept = this.lastCheck != null && now - this.lastCheck > GAP
+    this.lastCheck = +now
+    const late = slept ? LATE : 1
     for (const [item, at, kind, date, offset] of items) {
       const key = `${item.id}@${at}`
       const done = (this.sent[date] ||= [])
       if (item.done || done.includes(key)) continue
       const start = toMin(at) + offset
-      // 開始後 1 分鐘內打開 App 仍會補提醒；再晚就不吵了
-      if (mins >= start - lead && mins < start + 1) {
+      if (mins >= start - lead && mins < start + late) {
         done.push(key)
         changed = true
         this.onRemind(kind === 'task' ? { ...item, start: at } : item, Math.max(0, Math.ceil(start - mins)), kind)
       }
     }
-    // 就寢前 30 分鐘（之後 10 分鐘內打開 App 也會補提醒）
+    // 就寢前 30 分鐘（之後 10 分鐘內打開 App 也會補提醒）。照「過了幾分鐘」算，跨過午夜也對得上
+    // （就寢 00:25 → 23:55 起的 10 分鐘）；記在這段開始的那一天，過了午夜不會再提醒一次
     const r = this.store.state.rhythm
     const bedKey = `bed@${r.sleep}`
     const at = (toMin(r.sleep) - 30 + 1440) % 1440
-    if (r.bedRemind && !sent.includes(bedKey) && mins >= at && mins < at + 10) {
-      sent.push(bedKey)
-      changed = true
-      this.onRemind({ id: 'bedtime', title: '就寢', start: r.sleep }, 30, 'bed')
+    const since = (mins - at + 1440) % 1440
+    if (r.bedRemind && since < 10) {
+      const night = (this.sent[mins - since >= 0 ? today : addDays(today, -1)] ||= [])
+      if (!night.includes(bedKey)) {
+        night.push(bedKey)
+        changed = true
+        this.onRemind({ id: 'bedtime', title: '就寢', start: r.sleep }, 30, 'bed')
+      }
     }
     // 重要日子和里程碑期限：前一天和當天，早上 8 點後第一次打開時提醒一次（專案的截止日另外有提醒）
     if (mins >= 480) {
@@ -90,8 +102,10 @@ export class Reminders {
         this.onRemind(d, d.days, 'date')
       }
     }
+    // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）
+    const yesterday = addDays(today, -1)
     for (const d of Object.keys(this.sent)) {
-      if (d !== today && d !== tomorrow) {
+      if (d !== yesterday && d !== today && d !== tomorrow) {
         delete this.sent[d]
         changed = true
       }
