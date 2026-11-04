@@ -2413,7 +2413,9 @@ export class Store {
   // 存不進去也照樣重置：已經按了兩次，而且空間不夠時重置可能正是想清出空間
   reset() {
     keepBackup(this.state, 'reset', this.state.updatedAt)
-    localStorage.removeItem(KEY)
+    try {
+      localStorage.removeItem(KEY)
+    } catch {}
     const version = this._nextVersion()
     this.state = seed(false)
     this.state.updatedAt = version

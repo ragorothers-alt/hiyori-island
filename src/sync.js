@@ -17,6 +17,13 @@ export function restoreBackup(store) {
 }
 const NO_ROOM = '瀏覽器的儲存空間不夠，沒辦法先備份另一邊，所以先不替換。請先用「匯出資料」存一份'
 const NO_SAVE = '瀏覽器的儲存空間不夠，這台的存檔寫不進去。請先用「匯出資料」存一份，再清出一些空間'
+const readKey = (k) => {
+  try {
+    return localStorage.getItem(k) || ''
+  } catch {
+    return ''
+  }
+}
 
 // 子類別要實作：
 //   _ready()                             有沒有連結（有檔案 handle、有同步碼）
@@ -35,7 +42,8 @@ export class SyncEngine {
     this.message = ''
     this.lastSync = 0
     this.conflict = null
-    this.base = localStorage.getItem(baseKey) || ''
+    // 封鎖了網站資料的瀏覽器，讀 localStorage 會丟例外：當成還沒同步過，不要讓整個開機停下來
+    this.base = readKey(baseKey)
     // 連結世代：解除或換一個連結就加一，還在路上的舊請求回來後不再動狀態
     this.epoch = 0
     this._timer = 0
@@ -51,7 +59,7 @@ export class SyncEngine {
     // 同一個瀏覽器的另一個分頁同步完會改 base：跟著更新。不然換成那個分頁的資料後，
     // 這邊會以為兩邊都改過，下次雲端有新資料時就變成要選邊
     addEventListener('storage', (e) => {
-      if (e.key === baseKey) this.base = localStorage.getItem(baseKey) || ''
+      if (e.key === baseKey) this.base = readKey(baseKey)
     })
     // 回到這個視窗、或開著時定期看一次：別台裝置可能剛寫過
     addEventListener('focus', () => this.sync())

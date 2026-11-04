@@ -141,6 +141,18 @@ describe('雲端資料夾同步', () => {
     expect(titles(b.store)).toContain('A 的任務')
   })
 
+  it('瀏覽器封鎖網站資料（讀 localStorage 就丟例外）：同步的物件照樣建得起來，當成還沒同步過', () => {
+    const a = device()
+    const prev = globalThis.localStorage
+    globalThis.localStorage = { getItem() { throw new Error('SecurityError') }, setItem() { throw new Error('SecurityError') }, removeItem() {} }
+    try {
+      const s = new FileSync(a.store)
+      expect(s.base).toBe('')
+    } finally {
+      globalThis.localStorage = prev
+    }
+  })
+
   it('同步過的裝置存檔讀不進來：拿檔案裡的回來，不會把範例島推上去蓋掉', async () => {
     const a = device()
     await a.run((s) => s.addTask({ title: '真正的資料' }))

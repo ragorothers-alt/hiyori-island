@@ -625,6 +625,11 @@ async function boot() {
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
     navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[hiyori] SW 註冊失敗', e))
   }
+  // 請瀏覽器在空間吃緊時不要清掉這個網站的資料（iPhone 沒加到主畫面時，Safari 也可能把太久沒開的網站資料清掉）。
+  // Chrome 系和安裝成 App 時不會跳出詢問；Firefox 會跳出權限詢問，不在開機時突然問
+  if (navigator.storage?.persist && (navigator.userAgentData || matchMedia('(display-mode: standalone)').matches)) {
+    navigator.storage.persisted().then((on) => on || navigator.storage.persist()).catch(() => {})
+  }
   let installEvt = null
   const installRow = document.getElementById('installRow')
   addEventListener('beforeinstallprompt', (e) => {
