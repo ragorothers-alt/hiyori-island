@@ -2085,7 +2085,11 @@ export class Store {
   }
   // 刪掉專案時，歸在它底下的任務留著，只是不再歸屬
   deleteProject(id) {
-    this.state.projects = this.state.projects.filter((p) => p.id !== id)
+    const p = this._find('projects', id)
+    if (!p) return
+    // 跟刪掉一筆進度一樣：整個專案刪掉，它的進度也不算進累計筆數（不能建了寫、寫了刪來刷成就）
+    this.stats.projectLogs = Math.max(0, this.stats.projectLogs - p.logs.length)
+    this.state.projects = this.state.projects.filter((x) => x.id !== id)
     for (const t of this.state.tasks) if (t.project === id) t.project = t.ms = null
     this._fillSlots()
     this._finish()

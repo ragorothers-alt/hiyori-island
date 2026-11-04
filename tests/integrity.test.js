@@ -382,6 +382,13 @@ describe('灌不了的統計、改不了的欄位', () => {
     store.deleteProjectLog(p.id, log.id)
     store.deleteProjectLog(p.id, log.id)
     expect(store.stats.projectLogs).toBe(0)
+    // 整個專案刪掉：它的進度也扣回來
+    const q = store.addProject({ name: '寫了就刪', milestones: ['一'] })
+    for (let i = 0; i < 3; i++) store.addProjectLog(q.id, { text: `第 ${i} 筆` })
+    expect(store.stats.projectLogs).toBe(3)
+    store.deleteProject(q.id)
+    store.deleteProject(q.id)
+    expect(store.stats.projectLogs).toBe(0)
   })
 
   it('戒除里程碑：破戒後重新走到同一個里程碑照樣慶祝，但經驗只給第一次', () => {
