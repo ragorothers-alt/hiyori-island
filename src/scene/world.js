@@ -54,7 +54,10 @@ export class World {
       }, 8000)
     }
     canvas.addEventListener('webglcontextlost', waitRestore)
-    canvas.addEventListener('webglcontextrestored', () => clearTimeout(lostTimer))
+    canvas.addEventListener('webglcontextrestored', () => {
+      clearTimeout(lostTimer)
+      this.redraw()
+    })
 
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 900)
@@ -119,6 +122,7 @@ export class World {
     // App 模式：整個場景藏起來（不只被蓋住），連補畫都不用；_redraw 會留著，回到小島時補上
     this._hidden = false
     this._tickTimer = 0
+    this._kicked = 0
     this.coveredTick = null
     this._lastTick = 0
     // 改了 canvas 尺寸會清空畫面，蓋住時也要補畫一幀
@@ -156,7 +160,7 @@ export class World {
     this.renderer.setSize(w, h, false)
     this.composer.setSize(w, h)
     this.bloom.resolution.set(w / 2, h / 2)
-    this._redraw = true
+    this.redraw()
   }
 
   // 依版面解出預設視角。layout（像素）：面板展開時的畫面位移 shiftX／shiftY（同 setViewShift），
@@ -235,12 +239,16 @@ export class World {
     this._hidden = !!v
     this._syncLoop()
   }
-  // 藏起來（App 模式）時整個停掉每幀的迴圈：只是提早返回的話，一整天一秒還是會被喚醒 60 次。
-  // 改用每半秒一次的計時器跑 coveredTick；回到小島再接回迴圈
+  // 被蓋住（全螢幕編輯、App 模式）時整個停掉每幀的迴圈：只是提早返回的話，編輯一整天一秒還是會被喚醒 60 次。
+  // 改用每半秒一次的計時器跑 coveredTick；要補畫時由 redraw() 單獨要一幀；回到小島再接回迴圈
   _syncLoop() {
     if (!this._started) return
-    const sleep = this._covered && this._hidden
-    if (sleep === !!this._tickTimer) return
+    const sleep = this._covered
+    if (sleep === !!this._tickTimer) {
+      // 從 App 模式回到全螢幕編輯：藏起來時留下的補畫現在畫
+      if (sleep && this._redraw) this._kick()
+      return
+    }
     if (sleep) {
       this.renderer.setAnimationLoop(null)
       let last = performance.now()
@@ -267,7 +275,7 @@ export class World {
       rt.dispose()
     }
     this.composer.setPixelRatio(this.renderer.getPixelRatio())
-    this._redraw = true
+    this.redraw()
   }
 
   // 把這一幀的色調套到泛光與最後一道後製；太陽方向換算成畫面座標給光暈用
@@ -303,9 +311,20 @@ export class World {
     const quiet = now - this.lastInteract
     return quiet > 90000 ? 2 : quiet > 15000 ? 1 : 0
   }
-  // 場景停住時（covered）要求補畫一幀
+  // 場景停住時（covered）要求補畫一幀；藏起來時先記著，看得到時再畫
   redraw() {
     this._redraw = true
+    if (this._tickTimer) this._kick()
+  }
+  // 迴圈停著時單獨要一幀；閒置節流可能讓這幀跳過，沒畫到就再要一次
+  _kick() {
+    if (this._hidden || this._kicked) return
+    this._kicked = requestAnimationFrame((t) => {
+      this._kicked = 0
+      if (!this._tickTimer || !this._redraw) return
+      this._frame(t)
+      if (this._redraw) this._kick()
+    })
   }
   // 有特效在播（爆花、煙火、天燈）時呼叫，暫時維持全速
   keepAwake(ms = 2500) {

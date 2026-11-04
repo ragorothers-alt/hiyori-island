@@ -1,10 +1,17 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { defineConfig } from 'vite'
 
+// dist 底下所有檔案的相對路徑（排好序）
+const walk = (dir, base = '') =>
+  readdirSync(join(dir, base), { withFileTypes: true })
+    .flatMap((d) => (d.isDirectory() ? walk(dir, join(base, d.name)) : [join(base, d.name).replaceAll('\\', '/')]))
+    .sort()
+
 // Service Worker 的快取名稱帶著這次建置的代號，並附上這次建置的檔案清單（public/sw.js 會原樣複製進 dist，寫好之後再改）：
-// 每次部署換一個新快取、舊的清掉，沒有 hash 的圖示和 manifest 也會跟著更新；新版還用得到的舊檔搬過去
+// 每次部署換一個新快取、舊的清掉，沒有 hash 的圖示和 manifest 也會跟著更新；新版還用得到的舊檔搬過去。
+// 代號用 dist 裡每個檔案的路徑和內容算：只改 index.html、manifest、圖示或 sw.js 本身（檔名都不變）也會換新快取
 const swVersion = () => {
   let files = []
   let dir = 'dist'
@@ -17,7 +24,9 @@ const swVersion = () => {
     },
     closeBundle() {
       const file = join(dir, 'sw.js')
-      const id = createHash('sha256').update(files.join('\n')).digest('hex').slice(0, 10)
+      const hash = createHash('sha256')
+      for (const f of walk(dir)) hash.update(`${f}\n`).update(readFileSync(join(dir, f))).update('\n')
+      const id = hash.digest('hex').slice(0, 10)
       const src = readFileSync(file, 'utf8')
       const out = src.replace("const VERSION = 'hiyori-v1'", `const VERSION = 'hiyori-${id}'`).replace('const BUILD = []', `const BUILD = ${JSON.stringify(files)}`)
       if (out === src) throw new Error('sw.js 裡找不到 VERSION／BUILD，建置代號沒有填進去')
