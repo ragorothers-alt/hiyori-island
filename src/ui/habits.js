@@ -1,5 +1,5 @@
 import './habits.css'
-import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, patch } from './dom.js'
+import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, patch, setOn, pickOne } from './dom.js'
 import { EVENT_COLORS } from '../theme.js'
 import {
   HABIT_ICONS, HABIT_TEMPLATES, QUIT_MILESTONES, startOf, applies, countOn, doneOn, streak, bestStreak, rate,
@@ -333,13 +333,13 @@ export class HabitsView {
     const days = h?.days || []
     const icons = icon && !HABIT_ICONS.includes(icon) ? [icon, ...HABIT_ICONS] : HABIT_ICONS
     const kindSeg = isNew
-      ? `<div class="hb-f-top"><div class="seg" role="tablist"><button type="button" data-kind="build">養成</button><button type="button" data-kind="quit">戒除</button></div><span class="hb-f-tip"></span></div>`
+      ? `<div class="hb-f-top"><div class="seg" role="group" aria-label="習慣的種類"><button type="button" data-kind="build">養成</button><button type="button" data-kind="quit">戒除</button></div><span class="hb-f-tip"></span></div>`
       : ''
     return `<form class="hb-form hb-c${h?.kind === 'quit' ? ' quit' : ''}" data-form="${isNew ? 'new' : 'edit'}"${h ? ` data-id="${h.id}"` : ''} autocomplete="off" style="--mc:${colorOf(color)}">
       ${kindSeg}
       <div class="hb-f-name"><span class="stamp-k" data-preview>${esc(icon || (h?.kind === 'quit' ? '禁' : '習'))}</span><input class="hb-input" name="hname" maxlength="30" value="${esc(h?.name || '')}" placeholder="習慣名稱，例如：喝水、熬夜" /></div>
-      <div class="hb-f-row top"><span class="hb-f-label">圖示</span><div class="hb-icons">${icons.map((k) => `<button type="button" data-icon="${esc(k)}" class="${k === icon ? 'on' : ''}">${esc(k)}</button>`).join('')}</div></div>
-      <div class="hb-f-row"><span class="hb-f-label">顏色</span><div class="swatches hb-swatches">${EVENT_COLORS.map((c, i) => `<button type="button" data-color="${i}" class="${i === color ? 'on' : ''}" style="--c:${c}" aria-label="顏色 ${i + 1}"></button>`).join('')}</div></div>
+      <div class="hb-f-row top"><span class="hb-f-label">圖示</span><div class="hb-icons">${icons.map((k) => `<button type="button" data-icon="${esc(k)}" class="${k === icon ? 'on' : ''}" aria-pressed="${k === icon}">${esc(k)}</button>`).join('')}</div></div>
+      <div class="hb-f-row"><span class="hb-f-label">顏色</span><div class="swatches hb-swatches">${EVENT_COLORS.map((c, i) => `<button type="button" data-color="${i}" class="${i === color ? 'on' : ''}" aria-pressed="${i === color}" style="--c:${c}" aria-label="顏色 ${i + 1}"></button>`).join('')}</div></div>
       <div class="hb-f-row only-build"><span class="hb-f-label">每日目標</span><input class="hb-input hb-num" type="number" name="htarget" min="1" max="99" value="${h?.target || 1}" inputmode="numeric" aria-label="每日目標" /><input class="hb-input hb-unit" name="hunit" maxlength="6" value="${esc(h?.unit || '次')}" placeholder="次" aria-label="單位" /></div>
       <div class="hb-f-row only-build top"><span class="hb-f-label">哪幾天<em class="hb-f-freq">${freqLabel(days)}</em></span><div class="hb-wd">${WEEK_ORDER.map((d) => `<button type="button" data-day="${d}" class="${days.includes(d) ? 'on' : ''}" aria-pressed="${days.includes(d)}">${WEEK_ZH[d]}</button>`).join('')}</div></div>
       <div class="hb-f-btns"><button type="button" class="btn-ghost" data-act="${isNew ? 'new-cancel' : 'edit-cancel'}"${h ? ` data-id="${h.id}"` : ''}>取消</button><button type="submit" class="btn-primary">${isNew ? '加入' : '儲存'}</button></div>
@@ -362,12 +362,12 @@ export class HabitsView {
     const f = b.closest('form')
     if (f && b.dataset.icon !== undefined) return this._pickIcon(f, b)
     if (f && b.dataset.color !== undefined) {
-      $$('[data-color]', f).forEach((x) => x.classList.toggle('on', x === b))
+      pickOne($$('[data-color]', f), (x) => x === b)
       f.style.setProperty('--mc', colorOf(+b.dataset.color))
       return
     }
     if (f && b.dataset.day !== undefined) {
-      b.setAttribute('aria-pressed', b.classList.toggle('on'))
+      setOn(b, !b.classList.contains('on'))
       $('.hb-f-freq', f).textContent = freqLabel($$('[data-day].on', f).map((x) => +x.dataset.day))
       return
     }
@@ -516,7 +516,7 @@ export class HabitsView {
 
   _pickIcon(f, b) {
     const on = !b.classList.contains('on')
-    $$('[data-icon]', f).forEach((x) => x.classList.toggle('on', on && x === b))
+    pickOne($$('[data-icon]', f), (x) => on && x === b)
     this._preview(f)
   }
 
@@ -548,7 +548,7 @@ export class HabitsView {
     if (!f) return
     const quit = this.newKind === 'quit'
     f.classList.toggle('quit', quit)
-    $$('[data-kind]', f).forEach((b) => b.classList.toggle('on', b.dataset.kind === this.newKind))
+    pickOne($$('[data-kind]', f), (b) => b.dataset.kind === this.newKind)
     f.elements.hname.placeholder = quit ? '想戒除什麼？例如：熬夜、喝手搖飲' : '想養成什麼？例如：喝水、伸展'
     $('.hb-f-tip', f).textContent = quit ? '不用打卡，數著沒碰它的日子' : '照選好的日子打卡，達標就完成'
     $('.btn-primary', f).textContent = quit ? '加入' : '加入'

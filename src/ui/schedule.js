@@ -1,5 +1,5 @@
 import './schedule.css'
-import { $, esc, ICON, armConfirm, WEEK_ZH } from './dom.js'
+import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
 import { addDays, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
@@ -115,7 +115,7 @@ export class ScheduleView {
         <label class="time-field">就寢 <input type="time" name="bed" value="${r.sleep}"></label><span class="tilde">→</span>
         <label class="time-field">起床 <input type="time" name="wake" value="${r.wake}"></label>
       </div>
-      <div class="form-row sc-foot"><div class="seg" data-q>${[1, 2, 3, 4, 5].map((q) => `<button type="button" data-v="${q}" class="${q === 3 ? 'on' : ''}">${QUALITY[q]}</button>`).join('')}</div>
+      <div class="form-row sc-foot"><div class="seg" data-q>${[1, 2, 3, 4, 5].map((q) => `<button type="button" data-v="${q}" class="${q === 3 ? 'on' : ''}" aria-pressed="${q === 3}">${QUALITY[q]}</button>`).join('')}</div>
         <button class="btn-primary" type="submit">記下</button></div>
     </form>`
   }
@@ -298,7 +298,7 @@ export class ScheduleView {
     const ed = this.editing
     const ev = ed.type === 'event'
     const routine = this.store.routineOf(item)
-    const swatches = EVENT_COLORS.map((c, i) => `<button type="button" data-color="${i}" style="--c:${c}" class="${i === ed.color ? 'on' : ''}" aria-label="顏色 ${i + 1}"></button>`).join('')
+    const swatches = EVENT_COLORS.map((c, i) => `<button type="button" data-color="${i}" style="--c:${c}" class="${i === ed.color ? 'on' : ''}" aria-pressed="${i === ed.color}" aria-label="顏色 ${i + 1}"></button>`).join('')
     const body = ev
       ? `<div class="ec-grid">
           <label>日期<input type="date" name="date" value="${item.date}" required></label>
@@ -312,8 +312,8 @@ export class ScheduleView {
           <label>開始<input type="time" name="at" value="${item.at || ''}"></label>
           <label>預估時間<select name="dur">${[...new Set([...DURS, taskDur(item)])].sort((a, b) => a - b).map((d) => `<option value="${d}" ${d === taskDur(item) ? 'selected' : ''}>${fmtDur(d)}</option>`).join('')}</select></label>
         </div>
-        <div class="form-row"><div class="seg" data-pri>${[1, 2, 3].map((p) => `<button type="button" data-v="${p}" class="${p === ed.priority ? 'on' : ''}">${PRIORITIES[p].label}</button>`).join('')}</div></div>
-        <div class="tag-pick">${TAGS.map((t) => `<button type="button" data-tag="${t.id}" style="--c:${t.color}" class="${t.id === ed.tag ? 'on' : ''}"><i></i>${t.label}</button>`).join('')}</div>
+        <div class="form-row"><div class="seg" data-pri>${[1, 2, 3].map((p) => `<button type="button" data-v="${p}" class="${p === ed.priority ? 'on' : ''}" aria-pressed="${p === ed.priority}">${PRIORITIES[p].label}</button>`).join('')}</div></div>
+        <div class="tag-pick">${TAGS.map((t) => `<button type="button" data-tag="${t.id}" style="--c:${t.color}" class="${t.id === ed.tag ? 'on' : ''}" aria-pressed="${t.id === ed.tag}"><i></i>${t.label}</button>`).join('')}</div>
         ${this._projectPick(item)}`
     $('#editSheet').innerHTML = `<form class="modal-card edit-card glass" autocomplete="off">
       <div class="modal-kicker">${ed.create ? 'あたらしいよてい' : ev ? 'よてい' : 'タスク'}</div>
@@ -409,7 +409,7 @@ export class ScheduleView {
     const card = $('#sleepCard')
     card.addEventListener('click', (e) => {
       const q = e.target.closest('[data-q] button')
-      if (q) q.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === q))
+      if (q) pickOne(q.parentElement.querySelectorAll('button'), (x) => x === q)
       if (e.target.closest('[data-skip]')) {
         try {
           localStorage.setItem(SKIP_KEY, s.today)
@@ -554,17 +554,17 @@ export class ScheduleView {
       const color = e.target.closest('[data-color]')
       if (color) {
         ed.color = +color.dataset.color
-        sheet.querySelectorAll('[data-color]').forEach((x) => x.classList.toggle('on', x === color))
+        pickOne(sheet.querySelectorAll('[data-color]'), (x) => x === color)
       }
       const pri = e.target.closest('[data-pri] button')
       if (pri) {
         ed.priority = +pri.dataset.v
-        pri.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === pri))
+        pickOne(pri.parentElement.querySelectorAll('button'), (x) => x === pri)
       }
       const tag = e.target.closest('[data-tag]')
       if (tag) {
         ed.tag = tag.dataset.tag
-        sheet.querySelectorAll('[data-tag]').forEach((x) => x.classList.toggle('on', x === tag))
+        pickOne(sheet.querySelectorAll('[data-tag]'), (x) => x === tag)
       }
       const act = e.target.closest('[data-ec]')?.dataset.ec
       if (!act) return

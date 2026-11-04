@@ -69,6 +69,16 @@ export function inlineEdit(el, value, onSave, maxLength = 60) {
   input.addEventListener('blur', () => finish(true))
 }
 
+// 選項按鈕：外觀（.on）和讀螢幕軟體聽到的狀態（aria-pressed）一起切
+export function setOn(el, on) {
+  el.classList.toggle('on', !!on)
+  el.setAttribute('aria-pressed', on ? 'true' : 'false')
+}
+// 一組選項裡只有一個是選的
+export function pickOne(els, isOn) {
+  for (const el of els) setOn(el, isOn(el))
+}
+
 // 內容沒變就不動 DOM：避免重播動畫、保留 hover 與焦點，也省掉重建節點
 export function setHTML(el, html) {
   if (el._html === html) return false

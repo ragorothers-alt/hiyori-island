@@ -1,5 +1,5 @@
 import './coach.css'
-import { $, esc, ICON, armConfirm } from './dom.js'
+import { $, esc, ICON, armConfirm, pickOne } from './dom.js'
 import { DATE_KINDS, DUE_KINDS } from '../theme.js'
 
 // 任務頁最上面的「だいじな日」：考試、截止日、紀念日的倒數小卡；專案的截止日和里程碑期限也一起列（唯讀，點了打開那個專案）
@@ -42,7 +42,7 @@ export class DatesView {
       this.render()
     } else if (act === 'kind') {
       this.kind = b.dataset.v
-      for (const x of this.root.querySelectorAll('[data-act="kind"]')) x.classList.toggle('on', x === b)
+      pickOne(this.root.querySelectorAll('[data-act="kind"]'), (x) => x === b)
     } else if (act === 'del') armConfirm(b, ICON.check, () => this.store.deleteDate(b.dataset.id))
     else if (act === 'project') this.hooks.openProject?.(b.dataset.id, b.dataset.sec)
   }
@@ -76,7 +76,7 @@ export class DatesView {
           <input name="title" maxlength="30" placeholder="名稱，例如：期中考" required />
           <input name="date" type="date" min="${s.today}" required />
           <div class="seg">${Object.entries(DATE_KINDS)
-            .map(([id, k]) => `<button type="button" data-act="kind" data-v="${id}" class="${this.kind === id ? 'on' : ''}">${k.label}</button>`)
+            .map(([id, k]) => `<button type="button" data-act="kind" data-v="${id}" class="${this.kind === id ? 'on' : ''}" aria-pressed="${this.kind === id}">${k.label}</button>`)
             .join('')}</div>
           <button type="button" class="btn-ghost" data-act="cancel">取消</button><button class="btn-primary" type="submit">加入</button>
         </form>`

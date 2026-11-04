@@ -10,7 +10,7 @@ import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
-import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML } from './ui/dom.js'
+import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML, setOn, pickOne } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -202,10 +202,10 @@ export class UI {
   }
 
   _syncPickers() {
-    $$('#taskPriority button').forEach((b) => b.classList.toggle('on', +b.dataset.v === this.priority))
-    $$('#taskTag button').forEach((b) => b.classList.toggle('on', b.dataset.tag === this.tag))
-    $$('#eventColor button').forEach((b) => b.classList.toggle('on', +b.dataset.i === this.eventColor))
-    $$('#projectColor button').forEach((b) => b.classList.toggle('on', +b.dataset.i === this.projectColor))
+    pickOne($$('#taskPriority button'), (b) => +b.dataset.v === this.priority)
+    pickOne($$('#taskTag button'), (b) => b.dataset.tag === this.tag)
+    pickOne($$('#eventColor button'), (b) => +b.dataset.i === this.eventColor)
+    pickOne($$('#projectColor button'), (b) => +b.dataset.i === this.projectColor)
   }
 
   _bindChrome() {
@@ -312,12 +312,11 @@ export class UI {
     })
   }
 
-  // ── 蓋在面板上的幾層：對話框（DOM 裡越後面越上層）→ App 模式的全螢幕計時 → 日曆 ──
+  // ── 蓋在面板上的幾層：對話框（DOM 裡越後面越上層）→ 番茄鐘的小視窗 → App 模式的全螢幕計時 → 商店 → 日曆 ──
   _topLayer() {
     const modal = $$('.modal').filter((m) => !m.hidden).pop()
     if (modal) return modal
-    if (!$('#focusFull').hidden) return $('#focusFull')
-    return this._calendar.view?.isOpen ? $('#calendar') : null
+    return [$('#focusSet'), $('#focusPick'), $('#focusFull'), $('#shop')].find((el) => !el.hidden) || (this._calendar.view?.isOpen ? $('#calendar') : null)
   }
   // Esc 一次只關最上面那一層；什麼都沒開時才放開打字的欄位、離開全螢幕
   _escape(typing) {
@@ -329,15 +328,15 @@ export class UI {
         newsModal: () => this.closeNews(),
         weekModal: () => this.closeWeekCard(),
         levelModal: () => this.closeModal(),
+        focusSet: () => this.focus.toggleSet(false),
+        focusPick: () => this.focus.togglePicker(false),
         focusFull: () => this.focus.toggleBig(false),
+        shop: () => this.toggleShop(false),
         calendar: () => this._calendar.view?.close(),
       }[top.id]
       return close?.()
     }
-    if (!$('#focusPick').hidden || !$('#focusSet').hidden) {
-      this.focus.togglePicker(false)
-      this.focus.toggleSet(false)
-    } else if (!$('#shop').hidden || this._shopWait) this.toggleShop(false)
+    if (this._shopWait) this.toggleShop(false)
     else if (typing) document.activeElement.blur()
     else if (this.tab === 'projects' && this._project.view?.id) this.closeProject()
     else this.toggleFull(false)
@@ -381,7 +380,7 @@ export class UI {
         }
       }
     })
-    for (const el of [...$$('.modal'), $('#focusFull')]) watch.observe(el, { attributes: true, attributeFilter: ['hidden'] })
+    for (const el of [...$$('.modal'), $('#focusFull'), $('#shop'), $('#focusPick'), $('#focusSet')]) watch.observe(el, { attributes: true, attributeFilter: ['hidden'] })
   }
 
   // 選中的分頁：active 樣式、aria-selected，Tab 鍵只停在選中的那一個（其他用方向鍵）
@@ -1063,7 +1062,7 @@ export class UI {
     }
     const perm = Notification.permission
     btn.disabled = perm === 'denied' || st.remindLead < 0
-    btn.classList.toggle('on', st.notify && perm === 'granted')
+    setOn(btn, st.notify && perm === 'granted')
     btn.textContent = perm === 'denied' ? '通知已被瀏覽器封鎖' : st.notify && perm === 'granted' ? '系統通知：開' : '開啟系統通知'
   }
 
@@ -1319,20 +1318,20 @@ export class UI {
   // ── 紀錄 ──
   renderSettings() {
     const on = this.store.state.settings.powerSave
-    $('#powerBtn').classList.toggle('on', on)
+    setOn($('#powerBtn'), on)
     $('#powerBtn').textContent = on ? '開' : '關'
     const theme = this.store.state.settings.theme
-    $$('#themePick button').forEach((b) => b.classList.toggle('on', b.dataset.v === theme))
+    pickOne($$('#themePick button'), (b) => b.dataset.v === theme)
     $('#themeInfo').textContent = THEME_INFO[theme]
     const quality = this.store.state.settings.quality
-    $$('#qualityPick button').forEach((b) => b.classList.toggle('on', b.dataset.v === quality))
+    pickOne($$('#qualityPick button'), (b) => b.dataset.v === quality)
     $('#qualityInfo').textContent = QUALITY_INFO[quality]
-    $$('#layoutPick button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'app') === !!this.appMode))
+    pickOne($$('#layoutPick button'), (b) => (b.dataset.v === 'app') === !!this.appMode)
     $('#layoutInfo').textContent = this.appMode ? '面板撐滿畫面、小島先休息，像一般 App 一樣用（只改這台裝置）' : '任務在島上開花、兩人在島上陪你（只改這台裝置）'
     const fs = this.store.state.settings.fontScale
-    $$('#fontPick button').forEach((b) => b.classList.toggle('on', +b.dataset.v === fs))
+    pickOne($$('#fontPick button'), (b) => +b.dataset.v === fs)
     const stuck = this.store.state.settings.stuckNudge
-    $('#stuckBtn').classList.toggle('on', stuck)
+    setOn($('#stuckBtn'), stuck)
     $('#stuckBtn').textContent = stuck ? '開' : '關'
     $('#newsInfo').textContent = `${CHANGELOG[0].date.slice(5).replace('-', '/')}・${CHANGELOG[0].title}`
     this.renderNewsDot()
@@ -1503,7 +1502,7 @@ export class UI {
     setHTML($('#dexGrid'), list
       .map((f) => {
         const got = dex[f.key]
-        return `<button class="dex-cell ${got ? '' : 'unknown'} ${this.dexSel === f.key ? 'on' : ''}" data-k="${f.key}" style="--rc:${RARITIES[f.rarity].color}">
+        return `<button class="dex-cell ${got ? '' : 'unknown'} ${this.dexSel === f.key ? 'on' : ''}" aria-pressed="${this.dexSel === f.key}" data-k="${f.key}" style="--rc:${RARITIES[f.rarity].color}">
           <img src="${thumbs?.[f.key] || BLANK}" alt="" draggable="false" /><span>${got ? esc(f.name) : '？？？'}</span></button>`
       })
       .join(''))
@@ -1548,7 +1547,7 @@ export class UI {
       const b = e.target.closest('[data-k]')
       if (!b) return
       this.dexSel = b.dataset.k
-      $$('#dexGrid .dex-cell').forEach((x) => x.classList.toggle('on', x === b))
+      pickOne($$('#dexGrid .dex-cell'), (x) => x === b)
       this._renderDexDetail()
     })
   }
@@ -1615,7 +1614,7 @@ export class UI {
       const b = e.target.closest('[data-mood]')
       if (!b) return
       this.mood = b.dataset.mood
-      $$('#moodPick .mood').forEach((x) => x.classList.toggle('on', x === b))
+      pickOne($$('#moodPick .mood'), (x) => x === b)
       $('#reviewSave').disabled = false
     })
     $('#reviewForm').addEventListener('submit', (e) => {
@@ -1647,7 +1646,7 @@ export class UI {
     const tasks = s.tasksOn(date)
     const ev = s.eventsOn(date)
     $('#reviewSum').innerHTML = `<span><b>${tasks.filter((t) => t.done).length}</b>/ ${tasks.length} 朵花綻放</span><span><b>${day.focus}</b>分鐘專注</span><span><b>${ev.filter((e) => e.done).length}</b>個日程完成</span>`
-    $$('#moodPick .mood').forEach((x) => x.classList.toggle('on', x.dataset.mood === this.mood))
+    pickOne($$('#moodPick .mood'), (x) => x.dataset.mood === this.mood)
     $('#reviewText').value = prev?.text || ''
     $('#reviewSave').disabled = !this.mood
     $('#reviewSave').textContent = prev ? '更新' : '記下來'
@@ -1949,6 +1948,7 @@ export class UI {
     if (open) this.toggleFull(false)
     $('#shop').hidden = !open
     $('#shopBtn').classList.toggle('on', open)
+    $('#shopBtn').setAttribute('aria-expanded', open)
     if (open) this.renderShop()
   }
 
@@ -2221,11 +2221,12 @@ class FocusTimer {
   togglePicker(force) {
     const open = force ?? $('#focusPick').hidden
     $('#focusPick').hidden = !open
+    $('#focusLabel').setAttribute('aria-expanded', open)
     if (!open) return
     this.toggleSet(false)
     const { tasks, projects } = this._targets()
     const cur = this._targetKey()
-    const item = (key, color, text, extra = '') => `<li><button data-target="${esc(key)}" class="${key === cur ? 'on' : ''}"><i style="--c:${color}"></i>${text}${extra}</button></li>`
+    const item = (key, color, text, extra = '') => `<li><button data-target="${esc(key)}" class="${key === cur ? 'on' : ''}" aria-pressed="${key === cur}"><i style="--c:${color}"></i>${text}${extra}</button></li>`
     $('#focusPickList').innerHTML = [
       item('', '#d8dee8', '不指定'),
       '<li class="fp-h">今天的任務</li>',
@@ -2241,6 +2242,7 @@ class FocusTimer {
     const el = $('#focusSet')
     const open = force ?? el.hidden
     el.hidden = !open
+    $('#focusTime').setAttribute('aria-expanded', open)
     if (!open) return
     this.togglePicker(false)
     this._renderSet()
@@ -2360,11 +2362,7 @@ class FocusTimer {
     const v = st.focusMin
     $('#focusSet h4').firstChild.textContent = live ? '計時中・換個目標' : '要怎麼專注？'
     $('#fsMode').hidden = live
-    for (const b of $$('#fsMode button')) {
-      const on = (b.dataset.v === 'up') === up
-      b.classList.toggle('on', on)
-      b.setAttribute('aria-pressed', String(on))
-    }
+    pickOne($$('#fsMode button'), (b) => (b.dataset.v === 'up') === up)
     $('#fsTime').textContent = live ? $('#focusTime').textContent : up ? '00:00' : `${v}:00`
     $('#fsTime').classList.toggle('up', up && this.mode !== 'break')
     // 正向計時不用選長度和輪數
@@ -2372,8 +2370,8 @@ class FocusTimer {
     $('#fsRoundsRow').hidden = up || live
     $('#fsBreakRow').hidden = live
     $('#fsStart').hidden = live
-    for (const b of $$('#fsRounds button')) b.classList.toggle('on', +b.dataset.v === st.focusRounds)
-    for (const b of $$('#fsBreak button')) b.classList.toggle('on', +b.dataset.v === st.breakMin)
+    pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
+    pickOne($$('#fsBreak button'), (b) => +b.dataset.v === st.breakMin)
     const target = this.project ? `，時間記進「${this.project.name}」` : ''
     $('#fsSum').textContent = live
       ? `換了目標，這一輪的時間就算在新的目標上${target}`

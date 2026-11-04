@@ -113,7 +113,7 @@
           <input id="taskTitle" maxlength="80" placeholder="種下一個任務…" />
           <div class="quick-preview" id="quickPreview" hidden></div>
           <div class="form-row">
-            <div class="seg" id="taskPriority">
+            <div class="seg" id="taskPriority" role="group" aria-label="優先度">
               <button type="button" data-v="1">低</button>
               <button type="button" data-v="2" class="on">中</button>
               <button type="button" data-v="3">高</button>
@@ -121,7 +121,7 @@
             <select class="repeat-pick" id="taskRepeat" aria-label="重複"></select>
             <button class="btn-primary" type="submit">種下</button>
           </div>
-          <div class="tag-pick" id="taskTag"></div>
+          <div class="tag-pick" id="taskTag" role="group" aria-label="分類"></div>
         </form>
 
         <div class="quest-mini"><h4>今日のおつとめ</h4><ul id="questMini"></ul></div>
@@ -146,7 +146,7 @@
             <span class="tilde">〜</span>
             <label class="time-field"><input type="time" id="eventEnd" value="10:00" /></label>
             <select class="repeat-pick" id="eventRepeat" aria-label="重複"></select>
-            <div class="swatches" id="eventColor"></div>
+            <div class="swatches" id="eventColor" role="group" aria-label="日程的顏色"></div>
             <button class="btn-primary" type="submit">加入</button>
           </div>
         </form>
@@ -192,7 +192,7 @@
           <div class="form-row">
             <button type="button" class="chip-toggle" id="projectDeadlineAdd">＋ 截止日</button>
             <label class="date-field" id="projectDeadlineField" hidden>截止 <input type="date" id="projectDeadline" /><button type="button" class="mini" id="projectDeadlineClear" title="不設截止日" aria-label="不設截止日">×</button></label>
-            <div class="swatches" id="projectColor"></div>
+            <div class="swatches" id="projectColor" role="group" aria-label="專案的顏色"></div>
           </div>
           <textarea id="projectMilestones" rows="4" placeholder="里程碑，一行一個（完成越多，房子蓋得越完整）"></textarea>
           <div class="form-row end">
@@ -237,7 +237,7 @@
         <div class="settings" id="settingsBox">
           <div class="set-row" id="installRow" hidden><div><b>安裝到桌面</b><small>像 App 一樣從桌面或主畫面打開，離線也能用</small></div><button class="chip-toggle on" id="installBtn">安裝</button></div>
           <div class="set-row theme-row"><div><b>介面</b><small id="layoutInfo"></small></div>
-            <div class="seg" id="layoutPick"><button type="button" data-v="island">小島</button><button type="button" data-v="app">App</button></div></div>
+            <div class="seg" id="layoutPick" role="group" aria-label="版面"><button type="button" data-v="island">小島</button><button type="button" data-v="app">App</button></div></div>
           <!-- Liquid Glass 的透明度（照 iOS 的「清透／著色」），上面是即時預覽 -->
           <div class="set-row glass-row" id="glassRow">
             <div><b>Liquid Glass</b><small>面板、分頁列、側欄、Dock、小視窗和提示卡的玻璃。往左更清透，看得到後面的小島和內容；往右底色更實，字和按鈕更清楚</small></div>
@@ -252,12 +252,12 @@
             </label>
           </div>
           <div class="set-row theme-row"><div><b>夜間模式</b><small id="themeInfo"></small></div>
-            <div class="seg" id="themePick"><button type="button" data-v="auto">依時間</button><button type="button" data-v="system">跟系統</button><button type="button" data-v="day">白天</button><button type="button" data-v="night">夜晚</button></div></div>
+            <div class="seg" id="themePick" role="group" aria-label="外觀"><button type="button" data-v="auto">依時間</button><button type="button" data-v="system">跟系統</button><button type="button" data-v="day">白天</button><button type="button" data-v="night">夜晚</button></div></div>
           <div class="set-row"><div><b>省電模式</b><small>閒置時降低畫面更新率，筆電整天開著也不耗電</small></div><button class="chip-toggle" id="powerBtn"></button></div>
           <div class="set-row theme-row"><div><b>畫質</b><small id="qualityInfo"></small></div>
-            <div class="seg" id="qualityPick"><button type="button" data-v="auto">自動</button><button type="button" data-v="high">高</button><button type="button" data-v="standard">標準</button></div></div>
+            <div class="seg" id="qualityPick" role="group" aria-label="畫質"><button type="button" data-v="auto">自動</button><button type="button" data-v="high">高</button><button type="button" data-v="standard">標準</button></div></div>
           <div class="set-row theme-row"><div><b>字體大小</b><small>面板、對話框和提示卡的字</small></div>
-            <div class="seg" id="fontPick"><button type="button" data-v="0.9">小</button><button type="button" data-v="1">標準</button><button type="button" data-v="1.12">大</button><button type="button" data-v="1.25">特大</button></div></div>
+            <div class="seg" id="fontPick" role="group" aria-label="字體大小"><button type="button" data-v="0.9">小</button><button type="button" data-v="1">標準</button><button type="button" data-v="1.12">大</button><button type="button" data-v="1.25">特大</button></div></div>
           <div class="set-row"><div><b>卡關提醒</b><small>任務一直往後挪、或逾期好幾天時，ふじ陪你拆小一點</small></div><button class="chip-toggle" id="stuckBtn"></button></div>
           <div class="set-row"><div><b>這一版的新功能<i class="news-dot" id="newsDot" hidden></i></b><small id="newsInfo"></small></div><button class="chip-toggle" id="newsBtn">看看</button></div>
           <div class="set-row"><div><b>意見回饋</b><small>想要的功能、遇到的問題，到 GitHub 上告訴我們（需要 GitHub 帳號）</small></div><button class="chip-toggle" id="feedbackBtn">寫回饋</button></div>
@@ -291,15 +291,15 @@
         <span class="focus-icon" id="focusIcon"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
       </button>
       <div class="focus-info">
-        <div class="focus-time" id="focusTime">25:00</div>
-        <button class="focus-label focus-task" id="focusLabel" title="選一個要專注的任務">專注 · しゅうちゅう</button>
+        <button type="button" class="focus-time" id="focusTime" title="專注的長度、輪數和目標" aria-haspopup="dialog" aria-expanded="false" aria-controls="focusSet">25:00</button>
+        <button class="focus-label focus-task" id="focusLabel" title="選一個要專注的任務" aria-haspopup="dialog" aria-expanded="false" aria-controls="focusPick">專注 · しゅうちゅう</button>
       </div>
       <button class="icon-btn small" id="focusStop" title="結束" hidden><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
       <button class="icon-btn small" id="roomBtn" title="看看小木屋裡" hidden><svg viewBox="0 0 24 24"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></button>
     </div>
     <div class="dock-sep"></div>
     <button class="icon-btn" id="calBtn" title="日曆（C）"><svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="3"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/></svg></button>
-    <button class="icon-btn" id="shopBtn" title="金平糖商店 (S)"><svg viewBox="0 0 24 24"><path d="M4 9.5L5.5 4h13L20 9.5"/><path d="M4 9.5c0 1.4 1.1 2.5 2.5 2.5S9 10.9 9 9.5c0 1.4 1.1 2.5 2.5 2.5h1c1.4 0 2.5-1.1 2.5-2.5 0 1.4 1.1 2.5 2.5 2.5S20 10.9 20 9.5"/><path d="M5.5 12v8h13v-8"/><path d="M10 20v-4h4v4"/></svg></button>
+    <button class="icon-btn" id="shopBtn" title="金平糖商店 (S)" aria-label="金平糖商店" aria-haspopup="dialog" aria-expanded="false" aria-controls="shop"><svg viewBox="0 0 24 24"><path d="M4 9.5L5.5 4h13L20 9.5"/><path d="M4 9.5c0 1.4 1.1 2.5 2.5 2.5S9 10.9 9 9.5c0 1.4 1.1 2.5 2.5 2.5h1c1.4 0 2.5-1.1 2.5-2.5 0 1.4 1.1 2.5 2.5 2.5S20 10.9 20 9.5"/><path d="M5.5 12v8h13v-8"/><path d="M10 20v-4h4v4"/></svg></button>
     <button class="icon-btn" id="viewBtn" title="回到全景 (V)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
     <button class="icon-btn" id="themeBtn" title="切換成夜晚 (D)"><svg viewBox="0 0 24 24" class="i-moon"><path d="M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z"/></svg><svg viewBox="0 0 24 24" class="i-sun"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"/></svg></button>
     <button class="icon-btn" id="soundBtn" title="音效"><svg viewBox="0 0 24 24" id="soundIcon"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
@@ -315,7 +315,7 @@
       <div class="review-date" id="reviewDate"></div>
       <div class="review-sum" id="reviewSum"></div>
       <div class="review-q">今天心裡是什麼天氣？</div>
-      <div class="moods" id="moodPick"></div>
+      <div class="moods" id="moodPick" role="group" aria-label="今天的心情"></div>
       <input id="reviewText" maxlength="140" placeholder="寫一句話給今天的自己（可以不寫）" autocomplete="off" />
       <div class="review-actions">
         <button type="button" class="btn-ghost" id="reviewLater">之後再說</button>
@@ -345,7 +345,7 @@
     </div>
   </div>
 
-  <div class="shop" id="shop" hidden>
+  <div class="shop" id="shop" role="dialog" aria-modal="true" aria-label="金平糖商店" hidden>
     <div class="shop-card glass">
       <header class="shop-head">
         <h3>金平糖商店<small>こんぺいとう屋</small></h3>
@@ -362,12 +362,12 @@
     <button class="chip-toggle" id="placeCancel">取消 Esc</button>
   </div>
 
-  <div class="focus-pick glass" id="focusPick" hidden>
+  <div class="focus-pick glass" id="focusPick" role="dialog" aria-label="選專注的目標" hidden>
     <h4>要專注在哪件事上？<small>しゅうちゅう</small></h4>
     <ul id="focusPickList"></ul>
   </div>
 
-  <div class="focus-pick focus-set glass" id="focusSet" hidden>
+  <div class="focus-pick focus-set glass" id="focusSet" role="dialog" aria-label="專注的長度和輪數" hidden>
     <h4>要怎麼專注？<small>じかん</small></h4>
     <div class="seg fs-mode" id="fsMode" role="group" aria-label="計時方式"><button type="button" data-v="down">倒數計時</button><button type="button" data-v="up">正向計時</button></div>
     <div class="fs-time" id="fsTime">25:00</div>
@@ -376,8 +376,8 @@
       <span class="fs-needle"></span>
     </div>
     <div class="fs-row"><label for="fsTarget">目標</label><select class="fs-target" id="fsTarget"></select></div>
-    <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
-    <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
+    <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds" role="group" aria-label="輪數"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
+    <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak" role="group" aria-label="休息"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
     <p class="fs-sum" id="fsSum"></p>
     <button type="button" class="btn-primary" id="fsStart">開始專注</button>
   </div>

@@ -714,7 +714,7 @@ body.night .pomo { color: #ffd38f; }
 
 /* ── 專注長度：刻度尺 ── */
 /* 點時間：沒在計時時打開計時設定，計時中可以換目標 */
-.focus .focus-time { cursor: pointer; border-radius: 6px; }
+.focus .focus-time { cursor: pointer; border-radius: 6px; padding: 0; display: block; text-align: left; }
 .focus .focus-time:hover { color: #d58a3f; }
 body.night .focus .focus-time:hover { color: #ffd38f; }
 .focus-set { text-align: center; padding: 14px 14px 12px; overflow-y: auto; overscroll-behavior: contain; }
