@@ -1470,10 +1470,10 @@ export class UI {
     const acts = Object.entries(BOND_ACTS)
       .filter(([k]) => BOND_LEVELS.some((l) => l.reward?.act === k && l.level <= b.level))
       .map(([, a]) => `<span title="${esc(a.desc)}">${esc(a.name)}</span>`)
-    const wardrobe = (who, current) => `<div class="outfit-row"><span class="outfit-who">${who === 'fuji' ? 'ふじ' : 'もち'}</span><div class="outfits">${OUTFITS.map((o) => {
+    const wardrobe = (who, current) => `<div class="outfit-row"><span class="outfit-who">${who === 'fuji' ? 'ふじ' : 'もち'}</span><div class="outfits" role="group" aria-label="${who === 'fuji' ? 'ふじ' : 'もち'}的衣裝">${OUTFITS.map((o) => {
       const lv = outfitLevel(o.key)
       const locked = lv > b.level
-      return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" data-who="${who}" ${locked ? 'disabled' : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
+      return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" data-who="${who}" aria-pressed="${o.key === current}" ${locked ? `disabled aria-label="${esc(`${o.name}（好感度 Lv.${lv} 解鎖）`)}"` : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
     }).join('')}</div></div>`
     $('#bondCount').textContent = `Lv.${b.level}`
     setHTML($('#bondBox'), `

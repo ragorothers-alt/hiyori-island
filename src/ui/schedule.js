@@ -84,7 +84,8 @@ export class ScheduleView {
           const dd = parseDate(d)
           const ev = s.eventsOn(d).length
           const left = s.tasksOn(d).filter((t) => !t.done).length
-          return `<button class="ws-day ${d === s.selectedDate ? 'on' : ''} ${d === s.today ? 'today' : ''} ${dd.getDay() % 6 === 0 ? 'weekend' : ''}" data-date="${d}">
+          const name = `${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）${ev ? `・${ev} 個日程` : ''}${left ? `・${left} 件待辦` : ''}`
+          return `<button class="ws-day ${d === s.selectedDate ? 'on' : ''} ${d === s.today ? 'today' : ''} ${dd.getDay() % 6 === 0 ? 'weekend' : ''}" data-date="${d}" aria-label="${name}" aria-pressed="${d === s.selectedDate}"${d === s.today ? ' aria-current="date"' : ''}>
             <small>${WEEK_ZH[dd.getDay()]}</small><b>${dd.getDate()}</b><i>${ev ? '<em class="e"></em>' : ''}${left ? '<em class="t"></em>' : ''}</i></button>`
         })
         .join('') +
@@ -267,13 +268,13 @@ export class ScheduleView {
         .join('')}</ul>
       ${r.meals.length < 6 ? '<button type="button" class="btn-ghost rf-add" data-meal-add>＋ 新增時段</button>' : ''}
       <div class="rf-sub">工作／上課時段<small>工作、學習類的任務會優先排進來</small></div>
-      <div class="rf-row"><button type="button" class="chip-toggle ${r.work ? 'on' : ''}" data-work-toggle>${r.work ? '有固定時段' : '沒有固定時段'}</button>
+      <div class="rf-row"><button type="button" class="chip-toggle ${r.work ? 'on' : ''}" data-work-toggle aria-pressed="${!!r.work}">${r.work ? '有固定時段' : '沒有固定時段'}</button>
         ${r.work ? `${time('data-w="start"', r.work.start, '工作／上課開始')}<span class="tilde">〜</span>${time('data-w="end"', r.work.end, '工作／上課結束')}` : ''}</div>
-      ${r.work ? `<div class="rf-days">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button type="button" data-wd="${d}" class="${r.work.days.includes(d) ? 'on' : ''}">${WEEK_ZH[d]}</button>`).join('')}</div>` : ''}
+      ${r.work ? `<div class="rf-days" role="group" aria-label="工作／上課的日子">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button type="button" data-wd="${d}" class="${r.work.days.includes(d) ? 'on' : ''}" aria-pressed="${r.work.days.includes(d)}">${WEEK_ZH[d]}</button>`).join('')}</div>` : ''}
       <div class="rf-sub">精神最好的時段<small>重要的任務會優先排在這裡</small></div>
-      <div class="seg rf-peak" data-peak>${Object.entries(PEAKS).map(([k, p]) => `<button type="button" data-v="${k}" class="${r.peak === k ? 'on' : ''}">${p.label}</button>`).join('')}</div>
+      <div class="seg rf-peak" data-peak role="group" aria-label="精神最好的時段">${Object.entries(PEAKS).map(([k, p]) => `<button type="button" data-v="${k}" class="${r.peak === k ? 'on' : ''}" aria-pressed="${r.peak === k}">${p.label}</button>`).join('')}</div>
       <div class="rf-row"><span class="rf-k">時段之間留</span><select data-r="buffer" aria-label="緩衝時間">${[0, 5, 10, 15, 20, 30].map((v) => `<option value="${v}" ${r.buffer === v ? 'selected' : ''}>${v ? `${v} 分鐘` : '不留'}</option>`).join('')}</select></div>
-      <div class="rf-row"><button type="button" class="chip-toggle ${r.bedRemind ? 'on' : ''}" data-bed>就寢前 30 分鐘，ふじ提醒你：${r.bedRemind ? '開' : '關'}</button></div>`
+      <div class="rf-row"><button type="button" class="chip-toggle ${r.bedRemind ? 'on' : ''}" data-bed aria-pressed="${!!r.bedRemind}">就寢前 30 分鐘，ふじ提醒你：${r.bedRemind ? '開' : '關'}</button></div>`
   }
 
   // ── 編輯面板 ──

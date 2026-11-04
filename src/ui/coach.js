@@ -459,9 +459,9 @@ export class CoachView {
       ['plan', '排程', 'けいかく'],
       ['report', '週報', 'しゅうほう'],
     ]
-      .map(([v, label, kana]) => `<button type="button" data-act="view" data-v="${v}" class="${this.view === v ? 'on' : ''}">${label}<small>${kana}</small></button>`)
+      .map(([v, label, kana]) => `<button type="button" data-act="view" data-v="${v}" class="${this.view === v ? 'on' : ''}" aria-pressed="${this.view === v}">${label}<small>${kana}</small></button>`)
       .join('')
-    const hist = this.view === 'plan' ? `<button class="icon-btn small${this.history ? ' on' : ''}" data-act="history" title="最近的排程">${CLOCK}${n ? `<i class="ch-n">${n}</i>` : ''}</button>` : ''
+    const hist = this.view === 'plan' ? `<button class="icon-btn small${this.history ? ' on' : ''}" data-act="history" title="最近的排程" aria-label="最近的排程" aria-expanded="${!!this.history}">${CLOCK}${n ? `<i class="ch-n">${n}</i>` : ''}</button>` : ''
     return `<div class="coach-head"><div class="seg coach-seg">${seg}</div>${hist}</div>`
   }
   _msg(who, html, extra = '') {
@@ -505,7 +505,7 @@ export class CoachView {
     const sunday = this._isSunday()
     const restDates = scopeDates('rest', today)
     const nextDates = scopeDates('next', today)
-    const opt = (v, label, sub) => `<button type="button" data-v="${v}" class="${a.scope === v ? 'on' : ''}"><b>${label}</b><small>${sub}</small></button>`
+    const opt = (v, label, sub) => `<button type="button" data-v="${v}" class="${a.scope === v ? 'on' : ''}" aria-pressed="${a.scope === v}"><b>${label}</b><small>${sub}</small></button>`
     const scope = [
       a.scope === 'day' && a.date && a.date !== today ? opt('day', '只排這一天', dayLabel(a.date)) : '',
       opt('today', '排今天就好', dayLabel(today)),
@@ -514,36 +514,36 @@ export class CoachView {
     ].join('')
 
     const chip = (key, label, color, on, extra = '') =>
-      `<button type="button" data-key="${esc(key)}" class="${on ? 'on' : ''}" style="--c:${color}">${esc(label)}${extra}</button>`
+      `<button type="button" data-key="${esc(key)}" class="${on ? 'on' : ''}" aria-pressed="${!!on}" style="--c:${color}">${esc(label)}${extra}</button>`
     const focus = [
       ...TAGS.map((t) => chip('tag:' + t.id, t.label, t.color, a.focus.has('tag:' + t.id))),
       ...this._projects().slice(0, 8).map((p) => chip('proj:' + p.id, p.name, PROJECT_COLORS[p.color] || '#f2a8bf', a.focus.has('proj:' + p.id), '<small>專案</small>')),
       ...this._items().map((it) => chip('item:' + it.label, it.label, tagOf(it.tag).color, a.focus.has('item:' + it.label))),
     ].join('')
     const other = this.otherOpen
-      ? `<div class="coach-other" data-r="other"><input name="other" maxlength="16" autocomplete="off" placeholder="例如：數學、英文單字、健身" /><button class="btn-primary" type="button" data-act="addOther">加入</button></div>`
+      ? `<div class="coach-other" data-r="other"><input name="other" maxlength="16" autocomplete="off" placeholder="例如：數學、英文單字、健身" aria-label="其他想主攻的項目" /><button class="btn-primary" type="button" data-act="addOther">加入</button></div>`
       : ''
 
     const r = s.state.rhythm
     const slots = SLOTS.map(
-      (x) => `<button type="button" data-v="${x.id}" class="${a.slots.has(x.id) ? 'on' : ''}" style="--c:#b9a7e6">${x.label}<small>${slotText(x.id, r)}</small></button>`,
+      (x) => `<button type="button" data-v="${x.id}" class="${a.slots.has(x.id) ? 'on' : ''}" aria-pressed="${a.slots.has(x.id)}" style="--c:#b9a7e6">${x.label}<small>${slotText(x.id, r)}</small></button>`,
     ).join('')
 
     const choices = this._examChoices()
     const exam = a.exam
-      ? `<div class="cchips" data-q="exam">${choices
-          .map((d) => `<button type="button" data-v="${esc(d.id)}" class="${a.examId === d.id ? 'on' : ''}" style="--c:#e8899f">${DUE_KINDS[d.kind].kanji}・${esc(d.title)}<small>${d.days ? `還有 ${d.days} 天` : '今天'}</small></button>`)
+      ? `<div class="cchips" data-q="exam" role="group" aria-label="哪一個考試或截止日">${choices
+          .map((d) => `<button type="button" data-v="${esc(d.id)}" class="${a.examId === d.id ? 'on' : ''}" aria-pressed="${a.examId === d.id}" style="--c:#e8899f">${DUE_KINDS[d.kind].kanji}・${esc(d.title)}<small>${d.days ? `還有 ${d.days} 天` : '今天'}</small></button>`)
           .join('')}<button type="button" data-act="examAdd" class="add">＋ 新增</button></div>
         ${this.examForm ? `<div class="coach-other" data-r="examNew"><input name="examTitle" maxlength="30" autocomplete="off" placeholder="例如：期中考" aria-label="考試或截止日的名稱" /><input name="examDate" type="date" min="${today}" aria-label="日期" /><button class="btn-primary" type="button" data-act="examSave">加入</button></div>` : ''}`
       : ''
 
     return `<form class="ccard" data-r="ask">
-      <section class="cq"><h5>${sunday ? '這週只剩今天了' : '要排哪段？'}</h5>${sunday ? '<p class="hint">要排今天就好，還是從下週開始排一整週？</p>' : ''}<div class="copts" data-q="scope">${scope}</div></section>
-      <section class="cq"><h5>想主攻哪些？<small>可多選</small></h5><div class="cchips" data-q="focus">${focus}<button type="button" data-act="other" class="add">＋ 其他</button></div>${other}</section>
-      <section class="cq"><h5>什麼時候比較有空？<small>可多選・照你的作息換算</small></h5><div class="cchips" data-q="slots">${slots}</div></section>
-      <section class="cq"><div class="cq-row"><h5>最近有考試或截止日？</h5><button type="button" class="chip-toggle${a.exam ? ' on' : ''}" data-act="examToggle">${a.exam ? '有' : '沒有'}</button></div>${exam}</section>
-      <section class="cq"><h5>這週想做到幾天？</h5><div class="cdays" data-q="days">${DAYS.map((d) => `<button type="button" data-v="${d.v}" class="${a.days === d.v ? 'on' : ''}"><b>${d.label}</b><small>${d.sub}</small></button>`).join('')}</div><p class="hint">做到一天＝那天排的都完成。</p></section>
-      <section class="cq"><div class="cq-row"><h5>每次多久？</h5><div class="seg" data-q="len">${LENS.map((v) => `<button type="button" data-v="${v}" class="${!a.total && a.len === v ? 'on' : ''}">${v} 分</button>`).join('')}</div></div>
+      <section class="cq"><h5>${sunday ? '這週只剩今天了' : '要排哪段？'}</h5>${sunday ? '<p class="hint">要排今天就好，還是從下週開始排一整週？</p>' : ''}<div class="copts" data-q="scope" role="group" aria-label="要排哪段">${scope}</div></section>
+      <section class="cq"><h5>想主攻哪些？<small>可多選</small></h5><div class="cchips" data-q="focus" role="group" aria-label="想主攻哪些（可多選）">${focus}<button type="button" data-act="other" class="add" aria-expanded="${!!this.otherOpen}">＋ 其他</button></div>${other}</section>
+      <section class="cq"><h5>什麼時候比較有空？<small>可多選・照你的作息換算</small></h5><div class="cchips" data-q="slots" role="group" aria-label="什麼時候比較有空（可多選）">${slots}</div></section>
+      <section class="cq"><div class="cq-row"><h5>最近有考試或截止日？</h5><button type="button" class="chip-toggle${a.exam ? ' on' : ''}" data-act="examToggle" aria-pressed="${!!a.exam}">${a.exam ? '有' : '沒有'}</button></div>${exam}</section>
+      <section class="cq"><h5>這週想做到幾天？</h5><div class="cdays" data-q="days" role="group" aria-label="這週想做到幾天">${DAYS.map((d) => `<button type="button" data-v="${d.v}" class="${a.days === d.v ? 'on' : ''}" aria-pressed="${a.days === d.v}"><b>${d.label}</b><small>${d.sub}</small></button>`).join('')}</div><p class="hint">做到一天＝那天排的都完成。</p></section>
+      <section class="cq"><div class="cq-row"><h5>每次多久？</h5><div class="seg" data-q="len" role="group" aria-label="每次多久">${LENS.map((v) => `<button type="button" data-v="${v}" class="${!a.total && a.len === v ? 'on' : ''}" aria-pressed="${!a.total && a.len === v}">${v} 分</button>`).join('')}</div></div>
         ${a.total ? `<p class="hint">照你說的總共 ${hours(a.total)}，切成差不多長的幾段 <button type="button" class="cm-link" data-act="clearTotal">改成每次固定長度</button></p>` : ''}</section>
       <div class="cq-send"><button class="btn-primary" type="submit"${this._ready() ? '' : ' disabled'}>送出回答</button>${this._ready() ? '' : '<small>至少選一個主攻項目和一個時段</small>'}</div>
     </form>`

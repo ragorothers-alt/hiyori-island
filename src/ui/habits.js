@@ -263,7 +263,7 @@ export class HabitsView {
       <p class="hb-since">${dateLabel(since, false)}開始・第 ${daysBetween(since, today) + 1} 天${build ? `・${freqLabel(h.days)} ${h.target} ${esc(h.unit)}` : ''}</p>
       ${build ? '' : this._slipsHTML(h)}
       <div class="hb-tools">
-        <button type="button" data-act="edit" data-id="${h.id}" class="${this.editId === h.id ? 'on' : ''}">${ICON.edit}編輯</button>
+        <button type="button" data-act="edit" data-id="${h.id}" class="${this.editId === h.id ? 'on' : ''}" aria-expanded="${this.editId === h.id}">${ICON.edit}編輯</button>
         <button type="button" data-act="archive" data-id="${h.id}">封存</button>
         <button type="button" data-act="delete" data-id="${h.id}">${ICON.del}刪除</button>
       </div>`
