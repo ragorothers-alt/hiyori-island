@@ -14,6 +14,7 @@ import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
 import { PROJECT_LIMITS as PL, projectProgress, progressAll } from './projects.js'
+import { isEvent } from './events.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
 const townStages = (stats) => {
@@ -679,11 +680,14 @@ export class Store {
   }
 
   // ── 事件 ──
+  // 事件名稱都在 events.js：拼錯的名字先在主控台說一聲（測試會擋下來，這裡是開發時的提醒）
   on(type, fn) {
+    if (!isEvent(type)) console.warn(`[hiyori] 沒有這個事件：${type}`)
     ;(this.handlers[type] ||= []).push(fn)
     return () => (this.handlers[type] = this.handlers[type].filter((f) => f !== fn))
   }
   emit(type, payload) {
+    if (!isEvent(type)) console.warn(`[hiyori] 沒有這個事件：${type}`)
     for (const fn of this.handlers[type] || []) fn(payload)
   }
 
