@@ -10,7 +10,7 @@ import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
-import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML, setOn, pickOne } from './ui/dom.js'
+import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -1244,7 +1244,7 @@ export class UI {
       <div class="proj-bar">${bar}</div>
       ${sum}
       ${archived ? '' : `<ul class="ms-list">${ms}</ul>
-      <form class="ms-add"><input placeholder="新增里程碑" maxlength="60" /><button class="mini" type="submit" title="新增">${ICON.plus}</button></form>`}
+      <form class="ms-add"><input placeholder="新增里程碑" maxlength="60" aria-label="新增里程碑" /><button class="mini" type="submit" title="新增" aria-label="新增里程碑">${ICON.plus}</button></form>`}
       <div class="proj-actions">
         ${archived
           ? `<button data-act="open">打開</button><button data-act="restore" title="放回進行中的專案，房子也會回到島上">恢復</button><button data-act="delete">刪除</button>`
@@ -2025,7 +2025,7 @@ export class UI {
     this.highlight(type, id)
     const el =
       type === 'task' ? $(`.item[data-id="${CSS.escape(id)}"]`) : type === 'event' ? $(`.blk[data-id="${CSS.escape(id)}"]`) : $(`.proj[data-id="${CSS.escape(id)}"]`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el?.scrollIntoView({ behavior: scrollMode(), block: 'center' })
     setTimeout(() => this.highlight(null), 2200)
   }
 
@@ -2300,7 +2300,7 @@ class FocusTimer {
     })
     ruler.addEventListener('click', (e) => {
       const t = e.target.closest('[data-i]')
-      if (t) ruler.scrollTo({ left: +t.dataset.i * RULER_TICK, behavior: 'smooth' })
+      if (t) ruler.scrollTo({ left: +t.dataset.i * RULER_TICK, behavior: scrollMode() })
     })
     // 桌機：滾輪上下也能左右轉、左右鍵一格一格調、滑鼠可以直接拖
     ruler.addEventListener(
@@ -2308,16 +2308,19 @@ class FocusTimer {
       (e) => {
         if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
         e.preventDefault()
-        ruler.scrollTo({ left: (nearest() + Math.sign(e.deltaY)) * RULER_TICK, behavior: 'smooth' })
+        ruler.scrollTo({ left: (nearest() + Math.sign(e.deltaY)) * RULER_TICK, behavior: scrollMode() })
       },
       { passive: false },
     )
+    // 鍵盤：跟一般的滑桿一樣，左右（上下）一格、Home／End 到最短和最長
+    const STEP = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }
     ruler.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const to = e.key === 'Home' ? 0 : e.key === 'End' ? RULER.length - 1 : e.key in STEP ? nearest() + STEP[e.key] : null
+      if (to == null) return
       // 不要讓全域的左右鍵切換日期
       e.stopPropagation()
       e.preventDefault()
-      ruler.scrollTo({ left: (nearest() + (e.key === 'ArrowRight' ? 1 : -1)) * RULER_TICK, behavior: 'smooth' })
+      ruler.scrollTo({ left: to * RULER_TICK, behavior: scrollMode() })
     })
     let drag = null
     ruler.addEventListener('pointerdown', (e) => {
@@ -2334,7 +2337,7 @@ class FocusTimer {
     const end = () => {
       if (!drag) return
       ruler.classList.remove('dragging')
-      if (drag.moved) ruler.scrollTo({ left: nearest() * RULER_TICK, behavior: 'smooth' })
+      if (drag.moved) ruler.scrollTo({ left: nearest() * RULER_TICK, behavior: scrollMode() })
       drag = null
     }
     ruler.addEventListener('pointerup', end)
@@ -2381,6 +2384,9 @@ class FocusTimer {
     $('#fsMode').hidden = live
     pickOne($$('#fsMode button'), (b) => (b.dataset.v === 'up') === up)
     $('#fsTime').textContent = live ? $('#focusTime').textContent : up ? '00:00' : `${v}:00`
+    // 刻度尺是滑桿：讀螢幕軟體要知道現在是幾分鐘
+    $('#fsRuler').setAttribute('aria-valuenow', v)
+    $('#fsRuler').setAttribute('aria-valuetext', `${v} 分鐘`)
     $('#fsTime').classList.toggle('up', up && this.mode !== 'break')
     // 正向計時不用選長度和輪數
     $('#fsRwrap').hidden = up || live

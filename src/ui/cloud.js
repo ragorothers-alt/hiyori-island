@@ -1,5 +1,5 @@
 import './cloud.css'
-import { esc, armConfirm } from './dom.js'
+import { esc, armConfirm, scrollMode } from './dom.js'
 import { shareLink } from '../cloud.js'
 
 // 設定裡「線上同步」那一列：開始同步、輸入同步碼、顯示同步碼（QR code 與分享連結）、衝突時選邊。
@@ -50,7 +50,7 @@ export class CloudView {
     this.mode = 'join'
     this.draft = code
     this.render()
-    this.row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    this.row.scrollIntoView({ block: 'center', behavior: scrollMode() })
   }
 
   async _act(act, btn) {

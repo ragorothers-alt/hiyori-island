@@ -1,5 +1,5 @@
 import './habits.css'
-import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, patch, setOn, pickOne } from './dom.js'
+import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, patch, setOn, pickOne, scrollMode } from './dom.js'
 import { EVENT_COLORS } from '../theme.js'
 import {
   HABIT_ICONS, HABIT_TEMPLATES, QUIT_MILESTONES, startOf, applies, countOn, doneOn, streak, bestStreak, rate,
@@ -289,7 +289,7 @@ export class HabitsView {
         else if (date < start && build) {
           // 開始日以前也能補（開始日會跟著往前移）
           const tip = `${when}・還沒開始記，點一下補打卡`
-          out.push(`<button type="button" class="hb-cell pre" data-act="cell" data-id="${h.id}" data-date="${date}" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`)
+          out.push(`<button type="button" class="hb-cell pre" data-act="cell" data-id="${h.id}" data-date="${date}" tabindex="-1" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`)
         } else if (date < start) out.push(`<i class="hb-cell pre" title="${when}・還沒開始"></i>`)
         else if (!build) {
           const [cls, tip] = v === 'slip' ? ['slip', '重新開始'] : v === 'urge' ? ['urge', `忍住了 ${h.urges[date]} 次`] : ['clean', '沒有碰']
@@ -299,14 +299,20 @@ export class HabitsView {
           const n = countOn(h, date)
           const cls = v >= 1 ? 'full' : v > 0 ? 'part' : 'miss'
           const tip = `${when}・${n} / ${t} ${h.unit}，${v >= 1 ? '點一下清除' : '點一下補到目標'}`
-          out.push(`<button type="button" class="hb-cell ${cls}${tod}" data-act="cell" data-id="${h.id}" data-date="${date}" style="--p:${Math.round(v * 100)}%" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`)
+          out.push(`<button type="button" class="hb-cell ${cls}${tod}" data-act="cell" data-id="${h.id}" data-date="${date}" tabindex="-1" style="--p:${Math.round(v * 100)}%" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`)
         }
       }
     }
+    // 十二週的格子只佔一個 Tab 停點（今天那格，沒有就最後一格）：進來後用方向鍵移動，不用按 84 次 Tab 才走得出去
+    const btn = (x) => x.includes('data-act="cell"')
+    const stop = out.findLastIndex((x) => btn(x) && x.includes(' today"'))
+    const at = stop >= 0 ? stop : out.findLastIndex(btn)
+    if (at >= 0) out[at] = out[at].replace('tabindex="-1"', 'tabindex="0"')
     const legend = build
       ? '<span><i class="hb-cell miss"></i>未達標</span><span><i class="hb-cell part" style="--p:45%"></i>做了一些</span><span><i class="hb-cell full"></i>完成</span><span class="tip">點格子可以補打卡</span>'
       : '<span><i class="hb-cell clean"></i>沒有碰</span><span><i class="hb-cell urge"></i>忍住了</span><span><i class="hb-cell slip"></i>重新開始</span>'
-    return `<div class="hb-heat">${out.join('')}</div><div class="hb-legend">${legend}</div>`
+    const group = at >= 0 ? ' role="group" aria-label="最近 12 週，用方向鍵移動"' : ''
+    return `<div class="hb-heat"${group}>${out.join('')}</div><div class="hb-legend">${legend}</div>`
   }
 
   _slipsHTML(h) {
@@ -337,7 +343,7 @@ export class HabitsView {
       : ''
     return `<form class="hb-form hb-c${h?.kind === 'quit' ? ' quit' : ''}" data-form="${isNew ? 'new' : 'edit'}"${h ? ` data-id="${h.id}"` : ''} autocomplete="off" style="--mc:${colorOf(color)}">
       ${kindSeg}
-      <div class="hb-f-name"><span class="stamp-k" data-preview>${esc(icon || (h?.kind === 'quit' ? '禁' : '習'))}</span><input class="hb-input" name="hname" maxlength="30" value="${esc(h?.name || '')}" placeholder="習慣名稱，例如：喝水、熬夜" /></div>
+      <div class="hb-f-name"><span class="stamp-k" data-preview>${esc(icon || (h?.kind === 'quit' ? '禁' : '習'))}</span><input class="hb-input" name="hname" maxlength="30" value="${esc(h?.name || '')}" placeholder="習慣名稱，例如：喝水、熬夜" aria-label="習慣名稱" /></div>
       <div class="hb-f-row top"><span class="hb-f-label">圖示</span><div class="hb-icons">${icons.map((k) => `<button type="button" data-icon="${esc(k)}" class="${k === icon ? 'on' : ''}" aria-pressed="${k === icon}">${esc(k)}</button>`).join('')}</div></div>
       <div class="hb-f-row"><span class="hb-f-label">顏色</span><div class="swatches hb-swatches">${EVENT_COLORS.map((c, i) => `<button type="button" data-color="${i}" class="${i === color ? 'on' : ''}" aria-pressed="${i === color}" style="--c:${c}" aria-label="顏色 ${i + 1}"></button>`).join('')}</div></div>
       <div class="hb-f-row only-build"><span class="hb-f-label">每日目標</span><input class="hb-input hb-num" type="number" name="htarget" min="1" max="99" value="${h?.target || 1}" inputmode="numeric" aria-label="每日目標" /><input class="hb-input hb-unit" name="hunit" maxlength="6" value="${esc(h?.unit || '次')}" placeholder="次" aria-label="單位" /></div>
@@ -502,6 +508,24 @@ export class HabitsView {
   }
 
   _key(e) {
+    // 熱度圖：上下是前一天／後一天，左右是上一週／下一週；跳過不能點的格子（不用做、還沒到）
+    const cell = e.target.closest?.('.hb-cell[data-act="cell"]')
+    const step = cell && { ArrowUp: -1, ArrowDown: 1, ArrowLeft: -7, ArrowRight: 7 }[e.key]
+    if (step) {
+      e.preventDefault()
+      e.stopPropagation()
+      const box = cell.closest('.hb-heat')
+      let d = cell.dataset.date
+      for (let i = 0; i < 84; i++) {
+        d = addDays(d, step)
+        const to = $(`.hb-cell[data-act="cell"][data-date="${d}"]`, box)
+        if (!to) continue
+        for (const c of $$('.hb-cell[tabindex="0"]', box)) c.tabIndex = -1
+        to.tabIndex = 0
+        return to.focus()
+      }
+      return
+    }
     if (e.key !== 'Escape') return
     const f = e.target.closest?.('form[data-form]')
     if (!f) return
@@ -581,6 +605,6 @@ export class HabitsView {
   }
   _reveal(id) {
     if (!id) return
-    requestAnimationFrame(() => $(`article[data-k="${CSS.escape(id)}"]`, this.root)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+    requestAnimationFrame(() => $(`article[data-k="${CSS.escape(id)}"]`, this.root)?.scrollIntoView({ block: 'nearest', behavior: scrollMode() }))
   }
 }

@@ -172,9 +172,9 @@ export class ScheduleView {
       ? `<div class="tray-head">還沒排時段<small>點一下放進最近的空檔，或拖到時間軸上</small></div>
         <div class="tray-list">${list
           .map(
-            (t) => `<div class="chip-task ${planned.has(t.id) ? 'planned' : ''} ${t.date < date ? 'late' : ''}" data-id="${esc(t.id)}" style="--c:${tagOf(t.tag).color}" role="button" tabindex="0">
-              <i class="pri p${t.priority}" title="${PRIORITIES[t.priority].label}優先"></i>${t.star ? '<em class="star" title="本命">★</em>' : ''}${t.date < date ? '<em class="late-tag">逾期</em>' : ''}
-              <span>${esc(t.title)}</span><button type="button" class="dur" data-dur title="預估時間（點一下調整）">${fmtDur(taskDur(t))}</button></div>`,
+            // 放進空檔的按鈕和調整時間的按鈕並排（不包在一起：讀螢幕軟體才分得出是兩個按鈕）
+            (t) => `<div class="chip-task ${planned.has(t.id) ? 'planned' : ''} ${t.date < date ? 'late' : ''}" data-id="${esc(t.id)}" style="--c:${tagOf(t.tag).color}">
+              <button type="button" class="chip-slot" data-slot title="放進最近的空檔"><i class="pri p${t.priority}" title="${PRIORITIES[t.priority].label}優先"></i>${t.star ? '<em class="star" title="本命">★</em>' : ''}${t.date < date ? '<em class="late-tag">逾期</em>' : ''}<span>${esc(t.title)}</span></button><button type="button" class="dur" data-dur title="預估時間（點一下調整）" aria-label="預估 ${fmtDur(taskDur(t))}，點一下調整">${fmtDur(taskDur(t))}</button></div>`,
           )
           .join('')}</div>`
       : ''
@@ -254,21 +254,21 @@ export class ScheduleView {
     const el = $('#rhythmForm')
     if (el.contains(document.activeElement)) return
     const r = this.store.state.rhythm
-    const time = (attr, v) => `<label class="time-field"><input type="time" ${attr} value="${v}"></label>`
+    const time = (attr, v, label) => `<label class="time-field"><input type="time" ${attr} value="${v}" aria-label="${esc(label)}"></label>`
     el.innerHTML = `
-      <div class="rf-row"><span class="rf-k">起床</span>${time('data-r="wake"', r.wake)}<span class="rf-k">就寢</span>${time('data-r="sleep"', r.sleep)}</div>
+      <div class="rf-row"><span class="rf-k">起床</span>${time('data-r="wake"', r.wake, '起床時間')}<span class="rf-k">就寢</span>${time('data-r="sleep"', r.sleep, '就寢時間')}</div>
       <div class="rf-sub">三餐與固定休息<small>排程會避開</small></div>
       <ul class="rf-meals">${r.meals
         .map(
           (m, i) => `<li data-i="${i}"><input class="rf-label" data-m="label" value="${esc(m.label)}" maxlength="12" aria-label="名稱">
-            ${time('data-m="start"', m.start)}<span class="tilde">〜</span>${time('data-m="end"', m.end)}
+            ${time('data-m="start"', m.start, `${m.label}開始`)}<span class="tilde">〜</span>${time('data-m="end"', m.end, `${m.label}結束`)}
             <button type="button" class="mini" data-meal-del title="移除" aria-label="移除">${ICON.del}</button></li>`,
         )
         .join('')}</ul>
       ${r.meals.length < 6 ? '<button type="button" class="btn-ghost rf-add" data-meal-add>＋ 新增時段</button>' : ''}
       <div class="rf-sub">工作／上課時段<small>工作、學習類的任務會優先排進來</small></div>
       <div class="rf-row"><button type="button" class="chip-toggle ${r.work ? 'on' : ''}" data-work-toggle>${r.work ? '有固定時段' : '沒有固定時段'}</button>
-        ${r.work ? `${time('data-w="start"', r.work.start)}<span class="tilde">〜</span>${time('data-w="end"', r.work.end)}` : ''}</div>
+        ${r.work ? `${time('data-w="start"', r.work.start, '工作／上課開始')}<span class="tilde">〜</span>${time('data-w="end"', r.work.end, '工作／上課結束')}` : ''}</div>
       ${r.work ? `<div class="rf-days">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button type="button" data-wd="${d}" class="${r.work.days.includes(d) ? 'on' : ''}">${WEEK_ZH[d]}</button>`).join('')}</div>` : ''}
       <div class="rf-sub">精神最好的時段<small>重要的任務會優先排在這裡</small></div>
       <div class="seg rf-peak" data-peak>${Object.entries(PEAKS).map(([k, p]) => `<button type="button" data-v="${k}" class="${r.peak === k ? 'on' : ''}">${p.label}</button>`).join('')}</div>
@@ -460,19 +460,15 @@ export class ScheduleView {
 
     const tray = $('#planTray')
     tray.addEventListener('click', (e) => {
+      // 用鍵盤（Enter／空白鍵）按任務名稱：放進最近的空檔。滑鼠和手指的點擊交給拖曳那邊分辨是點還是拖
+      const slot = e.target.closest('[data-slot]')
+      if (slot && e.detail === 0) return this._slot(slot.closest('.chip-task').dataset.id)
       const dur = e.target.closest('[data-dur]')
       if (!dur) return
       const id = dur.closest('.chip-task').dataset.id
       const t = s.state.tasks.find((x) => x.id === id)
       const cur = taskDur(t)
       s.updateTask(id, { dur: DURS.find((d) => d > cur) || DURS[0] })
-    })
-    tray.addEventListener('keydown', (e) => {
-      const chip = e.target.closest('.chip-task')
-      if (chip && (e.key === 'Enter' || e.key === ' ') && !e.target.closest('[data-dur]')) {
-        e.preventDefault()
-        this._slot(chip.dataset.id)
-      }
     })
     tray.addEventListener('pointerdown', (e) => {
       const chip = e.target.closest('.chip-task')

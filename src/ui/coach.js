@@ -1,5 +1,5 @@
 import './coach.css'
-import { $, esc, ICON } from './dom.js'
+import { $, esc, ICON, scrollMode } from './dom.js'
 import { TAGS, tagOf, PROJECT_COLORS, DUE_KINDS, moodOf } from '../theme.js'
 import { FUJI_LINES } from '../data/lines.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel, addDays } from '../coach.js'
@@ -62,6 +62,10 @@ export class CoachView {
     this.root = root
     this.store = store
     this.hooks = hooks
+    // ふじ的新回覆念給讀螢幕軟體聽：整頁每次都會重畫，所以放在一個不跟著重畫的區塊裡
+    this.live = Object.assign(document.createElement('p'), { className: 'sr-only' })
+    this.live.setAttribute('aria-live', 'polite')
+    root.after(this.live)
     this.view = 'plan' // plan：排程 | report：週報
     this.step = 'ask' // ask：填問卷 | preview：看預覽 | done：已套用
     this.res = null
@@ -199,7 +203,7 @@ export class CoachView {
     this.reply = this._replyText()
     if (res.fallback) this.hooks.toast?.({ icon: '藤', title: '這次用平常的方法排', sub: res.why?.message || 'Claude 排的放不進你選的空檔' })
     this.render()
-    requestAnimationFrame(() => $('[data-r="reply"]', this.root)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    requestAnimationFrame(() => $('[data-r="reply"]', this.root)?.scrollIntoView({ behavior: scrollMode(), block: 'start' }))
   }
   _replyText() {
     const r = this.res
@@ -230,7 +234,7 @@ export class CoachView {
     this.doneText = say('coachApplied', { count, days: r.days.length }, '排好了，照自己的步調來。')
     this.render()
     // 捲到最下面，讓「撤銷／到日程看看」露出來（不被下方的輸入框蓋住）
-    requestAnimationFrame(() => this.root.closest('.panel-body')?.scrollTo({ top: 1e6, behavior: 'smooth' }))
+    requestAnimationFrame(() => this.root.closest('.panel-body')?.scrollTo({ top: 1e6, behavior: scrollMode() }))
   }
   _undo(id) {
     const n = this.store.undoCoachPlan(id)
@@ -435,11 +439,14 @@ export class CoachView {
     }
     parts.push(
       `<form class="coach-say" data-r="say" autocomplete="off">
-        <input name="say" maxlength="60" value="${esc(this.draft)}" placeholder="想排什麼？例如：這週的數學複習 3小時" />
+        <input name="say" maxlength="60" value="${esc(this.draft)}" placeholder="想排什麼？例如：這週的數學複習 3小時" aria-label="告訴ふじ想排什麼" />
         <button class="btn-primary" type="submit">送出</button>
       </form>`,
     )
     this.root.innerHTML = `<div class="coach">${parts.join('')}</div>`
+    const said = this.step === 'done' ? this.doneText : this.step === 'think' ? this.thinking : this.step === 'ask' ? this.flash : this.reply?.join(' ')
+    if (said && said !== this._said) this.live.textContent = `ふじ：${said}`
+    this._said = said
   }
 
   _head() {

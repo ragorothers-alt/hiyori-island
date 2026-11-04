@@ -60,6 +60,7 @@ body.night .ws-day.today b { color: #9fd0f3; }
   transition: transform .2s var(--ease), box-shadow .2s, opacity .2s;
 }
 .chip-task:hover { background: var(--glass-strong); box-shadow: 0 3px 10px rgba(80, 120, 170, .12); }
+.chip-slot { display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 0; text-align: left; cursor: inherit; border-radius: 6px; }
 .chip-task span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chip-task .pri { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--ink-faint); }
 .chip-task .pri.p2 { background: var(--sky); }

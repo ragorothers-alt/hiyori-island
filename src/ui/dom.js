@@ -46,6 +46,7 @@ export function inlineEdit(el, value, onSave, maxLength = 60) {
   input.className = 'inline-input'
   input.value = value
   input.maxLength = maxLength
+  input.setAttribute('aria-label', '改名（Enter 存、Esc 取消）')
   el.replaceChildren(input)
   input.focus()
   input.select()
@@ -68,6 +69,9 @@ export function inlineEdit(el, value, onSave, maxLength = 60) {
   })
   input.addEventListener('blur', () => finish(true))
 }
+
+// 捲動要不要有動畫：系統開了「減少動態效果」就直接跳過去（CSS 的 scroll-behavior 管不到 JS 指定的 smooth）
+export const scrollMode = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth')
 
 // 選項按鈕：外觀（.on）和讀螢幕軟體聽到的狀態（aria-pressed）一起切
 export function setOn(el, on) {
