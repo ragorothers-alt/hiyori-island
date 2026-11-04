@@ -13,16 +13,13 @@ import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
 import { BOND_ACTS, outfitOf } from './data/bond.js'
-import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
+import { lookHour, nightAt, realHour, systemDark, daypart } from './daylight.js'
 import { RESIDENTS, buildingOf } from './data/town.js'
 import { pick, short, fill, line } from './voice.js'
 
 // 描寫天色的字眼：外觀設定讓天空和真實時間不同時（例如白天開夜間模式），問候避開這些句子
 const SKY_WORDS = /陽光|晨光|太陽|曬|樹蔭|晚霞|夕陽|星星|月亮|夜色|天色|天黑|螢火蟲/
-function greetKey() {
-  const h = new Date().getHours()
-  return h >= 5 && h < 11 ? 'greet.morning' : h >= 11 && h < 17 ? 'greet.noon' : h >= 17 && h < 21 ? 'greet.evening' : 'greet.night'
-}
+const greetKey = () => `greet.${daypart()}`
 
 // 開機：資料、介面、提醒、同步。小島（three.js 場景、兩人的模型）在 islandScene.js，
 // App 模式開機時不載入：介面先出來，第一次切回小島才下載、建好（只建一次）；小島模式一開始就載入

@@ -11,7 +11,7 @@ import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML, setOn, pickOne } from './ui/dom.js'
-import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
+import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
@@ -80,7 +80,6 @@ const SIDE_KEY = 'hiyori-side-mini'
 // 商店和花の図鑑的縮圖是用 three.js 拍的，載入前先放透明的圖（版面不會跳）
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 const ISLAND_ICON = '<svg viewBox="0 0 24 24"><path d="M3 16.5c3 0 4.5-1.8 9-1.8s6 1.8 9 1.8"/><path d="M6.5 16.5l1.8 3.5h7.4l1.8-3.5"/><path d="M12 14.7V7"/><path d="M12 7c-2.4-1.6-5-1.2-6.5.6 2-.2 3.6.3 4.6 1.4M12 7c2.4-1.6 5-1.2 6.5.6-2-.2-3.6.3-4.6 1.4M12 7c-.8-1.6-2.3-2.6-4-2.8"/></svg>'
-const greeting = (h) => (h >= 5 && h < 11 ? '早安' : h >= 11 && h < 17 ? '午安' : h >= 17 && h < 22 ? '晚上好' : '夜深了')
 // 回饋：到 GitHub 開一則 issue，先填好版本和裝置大小（不帶任何個人資料）
 const FEEDBACK_URL = 'https://github.com/ragorothers-alt/hiyori-island/issues/new'
 const QUALITY_INFO = {
@@ -599,7 +598,7 @@ export class UI {
     if (!this.appMode) return
     const s = this.store
     const lv = s.level.level
-    $('#abGreet').textContent = greeting(new Date().getHours())
+    $('#abGreet').textContent = GREETING[daypart()]
     $('#abSub').textContent = `Lv.${lv} ${levelTitle(lv)}${s.streak ? `・連續 ${s.streak} 日` : ''}`
     const { cur, need } = s.level
     $('#abXp').style.width = `${(cur / need) * 100}%`

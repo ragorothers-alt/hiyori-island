@@ -6,6 +6,7 @@ import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, as
 import { buildInsights } from '../insights.js'
 import { aiReady, askAI } from '../ai.js'
 import { PEAKS } from '../planner.js'
+import { daypart } from '../daylight.js'
 
 // 「教練 · ふじ」分頁，分成兩頁：
 // 排程：ふじ打招呼 → 問卷（全部點選標籤）→ 你的回答 → ふじ排好的預覽 → 套用／換個排法／改答案。
@@ -24,10 +25,7 @@ const hours = (min) => {
   return `${Number.isInteger(h) ? h : h.toFixed(1)} 小時`
 }
 const span = (a, b) => (a === b ? dayLabel(a) : `${dayLabel(a)} – ${dayLabel(b)}`)
-const greetKey = () => {
-  const h = new Date().getHours()
-  return h >= 5 && h < 11 ? 'morning' : h >= 11 && h < 17 ? 'noon' : h >= 17 && h < 21 ? 'evening' : 'night'
-}
+const greetKey = () => daypart()
 const LENS = [25, 50, 90]
 const DAYS = [
   { v: 3, label: '輕量', sub: '3 天' },

@@ -34,3 +34,8 @@ export function lookHour(h, theme, dark = false) {
 export const systemDark = () => typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
 
 export const realHour = (d = new Date()) => d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600
+
+// 問候的時段：頂欄的招呼、兩人的開場台詞、ふじ的教練都用這一份，邊界才不會各說各的
+// 早上 5–11、中午 11–17、晚上 17–22、深夜 22–5
+export const daypart = (h = new Date().getHours()) => (h >= 5 && h < 11 ? 'morning' : h >= 11 && h < 17 ? 'noon' : h >= 17 && h < 22 ? 'evening' : 'night')
+export const GREETING = { morning: '早安', noon: '午安', evening: '晚上好', night: '夜深了' }

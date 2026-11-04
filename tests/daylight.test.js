@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { lookHour, nightAt } from '../src/daylight.js'
+import { readFileSync } from 'node:fs'
+import { lookHour, nightAt, daypart, GREETING } from '../src/daylight.js'
 import { Store } from '../src/store.js'
+import { LINES, FUJI_LINES } from '../src/data/lines.js'
+
+describe('問候的時段', () => {
+  it('邊界：5、11、17、22 點換時段；21 點還是晚上', () => {
+    expect([4, 5, 10, 11, 16, 17, 21, 22, 23, 0].map(daypart)).toEqual(['night', 'morning', 'morning', 'noon', 'noon', 'evening', 'evening', 'night', 'night', 'night'])
+    expect(GREETING[daypart(21)]).toBe('晚上好')
+  })
+  it('每個時段兩人都有開場白；ふじ的教練也有招呼', () => {
+    for (const p of ['morning', 'noon', 'evening', 'night']) {
+      expect(LINES.greet?.[p]?.length, `greet.${p}`).toBeGreaterThan(0)
+      expect(FUJI_LINES.coachHello?.[p]?.length, `coachHello.${p}`).toBeGreaterThan(0)
+    }
+  })
+  it('時段只在 daylight.js 算一次：其他地方不再自己判斷幾點是哪個時段', () => {
+    for (const f of ['../src/ui.js', '../src/main.js', '../src/ui/coach.js']) {
+      expect(readFileSync(new URL(f, import.meta.url), 'utf8'), f).not.toMatch(/h >= 17 && h < 2\d/)
+    }
+  })
+})
 
 describe('外觀：天空顯示的時間', () => {
   it('依時間就是真實時間', () => {
