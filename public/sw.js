@@ -40,8 +40,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req, { cache: 'no-cache' })
         .then((res) => {
-          const copy = res.clone()
-          caches.open(VERSION).then((c) => c.put('./index.html', copy))
+          // 404、500 這類錯誤頁不能存成離線用的首頁
+          if (res.ok) {
+            const copy = res.clone()
+            caches.open(VERSION).then((c) => c.put('./index.html', copy))
+          }
           return res
         })
         .catch(() => caches.match('./index.html')),

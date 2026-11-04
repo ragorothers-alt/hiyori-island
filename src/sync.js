@@ -16,6 +16,7 @@ export function restoreBackup(store) {
   return true
 }
 const NO_ROOM = '瀏覽器的儲存空間不夠，沒辦法先備份另一邊，所以先不替換。請先用「匯出資料」存一份'
+const NO_SAVE = '瀏覽器的儲存空間不夠，這台的存檔寫不進去。請先用「匯出資料」存一份，再清出一些空間'
 
 // 子類別要實作：
 //   _ready()                             有沒有連結（有檔案 handle、有同步碼）
@@ -128,12 +129,13 @@ export class SyncEngine {
     if (epoch !== this.epoch) return
     const local = this.store.state.rev || ''
     if (!remote) return this._write('') // 雲端還沒有資料（剛建立）
+    // 同步過的裝置，這台卻沒有自己的小島可推：沒有版本（被清掉了），或存檔讀不進來換成了範例島
+    // （之後就算在範例島上加了東西也一樣）。一律拿雲端的回來，這台後來加的留成備份；
+    // 不會把範例島蓋到雲端、再傳到每一台
+    if (this.base && (!local || this.store.loadFailed)) return this._load(remote)
     if (remote.rev === this.base) return local !== this.base ? this._write(this.base) : this._ok()
-    if (local === remote.rev) {
-      // 同一個版本（例如解除後重新連結）
-      this._setBase(local)
-      return this._ok()
-    }
+    // 同一個版本（例如解除後重新連結）
+    if (local === remote.rev) return this._synced(local)
     if (local === this.base) return this._load(remote)
     // 兩邊都有新變更：不自動決定，交給使用者
     // first：剛連結（還沒同步過），兩邊各有一份小島
@@ -181,8 +183,7 @@ export class SyncEngine {
       return
     }
     this.store.saveNow()
-    this._setBase(version.rev)
-    this._ok()
+    this._synced(version.rev)
   }
 
   _load(remote, { strict = false } = {}) {
@@ -194,9 +195,19 @@ export class SyncEngine {
     } catch (e) {
       return this._fail(e)
     }
-    this._setBase(remote.rev)
+    if (this._synced(remote.rev)) this.onPulled(remote.savedAt)
+  }
+
+  // 同步好了：這台的存檔也寫進去了，才把 base 記成這一版。存不進去（瀏覽器空間滿了）時 base 不動——
+  // 不然重新整理後讀到的是還沒更新的舊存檔，會被當成「這台改過」推上去，蓋掉雲端比較新的資料
+  _synced(rev) {
+    if (!this.store.saved) {
+      this._set('error', NO_SAVE)
+      return false
+    }
+    this._setBase(rev)
     this._ok()
-    this.onPulled(remote.savedAt)
+    return true
   }
 
   _ok() {

@@ -93,7 +93,8 @@ describe('同一個瀏覽器開兩個分頁', () => {
     b.save(false)
     await Promise.resolve()
     expect(b.state.tasks.map((t) => t.title)).toContain('A 的任務')
-    expect(readBackup()).toBeNull()
+    // 沒有把另一個分頁的版本當成「被取代的」留備份（beforeEach 的匯入留了一份匯入前的）
+    expect(readBackup()?.from).not.toBe('tab')
   })
 
   it('例行公事的實例 id 固定：換成另一個分頁那一版後重新生成，還是同一個 id', () => {

@@ -59,6 +59,26 @@ async function link(dev, file) {
   })
 }
 
+// 同一台裝置重新打開（同一份 localStorage），像 init() 一樣接回已經連結的檔案再同步（不重新連結，base 留著）
+function reopen(dev) {
+  const prev = globalThis.localStorage
+  globalThis.localStorage = dev.mem
+  const store = new Store()
+  const sync = new FileSync(store)
+  globalThis.localStorage = prev
+  const run = async (fn) => {
+    globalThis.localStorage = dev.mem
+    return fn(store, sync)
+  }
+  return { store, sync, mem: dev.mem, run }
+}
+const resume = (dev, file) =>
+  dev.run(async (_s, sync) => {
+    sync.handle = file
+    sync.state = 'linked'
+    await sync.sync()
+  })
+
 let file
 beforeAll(() => {
   globalThis.window ??= globalThis
@@ -119,6 +139,49 @@ describe('雲端資料夾同步', () => {
     await link(b, file)
     expect(b.sync.state).toBe('linked')
     expect(titles(b.store)).toContain('A 的任務')
+  })
+
+  it('同步過的裝置存檔讀不進來：拿檔案裡的回來，不會把範例島推上去蓋掉', async () => {
+    const a = device()
+    await a.run((s) => s.addTask({ title: '真正的資料' }))
+    await link(a, file)
+    const saved = file.content
+    a.mem.setItem('hiyori-daily-v1', '{壞掉的')
+    later()
+    const b = reopen(a)
+    expect(b.store.loadFailed).toBeTruthy()
+    expect(b.sync.base).toBeTruthy()
+    // 打開後、同步之前，又在範例島上加了東西
+    await b.run((s) => s.addTask({ title: '範例島上加的' }))
+    await resume(b, file)
+    expect(file.content).toBe(saved)
+    expect(titles(b.store)).toContain('真正的資料')
+    expect(b.store.loadFailed).toBeNull()
+    expect(titles(b.sync.backup)).toContain('範例島上加的')
+  })
+
+  it('寫出去之後這台存不進去：base 不往前推，重新打開會再拉一次，不會拿舊存檔蓋掉', async () => {
+    const a = device()
+    await link(a, file)
+    const base0 = a.sync.base
+    later()
+    const real = a.mem.setItem.bind(a.mem)
+    a.mem.setItem = (k, v) => {
+      if (k === 'hiyori-daily-v1') throw new Error('QuotaExceededError')
+      real(k, v)
+    }
+    await a.run(async (s, sync) => {
+      s.addTask({ title: '只在記憶體裡' })
+      await sync.sync()
+    })
+    expect(titles(JSON.parse(file.content).state)).toContain('只在記憶體裡')
+    expect(a.sync.base).toBe(base0)
+    expect(a.sync.state).toBe('error')
+    delete a.mem.setItem
+    const b = reopen(a)
+    await resume(b, file)
+    expect(titles(b.store)).toContain('只在記憶體裡')
+    expect(titles(JSON.parse(file.content).state)).toContain('只在記憶體裡')
   })
 
   it('只有一邊改過時，另一台下次同步會拉回新資料並備份舊的', async () => {

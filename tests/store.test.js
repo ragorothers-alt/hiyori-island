@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, addDays, dateStr, minToHHMM, repeatLabel, repeatMatches, toMin, weekKey,
+  Store, addDays, dateStr, minToHHMM, readBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY,
 } from '../src/store.js'
+import { restoreBackup } from '../src/sync.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
 import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS } from '../src/theme.js'
@@ -727,6 +728,109 @@ describe('存檔匯入與清洗', () => {
     expect(saved.tasks[0]).toMatchObject({ id: 'saved', title: '已保存' })
     expect(saved.player).toMatchObject({ xp: 42, coins: 7 })
     expect(onReload).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('存檔讀不進來、存不進去', () => {
+  const titlesOf = (st) => st.tasks.map((t) => t.title)
+  // 只讓某個 key 寫不進去，其他照常
+  const failOn = (key) => {
+    const real = localStorage.setItem.bind(localStorage)
+    return vi.spyOn(localStorage, 'setItem').mockImplementation((k, v) => {
+      if (k === key) throw new Error('QuotaExceededError')
+      real(k, v)
+    })
+  }
+
+  it('匯入、重置前把原本的小島留成備份，還原就回來', () => {
+    store.addTask({ title: '原本的任務' })
+    store.importJSON(JSON.stringify({ tasks: [{ id: 'imp', title: '匯入的' }], player: { xp: 1 } }))
+    expect(readBackup().from).toBe('import')
+    expect(titlesOf(readBackup().state)).toContain('原本的任務')
+    restoreBackup(store)
+    expect(titlesOf(store.state)).toContain('原本的任務')
+    store.addTask({ title: '重置前' })
+    store.reset()
+    expect(store.state.tasks).toEqual([])
+    expect(readBackup().from).toBe('reset')
+    expect(titlesOf(readBackup().state)).toContain('重置前')
+  })
+
+  it('匯入前備份存不進去就不匯入；壞掉的檔案也不會先動到備份', () => {
+    store.addTask({ title: '原本的任務' })
+    const original = store.exportJSON()
+    const backup = localStorage.getItem('hiyori-backup')
+    expect(() => store.importJSON('{}')).toThrow('不是有效的ひより存檔')
+    expect(localStorage.getItem('hiyori-backup')).toBe(backup)
+    failOn('hiyori-backup')
+    expect(() => store.importJSON(JSON.stringify({ tasks: [], player: {} }))).toThrow('沒辦法先備份')
+    expect(store.exportJSON()).toBe(original)
+  })
+
+  it('存不進去時說一次，又存得進去時再說一次；saved 看得出這一版有沒有寫進去', () => {
+    const failed = vi.fn()
+    const back = vi.fn()
+    store.on('saveFailed', failed)
+    store.on('saveRecovered', back)
+    const spy = failOn('hiyori-daily-v1')
+    store.addTask({ title: 'A' })
+    expect(store.saveNow()).toBe(false)
+    store.addTask({ title: 'B' })
+    store.saveNow()
+    expect(failed).toHaveBeenCalledTimes(1)
+    expect(store.saved).toBe(false)
+    spy.mockRestore()
+    expect(store.saveNow()).toBe(true)
+    expect(back).toHaveBeenCalledTimes(1)
+    expect(store.saved).toBe(true)
+  })
+
+  it('兩個分頁都改了資料、另一邊的版本備份不進去：先不蓋掉它', () => {
+    store.addTask({ title: '這邊的' })
+    store.saveNow()
+    const peer = JSON.parse(localStorage.getItem('hiyori-daily-v1'))
+    peer.rev = 'peerrev1'
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify(peer))
+    localStorage.setItem('hiyori-daily-rev', 'peerrev1')
+    store.addTask({ title: '這邊又加的' })
+    failOn('hiyori-backup')
+    expect(store.saveNow()).toBe(false)
+    expect(JSON.parse(localStorage.getItem('hiyori-daily-v1')).rev).toBe('peerrev1')
+  })
+
+  it('存檔讀不進來：原文另外留一份再換成範例島；留不下來時，自己改資料前不蓋掉原檔', () => {
+    localStorage.clear()
+    localStorage.setItem('hiyori-daily-v1', '{壞掉的')
+    // 原本那份的版本號還在：不能被當成「另一個分頁剛寫過」而一直存不進去
+    localStorage.setItem('hiyori-daily-rev', 'oldrev1')
+    const s = new Store()
+    const failed = vi.fn()
+    s.on('saveFailed', failed)
+    expect(s.loadFailed).toEqual({ rescued: true })
+    expect(JSON.parse(localStorage.getItem(RESCUE_KEY)).raw).toBe('{壞掉的')
+    expect(s.state.tasks.length).toBeGreaterThan(0)
+    s.addTask({ title: '範例島上加的' })
+    expect(s.saveNow()).toBe(true)
+    expect(failed).not.toHaveBeenCalled()
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('範例島上加的')
+
+    localStorage.clear()
+    localStorage.setItem('hiyori-daily-v1', '{壞掉的')
+    failOn(RESCUE_KEY)
+    const t = new Store()
+    expect(t.loadFailed).toEqual({ rescued: false })
+    t.saveNow()
+    expect(localStorage.getItem('hiyori-daily-v1')).toBe('{壞掉的')
+    t.addTask({ title: '自己加的' })
+    t.saveNow()
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('自己加的')
+  })
+
+  it('換進來的資料停在好幾天前：照樣做跨日結算，お守り保住連續天數', () => {
+    store.importJSON(JSON.stringify({ tasks: [], player: { xp: 0, coins: 0, streak: 5, lastActive: addDays(TODAY, -3), charms: 2 } }))
+    expect(store.player).toMatchObject({ streak: 5, charms: 0, lastActive: addDays(TODAY, -1) })
+    completeTask()
+    expect(store.streak).toBe(6)
   })
 })
 

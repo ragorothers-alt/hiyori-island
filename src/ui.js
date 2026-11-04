@@ -1356,8 +1356,12 @@ export class UI {
     const choosing = this.cloud?.state === 'conflict' || this.sync?.state === 'conflict'
     $('#backupRow').hidden = !bk || choosing
     if (bk) {
+      // 匯入、重置前留的：寫什麼時候換掉的；同步、兩個分頁留的：寫那一版是什麼時候的
+      const before = { import: '匯入檔案', reset: '重置' }[bk.from]
       const src = { local: '這台', file: '同步檔', tab: '另一個分頁' }[bk.from] || '雲端'
-      $('#backupInfo').textContent = `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
+      $('#backupInfo').textContent = before
+        ? `${when(bk.savedAt)} ${before}前的小島，留著備用`
+        : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
     }
     const sy = this.sync
     if (!sy) return
@@ -1718,7 +1722,8 @@ export class UI {
       if (!f) return
       try {
         this.store.importJSON(await f.text())
-        this.toast({ icon: '入', title: '資料已匯入', sub: '小島回到了那時的樣子' })
+        this.toast({ icon: '入', title: '資料已匯入', sub: '原本的小島留成備份，選錯檔案的話可以在設定裡還原' })
+        this.renderSync()
       } catch (err) {
         this.toast({ icon: '！', title: '匯入失敗', sub: err.message })
       }
@@ -1730,7 +1735,12 @@ export class UI {
         this.toast({ icon: '掃', title: `清掉了 ${n} 筆範例`, sub: '自己加的資料、經驗值和統計都還在' })
         this.renderSettings()
       })
-    $('#resetBtn').onclick = (e) => armConfirm(e.currentTarget, '再按一次，清空所有資料', () => this.store.reset())
+    $('#resetBtn').onclick = (e) =>
+      armConfirm(e.currentTarget, '再按一次，清空所有資料', () => {
+        this.store.reset()
+        this.renderSync()
+        if (readBackup()?.from === 'reset') this.toast({ icon: '戻', title: '小島清空了', sub: '原本的小島留成備份，後悔的話可以在設定裡還原' })
+      })
   }
 
   renderRecords() {

@@ -29,6 +29,8 @@ const KEY = 'hiyori-daily-v1'
 // 存檔的版本號另外存一份小的：寫之前先看一眼，就知道另一個分頁是不是剛寫過（不用每次讀整份）
 const REV_KEY = 'hiyori-daily-rev'
 const BACKUP_KEY = 'hiyori-backup'
+// 讀不進來的存檔原文（壞掉了、或清洗時出錯）：另外留一份，不會被接下來的存檔蓋掉
+export const RESCUE_KEY = 'hiyori-rescue'
 
 // ── 被取代的那一份（只留最近一份；雲端、資料夾同步和兩個分頁同時改了資料都共用） ──
 export function readBackup() {
@@ -39,7 +41,8 @@ export function readBackup() {
     return null
   }
 }
-// from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）。存不進去（瀏覽器空間不夠）時回傳 false
+// from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）、'import'（匯入前）、'reset'（重置前）。
+// 存不進去（瀏覽器空間不夠）時回傳 false
 export function keepBackup(state, from, at) {
   try {
     localStorage.setItem(BACKUP_KEY, JSON.stringify({ from, at, savedAt: Date.now(), state }))
@@ -673,11 +676,22 @@ export class Store {
 
   // ── 存取 ──
   _load() {
+    let raw = null
     try {
-      const raw = localStorage.getItem(KEY)
+      raw = localStorage.getItem(KEY)
       if (raw) return migrate(JSON.parse(raw))
     } catch (e) {
       console.warn('[hiyori] 讀取存檔失敗，使用預設資料', e)
+      // 原文另外留一份再換成範例島；留不下來（空間不夠）時，saveNow 在使用者自己改資料前不會蓋掉它。
+      // 範例島的 rev 是空的：有開同步的話，同步會從雲端拉回來，不會把範例島推上去（sync.js）
+      if (raw) {
+        let rescued = false
+        try {
+          localStorage.setItem(RESCUE_KEY, JSON.stringify({ at: Date.now(), error: String(e?.message || e), raw }))
+          rescued = true
+        } catch {}
+        this.loadFailed = { rescued }
+      }
     }
     return seed()
   }
@@ -701,23 +715,45 @@ export class Store {
   _nextVersion() {
     return Math.max(Date.now(), (this.state.updatedAt || 0) + 1)
   }
+  // 回傳有沒有寫進去。寫不進去（多半是瀏覽器空間滿了）時發一次 saveFailed，之後又寫得進去時發 saveRecovered
   saveNow() {
+    // 存檔讀不進來、原文也沒能另外留下來：使用者自己改資料之前，不拿範例島蓋掉它
+    if (this.loadFailed && !this.loadFailed.rescued && !this.state.rev) return false
     try {
       // 另一個分頁剛寫過、這邊還沒換成那一版（事件還在路上）
       const disk = localStorage.getItem(REV_KEY)
       if (disk && disk !== this._diskRev && disk !== this.state.rev) {
         // 這邊沒改過資料（只是例行實例、跨日這類各自推導的變化）：直接換成那一版
-        if ((this.state.rev || '') === this._diskRev && this._adoptDisk()) return
-        // 兩邊都改了：那一版先留成備份（設定裡可以還原），不會被無聲蓋掉
-        const peer = JSON.parse(localStorage.getItem(KEY) || 'null')
-        if (peer?.rev) keepBackup(peer, 'tab', peer.updatedAt)
+        if ((this.state.rev || '') === this._diskRev && this._adoptDisk()) return true
+        // 兩邊都改了：那一版先留成備份（設定裡可以還原），不會被無聲蓋掉；備份存不進去就先不寫。
+        // 存檔裡那份讀不懂（開場時就讀不進來、原文已經另外留了）：沒有可以備份的，照常寫
+        let peer = null
+        try {
+          peer = JSON.parse(localStorage.getItem(KEY) || 'null')
+        } catch {}
+        if (peer?.rev && !keepBackup(peer, 'tab', peer.updatedAt)) throw new Error('空間不夠，沒辦法先備份另一個分頁的版本')
       }
       localStorage.setItem(KEY, JSON.stringify(this.state))
       localStorage.setItem(REV_KEY, this.state.rev || '')
       this._diskRev = this.state.rev || ''
     } catch (e) {
       console.warn('[hiyori] 存檔失敗', e)
+      // 只在「從存得進去變成存不進去」時說一次，不要每個動作都跳出來
+      if (!this.saveError) {
+        this.saveError = e
+        this.emit('saveFailed', e)
+      }
+      return false
     }
+    if (this.saveError) {
+      this.saveError = null
+      this.emit('saveRecovered')
+    }
+    return true
+  }
+  // 記憶體裡這一版已經寫進存檔了（存不進去、還沒寫時是 false）。同步靠它判斷能不能把 base 往前推
+  get saved() {
+    return (this.state.rev || '') === this._diskRev
   }
 
   // ── 推導資料 ──
@@ -2287,6 +2323,7 @@ export class Store {
   exportJSON() {
     return JSON.stringify(this.state, null, 2)
   }
+  // 匯入前把現在的小島留成備份（設定裡可以還原）；備份存不進去就不匯入，免得選錯檔案就回不去
   importJSON(text) {
     let obj
     try {
@@ -2294,6 +2331,8 @@ export class Store {
     } catch {
       throw new Error('檔案不是 JSON 格式')
     }
+    if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
+    if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error('瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份')
     this.replaceState(obj)
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
@@ -2308,11 +2347,20 @@ export class Store {
     // 匯入的舊檔沒有小鎮紀錄：照統計直接蓋好就好，不另外打招呼
     delete next.town.welcome
     this.state = next
+    // 換成了一份讀得進來的資料：不再是「存檔讀不進來」的狀態
+    this.loadFailed = null
     this.settleLots()
     this.today = dateStr()
     this._ensureRoutines(this.today)
     if (this.selectedDate !== this.today) this._ensureRoutines(this.selectedDate)
     this._ensureQuests()
+    // 換進來的這份可能停在好幾天前（匯入舊備份、很久沒開的裝置）：補做跨日結算，お守り才保得住連續天數、
+    // 戒除里程碑才領得到（之後同一天的 tick 不會再做）。都只做一次；另一個分頁的那一版那邊已經做過了。
+    // 每天來訪的好感度不補：拉回同步資料時跳出送金平糖會很突兀，明天打開就有
+    if (!peer) {
+      this._applyCharms()
+      this._quitMilestones(this._pending)
+    }
     if (peer) this._diskRev = rev
     else this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
@@ -2320,6 +2368,7 @@ export class Store {
     if (!peer) this.emit('dirty')
     this.emit('change')
     this.emit('reload', { soft })
+    this.flushPending()
   }
   // ── 範例資料（id 開頭是 ex-） ──
   samples() {
@@ -2348,8 +2397,10 @@ export class Store {
     return n
   }
 
-  // 重置：清空成一座空島（不放範例）
+  // 重置：清空成一座空島（不放範例）。重置前的小島留成備份（設定裡可以還原）；
+  // 存不進去也照樣重置：已經按了兩次，而且空間不夠時重置可能正是想清出空間
   reset() {
+    keepBackup(this.state, 'reset', this.state.updatedAt)
     localStorage.removeItem(KEY)
     const version = this._nextVersion()
     this.state = seed(false)
