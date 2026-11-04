@@ -22,6 +22,8 @@ const SKY_WORDS = /陽光|晨光|太陽|曬|樹蔭|晚霞|夕陽|星星|月亮|�
 const greetKey = () => `greet.${daypart()}`
 // 部署新版後自動重新整理過的時間（sessionStorage）：短時間內不重複整理
 const RELOADED_KEY = 'hiyori-reloaded'
+// 已經請過瀏覽器保留資料（不會跳出詢問的瀏覽器以外，只請一次）
+const PERSIST_KEY = 'hiyori-persist-asked'
 
 // 開機：資料、介面、提醒、同步。小島（three.js 場景、兩人的模型）在 islandScene.js，
 // App 模式開機時不載入：介面先出來，第一次切回小島才下載、建好（只建一次）；小島模式一開始就載入
@@ -666,9 +668,29 @@ async function boot() {
     setTimeout(() => location.reload(), 1200)
   })
   // 請瀏覽器在空間吃緊時不要清掉這個網站的資料（iPhone 沒加到主畫面時，Safari 也可能把太久沒開的網站資料清掉）。
-  // Chrome 系和安裝成 App 時不會跳出詢問；Firefox 會跳出權限詢問，不在開機時突然問
-  if (navigator.storage?.persist && (navigator.userAgentData || matchMedia('(display-mode: standalone)').matches)) {
-    navigator.storage.persisted().then((on) => on || navigator.storage.persist()).catch(() => {})
+  // Chrome 系和安裝成 App 時不會跳出詢問，開機就請；其他瀏覽器（Safari 一般分頁、Firefox 會跳出權限詢問）
+  // 等到第一次動手加了自己的東西（不只範例）時才請，只請一次：那時正在操作，詢問也看得懂是為了什麼
+  if (navigator.storage?.persist) {
+    const ask = () => navigator.storage.persisted().then((on) => on || navigator.storage.persist()).catch(() => {})
+    let asked = false
+    try {
+      asked = !!localStorage.getItem(PERSIST_KEY)
+    } catch {}
+    if (navigator.userAgentData || matchMedia('(display-mode: standalone)').matches) ask()
+    else if (!asked) {
+      const mine = () => {
+        const s = store.state
+        return s.tasks.length + s.events.length + s.projects.length + s.habits.length > store.sampleCount()
+      }
+      const off = store.on('dirty', () => {
+        if (!mine()) return
+        off()
+        try {
+          localStorage.setItem(PERSIST_KEY, '1')
+        } catch {}
+        ask()
+      })
+    }
   }
   let installEvt = null
   const installRow = document.getElementById('installRow')
