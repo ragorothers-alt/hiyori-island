@@ -209,6 +209,14 @@ export class Sky {
   setTheme(theme) {
     if (theme !== this.theme) this._retarget(() => (this.theme = theme))
   }
+  // 陰影貼圖的解析度（畫質 standard 用小一點）：換了要丟掉舊的貼圖，下一幀照新尺寸重建
+  setShadowSize(n) {
+    const s = this.sun.shadow
+    if (s.mapSize.x === n) return
+    s.mapSize.set(n, n)
+    s.map?.dispose()
+    s.map = null
+  }
   // 切換外觀後天色還在快轉
   get shifting() {
     return !!this._shift

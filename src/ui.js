@@ -15,9 +15,6 @@ import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
-import { CalendarView } from './ui/calendar.js'
-import { CoachView } from './ui/coach.js'
-import { ProjectView } from './ui/project.js'
 import { latestLog, msProgress, msSteps, msTasks, projectStats } from './projects.js'
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
@@ -28,6 +25,23 @@ import { readBackup, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
+// 不常用的畫面（月曆、教練、專案詳情）：開場不載，第一次用到才下載。開完閒下來時也會先在背景載好（preloadViews），
+// 之後離線也打得開。view 是載好的那個（還沒載好是 null）
+function lazy(load) {
+  let p = null
+  const lz = {
+    view: null,
+    get: () =>
+      (p ||= load().then(
+        (v) => (lz.view = v),
+        (err) => {
+          p = null
+          throw err
+        },
+      )),
+  }
+  return lz
+}
 // 手機直式時面板是下半部的抽屜；橫向手機高度太矮，改回側邊面板（和 styles.css 的媒體查詢同步）
 export const SIDE_PHONE = '(max-width: 860px) and (max-height: 500px) and (orientation: landscape)'
 export const sheetLayout = () => matchMedia('(max-width: 860px)').matches && !matchMedia(SIDE_PHONE).matches
@@ -115,8 +129,8 @@ export class UI {
       setTab: (tab) => this.setTab(tab),
       openEdit: (type, id) => this.schedule.openEdit(type, id),
       openReview: (date) => this.openReview(date),
-      openCalendar: (date) => this.calendar.open(date),
-      closeCalendar: () => this.calendar.close(),
+      openCalendar: (date) => this._use(this._calendar, (c) => c.open(date)),
+      closeCalendar: () => this._calendar.view?.close(),
       focusEvent: (id) => hooks.focusEvent(id),
       hoverEvent: (id) => hooks.hoverEvent(id),
       openWeekCard: (wk) => this.openWeekCard(wk),
@@ -125,8 +139,8 @@ export class UI {
     this.schedule = new ScheduleView(store, viewHooks)
     this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
     this.life = new LifeView($('#lifeRoot'), store, viewHooks)
-    this.calendar = new CalendarView($('#calendar'), store, viewHooks)
-    this.coach = new CoachView($('#coachRoot'), store, viewHooks)
+    this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
+    this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)))
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
     this.dates.render()
     this.today = new TodayView($('#todayRoot'), store, {
@@ -140,15 +154,20 @@ export class UI {
       focusTaskId: () => (this.focus.mode === 'focus' ? this.focus.taskId : null),
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
-    this.projectView = new ProjectView($('#projectDetail'), store, {
-      toast: (o) => this.toast(o),
-      close: () => this.closeProject(),
-      viewOnIsland: (id) => this._onIsland(() => hooks.focusProject(id)),
-      startFocus: (id) => this.focus.startWith(id),
-      startFocusProject: (id) => this.focus.startWith(null, id),
-      openEdit: (type, id) => this.schedule.openEdit(type, id),
-      appMode: () => !!this.appMode,
-    })
+    this._project = lazy(() =>
+      import('./ui/project.js').then(
+        ({ ProjectView }) =>
+          new ProjectView($('#projectDetail'), store, {
+            toast: (o) => this.toast(o),
+            close: () => this.closeProject(),
+            viewOnIsland: (id) => this._onIsland(() => hooks.focusProject(id)),
+            startFocus: (id) => this.focus.startWith(id),
+            startFocusProject: (id) => this.focus.startWith(null, id),
+            openEdit: (type, id) => this.schedule.openEdit(type, id),
+            appMode: () => !!this.appMode,
+          }),
+      ),
+    )
     // 設定裡的「ふじ的 AI」（Claude 通行碼、模型）
     this.aiView = new AiView($('#aiRow'), { toast: (o) => this.toast(o) })
     this.applyFontScale()
@@ -158,7 +177,20 @@ export class UI {
     // 開發與截圖用：?tab=habits、?calendar
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
-    if (q.has('calendar')) this.calendar.open()
+    if (q.has('calendar')) this._use(this._calendar, (c) => c.open())
+  }
+
+  // 載好了就直接做；還沒就先載再做（離線又沒快取時說一聲）
+  _use(lz, fn) {
+    if (lz.view) return fn(lz.view)
+    lz.get().then(fn, (err) => {
+      console.warn('[hiyori] 畫面載入失敗', err)
+      this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
+    })
+  }
+  // 開場後閒下來時把月曆、教練、專案詳情先載好（一個一個來，不搶開場的資源）
+  preloadViews() {
+    return [this._calendar, this._coach, this._project].reduce((p, lz) => p.then(() => lz.get()).catch(() => {}), Promise.resolve())
   }
 
   // ── 靜態元件 ──
@@ -223,12 +255,12 @@ export class UI {
     this.toggleFull(false)
     $('#themeBtn').onclick = () => this.toggleTheme()
     this.renderTheme()
-    $('#calBtn').onclick = () => this.calendar.toggle()
-    $('#dateMain').onclick = () => this.calendar.open()
+    $('#calBtn').onclick = () => this._use(this._calendar, (c) => c.toggle())
+    $('#dateMain').onclick = () => this._use(this._calendar, (c) => c.open())
     $('#dateMain').onkeydown = (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
-        this.calendar.open()
+        this._use(this._calendar, (c) => c.open())
       }
     }
     $('#shopBtn').onclick = () => this.toggleShop()
@@ -272,7 +304,7 @@ export class UI {
         this.toggleFull(false)
         this.hooks.resetView()
       } else if (e.key === 's' || e.key === 'S') this.toggleShop()
-      else if (e.key === 'c' || e.key === 'C') this.calendar.toggle()
+      else if (e.key === 'c' || e.key === 'C') this._use(this._calendar, (c) => c.toggle())
       else if (e.key === 'f' || e.key === 'F') this.focus.toggle()
       else if (e.key === 'ArrowLeft') $('#prevDay').click()
       else if (e.key === 'ArrowRight') $('#nextDay').click()
@@ -285,7 +317,7 @@ export class UI {
     const modal = $$('.modal').filter((m) => !m.hidden).pop()
     if (modal) return modal
     if (!$('#focusFull').hidden) return $('#focusFull')
-    return this.calendar.isOpen ? $('#calendar') : null
+    return this._calendar.view?.isOpen ? $('#calendar') : null
   }
   // Esc 一次只關最上面那一層；什麼都沒開時才放開打字的欄位、離開全螢幕
   _escape(typing) {
@@ -298,7 +330,7 @@ export class UI {
         weekModal: () => this.closeWeekCard(),
         levelModal: () => this.closeModal(),
         focusFull: () => this.focus.toggleBig(false),
-        calendar: () => this.calendar.close(),
+        calendar: () => this._calendar.view?.close(),
       }[top.id]
       return close?.()
     }
@@ -307,7 +339,7 @@ export class UI {
       this.focus.toggleSet(false)
     } else if (!$('#shop').hidden || this._shopWait) this.toggleShop(false)
     else if (typing) document.activeElement.blur()
-    else if (this.tab === 'projects' && this.projectView.id) this.closeProject()
+    else if (this.tab === 'projects' && this._project.view?.id) this.closeProject()
     else this.toggleFull(false)
   }
   // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）
@@ -377,7 +409,7 @@ export class UI {
     this._renderPage(tab)
     if (tab === 'records') this.renderRecords()
     if (tab === 'habits') this.habits.render()
-    if (tab === 'coach') this.coach.render()
+    if (tab === 'coach') this._use(this._coach, (c) => c.render())
     if (tab === 'today') this.today.render()
   }
 
@@ -740,7 +772,8 @@ export class UI {
         if (ea.dataset.act === 'quickAdd') $('#taskTitle').focus()
         else {
           this.setTab('coach')
-          this.coach.preset({ scope: this.store.selectedDate === this.store.today ? 'today' : 'day', date: this.store.selectedDate })
+          const date = this.store.selectedDate
+          this._use(this._coach, (c) => c.preset({ scope: date === this.store.today ? 'today' : 'day', date }))
         }
         return
       }
@@ -1224,7 +1257,8 @@ export class UI {
 
   // ── 專案詳情 ──
   openProject(id, sec) {
-    this.projectView.open(id, sec)
+    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec))
+    this._project.view.open(id, sec)
     this._stale?.add('projects')
     if (this.tab === 'projects') this._renderPage('projects')
     else this.setTab('projects')
@@ -1232,8 +1266,10 @@ export class UI {
     requestAnimationFrame(() => $('#projectDetail .pd-back')?.focus({ preventScroll: true }))
   }
   closeProject() {
-    const id = this.projectView.id
-    this.projectView.close()
+    const pv = this._project.view
+    if (!pv) return
+    const id = pv.id
+    pv.close()
     this._stale?.add('projects')
     this._renderPage('projects')
     // 回到列表上剛剛那張卡
@@ -1246,12 +1282,12 @@ export class UI {
   renderProjects() {
     const s = this.store
     // 打開了某個專案：換成詳情（專案被刪掉、或同步後不見了就回到列表）
-    const pv = this.projectView
-    const open = !!pv.id && s.state.projects.some((p) => p.id === pv.id)
+    const pv = this._project.view
+    const open = !!pv?.id && s.state.projects.some((p) => p.id === pv.id)
     $('#projectHome').hidden = open
     $('#projectDetail').hidden = !open
     if (open) return pv.render()
-    if (pv.id) pv.close()
+    if (pv?.id) pv.close()
     // 進行中的在前，再來暫停的、已落成的
     const all = s.activeProjects()
     const rank = { active: 0, paused: 1, done: 2 }
@@ -1869,10 +1905,10 @@ export class UI {
     this._renderPage(this.tab)
     if (this.tab === 'records') this.renderRecords()
     if (this.tab === 'habits') this.habits.render()
-    if (this.tab === 'coach') this.coach.refresh()
+    if (this.tab === 'coach') this._coach.view?.refresh()
     if (this.tab === 'today') this.today.render()
     this.dates?.refresh()
-    if (this.calendar.isOpen) this.calendar.render()
+    if (this._calendar.view?.isOpen) this._calendar.view.render()
   }
 
   _renderPage(tab) {
@@ -1971,8 +2007,9 @@ export class UI {
 
   reveal(type, id) {
     // 點了島上另一棟房子：先回到專案列表，那張卡才看得到
-    if (type === 'project' && this.projectView.id && this.projectView.id !== id) {
-      this.projectView.close()
+    const pv = this._project.view
+    if (type === 'project' && pv?.id && pv.id !== id) {
+      pv.close()
       this._stale?.add('projects')
     }
     this.setTab({ task: 'tasks', event: 'schedule', project: 'projects' }[type])

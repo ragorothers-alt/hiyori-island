@@ -86,9 +86,11 @@ export async function createIsland(ctx) {
   const placed = new Placed(world, sky)
   const town = new Town(world, labels, island, sky)
   world.powerSave = store.state.settings.powerSave
-  // 畫質：auto 時觸控手機用標準（不做 MSAA、白天不開泛光），其他用高
-  const applyQuality = (q) =>
+  // 畫質：auto 時觸控手機用標準（不做 MSAA、白天不開泛光、解析度和陰影降一級），其他用高
+  const applyQuality = (q) => {
     world.setQuality(q === 'auto' ? (matchMedia('(hover: none) and (pointer: coarse)').matches ? 'standard' : 'high') : q)
+    sky.setShadowSize(world.quality.shadow)
+  }
   applyQuality(store.state.settings.quality)
   decor.sync(store.level.level)
 

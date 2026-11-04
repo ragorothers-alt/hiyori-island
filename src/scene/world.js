@@ -20,10 +20,11 @@ const MARGIN = 12
 // 閒置時左右慢慢擺動（不整圈轉到背面）：振幅與角速度
 const SWAY = 1.0
 const SWAY_W = 0.04
-// 畫質：high＝反鋸齒（composer 4× MSAA）＋白天也開泛光；standard（手機）＝不做 MSAA、泛光只在夜晚
-const QUALITY = {
-  high: { dpr: 1.5, samples: 4, dayBloom: true },
-  standard: { dpr: 1.5, samples: 0, dayBloom: false },
+// 畫質：high＝反鋸齒（composer 4× MSAA）＋白天也開泛光；standard（手機）＝不做 MSAA、泛光只在夜晚，
+// 解析度和陰影貼圖也降一級（手機 GPU 主要花在像素數和陰影上）
+export const QUALITY = {
+  high: { dpr: 1.5, samples: 4, dayBloom: true, shadow: 2048 },
+  standard: { dpr: 1.25, samples: 0, dayBloom: false, shadow: 1024 },
 }
 const _sunP = new THREE.Vector3()
 const _fwd = new THREE.Vector3()

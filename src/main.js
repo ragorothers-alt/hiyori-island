@@ -708,6 +708,9 @@ async function boot() {
       }, 5600)
     }),
   )
+  // 開場忙完再把月曆、教練、專案詳情載好；載過的檔案（含之後才載的）都請 Service Worker 收進離線快取
+  const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 2000))
+  idle(() => ui.preloadViews().then(keepOffline), { timeout: 8000 })
 }
 
 boot()
