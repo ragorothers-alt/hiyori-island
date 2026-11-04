@@ -603,7 +603,8 @@ function migrate(s) {
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
   // 舊版用長度 0 代表往上數：換成正向計時，倒數的長度回到預設
   if (settings.focusMin === 0) settings.focusUp = true
-  settings.focusMin = num(settings.focusMin || FOCUS_MIN, 5, 180, FOCUS_MIN)
+  // 跟計時設定的刻度尺同一個範圍（10～90 分、每 5 分一格）：匯入的 120 分不會在第一次捲動刻度尺時被悄悄改掉
+  settings.focusMin = Math.round(num(settings.focusMin || FOCUS_MIN, 10, 90, FOCUS_MIN) / 5) * 5
   settings.breakMin = num(settings.breakMin, 1, 30, BREAK_MIN)
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1

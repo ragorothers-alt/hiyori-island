@@ -71,7 +71,7 @@ export class LifeView {
           <div class="life-kinds" role="group" aria-label="種類">${kinds}</div>
           <div class="life-line">
             <input type="text" name="text" maxlength="120" aria-label="內容" data-r="text" />
-            <label class="life-amt" data-r="amtBox" hidden><span>NT$</span><input type="number" name="amount" min="0" max="9999999" step="1" inputmode="numeric" placeholder="金額" data-r="amt" /></label>
+            <label class="life-amt" data-r="amtBox" hidden><span>NT$</span><input type="number" name="amount" min="0" max="9999999" step="1" inputmode="numeric" placeholder="金額" aria-label="金額（新台幣）" data-r="amt" /></label>
           </div>
           <div class="form-row">
             <label class="time-field life-time"><span>時間</span><input type="time" name="t" data-r="time" /></label>

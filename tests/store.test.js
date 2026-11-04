@@ -1657,7 +1657,10 @@ describe('番茄鐘長度與專注時段', () => {
     store.importJSON(store.exportJSON())
     expect(store.state.settings).toMatchObject({ focusUp: true, focusMin: 50, breakMin: 10, focusRounds: 3 })
     store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 999, breakMin: -3, focusRounds: 9, focusUp: 'yes' } }))
-    expect(store.state.settings).toMatchObject({ focusUp: false, focusMin: 180, breakMin: 1, focusRounds: 4 })
+    // 長度跟刻度尺同一個範圍（10～90、每 5 分一格）
+    expect(store.state.settings).toMatchObject({ focusUp: false, focusMin: 90, breakMin: 1, focusRounds: 4 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 37 } }))
+    expect(store.state.settings.focusMin).toBe(35)
     store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusMin: 'abc' } }))
     expect(store.state.settings.focusMin).toBe(25)
   })

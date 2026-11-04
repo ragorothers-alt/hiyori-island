@@ -315,7 +315,7 @@ export class ScheduleView {
           <label>結束<input type="time" name="end" value="${item.end}" required></label>
         </div>
         <div class="swatches ec-colors">${swatches}</div>
-        <textarea name="note" maxlength="200" rows="2" placeholder="備註：地點、要帶的東西…">${esc(item.note || '')}</textarea>`
+        <textarea name="note" maxlength="200" rows="2" placeholder="備註：地點、要帶的東西…" aria-label="備註">${esc(item.note || '')}</textarea>`
       : `<div class="ec-grid">
           <label>日期<input type="date" name="date" value="${item.date}" required></label>
           <label>開始<input type="time" name="at" value="${item.at || ''}"></label>
@@ -326,7 +326,7 @@ export class ScheduleView {
         ${this._projectPick(item)}`
     $('#editSheet').innerHTML = `<form class="modal-card edit-card glass" autocomplete="off">
       <div class="modal-kicker">${ed.create ? 'あたらしいよてい' : ev ? 'よてい' : 'タスク'}</div>
-      <input name="title" class="ec-title" maxlength="${ev ? 60 : 80}" placeholder="${ev ? '日程名稱，例如：牙醫' : '任務名稱'}" value="${esc(item.title)}" required>
+      <input name="title" class="ec-title" maxlength="${ev ? 60 : 80}" placeholder="${ev ? '日程名稱，例如：牙醫' : '任務名稱'}" aria-label="${ev ? '日程名稱' : '任務名稱'}" value="${esc(item.title)}" required>
       ${body}
       ${routine ? `<p class="hint ec-hint">這是例行${ev ? '日程' : '任務'}，這裡只改這一天</p>` : ''}
       <div class="ec-actions">

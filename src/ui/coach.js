@@ -412,7 +412,8 @@ export class CoachView {
   render() {
     if (this.view === 'report') {
       this.root.innerHTML = `<div class="coach">${this._head()}${this._reportHTML()}</div>`
-      return
+      // 切到週報：念出開場和本週到目前的幾個數字（數字沒變就不重念）
+      return this._announce(this._reportSay)
     }
     this.hello ||= say(`coachHello.${greetKey()}`, {}, '想排些什麼？用下面的標籤告訴我吧。')
     const parts = [this._head(), this.history ? this._historyHTML() : '', this._msg('fuji', this.hello)]
@@ -448,7 +449,11 @@ export class CoachView {
       </form>`,
     )
     this.root.innerHTML = `<div class="coach">${parts.join('')}</div>`
-    const said = this.step === 'done' ? this.doneText : this.step === 'think' ? this.thinking : this.step === 'ask' ? this.flash : this.reply?.join(' ')
+    // 問卷那一步沒有新的話時，念開場的招呼
+    this._announce(this.step === 'done' ? this.doneText : this.step === 'think' ? this.thinking : this.step === 'ask' ? this.flash || this.hello : this.reply?.join(' '))
+  }
+  // ふじ新說的話放進 live region，讀螢幕軟體會念出來；同一句不重念
+  _announce(said) {
     if (said && said !== this._said) this.live.textContent = `ふじ：${said}`
     this._said = said
   }
@@ -582,7 +587,16 @@ export class CoachView {
     const used = s.usedDays()
     const tier = w.active >= 5 || w.done >= 20 ? 'great' : w.active >= 3 ? 'good' : 'gentle'
     const parts = []
-    parts.push(this._msg('fuji', esc(used < 3 ? say('weekFirst', { days: 3 - used }, '再累積幾天，就有第一份週報。') : say(`weekReport.${tier}`, {}, '這週也辛苦了。'))))
+    // 開場的話隨機挑一句，同一種情況就固定那一句（重畫時不換、讀螢幕軟體也不會一直重念）
+    const leadKey = used < 3 ? `first${used}` : tier
+    if (this._leadKey !== leadKey) {
+      this._leadKey = leadKey
+      this._lead = used < 3 ? say('weekFirst', { days: 3 - used }, '再累積幾天，就有第一份週報。') : say(`weekReport.${tier}`, {}, '這週也辛苦了。')
+    }
+    const lead = this._lead
+    // 念出來的是純文字（fmtMin 會帶 <small>）
+    this._reportSay = `${lead} 本週到目前完成率 ${Math.round(w.rate * 100)}%，投入 ${fmtMin(w.focus).replace(/<[^>]+>/g, '')}，完成 ${w.pomodoros} 個番茄。`
+    parts.push(this._msg('fuji', esc(lead)))
 
     // 本週到目前
     const range = `${md(w.week)}–${md(w.end)}`

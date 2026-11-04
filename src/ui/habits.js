@@ -245,7 +245,7 @@ export class HabitsView {
   _slipHTML(h) {
     return `<form class="hb-slip" data-form="slip" data-id="${h.id}" autocomplete="off">
       <p>沒關係，誰都會有這種時候。天數會重新開始，但你忍住過的每一次都還在。</p>
-      <input class="hb-input" name="note" maxlength="80" placeholder="想記一下當時的狀況嗎？（可以不填）" />
+      <input class="hb-input" name="note" maxlength="80" placeholder="想記一下當時的狀況嗎？（可以不填）" aria-label="當時的狀況（可以不填）" />
       <div class="hb-f-btns"><button type="button" class="btn-ghost" data-act="slip-cancel" data-id="${h.id}">先不要</button><button type="submit" class="btn-primary">重新開始</button></div>
     </form>`
   }
@@ -598,7 +598,15 @@ export class HabitsView {
     let sel = `[data-act="${k.act}"]`
     if (k.id) sel += `[data-id="${CSS.escape(k.id)}"]`
     if (k.date) sel += `[data-date="${k.date}"]`
-    $(sel, this.root)?.focus({ preventScroll: true })
+    const el = $(sel, this.root)
+    if (!el) return
+    // 熱度圖的格子：重畫後 Tab 停點回到今天那格，焦點卻在剛點的那格，會多出一個停點。停點跟著焦點走
+    const heat = el.closest('.hb-heat')
+    if (heat) {
+      for (const c of $$('.hb-cell[tabindex="0"]', heat)) c.tabIndex = -1
+      el.tabIndex = 0
+    }
+    el.focus({ preventScroll: true })
   }
   _focusIn(sel) {
     requestAnimationFrame(() => $(sel, this.root)?.focus({ preventScroll: false }))

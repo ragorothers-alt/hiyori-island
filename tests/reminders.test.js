@@ -202,6 +202,17 @@ describe('任務與就寢提醒', () => {
     expect(callback.mock.calls[0].slice(1)).toEqual([10, 'task'])
   })
 
+  it('兩個分頁幾乎同時檢查：另一邊在這邊讀完紀錄之後才記下的，這邊提醒前再看一次就不響', () => {
+    const a = vi.fn()
+    const tabA = new Reminders(store, a)
+    // 模擬 A 讀紀錄（_merge）的時候 B 還沒寫；B 在那之後提醒並記下
+    tabA._merge = () => {}
+    reminders.check(at(8, 50))
+    tabA.check(at(8, 50))
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(a).not.toHaveBeenCalled()
+  })
+
   it('電腦睡著時開始了：醒來後 15 分鐘內補提醒；平常打開 App 只補開始後 1 分鐘內的', () => {
     const task = store.addTask({ title: '線上課', date: TODAY, at: '14:00', dur: 60 })
     // 一直開著、每 30 秒檢查：開始 2 分鐘後就不吵了

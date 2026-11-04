@@ -73,7 +73,7 @@ export class DatesView {
       .join('')
     const form = this.adding
       ? `<form class="dt-form" autocomplete="off">
-          <input name="title" maxlength="30" placeholder="名稱，例如：期中考" required />
+          <input name="title" maxlength="30" placeholder="名稱，例如：期中考" aria-label="重要日子的名稱" required />
           <input name="date" type="date" min="${s.today}" required />
           <div class="seg">${Object.entries(DATE_KINDS)
             .map(([id, k]) => `<button type="button" data-act="kind" data-v="${id}" class="${this.kind === id ? 'on' : ''}" aria-pressed="${this.kind === id}">${k.label}</button>`)

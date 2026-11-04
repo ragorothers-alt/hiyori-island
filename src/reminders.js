@@ -48,6 +48,18 @@ export class Reminders {
     }
   }
 
+  // 要提醒之前：再讀一次存檔（另一個分頁可能剛好也在檢查），還沒人提醒過就先記下來、寫出去，回傳 true 才提醒。
+  // localStorage 沒有原子操作，但這樣兩個分頁同時響的空檔從一整輪檢查縮到幾乎沒有
+  _claim(date, key) {
+    const mine = (this.sent[date] ||= [])
+    const theirs = load()[date]
+    const taken = Array.isArray(theirs) && theirs.includes(key)
+    if (!mine.includes(key)) mine.push(key)
+    if (taken) return false
+    this._save()
+    return true
+  }
+
   check(now = new Date()) {
     this._merge()
     const lead = this.store.state.settings.remindLead
@@ -72,8 +84,7 @@ export class Reminders {
       if (item.done || done.includes(key)) continue
       const start = toMin(at) + offset
       if (mins >= start - lead && mins < start + late) {
-        done.push(key)
-        changed = true
+        if (!this._claim(date, key)) continue
         this.onRemind(kind === 'task' ? { ...item, start: at } : item, Math.max(0, Math.ceil(start - mins)), kind)
       }
     }
@@ -84,10 +95,8 @@ export class Reminders {
     const at = (toMin(r.sleep) - 30 + 1440) % 1440
     const since = (mins - at + 1440) % 1440
     if (r.bedRemind && since < 10) {
-      const night = (this.sent[mins - since >= 0 ? today : addDays(today, -1)] ||= [])
-      if (!night.includes(bedKey)) {
-        night.push(bedKey)
-        changed = true
+      const night = mins - since >= 0 ? today : addDays(today, -1)
+      if (!(this.sent[night] || []).includes(bedKey) && this._claim(night, bedKey)) {
         this.onRemind({ id: 'bedtime', title: '就寢', start: r.sleep }, 30, 'bed')
       }
     }
@@ -96,9 +105,7 @@ export class Reminders {
       // 不限筆數：同一天有很多個期限也要一個一個提醒到（畫面上的倒數才有筆數上限）
       for (const d of this.store.upcomingDates(Infinity, 1)) {
         const key = `date-${d.id}@${d.date}`
-        if (d.project || sent.includes(key)) continue
-        sent.push(key)
-        changed = true
+        if (d.project || sent.includes(key) || !this._claim(today, key)) continue
         this.onRemind(d, d.days, 'date')
       }
     }
