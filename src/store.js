@@ -532,9 +532,14 @@ function migrate(s) {
     if (!isObj(ps[k])) continue
     for (const [key, v] of Object.entries(ps[k])) if (shopKeys.has(key)) player[k][key] = k === 'unlocked' ? !!v : num(v, 0, 99, 0)
   }
+  // 擺飾的位置：島是圓的（半徑 12，專案町擴建後更大），照離中心的距離收進這座島能擺的範圍（離岸邊 0.8）。
+  // 原本各軸夾在 ±9：島緣合法擺的燈會被往內搬，島外的 (9, 9) 反而留著
+  const placeR = islandRadius(isObj(s.town) ? num(s.town.plevel, 0, 9, 0) : 0) - 0.8
   const placed = cleanList(s.placed, (p) => {
     if (!shopKeys.has(p.key) || !Number.isFinite(+p.x) || !Number.isFinite(+p.z)) return null
-    return { id: str(p.id), key: p.key, x: Math.max(-9, Math.min(9, +p.x)), z: Math.max(-9, Math.min(9, +p.z)), rot: Number.isFinite(+p.rot) ? +p.rot : 0, free: !!p.free }
+    const d = Math.hypot(+p.x, +p.z)
+    const k = d > placeR ? placeR / d : 1
+    return { id: str(p.id), key: p.key, x: +p.x * k, z: +p.z * k, rot: Number.isFinite(+p.rot) ? +p.rot : 0, free: !!p.free }
   })
 
   const history = {}

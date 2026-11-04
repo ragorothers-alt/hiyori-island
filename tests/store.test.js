@@ -1002,6 +1002,16 @@ describe('金平糖商店', () => {
     expect(onStored).toHaveBeenCalledTimes(1)
   })
 
+  it('讀存檔時擺飾照離中心的距離收進島裡：島緣擺的留在原地，島外的收回岸邊', () => {
+    const at = (x, z) => ({ id: `p${x}${z}`, key: 'lamp', x, z, rot: 0 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, placed: [at(10.5, 0), at(9, 9), at(100, 0)] }))
+    const [edge, corner, far] = store.state.placed
+    expect(edge).toMatchObject({ x: 10.5, z: 0 })
+    expect(Math.hypot(corner.x, corner.z)).toBeCloseTo(11.2)
+    expect(corner.x).toBeCloseTo(corner.z)
+    expect(far).toMatchObject({ x: 11.2, z: 0 })
+  })
+
   it('移動物品會更新座標與旋轉角度且不再扣款', () => {
     store.player.coins = 20
     const placed = store.placeItem('mushroom', 0, 0)
