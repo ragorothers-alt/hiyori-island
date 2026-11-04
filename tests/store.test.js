@@ -769,6 +769,17 @@ describe('存檔讀不進來、存不進去', () => {
     expect(titlesOf(readBackup().state)).toContain('重置前')
   })
 
+  it('重置前的備份存不進去：先不清，確定（force）了才清；清完今天的每日任務照樣有', () => {
+    store.addTask({ title: '原本的任務' })
+    const spy = failOn('hiyori-backup')
+    expect(store.reset()).toBe(false)
+    expect(titlesOf(store.state)).toContain('原本的任務')
+    expect(store.reset({ force: true })).toBe(true)
+    spy.mockRestore()
+    expect(store.state.tasks).toEqual([])
+    expect(store.quests()).toHaveLength(3)
+  })
+
   it('被取代的資料留最近 3 份，新的在前；以前只存一份的格式也讀得到', () => {
     localStorage.setItem('hiyori-backup', JSON.stringify({ from: 'cloud', at: 1, savedAt: 1, state: { tasks: [{ title: '舊格式' }] } }))
     expect(readBackup().from).toBe('cloud')

@@ -2564,12 +2564,12 @@ export class Store {
     return n
   }
 
-  // 重置：清空成一座空島（不放範例）。重置前的小島留成備份（設定裡可以還原）；
-  // 存不進去也照樣重置：已經按了兩次，而且空間不夠時重置可能正是想清出空間
-  reset() {
+  // 重置：清空成一座空島（不放範例）。重置前的小島留成備份（設定裡可以還原）。
+  // 備份存不進去時先不清，回傳 false 讓畫面問清楚；force：使用者知道沒有備份、還是要清（空間不夠時重置可能正是想清出空間）
+  reset({ force = false } = {}) {
     // 存檔是新版 App 寫的：這一版刪了它就找不回來
     if (this.newerApp) throw new Error(NEWER_MSG)
-    keepBackup(this.state, 'reset', this.state.updatedAt)
+    if (!keepBackup(this.state, 'reset', this.state.updatedAt) && !force) return false
     try {
       localStorage.removeItem(KEY)
     } catch {}
@@ -2577,11 +2577,16 @@ export class Store {
     this.state = seed(false)
     this.state.updatedAt = version
     this.state.rev = newRev()
+    // 空島也有今天的每日任務（不然要等到重新整理或明天才抽）
+    this.today = dateStr()
+    this._ensureQuests()
     this._readyQuests = new Set()
+    this._weeklyReady = this.weekly()?.ready
     this.saveNow()
     this.emit('dirty')
     this.emit('change')
     this.emit('reload')
+    return true
   }
 }
 

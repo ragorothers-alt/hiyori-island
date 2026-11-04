@@ -1808,13 +1808,25 @@ export class UI {
       })
     $('#resetBtn').onclick = (e) =>
       armConfirm(e.currentTarget, '再按一次，清空所有資料', () => {
+        // 剛被告知沒辦法留備份、30 秒內又按了一次：使用者知道了，照樣清
+        const force = Date.now() - (this._resetNoBackup || 0) < 30000
+        const t0 = Date.now()
         try {
-          this.store.reset()
+          if (!this.store.reset({ force })) {
+            this._resetNoBackup = Date.now()
+            return this.toast({ icon: '！', title: '還沒有清空', sub: '瀏覽器空間不夠，原本的小島沒辦法先留成備份，清空後就找不回來。建議先「匯出資料」；確定要清空的話，30 秒內再按一次重置', ms: 9000 })
+          }
         } catch (err) {
           return this.toast({ icon: '！', title: '沒有重置', sub: err.message })
         }
+        this._resetNoBackup = 0
         this.renderSync()
-        if (readBackup()?.from === 'reset') this.toast({ icon: '戻', title: '小島清空了', sub: '原本的小島留成備份，後悔的話可以在設定裡還原' })
+        const b = readBackup()
+        this.toast(
+          b?.from === 'reset' && b.savedAt >= t0
+            ? { icon: '戻', title: '小島清空了', sub: '原本的小島留成備份，後悔的話可以在設定裡還原' }
+            : { icon: '掃', title: '小島清空了', sub: '空間不夠，這次沒有留備份' },
+        )
       })
   }
 
