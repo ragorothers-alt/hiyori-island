@@ -826,6 +826,41 @@ describe('存檔讀不進來、存不進去', () => {
     expect(store.exportJSON()).toBe(original)
   })
 
+  // 模擬瀏覽器的空間上限：主存檔加上備份的總長度超過 limit 就丟出 QuotaExceededError
+  const quota = (limit) => {
+    const real = localStorage.setItem.bind(localStorage)
+    return vi.spyOn(localStorage, 'setItem').mockImplementation((k, v) => {
+      const size = (key) => (key === k ? String(v).length : (localStorage.getItem(key) || '').length)
+      if (size('hiyori-daily-v1') + size('hiyori-backup') > limit) throw Object.assign(new Error('full'), { name: 'QuotaExceededError' })
+      real(k, v)
+    })
+  }
+
+  it('空間滿了、主存檔寫不進去：先丟最舊的備份，現在的小島寫得進去', () => {
+    for (const from of ['local', 'tab', 'cloud']) keepBackup(JSON.parse(store.exportJSON()), from, 1)
+    const used = localStorage.getItem('hiyori-daily-v1').length + localStorage.getItem('hiyori-backup').length
+    quota(used + 200)
+    for (let i = 0; i < 12; i++) store.addTask({ title: `很長的任務名稱很長的任務名稱 ${i}` })
+    expect(store.saveNow()).toBe(true)
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('很長的任務名稱很長的任務名稱 11')
+    // 丟的是最舊的，新的留著
+    const left = readBackups().map((b) => b.from)
+    expect(left.length).toBeLessThan(3)
+    expect(left[0]).toBe('cloud')
+  })
+
+  it('主存檔本身就放不下：備份不白白丟掉，照樣說存不進去', () => {
+    for (const from of ['local', 'tab']) keepBackup(JSON.parse(store.exportJSON()), from, 1)
+    const before = localStorage.getItem('hiyori-backup')
+    const used = localStorage.getItem('hiyori-daily-v1').length + before.length
+    // 空間剛好是現在用掉的量；小島長到丟光備份也放不下
+    quota(used)
+    for (let i = 0; i < 200; i++) store.addTask({ title: `放不下的任務 ${i} `.padEnd(50, '長') })
+    expect(JSON.stringify(store.state).length).toBeGreaterThan(used)
+    expect(store.saveNow()).toBe(false)
+    expect(localStorage.getItem('hiyori-backup')).toBe(before)
+  })
+
   it('存不進去時說一次，又存得進去時再說一次；saved 看得出這一版有沒有寫進去', () => {
     const failed = vi.fn()
     const back = vi.fn()

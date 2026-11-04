@@ -68,6 +68,36 @@ export function keepBackup(state, from, at) {
   }
   return false
 }
+const isQuota = (e) => /quota/i.test(`${e?.name} ${e?.message}`) || e?.code === 22 || e?.code === 1014
+// 主存檔寫不進去（瀏覽器空間滿了）：從最舊的開始一份一份丟掉備份再試，被取代的舊資料不該把現在的小島擠掉。
+// 丟光了還是寫不進去（主存檔本身就太大）就把備份放回去，不白白丟掉。keep：至少要留下的份數
+function writeMain(json, keep = 0) {
+  let raw = null
+  try {
+    raw = localStorage.getItem(BACKUP_KEY)
+  } catch {}
+  for (;;) {
+    try {
+      localStorage.setItem(KEY, json)
+      return
+    } catch (e) {
+      const list = readBackups()
+      if (!isQuota(e) || list.length <= keep) {
+        try {
+          if (raw !== null && localStorage.getItem(BACKUP_KEY) !== raw) localStorage.setItem(BACKUP_KEY, raw)
+        } catch {}
+        throw e
+      }
+      const rest = list.slice(0, -1)
+      try {
+        if (rest.length) localStorage.setItem(BACKUP_KEY, JSON.stringify(rest))
+        else localStorage.removeItem(BACKUP_KEY)
+      } catch {
+        localStorage.removeItem(BACKUP_KEY)
+      }
+    }
+  }
+}
 export function dropBackup(i = 0) {
   const list = readBackups()
   list.splice(i, 1)
@@ -811,6 +841,8 @@ export class Store {
     if (this.loadFailed && !this.loadFailed.rescued && !this.state.rev) return false
     // 存檔是新版 App 寫的：用舊的格式寫回去會洗掉新的欄位
     if (this.newerApp) return false
+    // 這次存檔剛把另一個分頁的版本留成備份：空間不夠時也不丟它
+    let keep = 0
     try {
       // 另一個分頁剛寫過、這邊還沒換成那一版（事件還在路上）
       const disk = localStorage.getItem(REV_KEY)
@@ -828,9 +860,10 @@ export class Store {
           return false
         }
         if (peer?.rev && !keepBackup(peer, 'tab', peer.updatedAt)) throw new Error('空間不夠，沒辦法先備份另一個分頁的版本')
+        if (peer?.rev) keep = 1
       }
       const t0 = performance.now()
-      localStorage.setItem(KEY, JSON.stringify(this.state))
+      writeMain(JSON.stringify(this.state), keep)
       this._slowSave = performance.now() - t0 > SLOW_SAVE
       localStorage.setItem(REV_KEY, this.state.rev || '')
       this._diskRev = this.state.rev || ''
