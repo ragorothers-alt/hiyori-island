@@ -179,10 +179,20 @@ export class UI {
     if (q.has('calendar')) this._use(this._calendar, (c) => c.open())
   }
 
-  // 載好了就直接做；還沒就先載再做（離線又沒快取時說一聲）
+  // 載好了就直接做；還沒就先載再做（離線又沒快取時說一聲）。
+  // 還在下載時只記最後一次想做的事：慢網路連點兩下日曆，載好後不會開了又關；
+  // 等的時候切到別的分頁，就不再做（載好後不會突然跳出專案詳情搶畫面）
   _use(lz, fn) {
     if (lz.view) return fn(lz.view)
-    lz.get().then(fn, (err) => {
+    const waiting = !!lz.want
+    lz.want = { fn, tab: this.tab }
+    if (waiting) return
+    lz.get().then((v) => {
+      const want = lz.want
+      lz.want = null
+      if (want && want.tab === this.tab) want.fn(v)
+    }, (err) => {
+      lz.want = null
       console.warn('[hiyori] 畫面載入失敗', err)
       // 是部署了新版（main.js 會重新整理）就不叫人連網路
       if (!err?.updating) this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
