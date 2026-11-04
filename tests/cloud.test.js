@@ -488,10 +488,48 @@ describe('同步伺服器', () => {
     later(86_400_000 + 1000)
     expect((await post('/v1/create', { id: ids[2] })).status).toBe(200)
     expect(vaults().map((v) => v.created_at)).toHaveLength(1)
-    env.MAX_TOTAL = 3
     await post('/v1/push', { id: ids[2], base: null, rev: 'r1', savedAt: 5, data: 'AAAA' })
+    env.MAX_TOTAL = 3
     later(86_400_000 + 1000)
     expect((await post('/v1/create', { id: ids[0] })).status).toBe(507)
+  })
+
+  it('資料庫的總量上限也管寫入：變大的寫入擋下，變小的照常寫', async () => {
+    const ids = ['1', '2'].map((c) => c.repeat(64))
+    for (const i of ids) await post('/v1/create', { id: i })
+    await post('/v1/push', { id: ids[0], base: null, rev: 'r1', savedAt: 5, data: 'A'.repeat(40) })
+    env.MAX_TOTAL = 60
+    const grow = await post('/v1/push', { id: ids[1], base: null, rev: 'r1', savedAt: 5, data: 'A'.repeat(40) })
+    expect(grow.status).toBe(507)
+    expect((await post('/v1/push', { id: ids[1], base: null, rev: 'r1', savedAt: 5, data: 'A'.repeat(20) })).status).toBe(200)
+    expect((await post('/v1/push', { id: ids[0], base: 'r1', rev: 'r2', savedAt: 6, data: 'A'.repeat(8) })).status).toBe(200)
+    expect((await post('/v1/push', { id: ids[0], base: 'r2', rev: 'r3', savedAt: 7, data: 'A'.repeat(40) })).status).toBe(200)
+    expect((await post('/v1/push', { id: ids[0], base: 'r3', rev: 'r4', savedAt: 8, data: 'A'.repeat(44) })).status).toBe(507)
+  })
+
+  it('還沒記下 auth 的舊 vault：只憑 id 刪不掉；期限過了也不能再搶先登記', async () => {
+    const auth = 'e'.repeat(64)
+    await post('/v1/create', { id })
+    expect((await post('/v1/push', { id, base: null, rev: 'r1', savedAt: 5, data: 'AA==' })).status).toBe(200)
+    expect((await post('/v1/delete', { id })).status).toBe(403)
+    const unclaimed = await post('/v1/delete', { id, auth })
+    expect(unclaimed.status).toBe(409)
+    expect(await unclaimed.json()).toEqual({ error: 'unclaimed', rev: 'r1' })
+    expect(vaults()).toHaveLength(1)
+    env.LEGACY_UNTIL = Date.now() - 1
+    const late = await post('/v1/push', { id, auth, base: 'r1', rev: 'r2', savedAt: 6, data: 'AA==' })
+    expect(late.status).toBe(403)
+    expect(await late.json()).toEqual({ error: 'legacy' })
+    expect(vaults()[0].auth).toBeNull()
+  })
+
+  it('刪除還沒記下 auth 的舊 vault：前端先寫一次記下 auth 再刪', async () => {
+    const { a } = await pair()
+    // 假裝是加上 auth 以前建的 vault
+    env.DB.raw.prepare('UPDATE vaults SET auth = NULL').run()
+    await a.run((_s, sync) => sync.destroy())
+    expect(vaults()).toHaveLength(0)
+    expect(a.sync.state).toBe('off')
   })
 
   it('沒料到的錯誤也回 JSON 和 CORS 標頭', async () => {

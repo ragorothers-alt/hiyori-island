@@ -2,6 +2,7 @@
 // 端對端加密：同步碼只留在裝置上，用 HKDF 推導出 vault id（給伺服器找資料用）和 AES-GCM 金鑰；
 // 上傳的是壓縮後加密的整份小島，伺服器看不到內容。判斷新舊和衝突的邏輯跟資料夾同步共用（sync.js）。
 import { SyncEngine } from './sync.js'
+import { newRev } from './store.js'
 
 // 部署好的 Worker；開發時可用 VITE_SYNC_API 指到本機的 wrangler dev
 export const SYNC_API = import.meta.env?.VITE_SYNC_API || 'https://hiyori-sync.ragorothers.workers.dev'
@@ -145,6 +146,8 @@ export class CloudSync extends SyncEngine {
     if (e?.status === 404) return this._set('error', '雲端找不到這組同步碼，可能已經被刪除了')
     if (e?.status === 429) return this._set('error', '同步太頻繁，等一下再試')
     if (e?.status === 413) return this._set('error', '資料太大，超過同步的上限')
+    if (e?.status === 507) return this._set('error', '同步伺服器的空間滿了，這次的變更先留在這台裝置上')
+    if (e?.status === 403 && e.message === 'legacy') return this._set('error', '這組同步碼是很久以前開的，太久沒同步，伺服器不再接受寫入。資料都還在這台裝置上：請按「停止同步」，再「開始同步」開一組新的')
     if (e?.status === 403) return this._set('error', '同步伺服器拒絕了這次寫入。重新整理頁面、更新到最新版再試；還是不行的話，重新輸入同步碼')
     this._set('error', e?.message || String(e))
   }
@@ -220,7 +223,16 @@ export class CloudSync extends SyncEngine {
   // 刪除雲端的資料，這台也停止同步（其他裝置下次同步會看到「找不到這組同步碼」）
   async destroy() {
     if (!this.keys) return
-    await call('/v1/delete', { id: this.keys.id, auth: this.keys.auth })
+    const del = () => call('/v1/delete', { id: this.keys.id, auth: this.keys.auth })
+    try {
+      await del()
+    } catch (e) {
+      // 舊的 vault 還沒記下 auth（更新後還沒同步過）：伺服器只憑 id 不給刪。先寫一次讓它記下這台的 auth，再刪
+      if (e.status !== 409 || e.message !== 'unclaimed') throw e
+      const st = this.store.state
+      if (!(await this._push(e.body.rev, { rev: newRev(), savedAt: st.updatedAt || Date.now() }, JSON.stringify(st)))) throw e
+      await del()
+    }
     this.stop()
   }
 

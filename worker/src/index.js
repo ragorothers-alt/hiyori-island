@@ -5,7 +5,8 @@
 // 上傳要帶 base（「我以為雲端現在是哪一版」，空的 vault 是 null），對不上代表別台剛寫過，
 // 回 409 讓前端重新比對，不會蓋掉別台的變更。
 // 寫入和刪除還要帶 auth（前端由同步碼另外推導，跟 vault id 互相推不出來）：只知道 id 的人不能寫。
-// 舊版前端不帶 auth：vault 還沒記下 auth 時照舊讓它寫，記下之後就要對得上（見 migrations/0003）。
+// 舊版前端不帶 auth：vault 還沒記下 auth 時照舊讓它寫，記下之後就要對得上（見 migrations/0003）；
+// 還沒記下的舊 vault 到 LEGACY_UNTIL 為止才收寫入，也不能只憑 id 刪除。
 // /v1/ai：ふじ的 AI，經過這裡呼叫 Claude（見 ai.js；金鑰和通行碼都是 Worker 的 secret）。
 import { HttpError } from './http.js'
 import { askAI, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
@@ -21,6 +22,9 @@ const DAY = 86_400_000
 // 擋的是新建立，已經在用的 vault 照常同步
 export const CREATE_DAILY = 300
 export const MAX_TOTAL = 400_000_000
+// 舊的 vault（加上 auth 以前建的）到這天以前，第一次帶 auth 寫入時記下那一把；之後還沒記的就不再收寫入
+// （只知道 vault id 的人不能再趁還沒記下時搶先登記）。可以用 [vars] LEGACY_UNTIL（毫秒）改
+export const LEGACY_UNTIL = Date.UTC(2027, 0, 1)
 const cap = (v, d) => (Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : d)
 
 const CORS = {
@@ -64,7 +68,7 @@ export default {
       }
       if (pathname === '/v1/create') return json(await create(env, body, now))
       if (pathname === '/v1/pull') return json(await pull(env.DB, body))
-      if (pathname === '/v1/push') return json(await push(env.DB, body, now))
+      if (pathname === '/v1/push') return json(await push(env, body, now))
       if (pathname === '/v1/delete') return json(await remove(env.DB, body))
       throw new HttpError(404, 'not found')
     } catch (e) {
@@ -160,7 +164,8 @@ async function pull(db, body) {
   return { rev, savedAt: row.saved_at, data: row.data }
 }
 
-async function push(db, body, now) {
+async function push(env, body, now) {
+  const db = env.DB
   const hash = await vaultHash(body.id)
   const { base = null, rev, savedAt, data } = body
   if ((base !== null && !REV.test(base)) || typeof rev !== 'string' || !REV.test(rev) || rev === base || !time(savedAt)) {
@@ -169,26 +174,40 @@ async function push(db, body, now) {
   if (typeof data !== 'string' || !BASE64.test(data)) throw new HttpError(400, 'bad data')
   if (data.length > MAX_DATA) throw new HttpError(413, 'too large')
   const auth = await authHash(body.auth)
-  // rev IS ?2：base 是 null 時也比得到（空的 vault）。auth：記下了就要對得上；還沒記（舊的 vault）就記這一把
+  // 資料庫的總量上限也管寫入：變大的寫入超過上限就擋（變小、一樣大的照常寫，才清得出空間）
+  const usage = await db
+    .prepare('SELECT size, (SELECT COALESCE(SUM(size), 0) FROM vaults) AS total FROM vaults WHERE hash = ?1')
+    .bind(hash)
+    .first()
+  if (usage && data.length > usage.size && usage.total - usage.size + data.length > cap(env.MAX_TOTAL, MAX_TOTAL)) throw new HttpError(507, 'full')
+  // rev IS ?2：base 是 null 時也比得到（空的 vault）。auth：記下了就要對得上；
+  // 還沒記（舊的 vault）時，期限前記下這一把，期限後就不再收
+  const legacy = now < cap(env.LEGACY_UNTIL, LEGACY_UNTIL) ? 1 : 0
   const r = await db
     .prepare(
       `UPDATE vaults SET rev = ?3, saved_at = ?4, data = ?5, size = ?6, updated_at = ?7, auth = COALESCE(auth, ?8)
-       WHERE hash = ?1 AND rev IS ?2 AND (auth IS NULL OR auth = ?8)`,
+       WHERE hash = ?1 AND rev IS ?2 AND (auth = ?8 OR (auth IS NULL AND ?9 = 1))`,
     )
-    .bind(hash, base, rev, savedAt, data, data.length, now, auth)
+    .bind(hash, base, rev, savedAt, data, data.length, now, auth, legacy)
     .run()
   if (r.meta.changes) return { rev }
   const row = await db.prepare('SELECT rev, auth FROM vaults WHERE hash = ?1').bind(hash).first()
   if (!row) throw new HttpError(404, 'unknown vault')
   if (row.auth && row.auth !== auth) throw new HttpError(403, 'forbidden')
+  if (!row.auth && !legacy) throw new HttpError(403, 'legacy')
   throw new HttpError(409, 'conflict', { rev: row.rev })
 }
 
+// 刪除一定要帶對的 auth。舊的 vault 還沒記下 auth：回 409 unclaimed（附上目前的版本），
+// 前端先寫一次讓它記下這台的 auth 再刪；只知道 vault id 的人刪不掉
 async function remove(db, body) {
   const hash = await vaultHash(body.id)
   const auth = await authHash(body.auth)
-  const r = await db.prepare('DELETE FROM vaults WHERE hash = ?1 AND (auth IS NULL OR auth = ?2)').bind(hash, auth).run()
-  // 本來就沒有這個 vault 也算刪好了；有、但 auth 對不上就不刪
-  if (!r.meta.changes && (await db.prepare('SELECT 1 FROM vaults WHERE hash = ?1').bind(hash).first())) throw new HttpError(403, 'forbidden')
-  return { ok: true }
+  const r = await db.prepare('DELETE FROM vaults WHERE hash = ?1 AND auth = ?2').bind(hash, auth).run()
+  if (r.meta.changes) return { ok: true }
+  const row = await db.prepare('SELECT rev, auth FROM vaults WHERE hash = ?1').bind(hash).first()
+  // 本來就沒有這個 vault 也算刪好了
+  if (!row) return { ok: true }
+  if (!row.auth && auth) throw new HttpError(409, 'unclaimed', { rev: row.rev })
+  throw new HttpError(403, 'forbidden')
 }
