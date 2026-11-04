@@ -12,6 +12,11 @@ const TAG_ALIASES = {
 const WD = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
 const CN_NUM = { 零: 0, 〇: 0, 一: 1, 二: 2, 兩: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 }
 const num = (s) => (s in CN_NUM ? CN_NUM[s] : parseInt(s, 10))
+// 日曆上真的有這一天（2/30、4/31、13 月都不算）
+const realDay = (y, m, d) => {
+  const t = new Date(y, m - 1, d)
+  return t.getFullYear() === y && t.getMonth() === m - 1 && t.getDate() === d
+}
 
 const PERIOD = '(上午|早上|早晨|中午|下午|傍晚|晚上|凌晨|夜裡)?'
 const HOUR = '(\\d{1,2}|十[一二]?|[一二兩两三四五六七八九十])'
@@ -131,14 +136,17 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
     }
   })
   take(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, (_, y, m, d) => {
+    if (!realDay(+y, +m, +d)) return false
     out.date = dateStr(new Date(+y, +m - 1, +d))
   })
   take(/(?<![\d:：])(\d{1,2})\s*(?:\/|月)\s*(\d{1,2})\s*(?:日|號|号)?(?![\d:：])/g, (_, m, d) => {
-    if (+m < 1 || +m > 12 || +d < 1 || +d > 31) return false
     const y = parseDate(today).getFullYear()
-    let ds = dateStr(new Date(y, +m - 1, +d))
-    // 已經過了一個月以上，就當成明年
-    if (ds < addDays(today, -30)) ds = dateStr(new Date(y + 1, +m - 1, +d))
+    const on = (yy) => (realDay(yy, +m, +d) ? dateStr(new Date(yy, +m - 1, +d)) : null)
+    let ds = on(y)
+    // 已經過了一個月以上（或今年沒有這一天，例如 2/29），就當成明年
+    if (!ds || ds < addDays(today, -30)) ds = on(y + 1) || ds
+    // 2/30、13/5 這種日曆上沒有的：不當成日期，留在標題裡（不要默默進位成下個月）
+    if (!ds) return false
     out.date = ds
   })
 

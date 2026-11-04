@@ -702,6 +702,19 @@ describe('存檔匯入與清洗', () => {
     expect(store.player.xp).toBe(10)
   })
 
+  it('日曆上沒有的日期（2026-02-30）當成不合法，不會存成一筆永遠對不上的資料', () => {
+    store.importJSON(JSON.stringify({
+      tasks: [{ id: 't1', title: '二月三十', date: '2026-02-30' }, { id: 't2', title: '二月二十八', date: '2026-02-28' }],
+      projects: [{ id: 'p1', name: '專案', deadline: '2026-04-31', milestones: [] }],
+      player: { xp: 0, lastActive: '2026-13-01' },
+    }))
+    expect(store.state.tasks.map((t) => t.date)).toEqual([TODAY, '2026-02-28'])
+    expect(store.state.projects[0].deadline).toBe('')
+    expect(store.player.lastActive).toBeNull()
+    store.setDeadline('p1', '2026-02-30')
+    expect(store.state.projects[0].deadline).toBe('')
+  })
+
   it('非 JSON 字串會顯示指定錯誤且不覆蓋現有資料', () => {
     const original = store.exportJSON()
     expect(() => store.importJSON('這不是 JSON')).toThrow('檔案不是 JSON 格式')

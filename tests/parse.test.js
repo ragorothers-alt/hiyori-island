@@ -156,6 +156,20 @@ describe('快速輸入解析', () => {
   })
 })
 
+describe('日曆上沒有的日子', () => {
+  it('2/30、4/31、13/5 不當成日期，留在標題裡；2/28、2026-03-01 照常', () => {
+    for (const text of ['2/30 繳費', '4/31 繳費', '13/5 繳費', '2027-02-30 繳費']) {
+      const r = parseQuick(text, { today: TODAY })
+      expect(r.date ?? null).toBeNull()
+      expect(r.title).toBe(text)
+    }
+    expect(parseQuick('2/28 繳費', { today: TODAY })).toMatchObject({ title: '繳費', date: '2027-02-28' })
+    expect(parseQuick('2026-03-01 繳費', { today: TODAY })).toMatchObject({ title: '繳費', date: '2026-03-01' })
+    // 今年沒有 2/29（2026、2027 都不是閏年）
+    expect(parseQuick('2/29 繳費', { today: TODAY }).date ?? null).toBeNull()
+  })
+})
+
 describe('快速輸入預覽', () => {
   it('日程顯示種類、日期星期及時間，但不顯示任務優先度', () => {
     const parsed = parseQuick('明天下午3點到5點 設計週會 #工作 !高', { today: TODAY })

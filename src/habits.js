@@ -4,7 +4,11 @@
 
 const DAY = 86400000
 const ds = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-const pd = (s) => new Date(s + 'T00:00:00')
+// 跟 store.js 的 parseDate 一樣用年月日建日期（不要用字串解析：遇到不合法的日期兩邊結果會不一樣）
+const pd = (s) => {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
 const shift = (s, n) => {
   const d = pd(s)
   d.setDate(d.getDate() + n)

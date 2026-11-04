@@ -236,7 +236,9 @@ function seed(samples = true) {
 // ── 讀檔／匯入時把每個欄位都清洗成合法值（資料一律視為不可信） ──
 // 只認字串：正規式會把 ['2026-11-02'] 這種陣列轉成字串後當成合法，存進去之後一排序就壞掉
 const strict = (re) => ({ test: (v) => typeof v === 'string' && re.test(v) })
-const DATE_RE = strict(/^\d{4}-\d{2}-\d{2}$/)
+// 日期還要是日曆上真的有的那一天：2026-02-30 這種格式對、日子不存在的，各處換算的結果會不一樣
+// （有的進位成 3/2、有的變成 Invalid Date），那筆資料就永遠對不上任何一天
+const DATE_RE = { test: (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && dateStr(parseDate(v)) === v }
 const TIME_RE = strict(/^([01]\d|2[0-3]):[0-5]\d$/)
 const ID_RE = strict(/^[\w-]{1,40}$/)
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
