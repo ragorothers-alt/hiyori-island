@@ -4,15 +4,19 @@
 // 兩種管道共用這套判斷，各自記自己的 base，可以同時開：
 //   FileSync（這個檔案）：資料寫進使用者選的檔案，放在 OneDrive／Dropbox 的同步資料夾裡（不需後端，只有電腦版 Chrome／Edge）
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
-import { dropBackup, keepBackup, newRev, readBackup, newerData, NEWER_MSG } from './store.js'
+import { dropBackup, keepBackup, newRev, readBackup, readBackups, newerData, NEWER_MSG } from './store.js'
 
-// 被取代的那一份（只留最近一份）由 store.js 管：兩個分頁同時改了資料時也會用到
-export { readBackup }
-export function restoreBackup(store) {
-  const b = readBackup()
+// 被取代的資料（留最近幾份）由 store.js 管：兩個分頁同時改了資料時也會用到
+export { readBackup, readBackups }
+// 還原第 i 份備份：當成一次新的變更（會再同步出去）。還原前的小島也留一份，還原錯了可以再換回來。
+// 備份讀不進來（壞掉、或是新版 App 存的）時丟出錯誤，現在的小島和備份都不動
+export function restoreBackup(store, i = 0) {
+  const b = readBackup(i)
   if (!b) return false
-  store.replaceState(b.state) // 當成一次新的變更，會再同步出去
-  dropBackup()
+  const cur = store.state
+  store.replaceState(b.state)
+  dropBackup(i)
+  keepBackup(cur, 'restore', cur.updatedAt)
   return true
 }
 const NO_ROOM = '瀏覽器的儲存空間不夠，沒辦法先備份另一邊，所以先不替換。請先用「匯出資料」存一份'
@@ -338,7 +342,9 @@ export class FileSync extends SyncEngine {
     return { rev: typeof data.rev === 'string' && data.rev ? data.rev : String(data.savedAt), savedAt: data.savedAt, state: data.state }
   }
 
-  // 檔案沒辦法「對得上才寫」：寫之前再讀一次，確認還是 expect 那一版（例如衝突等待期間別台又寫過）
+  // 檔案沒辦法「對得上才寫」：寫之前再讀一次，確認還是 expect 那一版（例如衝突等待期間別台又寫過）。
+  // 讀和寫之間仍有一小段空隙：兩台電腦剛好在同一秒寫，雲端資料夾會自己留一份「衝突副本」，不會兩份都不見。
+  // 檔案是一般的 JSON（沒有加密）：設定頁在連結前會說清楚，要放在只有自己看得到的資料夾
   async _push(expect, { rev, savedAt }, json) {
     const cur = await this._pull()
     if ((cur?.rev || '') !== expect) return false

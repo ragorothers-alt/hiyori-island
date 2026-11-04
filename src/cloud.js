@@ -5,9 +5,14 @@ import { SyncEngine } from './sync.js'
 
 // 部署好的 Worker；開發時可用 VITE_SYNC_API 指到本機的 wrangler dev
 export const SYNC_API = import.meta.env?.VITE_SYNC_API || 'https://hiyori-sync.ragorothers.workers.dev'
+// 同步碼記在這台的 localStorage（之後才能自動同步、顯示給別台掃）：跟網站的登入狀態一樣，
+// 拿得到這個瀏覽器設定檔的人就看得到，所以設定頁提醒「同步碼就是鑰匙，不要給別人」
 const CODE_KEY = 'hiyori-cloud-code'
-// 同步碼字元：Crockford Base32（去掉 I、L、O、U），16 碼 = 80 bits
+// 同步碼字元：Crockford Base32（去掉 I、L、O、U），每碼 5 bits。
+// 新發的同步碼 28 碼 = 140 bits（就算伺服器的資料外流，也猜不出來）；以前發的 16 碼（80 bits）照樣能用
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+const CODE_LEN = 28
+const OLD_LEN = 16
 // keepalive 請求的內容上限是 64 KB，超過就用一般請求
 const KEEPALIVE_MAX = 60000
 
@@ -15,19 +20,19 @@ const enc = (s) => new TextEncoder().encode(s)
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 
 export function newCode() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  const bytes = crypto.getRandomValues(new Uint8Array(CODE_LEN))
   // 256 是 32 的倍數，取餘數不會偏向某些字元
   return [...bytes].map((b) => ALPHABET[b % 32]).join('').match(/.{4}/g).join('-')
 }
 
-// 「ab12 cd34…」→「AB12-CD34-…」；不是 16 碼回傳 null。O/I/L 容易跟 0/1 看錯，一律當成數字
+// 「ab12 cd34…」→「AB12-CD34-…」；不是 28 碼（或以前的 16 碼）回傳 null。O/I/L 容易跟 0/1 看錯，一律當成數字
 export function normalizeCode(text) {
   const s = String(text ?? '')
     .toUpperCase()
     .replace(/[\s-]/g, '')
     .replace(/O/g, '0')
     .replace(/[IL]/g, '1')
-  return /^[0-9A-HJKMNP-TV-Z]{16}$/.test(s) ? s.match(/.{4}/g).join('-') : null
+  return /^[0-9A-HJKMNP-TV-Z]+$/.test(s) && (s.length === CODE_LEN || s.length === OLD_LEN) ? s.match(/.{4}/g).join('-') : null
 }
 
 // 分享連結：同步碼放在 # 後面，不會送到網站伺服器

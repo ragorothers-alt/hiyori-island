@@ -123,7 +123,7 @@ export class CloudView {
     let info
     let btns
     if (joining) {
-      info = st === 'off' ? '輸入另一台裝置上的同步碼（16 個英文字母和數字）' : '要改用這組同步碼嗎？目前這組會停止同步'
+      info = st === 'off' ? '輸入另一台裝置上的同步碼（28 個英文字母和數字；以前的 16 碼也可以）' : '要改用這組同步碼嗎？目前這組會停止同步'
       btns = [['join', '連線', 1], ['cancel', '取消']]
     } else if (st === 'unsupported') {
       info = '這個瀏覽器不能用線上同步（版本太舊，或不是用 https 開啟）。可以用下面的匯出／匯入搬資料'
@@ -156,7 +156,7 @@ export class CloudView {
     this._panel = key
     const panel = this.$('.cloud-panel')
     if (key === 'join') {
-      panel.innerHTML = `<input class="cloud-input" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="24" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="同步碼" value="${esc(this.draft)}">`
+      panel.innerHTML = `<input class="cloud-input" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" maxlength="44" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="同步碼" value="${esc(this.draft)}">`
       return
     }
     if (!key) {

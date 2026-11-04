@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, addDays, dateStr, minToHHMM, readBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY,
+  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
@@ -767,6 +767,52 @@ describe('存檔讀不進來、存不進去', () => {
     expect(store.state.tasks).toEqual([])
     expect(readBackup().from).toBe('reset')
     expect(titlesOf(readBackup().state)).toContain('重置前')
+  })
+
+  it('被取代的資料留最近 3 份，新的在前；以前只存一份的格式也讀得到', () => {
+    localStorage.setItem('hiyori-backup', JSON.stringify({ from: 'cloud', at: 1, savedAt: 1, state: { tasks: [{ title: '舊格式' }] } }))
+    expect(readBackup().from).toBe('cloud')
+    for (const from of ['local', 'tab', 'import']) keepBackup({ tasks: [{ title: from }] }, from, 2)
+    expect(readBackups().map((b) => b.from)).toEqual(['import', 'tab', 'local'])
+  })
+
+  it('空間不夠留 3 份時少留幾份舊的；連一份都存不進去才算失敗，原本的備份不動', () => {
+    for (const from of ['local', 'tab']) keepBackup({ tasks: [] }, from, 1)
+    const real = localStorage.setItem.bind(localStorage)
+    // 只放得下兩份
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k, v) => {
+      if (k === 'hiyori-backup' && JSON.parse(v).length > 2) throw new Error('QuotaExceededError')
+      real(k, v)
+    })
+    expect(keepBackup({ tasks: [] }, 'cloud', 2)).toBe(true)
+    expect(readBackups().map((b) => b.from)).toEqual(['cloud', 'tab'])
+    spy.mockRestore()
+    const before = localStorage.getItem('hiyori-backup')
+    failOn('hiyori-backup')
+    expect(keepBackup({ tasks: [] }, 'file', 3)).toBe(false)
+    expect(localStorage.getItem('hiyori-backup')).toBe(before)
+  })
+
+  it('還原指定的那一份：還原前的小島也留一份；備份讀不進來時什麼都不動', () => {
+    store.addTask({ title: '第一版' })
+    keepBackup(JSON.parse(store.exportJSON()), 'cloud', 1)
+    store.addTask({ title: '第二版' })
+    keepBackup(JSON.parse(store.exportJSON()), 'tab', 2)
+    store.addTask({ title: '現在的' })
+    // 還原比較舊的那一份（第 2 份）
+    expect(restoreBackup(store, 1)).toBe(true)
+    expect(titlesOf(store.state)).toContain('第一版')
+    expect(titlesOf(store.state)).not.toContain('現在的')
+    // （最後那份是 beforeEach 匯入時留的）
+    expect(readBackups().map((b) => b.from)).toEqual(['restore', 'tab', 'import'])
+    expect(titlesOf(readBackup().state)).toContain('現在的')
+    // 壞掉的備份：丟出錯誤，小島和備份清單都不變
+    const list = localStorage.getItem('hiyori-backup')
+    const now = store.exportJSON()
+    localStorage.setItem('hiyori-backup', JSON.stringify([{ from: 'cloud', at: 1, savedAt: 1, state: { tasks: 'x' } }, ...JSON.parse(list)]))
+    expect(() => restoreBackup(store, 0)).toThrow()
+    expect(store.exportJSON()).toBe(now)
+    expect(readBackups()).toHaveLength(4)
   })
 
   it('匯入前備份存不進去就不匯入；壞掉的檔案也不會先動到備份', () => {

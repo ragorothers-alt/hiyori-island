@@ -21,7 +21,7 @@ import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
 import { TodayView } from './ui/today.js'
-import { readBackup, restoreBackup } from './sync.js'
+import { readBackup, readBackups, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
@@ -1346,9 +1346,15 @@ export class UI {
   attachCloud(cloud) {
     this.cloud = cloud
     this.cloudView = new CloudView($('#cloudRow'), cloud, { toast: (o) => this.toast(o) })
-    $('#backupBtn').addEventListener('click', (e) => {
-      armConfirm(e.currentTarget, '再按一次還原', () => {
-        if (restoreBackup(this.store)) this.toast({ icon: '戻', title: '已還原備份', sub: '小島回到被取代前的樣子' })
+    $('#backupList').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-backup]')
+      if (!b) return
+      armConfirm(b, '再按一次還原', () => {
+        try {
+          if (restoreBackup(this.store, +b.dataset.backup)) this.toast({ icon: '戻', title: '已還原備份', sub: '還原前的小島也留了一份，還原錯了可以再換回來' })
+        } catch (err) {
+          this.toast({ icon: '！', title: '這份備份沒辦法還原', sub: err.message })
+        }
         this.renderSync()
       })
     })
@@ -1385,18 +1391,22 @@ export class UI {
   renderSync() {
     this.cloudView?.render()
     const when = (t) => `${new Date(t).getMonth() + 1}/${new Date(t).getDate()} ${hhmm(t)}`
-    // 被同步取代的那一份（兩種同步共用）：還在選邊時先不顯示
-    const bk = readBackup()
+    // 被取代的資料（兩種同步、匯入、重置、還原共用，留最近幾份）：還在選邊時先不顯示
     const choosing = this.cloud?.state === 'conflict' || this.sync?.state === 'conflict'
-    $('#backupRow').hidden = !bk || choosing
-    if (bk) {
-      // 匯入、重置前留的：寫什麼時候換掉的；同步、兩個分頁留的：寫那一版是什麼時候的
-      const before = { import: '匯入檔案', reset: '重置' }[bk.from]
-      const src = { local: '這台', file: '同步檔', tab: '另一個分頁' }[bk.from] || '雲端'
-      $('#backupInfo').textContent = before
-        ? `${when(bk.savedAt)} ${before}前的小島，留著備用`
-        : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
-    }
+    const list = choosing ? [] : readBackups()
+    $('#backupList').hidden = !list.length
+    setHTML($('#backupList'), list
+      .map((bk, i) => {
+        // 匯入、重置、還原前留的：寫什麼時候換掉的；同步、兩個分頁留的：寫那一版是什麼時候的
+        const before = { import: '匯入檔案', reset: '重置', restore: '還原備份' }[bk.from]
+        const src = { local: '這台', file: '同步檔', tab: '另一個分頁' }[bk.from] || '雲端'
+        const info = before
+          ? `${when(bk.savedAt)} ${before}前的小島，留著備用`
+          : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
+        const n = list.length > 1 ? `<span class="bk-n">${i + 1} / ${list.length}</span>` : ''
+        return `<div class="set-row"><div><b>被取代的資料${n}</b><small>${info}</small></div><button class="chip-toggle" data-backup="${i}">還原</button></div>`
+      })
+      .join(''))
     const sy = this.sync
     if (!sy) return
     // 手機和 Firefox 不能直接存取檔案：有線上同步就夠了，整列藏起來
@@ -1404,7 +1414,7 @@ export class UI {
     const name = esc(sy.fileName)
     const view = {
       unsupported: ['', []],
-      off: ['把資料自動存進 OneDrive、Dropbox 等雲端資料夾裡的一個檔案，其他電腦連結同一個檔案就能共用', [['create', '建立同步檔', 1], ['choose', '連結既有檔案']]],
+      off: ['把資料自動存進 OneDrive、Dropbox 等雲端資料夾裡的一個檔案，其他電腦連結同一個檔案就能共用。檔案沒有加密，看得到那個資料夾的人都讀得到內容，請放在只有自己能看的地方', [['create', '建立同步檔', 1], ['choose', '連結既有檔案']]],
       'needs-permission': [`已記住「${name}」，瀏覽器需要你同意一次才能繼續同步`, [['resume', '繼續同步', 1], ['unlink', '解除']]],
       linked: [`已連結「${name}」・${sy.lastSync ? `${hhmm(sy.lastSync)} 同步過` : '同步中…'}`, [['now', '立即同步'], ['unlink', '解除']]],
       conflict: [

@@ -43,28 +43,37 @@ export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version
 const SLOW_SAVE = 8
 const SAVE_WAIT = 400
 
-// ── 被取代的那一份（只留最近一份；雲端、資料夾同步和兩個分頁同時改了資料都共用） ──
-export function readBackup() {
+// ── 被取代的資料：留最近 BACKUPS 份，新的在前（雲端、資料夾同步、兩個分頁同時改了資料、匯入和重置前都共用）──
+// 只留一份的話，同步取代了一次、接著又匯入，第一次被取代的那份就不見了
+const BACKUPS = 3
+export function readBackups() {
   try {
     const b = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null')
-    return b?.state ? b : null
+    // 舊版只存一份（一個物件）
+    return (Array.isArray(b) ? b : b ? [b] : []).filter((x) => x?.state)
   } catch {
-    return null
+    return []
   }
 }
-// from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）、'import'（匯入前）、'reset'（重置前）。
-// 存不進去（瀏覽器空間不夠）時回傳 false
+export const readBackup = (i = 0) => readBackups()[i] || null
+// from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）、'import'（匯入前）、'reset'（重置前）、'restore'（還原前）。
+// 空間不夠時先少留幾份舊的；連這一份都存不進去才回傳 false
 export function keepBackup(state, from, at) {
-  try {
-    localStorage.setItem(BACKUP_KEY, JSON.stringify({ from, at, savedAt: Date.now(), state }))
-    return true
-  } catch {
-    return false
+  let list = [{ from, at, savedAt: Date.now(), state }, ...readBackups()].slice(0, BACKUPS)
+  for (; list.length; list = list.slice(0, -1)) {
+    try {
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(list))
+      return true
+    } catch {}
   }
+  return false
 }
-export function dropBackup() {
+export function dropBackup(i = 0) {
+  const list = readBackups()
+  list.splice(i, 1)
   try {
-    localStorage.removeItem(BACKUP_KEY)
+    if (list.length) localStorage.setItem(BACKUP_KEY, JSON.stringify(list))
+    else localStorage.removeItem(BACKUP_KEY)
   } catch {}
 }
 

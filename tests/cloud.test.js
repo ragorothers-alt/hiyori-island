@@ -81,13 +81,25 @@ async function pair() {
 }
 
 describe('同步碼與加密', () => {
-  it('同步碼是 16 碼 Crockford Base32，輸入時容錯', () => {
+  it('新的同步碼是 28 碼 Crockford Base32（140 bits），輸入時容錯；以前的 16 碼照樣認得', () => {
     const code = newCode()
-    expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/)
+    expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){6}$/)
     expect(normalizeCode(code.toLowerCase().replace(/-/g, ' '))).toBe(code)
     expect(normalizeCode('o1il-0000-0000-0000')).toBe('0111-0000-0000-0000')
     expect(normalizeCode('ABCD-1234')).toBeNull()
     expect(normalizeCode('UUUU-0000-0000-0000')).toBeNull()
+    // 長度不對（20、24 碼）不認
+    expect(normalizeCode('0000-0000-0000-0000-0000')).toBeNull()
+    expect(normalizeCode('0000-0000-0000-0000-0000-0000')).toBeNull()
+  })
+
+  it('以前的 16 碼和新的 28 碼推出不同的 vault，各自解得開自己的資料', async () => {
+    const old = await deriveKeys('ABCD-EFGH-JKMN-PQRS')
+    const neu = await deriveKeys(newCode())
+    expect(old.id).toMatch(/^[0-9a-f]{64}$/)
+    expect(neu.id).not.toBe(old.id)
+    expect(await unseal(old.key, await seal(old.key, '舊的'))).toBe('舊的')
+    expect(await unseal(neu.key, await seal(neu.key, '新的'))).toBe('新的')
   })
 
   it('分享連結把同步碼放在 # 後面，讀得回來', () => {
