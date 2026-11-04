@@ -105,7 +105,7 @@ body.night .hb-note svg, body.night .hb-note button { color: #bfe0f7; }
 .hb-bar i { display: block; height: 100%; min-width: 4px; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--mc) 55%, #fff), var(--mc)); transition: width .8s var(--ease); }
 .hb-ms span { white-space: nowrap; }
 .hb-restart { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 8px 2px 0; font-size: 11.5px; color: var(--ink-soft); }
-.hb-restart button { font-size: 11.5px; color: #d07893; padding: 4px 2px; text-decoration: underline dotted; text-underline-offset: 3px; }
+.hb-restart button { font-size: 11.5px; color: var(--warn-ink); padding: 4px 2px; text-decoration: underline dotted; text-underline-offset: 3px; }
 body.night .hb-restart button { color: #ffb8cb; }
 .hb-acts { display: flex; gap: 6px; margin-top: 8px; }
 .hb-resist {

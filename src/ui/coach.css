@@ -152,7 +152,7 @@ body.night .dt-chip.soon small { color: #ffb0c4; }
 .wr-perf li b small { font-size: 11px; font-weight: 500; color: var(--ink-faint); }
 .wr-perf li i { font-style: normal; font-family: var(--font-num); font-size: 11px; font-weight: 600; margin-left: auto; }
 .wr-perf li i.up { color: #4aa17c; }
-.wr-perf li i.down { color: #d0738b; }
+.wr-perf li i.down { color: var(--warn-ink); }
 .wr-ins { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .wr-ins li { display: flex; gap: 10px; padding: 10px; border-radius: 14px; background: var(--field); }
 .wr-ins li.guess { background: transparent; border: 1px dashed rgba(120, 150, 190, .4); }
@@ -197,4 +197,4 @@ body.night .wr-ai .wr-badge { color: #cbbcff; }
 .wr-ai-tips li { position: relative; padding: 6px 10px 6px 24px; border-radius: 12px; background: var(--field); font-size: 12.5px; line-height: 1.55; }
 .wr-ai-tips li::before { content: '✿'; position: absolute; left: 9px; top: 6px; font-size: 10px; color: #b9a7e6; }
 .wr-ai-at { display: block; margin-top: 8px; font-size: 11px; color: var(--ink-faint); }
-.wr-ai-err { margin: 8px 0 0; font-size: 12px; color: #d0738b; }
+.wr-ai-err { margin: 8px 0 0; font-size: 12px; color: var(--warn-ink); }

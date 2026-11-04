@@ -13,6 +13,8 @@
   --sky-deep: #4f97c9;
   --sakura: #f19bb2;
   --sakura-soft: #fde6ee;
+  /* 警示、逾期、衝突、錯誤這類要讀的提醒字：白天的淺底、夜晚的深色玻璃都至少 4.5:1 */
+  --warn-ink: #a1596c;
   --mint: #86cdb0;
   --gold: #f0c36a;
   --glass: rgba(255, 255, 255, 0.56);
@@ -37,6 +39,7 @@ body.night {
   --ink-faint: #a9b4c8;
   --ink-deco: #919db4;
   --focus: #a0c4ff;
+  --warn-ink: #f19bb2;
   --glass: rgba(34, 44, 82, 0.5);
   --glass-strong: rgba(40, 52, 94, 0.82);
   --glass-hover: rgba(52, 66, 112, 0.7);
@@ -151,10 +154,15 @@ body.night .brand { text-shadow: 0 1px 12px rgba(0, 0, 0, .3); }
 .date-sub { font-family: var(--font-display); font-size: 11px; color: var(--ink-soft); letter-spacing: .2em; display: flex; justify-content: center; gap: 6px; }
 .date-rel { color: var(--sakura); }
 .date-season { color: var(--ink-faint); }
-.date-season[data-season="spring"] { color: #e58aa6; }
-.date-season[data-season="summer"] { color: #5fae7c; }
-.date-season[data-season="autumn"] { color: #e0855f; }
-.date-season[data-season="winter"] { color: #7f9ec4; }
+/* 季節字：白天用同色相的深一點（淺底上至少 4.5:1），夜晚用原本的亮色 */
+.date-season[data-season="spring"] { color: #9b5d70; }
+.date-season[data-season="summer"] { color: #437a57; }
+.date-season[data-season="autumn"] { color: #9f5f44; }
+.date-season[data-season="winter"] { color: #5b718d; }
+body.night .date-season[data-season="spring"] { color: #e58aa6; }
+body.night .date-season[data-season="summer"] { color: #5fae7c; }
+body.night .date-season[data-season="autumn"] { color: #e0855f; }
+body.night .date-season[data-season="winter"] { color: #7f9ec4; }
 body.night .date-season[data-season] { filter: brightness(1.35); }
 @media (max-width: 860px) { .date-season { display: none; } }
 .date-clock { font-family: var(--font-num); font-size: 15px; font-weight: 500; color: var(--ink-soft); padding: 4px 10px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); letter-spacing: .08em; }
@@ -236,7 +244,7 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .btn-ghost { padding: 7px 12px; border-radius: 12px; font-size: 13px; color: var(--ink-soft); border: 1px dashed rgba(120, 150, 190, .4); transition: background .2s; cursor: pointer; display: inline-block; }
 .btn-ghost:hover { background: var(--glass-hover); color: var(--ink); }
 .btn-ghost.wide { width: 100%; padding: 11px; margin-bottom: 12px; letter-spacing: .06em; }
-.btn-ghost.danger { color: #d0738b; border-color: rgba(220, 120, 150, .4); }
+.btn-ghost.danger { color: var(--warn-ink); border-color: rgba(220, 120, 150, .4); }
 .time-field input, .date-field input {
   border: 0; outline: 0; background: rgba(140, 170, 200, .14); border-radius: 10px; padding: 4px 6px; font-family: var(--font-num); font-size: 13px;
 }
@@ -284,8 +292,8 @@ body.night input[type=time], body.night input[type=date] { color-scheme: dark; }
 .empty .em { font-family: var(--font-display); font-size: 18px; color: var(--ink-soft); display: block; margin-bottom: 4px; letter-spacing: .14em; }
 
 .overdue { margin-bottom: 12px; padding: 10px; border-radius: 16px; background: rgba(246, 180, 200, .14); border: 1px dashed rgba(240, 150, 180, .4); }
-.overdue h4 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: #d07893; display: flex; justify-content: space-between; align-items: center; }
-.overdue h4 button { font-size: 11.5px; color: #d07893; padding: 2px 8px; border-radius: 8px; background: rgba(255, 255, 255, .5); }
+.overdue h4 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--warn-ink); display: flex; justify-content: space-between; align-items: center; }
+.overdue h4 button { font-size: 11.5px; color: var(--warn-ink); padding: 2px 8px; border-radius: 8px; background: rgba(255, 255, 255, .5); }
 body.night .overdue h4 button { background: rgba(255, 255, 255, .1); }
 .overdue .item { background: rgba(255, 255, 255, .4); }
 body.night .overdue .item { background: rgba(255, 255, 255, .05); }
@@ -302,7 +310,7 @@ body.night .overdue .item { background: rgba(255, 255, 255, .05); }
 .proj-pct { font-family: var(--font-num); font-weight: 700; font-size: 18px; color: var(--c); filter: saturate(1.4) brightness(.9); }
 body.night .proj-pct { filter: none; }
 .proj-meta { font-size: 11.5px; color: var(--ink-soft); margin: 3px 0 8px; display: flex; gap: 10px; flex-wrap: wrap; }
-.proj-meta .warn { color: #d9718e; }
+.proj-meta .warn { color: var(--warn-ink); }
 .proj-meta .paused { color: var(--ink-soft); font-weight: 500; }
 .proj.is-paused { opacity: .78; }
 .proj.is-paused .proj-pct { filter: grayscale(.8); }
@@ -502,7 +510,7 @@ body.night .stage-fade { background: #1d1a2a; }
   transform: translate(14px, -50%); padding: 7px 11px; border-radius: 12px; font-size: 12.5px; white-space: nowrap;
   background: rgba(255, 255, 255, .92); color: #3e4a5c; box-shadow: 0 6px 20px rgba(70, 110, 160, .2); line-height: 1.45;
 }
-.tooltip3d small { display: block; color: #8a97a8; font-family: var(--font-num); font-size: 11px; }
+.tooltip3d small { display: block; color: var(--ink-faint); font-family: var(--font-num); font-size: 11px; }
 .drag-tip { transform: translate(-50%, -100%); text-align: center; }
 .drag-tip small { font-size: 13px; color: #4f97c9; font-weight: 600; }
 .focus-tag { transform: translate(-50%, -100%); font-family: var(--font-display); font-size: 13px; letter-spacing: .3em; color: #fff; text-shadow: 0 0 10px rgba(120, 160, 220, .9); animation: breathe 3s ease-in-out infinite; }

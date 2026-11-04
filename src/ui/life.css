@@ -198,7 +198,7 @@ body.night .slp-dots i.on { background: #c7b7ff; }
 .slp-reg-d { margin-left: auto; font-size: 11px; color: var(--ink-soft); }
 .slp-reg p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.55; }
 .slp-reg small { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-faint); line-height: 1.5; }
-.slp-reg small.warn { color: #d77c6a; }
+.slp-reg small.warn { color: var(--warn-ink); }
 body.night .slp-reg small.warn { color: #ffb59a; }
 
 /* 睡眠補記 */
