@@ -7,7 +7,7 @@ import { COMMON_BY_TAG, flowerOf, rollFlower } from './data/flowers.js'
 import { DAILY_QUESTS, QUEST_TIERS, WEEKLY_QUESTS, questOf, weeklyOf } from './data/quests.js'
 import { BOND_POINTS, actLevel, bondLevel, outfitLevel, outfitOf } from './data/bond.js'
 import { PRIORITIES, XP, levelFromXp, MAX_PROJECTS, TOWER_SLOTS, TAGS, WEEK_ZH, MOODS, MAX_STARS, SOFT_CAP, CHARM, FOCUS_MIN, BREAK_MIN, DATE_KINDS } from './theme.js'
-import { DEFAULT_RHYTHM, PEAKS, optimizeDay, sleepMinutes } from './planner.js'
+import { DEFAULT_RHYTHM, PEAKS, busyOf, optimizeDay, sleepMinutes } from './planner.js'
 import { applies, bestClean, bestStreak, cleanDays, countOn, doneOn, QUIT_MILESTONES, streak as habitStreak, todayProgress } from './habits.js'
 import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
@@ -2336,27 +2336,48 @@ export class Store {
     }
   }
   // 套用ふじ排的計畫：一次建好所有任務（有時段、有預估時間）。meta：{ title, answers（下次的預設）, custom（自己加的主攻項目） }
+  // 回傳 { id, count：建了幾件, skipped：已經過去或撞到行程、沒建的段數 }；一件都沒建時 id 是 null
   applyCoachPlan(res, { title = '', answers = null, custom = [] } = {}) {
     this._refreshToday()
     const id = uid()
     const tags = new Set(TAGS.map((t) => t.id))
     const fx = []
     const dates = []
+    // 預覽到套用之間可能隔了一陣子（上午預覽、下午才按；中間又加了日程、跨過了午夜）：照現在再檢查一次。
+    // 已經過去的、跟現在的日程或已排任務撞在一起的不建，算放不下（skipped）
+    const now = new Date()
+    const nowMin = now.getHours() * 60 + now.getMinutes()
+    const busy = {}
+    const busyOn = (date) => (busy[date] ??= busyOf({ rhythm: this.state.rhythm, date, events: this.eventsOn(date), tasks: this.tasksOn(date).filter((t) => t.at && !t.done) }))
+    let skipped = 0
     for (const d of res?.days || []) {
-      if (!DATE_RE.test(d.date) || d.date < this.today) continue
+      if (!DATE_RE.test(d.date)) continue
+      if (d.date < this.today) {
+        skipped += (d.items || []).length
+        continue
+      }
       for (const it of d.items || []) {
         const name = str(it.title, 80).trim()
         if (!name) continue
+        const dur = num(it.dur, 5, 600, 30)
+        const at = TIME_RE.test(it.at) ? it.at : null
+        if (at) {
+          const a = toMin(at)
+          if ((d.date === this.today && a < nowMin) || busyOn(d.date).some(([p, q]) => a < q && p < a + dur)) {
+            skipped++
+            continue
+          }
+        }
         const t = {
           id: uid(), title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', done: false, rewarded: false,
-          createdAt: Date.now(), dur: num(it.dur, 5, 600, 30), at: TIME_RE.test(it.at) ? it.at : null, coach: id, moved: 0,
+          createdAt: Date.now(), dur, at, coach: id, moved: 0,
         }
         this.state.tasks.push(t)
         fx.push(['taskAdded', t])
         if (!dates.includes(d.date)) dates.push(d.date)
       }
     }
-    if (!fx.length) return null
+    if (!fx.length) return { id: null, count: 0, skipped }
     const c = this.state.coach
     c.plans = [...c.plans, { id, createdAt: Date.now(), title: str(title, 40), from: dates[0], to: dates[dates.length - 1], count: fx.length }].slice(-10)
     if (answers) c.last = { focus: answers.focus || [], slots: answers.slots || [], days: answers.days || 5, len: answers.len || 50 }
@@ -2370,9 +2391,10 @@ export class Store {
       this.day().timebox = 1
       this._gain(XP.plan, fx, { kind: 'plan' })
     }
-    fx.push(['coachApplied', { id, count: fx.filter(([k]) => k === 'taskAdded').length, days: dates.length }])
+    const count = fx.filter(([k]) => k === 'taskAdded').length
+    fx.push(['coachApplied', { id, count, days: dates.length, skipped }])
     this._finish(fx)
-    return id
+    return { id, count, skipped }
   }
   // 那次排程還沒完成、可以撤銷的任務數
   coachLeft(id) {

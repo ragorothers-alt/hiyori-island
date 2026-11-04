@@ -222,16 +222,20 @@ export class CoachView {
     if (!r?.days.length) return
     const a = this.a
     const focus = this._focusList()
-    const id = this.store.applyCoachPlan(r, {
+    const { id, count, skipped } = this.store.applyCoachPlan(r, {
       title: focus.map((f) => f.label).join('、'),
       answers: { focus: focus.map((f) => f.label), slots: [...a.slots], days: a.days, len: a.len },
       custom: a.custom.filter((c) => a.focus.has('item:' + c.label)),
     })
-    if (!id) return
+    // 預覽之後時間過了、又加了行程：照實說建了幾段、哪些沒放
+    const late = skipped ? `有 ${skipped} 段的時間已經過了、或撞到後來加的行程，沒有放進去。` : ''
+    if (!id) {
+      this.flash = `${late || '這次沒有可以放的時段。'}換個排法再試試吧。`
+      return this.render()
+    }
     this.planId = id
     this.step = 'done'
-    const count = r.days.reduce((n, d) => n + d.items.length, 0)
-    this.doneText = say('coachApplied', { count, days: r.days.length }, '排好了，照自己的步調來。')
+    this.doneText = `${say('coachApplied', { count, days: r.days.length }, '排好了，照自己的步調來。')}${late ? ` ${late}` : ''}`
     this.render()
     // 捲到最下面，讓「撤銷／到日程看看」露出來（不被下方的輸入框蓋住）
     requestAnimationFrame(() => this.root.closest('.panel-body')?.scrollTo({ top: 1e6, behavior: scrollMode() }))

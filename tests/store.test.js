@@ -1729,7 +1729,7 @@ describe('ふじ的排程教練與重要日子', () => {
     const onApplied = vi.fn()
     store.on('coachApplied', onApplied)
     const xp = store.player.xp
-    const id = store.applyCoachPlan(res(), { title: '數學、英文', answers: { focus: ['數學'], slots: ['wdEve'], days: 3, len: 25 }, custom: [{ label: '數學', tag: 'study' }] })
+    const { id } = store.applyCoachPlan(res(), { title: '數學、英文', answers: { focus: ['數學'], slots: ['wdEve'], days: 3, len: 25 }, custom: [{ label: '數學', tag: 'study' }] })
     const made = store.state.tasks.filter((t) => t.coach === id)
     expect(made).toHaveLength(3)
     expect(made[0]).toMatchObject({ title: '數學・預習', date: TODAY, at: '19:30', dur: 50, tag: 'study', priority: 2 })
@@ -1746,8 +1746,23 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(store.state.tasks.some((t) => t.date < TODAY && t.coach)).toBe(false)
   })
 
+  it('套用時照現在再檢查一次：已經過去的、撞到後來加的日程的不建，照實回報', () => {
+    vi.setSystemTime(new Date(2026, 9, 25, 20))
+    store.addEvent({ title: '後來加的聚餐', date: addDays(TODAY, 2), start: '19:00', end: '21:00' })
+    const onApplied = vi.fn()
+    store.on('coachApplied', onApplied)
+    // 今天 19:30 那段已經過了、後天 19:30 撞到聚餐，只剩今天 20:30 那段
+    expect(store.applyCoachPlan(res())).toMatchObject({ count: 1, skipped: 2 })
+    expect(store.state.tasks.filter((t) => t.coach).map((t) => t.title)).toEqual(['英文・複習'])
+    expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ count: 1, skipped: 2 }))
+    // 一段都放不下：不建、不記排程
+    vi.setSystemTime(new Date(2026, 9, 25, 23))
+    expect(store.applyCoachPlan({ days: [{ date: TODAY, items: [{ title: '太晚了', dur: 30, at: '21:00' }] }] })).toEqual({ id: null, count: 0, skipped: 1 })
+    expect(store.state.coach.plans).toHaveLength(1)
+  })
+
   it('撤銷：刪掉還沒完成的，做完的留著；匯出匯入後排程紀錄和任務的來源還在', () => {
-    const id = store.applyCoachPlan(res())
+    const { id } = store.applyCoachPlan(res())
     const first = store.state.tasks.find((t) => t.coach === id)
     store.toggleTask(first.id)
     store.importJSON(store.exportJSON())
@@ -1759,8 +1774,9 @@ describe('ふじ的排程教練與重要日子', () => {
   })
 
   it('最近的排程最多留 10 筆、自己加的主攻項目最多 12 個，新的在前', () => {
-    for (let i = 0; i < 12; i++) store.applyCoachPlan(res(), { custom: [{ label: `項目${i}`, tag: 'work' }] })
-    for (let i = 0; i < 2; i++) store.applyCoachPlan(res(), { custom: [{ label: `項目x${i}` }] })
+    // 每次排在不同的日子（同一個時段再套用一次會撞到上一次排的）
+    for (let i = 0; i < 12; i++) store.applyCoachPlan(res(addDays(TODAY, i * 3)), { custom: [{ label: `項目${i}`, tag: 'work' }] })
+    for (let i = 0; i < 2; i++) store.applyCoachPlan(res(addDays(TODAY, 40 + i * 3)), { custom: [{ label: `項目x${i}` }] })
     expect(store.state.coach.plans).toHaveLength(10)
     expect(store.state.coach.items).toHaveLength(12)
     expect(store.state.coach.items[0]).toEqual({ label: '項目x1', tag: 'study' })
