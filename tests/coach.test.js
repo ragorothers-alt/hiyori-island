@@ -39,7 +39,10 @@ describe('範圍與時段', () => {
     expect(slotText('wdMorning', R)).toBe('07:30–09:00')
     expect(slotText('weAfternoon', R)).toBe('13:00–18:30')
     expect(slotText('wdAfter', R)).toBe('18:00–20:00')
-    expect(slotText('wdEve', { ...R, sleep: '01:00' })).toBe('19:30–23:00')
+    // 就寢在午夜後：晚上排到午夜，睡前一小時落在這天的凌晨（跨午夜的分兩段，接起來說）
+    expect(slotText('wdEve', { ...R, sleep: '01:00' })).toBe('19:30–24:00')
+    expect(slotText('beforeBed', { ...R, sleep: '01:00' })).toBe('00:00–01:00')
+    expect(slotText('beforeBed', { ...R, sleep: '00:30' })).toBe('23:30–00:30')
     expect(SLOTS).toHaveLength(8)
     expect(defaultSlots(R)).toContain('wdEve')
     expect(defaultSlots({ ...R, work: null })).toContain('wdMorning')
@@ -47,6 +50,15 @@ describe('範圍與時段', () => {
 })
 
 describe('排程規則', () => {
+  it('就寢在午夜後：睡前一小時排得進凌晨，晚上的時段排到午夜', () => {
+    const late = { ...R, sleep: '01:00' }
+    const bed = planRules(req({ slots: ['beforeBed'], days: 7, len: 50, ctx: { rhythm: late } }))
+    expect(all(bed).length).toBeGreaterThan(0)
+    for (const it of all(bed)) expect(m(it.at) >= 0 && m(it.at) + it.dur <= 60, `${it.date} ${it.at}`).toBe(true)
+    const eve = planRules(req({ slots: ['wdEve'], days: 7, len: 50, ctx: { rhythm: late } }))
+    for (const it of all(eve)) expect(m(it.at) >= m('19:30') && m(it.at) + it.dur <= 1440, `${it.date} ${it.at}`).toBe(true)
+  })
+
   it('只排在選的時段裡，不壓到三餐、日程和已排的任務，前後留緩衝', () => {
     const events = [{ id: 'e', date: '2026-10-27', start: '19:30', end: '20:30', done: false }]
     const tasks = [{ id: 't', date: '2026-10-28', at: '19:30', dur: 60, priority: 2, done: false }]

@@ -46,6 +46,19 @@ export function awake(r) {
   const s = toM(r.sleep)
   return [w, s > w ? s : 1440]
 }
+// 照日曆的一天切出醒著的時段：就寢在午夜後時，這天的 0 點到就寢也還醒著（前一晚熬夜的那段）
+export function awakeRanges(r) {
+  const w = toM(r.wake)
+  const s = toM(r.sleep)
+  if (s > w) return [[w, s]]
+  return s > 0 ? [[0, s], [w, 1440]] : [[w, 1440]]
+}
+// 就寢時間接在當天後面算：午夜後就寢是 1440 以後（01:00 → 1500）
+export function bedAt(r) {
+  const w = toM(r.wake)
+  const s = toM(r.sleep)
+  return s > w ? s : s + 1440
+}
 
 // 作息色帶：睡眠、三餐（會佔用時間）、工作時段（只是背景）
 export function rhythmBlocks(r, date) {

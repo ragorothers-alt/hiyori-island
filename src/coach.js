@@ -15,7 +15,7 @@
 //   ctx: { today, nowMin, rhythm, events, tasks } events／tasks：這幾天已經有的日程、排了時段的任務
 // }
 // res = { days: [{ date, items: [{ title, label, tag, dur, at, priority }] }], unplaced, totalMin, picked, notes: [] }
-import { awake, busyOf, gaps, toM, toHHMM } from './planner.js'
+import { awakeRanges, bedAt, busyOf, gaps, toM, toHHMM } from './planner.js'
 import { PHASES, EXAM_PHASES } from './data/coachLines.js'
 import { TAGS, WEEK_ZH } from './theme.js'
 
@@ -46,22 +46,31 @@ function meal(r, kind) {
   }
   return null
 }
-const sleepAt = (r) => awake(r)[1]
+// 晚上的時段最晚到午夜（就寢在午夜後也一樣，午夜後那段算「睡前一小時」）
+const eveEnd = (r) => Math.min(bedAt(r) - 60, 1440)
+// 睡前一小時：就寢在午夜後時落在這天的凌晨（就寢 00:30 時分成 23:30–24:00 和 0:00–0:30 兩段）
+function beforeBed(r) {
+  const b = bedAt(r)
+  const a = b - 60
+  if (b <= 1440) return [[a, b]]
+  if (a >= 1440) return [[a - 1440, b - 1440]]
+  return [[a, 1440], [0, b - 1440]]
+}
 const workStart = (r) => (r.work ? toM(r.work.start) : 720)
 const workEnd = (r) => (r.work ? toM(r.work.end) : 1020)
 const lunchOf = (r) => meal(r, 'lunch') || [720, 780]
 const dinnerOf = (r) => meal(r, 'dinner') || [1110, 1170]
 
-// days：wd＝平日（一到五）、we＝週末、all＝每天
+// days：wd＝平日（一到五）、we＝週末、all＝每天。range 回傳那天的分鐘區間（可以不只一段）
 export const SLOTS = [
-  { id: 'wdMorning', label: '平日早上', days: 'wd', range: (r) => [toM(r.wake) + 30, workStart(r)] },
-  { id: 'wdNoon', label: '午休／空堂', days: 'wd', range: (r) => [lunchOf(r)[0] - 30, lunchOf(r)[1] + 60] },
-  { id: 'wdAfter', label: '下班／放學後', days: 'wd', range: (r) => [workEnd(r), workEnd(r) + 120] },
-  { id: 'wdEve', label: '平日晚上', days: 'wd', range: (r) => [dinnerOf(r)[1], sleepAt(r) - 60] },
-  { id: 'beforeBed', label: '睡前一小時', days: 'all', range: (r) => [sleepAt(r) - 60, sleepAt(r)] },
-  { id: 'weMorning', label: '週末上午', days: 'we', range: (r) => [toM(r.wake) + 60, lunchOf(r)[0]] },
-  { id: 'weAfternoon', label: '週末下午', days: 'we', range: (r) => [lunchOf(r)[1], dinnerOf(r)[0]] },
-  { id: 'weEve', label: '週末晚上', days: 'we', range: (r) => [dinnerOf(r)[1], sleepAt(r) - 60] },
+  { id: 'wdMorning', label: '平日早上', days: 'wd', range: (r) => [[toM(r.wake) + 30, workStart(r)]] },
+  { id: 'wdNoon', label: '午休／空堂', days: 'wd', range: (r) => [[lunchOf(r)[0] - 30, lunchOf(r)[1] + 60]] },
+  { id: 'wdAfter', label: '下班／放學後', days: 'wd', range: (r) => [[workEnd(r), workEnd(r) + 120]] },
+  { id: 'wdEve', label: '平日晚上', days: 'wd', range: (r) => [[dinnerOf(r)[1], eveEnd(r)]] },
+  { id: 'beforeBed', label: '睡前一小時', days: 'all', range: beforeBed },
+  { id: 'weMorning', label: '週末上午', days: 'we', range: (r) => [[toM(r.wake) + 60, lunchOf(r)[0]]] },
+  { id: 'weAfternoon', label: '週末下午', days: 'we', range: (r) => [[lunchOf(r)[1], dinnerOf(r)[0]]] },
+  { id: 'weEve', label: '週末晚上', days: 'we', range: (r) => [[dinnerOf(r)[1], eveEnd(r)]] },
 ]
 const SLOT_BY_ID = Object.fromEntries(SLOTS.map((s) => [s.id, s]))
 const onDay = (slot, date) => {
@@ -72,8 +81,11 @@ const onDay = (slot, date) => {
 export function slotText(id, rhythm) {
   const s = SLOT_BY_ID[id]
   if (!s) return ''
-  const [a, b] = s.range(rhythm)
-  return b > a ? `${toHHMM(a)}–${toHHMM(b)}` : ''
+  const rs = s.range(rhythm).filter(([a, b]) => b > a)
+  if (!rs.length) return ''
+  // 跨過午夜的兩段（23:30–24:00、0:00–0:30）接成一段說：23:30–00:30
+  const t = (m) => (m >= 1440 ? '24:00' : toHHMM(m))
+  return `${t(rs[0][0])}–${t(rs[rs.length - 1][1])}`
 }
 // 預設勾選：平日晚上和週末白天，作息裡沒有上班時段的話加上平日早上
 export function defaultSlots(rhythm) {
@@ -163,13 +175,13 @@ function dayInfo(date, req) {
   let from = 0
   if (date === ctx.today && ctx.nowMin != null) from = Math.ceil((ctx.nowMin + 5) / 5) * 5
   if (date < ctx.today) from = 1440
-  const [w, sl] = awake(r)
+  // 選的時段 ∩ 醒著的時段（就寢在午夜後時，凌晨那段也算）∩ 現在以後
+  const ranges = awakeRanges(r)
   const wins = []
   for (const id of slots) {
     const slot = SLOT_BY_ID[id]
     if (!slot || !onDay(slot, date)) continue
-    const [a, b] = slot.range(r)
-    wins.push([Math.max(a, w, from), Math.min(b, sl)])
+    for (const [a, b] of slot.range(r)) for (const [p, q] of ranges) wins.push([Math.max(a, p, from), Math.min(b, q)])
   }
   const merged = mergeWins(wins).filter(([a, b]) => b - a >= 15)
   const free = merged.reduce((sum, [a, b]) => sum + gaps(a, b, busy).reduce((x, [p, q]) => x + q - p, 0), 0)
