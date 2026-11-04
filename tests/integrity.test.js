@@ -122,6 +122,76 @@ describe('同一個瀏覽器開兩個分頁', () => {
   })
 })
 
+describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () => {
+  // 假裝另一個分頁已經是第 3 版的 App：多了這一版看不懂的欄位
+  const writeNewer = (extra = {}) => {
+    const v3 = { ...JSON.parse(store.exportJSON()), version: 3, rev: 'newer-rev', future: { keep: 'me' }, ...extra }
+    localStorage.setItem(KEY, JSON.stringify(v3))
+    localStorage.setItem('hiyori-daily-rev', 'newer-rev')
+    return v3
+  }
+
+  it('另一個分頁存了新版的：不換過來、說一聲，之後也不拿舊格式蓋掉它', () => {
+    store.saveNow()
+    const newer = vi.fn()
+    store.on('newerApp', newer)
+    const v3 = writeNewer()
+    store._otherTabSaved({ key: KEY })
+    expect(newer).toHaveBeenCalledTimes(1)
+    expect(store.newerApp).toBe(true)
+    store.addTask({ title: '舊分頁加的' })
+    expect(store.saveNow()).toBe(false)
+    expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: 3, future: v3.future })
+  })
+
+  it('這邊改了資料、存檔時才發現另一邊是新版：也不蓋掉', () => {
+    store.saveNow()
+    writeNewer()
+    store.addTask({ title: '同時改的' })
+    expect(store.saveNow()).toBe(false)
+    expect(store.newerApp).toBe(true)
+    expect(JSON.parse(localStorage.getItem(KEY)).version).toBe(3)
+  })
+
+  it('開機就讀到新版的存檔：照樣顯示，看不懂的欄位和版本號原樣留著，但不寫回去', () => {
+    writeNewer()
+    const old = new Store()
+    expect(old.newerApp).toBe(true)
+    expect(old.state).toMatchObject({ version: 3, future: { keep: 'me' } })
+    old.addTask({ title: '舊程式加的' })
+    expect(old.saveNow()).toBe(false)
+    expect(JSON.parse(localStorage.getItem(KEY)).tasks.map((t) => t.title)).not.toContain('舊程式加的')
+  })
+
+  it('匯入新版匯出的檔案：先擋下來，現在的小島和備份都不動', () => {
+    const before = store.exportJSON()
+    const backup = localStorage.getItem('hiyori-backup')
+    const v3 = { ...JSON.parse(before), version: 3 }
+    expect(() => store.importJSON(JSON.stringify(v3))).toThrow('新版 App')
+    expect(store.exportJSON()).toBe(before)
+    expect(localStorage.getItem('hiyori-backup')).toBe(backup)
+  })
+
+  it('同步拉到新版 App 存的資料：不拉也不推，停在錯誤等使用者更新', async () => {
+    globalThis.window ??= globalThis
+    globalThis.document ??= { hidden: true, addEventListener() {} }
+    globalThis.addEventListener ??= () => {}
+    const sync = new FileSync(store)
+    sync.state = 'linked'
+    const v3 = { ...JSON.parse(store.exportJSON()), version: 3, rev: 'cloud-v3' }
+    const pushed = vi.fn()
+    sync._ready = () => true
+    sync._pull = async () => ({ rev: 'cloud-v3', savedAt: Date.now(), state: v3 })
+    sync._push = pushed
+    const rev = store.state.rev
+    await sync.sync()
+    expect(sync.state).toBe('error')
+    expect(sync.message).toContain('新版 App')
+    expect(store.state.rev).toBe(rev)
+    expect(pushed).not.toHaveBeenCalled()
+  })
+})
+
 describe('拆成三小步', () => {
   it('專注過的輪數留在第一步', () => {
     const t = store.addTask({ title: '寫報告' })

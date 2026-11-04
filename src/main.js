@@ -312,6 +312,10 @@ async function boot() {
     ui.toast({ icon: '存', title: '資料存不進去', sub: '瀏覽器的儲存空間可能滿了。先別關掉頁面，到「紀錄」的設定裡「匯出資料」存一份', ms: 15000 })
   store.on('saveFailed', saveFailedToast)
   store.on('saveRecovered', () => ui.toast({ icon: '存', title: '又存得進去了', sub: '剛才的變更都已經存好' }))
+  // 另一個分頁已經更新成新版：這個分頁還是舊的程式，再存下去會洗掉新版的資料
+  const newerToast = () =>
+    ui.toast({ icon: '新', title: '這個分頁的 App 比較舊', sub: '另一個分頁已經更新到新版。重新整理這一頁再繼續，這裡的變更先不會存', ms: 15000 })
+  store.on('newerApp', newerToast)
 
   // ── 本命 ──
   store.on('starPicked', (t) => {
@@ -674,7 +678,8 @@ async function boot() {
       : '有開同步的話，會自動從雲端拉回來；沒有的話先別在這台新增資料'
     ui.toast({ icon: '！', title: '原本的存檔讀不進來', sub, ms: 15000 })
   }
-  // 開場前就存不進去（事件那時還沒人聽）
+  // 開場前就存不進去、讀到新版 App 存的資料（事件那時還沒人聽）
+  else if (store.newerApp) newerToast()
   else if (store.saveError) saveFailedToast()
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {

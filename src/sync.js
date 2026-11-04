@@ -4,7 +4,7 @@
 // 兩種管道共用這套判斷，各自記自己的 base，可以同時開：
 //   FileSync（這個檔案）：資料寫進使用者選的檔案，放在 OneDrive／Dropbox 的同步資料夾裡（不需後端，只有電腦版 Chrome／Edge）
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
-import { dropBackup, keepBackup, newRev, readBackup } from './store.js'
+import { dropBackup, keepBackup, newRev, readBackup, newerData, NEWER_MSG } from './store.js'
 
 // 被取代的那一份（只留最近一份）由 store.js 管：兩個分頁同時改了資料時也會用到
 export { readBackup }
@@ -135,6 +135,8 @@ export class SyncEngine {
       return
     }
     if (epoch !== this.epoch) return
+    // 這台或雲端的資料是新版 App 存的：這一版看不懂新的欄位，不拉也不推，等使用者更新
+    if (this.store.newerApp || newerData(remote?.state)) return this._set('error', NEWER_MSG)
     // 存檔很大時會等停手才寫：比對版本前先寫好，base 才推得動
     this.store.flushSave()
     const local = this.store.state.rev || ''

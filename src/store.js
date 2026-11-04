@@ -34,6 +34,11 @@ const BACKUP_KEY = 'hiyori-backup'
 export const RESCUE_KEY = 'hiyori-rescue'
 // 記住最近幾輪專注的 id（兩個分頁同一輪只記一次）
 const POMO_SIDS = 20
+// 存檔格式的版本。比這個新的資料是新版 App 寫的：這一版看不懂新的欄位，不能讀進來再用舊的格式寫回去
+// （舊的 PWA 分頁還開著、另一個分頁已經更新了的時候會遇到）
+export const DATA_VERSION = 2
+export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
+export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version) > DATA_VERSION
 // 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
 const SLOW_SAVE = 8
 const SAVE_WAIT = 400
@@ -196,7 +201,7 @@ function seed(samples = true) {
   folio[2].steps = [{ id: uid(), title: '挑三個代表作', done: true }, { id: uid(), title: '每個案例寫一段背景', done: false }, { id: uid(), title: '請朋友讀一遍', done: false }]
   const now = Date.now()
   return {
-    version: 2,
+    version: DATA_VERSION,
     tasks: samples ? SAMPLE_TASKS.map(task) : [],
     events: samples ? SAMPLE_EVENTS.map(ev) : [],
     projects: !samples ? [] : [
@@ -589,10 +594,14 @@ function migrate(s) {
   }
   const createdAt = ts(s.createdAt) || Date.now()
   if (!(s.version >= 2)) markLegacySamples({ tasks, events, projects }, createdAt)
+  const newer = newerData(s)
   return {
+    // 新版 App 寫的資料（只會在開機時讀到，而且讀到了就不再寫回去，見 newerApp）：
+    // 看不懂的頂層欄位原樣留著、版本號也不往回改，萬一寫出去也不會把新版的欄位洗掉
+    ...(newer ? Object.fromEntries(Object.entries(s).filter(([k]) => !['__proto__', 'constructor', 'prototype'].includes(k))) : {}),
     // lotsPlan：專案町的地塊編號版本。舊的塔位（散在島上的 16 個點）對不上新的地，全部先收回，讀進來後再依序排進去
     lotsPlan: 1,
-    version: 2, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
+    version: newer ? Number(s.version) : DATA_VERSION, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
@@ -666,6 +675,10 @@ export class Store {
       return false
     }
     if (!obj?.rev) return false
+    if (newerData(obj)) {
+      this._newer()
+      return false
+    }
     if (obj.rev === this.state.rev) {
       this._diskRev = obj.rev
       return false
@@ -677,6 +690,12 @@ export class Store {
       console.warn('[hiyori] 讀取另一個分頁的存檔失敗', err)
       return false
     }
+  }
+  // 存檔是新版 App 寫的（另一個分頁已經更新了）：這邊不讀它、也不再寫，請使用者重新整理
+  _newer() {
+    if (this.newerApp) return
+    this.newerApp = true
+    this.emit('newerApp')
   }
 
   // ── 事件 ──
@@ -696,7 +715,12 @@ export class Store {
     let raw = null
     try {
       raw = localStorage.getItem(KEY)
-      if (raw) return migrate(JSON.parse(raw))
+      if (raw) {
+        const obj = JSON.parse(raw)
+        // 新版 App 存的（另一個分頁已經更新了，這邊還是舊的程式）：讀進來顯示，但不寫回去
+        if (newerData(obj)) this.newerApp = true
+        return migrate(obj)
+      }
     } catch (e) {
       console.warn('[hiyori] 讀取存檔失敗，使用預設資料', e)
       // 原文另外留一份再換成範例島；留不下來（空間不夠）時，saveNow 在使用者自己改資料前不會蓋掉它。
@@ -742,6 +766,8 @@ export class Store {
     clearTimeout(this._saveTimer)
     // 存檔讀不進來、原文也沒能另外留下來：使用者自己改資料之前，不拿範例島蓋掉它
     if (this.loadFailed && !this.loadFailed.rescued && !this.state.rev) return false
+    // 存檔是新版 App 寫的：用舊的格式寫回去會洗掉新的欄位
+    if (this.newerApp) return false
     try {
       // 另一個分頁剛寫過、這邊還沒換成那一版（事件還在路上）
       const disk = localStorage.getItem(REV_KEY)
@@ -754,6 +780,10 @@ export class Store {
         try {
           peer = JSON.parse(localStorage.getItem(KEY) || 'null')
         } catch {}
+        if (newerData(peer)) {
+          this._newer()
+          return false
+        }
         if (peer?.rev && !keepBackup(peer, 'tab', peer.updatedAt)) throw new Error('空間不夠，沒辦法先備份另一個分頁的版本')
       }
       const t0 = performance.now()
@@ -2366,6 +2396,7 @@ export class Store {
       throw new Error('檔案不是 JSON 格式')
     }
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
+    if (newerData(obj)) throw new Error(NEWER_MSG)
     if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error('瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份')
     this.replaceState(obj)
   }
@@ -2375,6 +2406,7 @@ export class Store {
   // peer：另一個分頁剛存的那一版。它已經在存檔裡了：不寫回去，也不算這邊改了資料（不觸發同步）
   replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false } = {}) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
+    if (newerData(obj)) throw new Error(NEWER_MSG)
     const next = migrate(obj)
     next.updatedAt = updatedAt
     next.rev = rev
