@@ -345,6 +345,41 @@ describe('線上同步', () => {
     expect(titles(b.store)).toContain('馬上切走')
   })
 
+  it('舊分頁（另一個分頁已經是新版 App）改了資料再切走：不把舊格式送上去', async () => {
+    const { a } = await pair()
+    const cloud = vaults()[0].data
+    await a.run(async (s, sync) => {
+      s.newerApp = true
+      s.addTask({ title: '舊分頁加的' })
+      calls = []
+      sync.flush()
+      await vi.waitFor(() => expect(sync.state).toBe('error'))
+    })
+    expect(a.sync.message).toContain('新版 App')
+    expect(calls).toEqual([])
+    expect(vaults()[0].data).toBe(cloud)
+  })
+
+  it('存檔讀不進來（換成範例島）時切走、或雲端沒有資料：都不把範例島推上去', async () => {
+    const { a } = await pair()
+    const cloud = vaults()[0].data
+    await a.run(async (s, sync) => {
+      s.loadFailed = { rescued: true }
+      s.addTask({ title: '範例島上加的' })
+      calls = []
+      sync.flush()
+      await vi.waitFor(() => expect(sync.state).toBe('error'))
+      expect(calls).toEqual([])
+      // 雲端那份不見了（被刪掉）：也不拿範例島補上
+      sync._pull = async () => null
+      sync.state = 'linked'
+      await sync.sync()
+      expect(sync.state).toBe('error')
+    })
+    expect(calls.map((c) => c.path)).not.toContain('/v1/push')
+    expect(vaults()[0].data).toBe(cloud)
+  })
+
   it('重新開啟 App 時用記住的同步碼繼續同步', async () => {
     const { a, code } = await pair()
     const again = new CloudSync(a.store)

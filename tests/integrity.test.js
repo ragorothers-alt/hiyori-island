@@ -163,6 +163,14 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     expect(JSON.parse(localStorage.getItem(KEY)).tasks.map((t) => t.title)).not.toContain('舊程式加的')
   })
 
+  it('舊分頁按重置：不刪新版的存檔', () => {
+    store.saveNow()
+    writeNewer()
+    store._otherTabSaved({ key: KEY })
+    expect(() => store.reset()).toThrow('新版 App')
+    expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: 3, future: { keep: 'me' } })
+  })
+
   it('匯入新版匯出的檔案：先擋下來，現在的小島和備份都不動', () => {
     const before = store.exportJSON()
     const backup = localStorage.getItem('hiyori-backup')

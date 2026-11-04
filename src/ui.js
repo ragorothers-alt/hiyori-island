@@ -1781,7 +1781,11 @@ export class UI {
       })
     $('#resetBtn').onclick = (e) =>
       armConfirm(e.currentTarget, '再按一次，清空所有資料', () => {
-        this.store.reset()
+        try {
+          this.store.reset()
+        } catch (err) {
+          return this.toast({ icon: '！', title: '沒有重置', sub: err.message })
+        }
         this.renderSync()
         if (readBackup()?.from === 'reset') this.toast({ icon: '戻', title: '小島清空了', sub: '原本的小島留成備份，後悔的話可以在設定裡還原' })
       })

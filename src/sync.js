@@ -21,6 +21,7 @@ export function restoreBackup(store, i = 0) {
 }
 const NO_ROOM = '瀏覽器的儲存空間不夠，沒辦法先備份另一邊，所以先不替換。請先用「匯出資料」存一份'
 const NO_SAVE = '瀏覽器的儲存空間不夠，這台的存檔寫不進去。請先用「匯出資料」存一份，再清出一些空間'
+const LOAD_FAILED = '這台的存檔讀不進來，雲端也拿不到資料：先不把範例島傳上去，等連上雲端再拿回來'
 const readKey = (k) => {
   try {
     return localStorage.getItem(k) || ''
@@ -174,7 +175,17 @@ export class SyncEngine {
     })
   }
 
+  // 這台的小島現在不能拿去蓋別台：看不懂的新版資料、或存檔讀不進來換成的範例島（已經同步過的話）。
+  // 一般同步、切到背景直接送（flush）、雲端沒有資料、衝突選「用這台的」都經過 _write，在這裡一起擋
+  _pushBlocked() {
+    if (this.store.newerApp) return NEWER_MSG
+    if (this.store.loadFailed && this.base) return LOAD_FAILED
+    return ''
+  }
+
   async _write(expect, opts = {}) {
+    const blocked = this._pushBlocked()
+    if (blocked) return this._set('error', blocked)
     const epoch = this.epoch
     const st = this.store.state
     if (!st.rev) {

@@ -2534,6 +2534,8 @@ export class Store {
   // 重置：清空成一座空島（不放範例）。重置前的小島留成備份（設定裡可以還原）；
   // 存不進去也照樣重置：已經按了兩次，而且空間不夠時重置可能正是想清出空間
   reset() {
+    // 存檔是新版 App 寫的：這一版刪了它就找不回來
+    if (this.newerApp) throw new Error(NEWER_MSG)
     keepBackup(this.state, 'reset', this.state.updatedAt)
     try {
       localStorage.removeItem(KEY)
