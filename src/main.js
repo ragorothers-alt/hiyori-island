@@ -20,6 +20,8 @@ import { pick, short, fill, line } from './voice.js'
 // 描寫天色的字眼：外觀設定讓天空和真實時間不同時（例如白天開夜間模式），問候避開這些句子
 const SKY_WORDS = /陽光|晨光|太陽|曬|樹蔭|晚霞|夕陽|星星|月亮|夜色|天色|天黑|螢火蟲/
 const greetKey = () => `greet.${daypart()}`
+// 部署新版後自動重新整理過的時間（sessionStorage）：短時間內不重複整理
+const RELOADED_KEY = 'hiyori-reloaded'
 
 // 開機：資料、介面、提醒、同步。小島（three.js 場景、兩人的模型）在 islandScene.js，
 // App 模式開機時不載入：介面先出來，第一次切回小島才下載、建好（只建一次）；小島模式一開始就載入
@@ -644,6 +646,25 @@ async function boot() {
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
     navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[hiyori] SW 註冊失敗', e))
   }
+  // 開著的時候部署了新版：新的 Service Worker 接手後清掉了舊版的檔案，伺服器上也換成新的了，
+  // 這個舊頁面第一次要載入的畫面（切回小島、日曆…）會找不到。重新整理一次換成新版；
+  // 離線時不試（那是真的連不上），30 秒內也只試一次，免得一直重新整理
+  addEventListener('vite:preloadError', (e) => {
+    if (!navigator.onLine) return
+    let last = 0
+    try {
+      last = Number(sessionStorage.getItem(RELOADED_KEY)) || 0
+    } catch {}
+    if (Date.now() - last < 30000) return
+    try {
+      sessionStorage.setItem(RELOADED_KEY, String(Date.now()))
+    } catch {}
+    // 載入失敗的那幾處看到這個就不再叫人「連上網路」
+    if (e.payload) e.payload.updating = true
+    ui.toast({ icon: '新', title: '有新版本了', sub: '重新整理一下，換上新版…' })
+    store.flushSave()
+    setTimeout(() => location.reload(), 1200)
+  })
   // 請瀏覽器在空間吃緊時不要清掉這個網站的資料（iPhone 沒加到主畫面時，Safari 也可能把太久沒開的網站資料清掉）。
   // Chrome 系和安裝成 App 時不會跳出詢問；Firefox 會跳出權限詢問，不在開機時突然問
   if (navigator.storage?.persist && (navigator.userAgentData || matchMedia('(display-mode: standalone)').matches)) {
@@ -676,7 +697,7 @@ async function boot() {
       await ensureIsland()
     } catch (err) {
       ui.setAppMode(true, { save: false })
-      ui.toast({ icon: '島', title: '小島沒有載入成功', sub: err.reload ? '先用 App 模式；重新整理頁面再試一次' : '先用 App 模式；連上網路再按「小島」試試', ms: 7000 })
+      if (!err?.updating) ui.toast({ icon: '島', title: '小島沒有載入成功', sub: err.reload ? '先用 App 模式；重新整理頁面再試一次' : '先用 App 模式；連上網路再按「小島」試試', ms: 7000 })
     }
   }
   store.flushPending()

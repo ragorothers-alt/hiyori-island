@@ -184,7 +184,8 @@ export class UI {
     if (lz.view) return fn(lz.view)
     lz.get().then(fn, (err) => {
       console.warn('[hiyori] 畫面載入失敗', err)
-      this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
+      // 是部署了新版（main.js 會重新整理）就不叫人連網路
+      if (!err?.updating) this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
     })
   }
   // 開場後閒下來時把月曆、教練、專案詳情先載好（一個一個來，不搶開場的資源）
@@ -537,7 +538,7 @@ export class UI {
       },
       (err) => {
         const sub = err?.reload ? '重新整理頁面再試一次' : '連上網路再按一次「小島」；還是不行就重新整理頁面'
-        if (ticket === this._modeTicket) this.toast({ icon: '島', title: '小島沒有載入成功', sub, ms: 6000 })
+        if (ticket === this._modeTicket && !err?.updating) this.toast({ icon: '島', title: '小島沒有載入成功', sub, ms: 6000 })
         return false
       },
     )
