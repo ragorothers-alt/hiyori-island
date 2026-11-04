@@ -29,10 +29,12 @@ function toMinutes(period, h, m, guessPm = false) {
   if (!period && guessPm && h >= 1 && h <= 6) h += 12
   if (period) {
     if (/下午|傍晚|晚上|夜裡/.test(period) && h < 12) h += 12
+    // 「晚上 12 點」是半夜，不是中午
+    else if (/晚上|夜裡/.test(period) && h === 12) h = 24
     else if (period === '中午' && h < 11) h += 12
     else if (/凌晨|上午|早上|早晨/.test(period) && h === 12) h = 0
   }
-  if (h === 24) h = 0
+  // 24 點（半夜）回傳 1440 起算：呼叫的那邊換成隔天 0 點，或當成那天的結束
   return h * 60 + m
 }
 
@@ -59,8 +61,8 @@ function readTime(match, offset, evening = false) {
     if (/am/i.test(g(6)) && h === 12) h = 0
     return { period: 'x', minutes: toMinutes(null, h, m) }
   }
-  // 「今晚 9點」：沒寫時段就當晚上
-  if (!period && evening && h < 12) return { period: '晚上', minutes: toMinutes('晚上', h, m) }
+  // 「今晚 9點」：沒寫時段就當晚上（今晚 12 點是半夜）
+  if (!period && evening && h <= 12) return { period: '晚上', minutes: toMinutes('晚上', h, m) }
   return { period, minutes: toMinutes(period, h, m, guess) }
 }
 
@@ -157,11 +159,20 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
     const a = readTime(rm, 1, evening)
     const b = readTime(rm, 8, evening)
     if (a.minutes != null && b.minutes != null) {
+      let start = a.minutes
       let end = b.minutes
-      // 「下午3點到5點」：結束沒寫時段時沿用開始的時段
-      if (!b.period && a.period && end < a.minutes && b.minutes < 720) end = b.minutes + 720
-      if (end <= a.minutes) end = Math.min(a.minutes + 60, 1439)
-      out.start = a.minutes
+      // 從半夜開始（晚上12點到1點）：整段換到隔天
+      if (start >= 1440) {
+        out.date = addDays(out.date || today, 1)
+        start -= 1440
+        if (end >= 1440) end -= 1440
+      }
+      // 「下午3點到5點」「晚上10點到12點」：結束沒寫時段時沿用開始的時段（12 點就是半夜）
+      if (!b.period && a.period && end < start && end <= 720) end += 720
+      // 結束在半夜：那天的最後一分鐘
+      if (end >= 1440) end = 1439
+      if (end <= start) end = Math.min(start + 60, 1439)
+      out.start = start
       out.end = end
       text = text.replace(rm[0], ' ')
     }
@@ -172,6 +183,11 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
       const a = readTime(one, 1, evening)
       if (a.minutes != null) {
         out.start = a.minutes
+        // 「明天晚上12點」：隔天的 0 點
+        if (out.start >= 1440) {
+          out.date = addDays(out.date || today, 1)
+          out.start -= 1440
+        }
         text = text.replace(one[0], ' ')
       }
     }

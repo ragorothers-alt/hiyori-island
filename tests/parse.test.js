@@ -52,6 +52,26 @@ describe('快速輸入解析', () => {
       expected: { title: '回診', date: '2027-01-05' },
     },
     {
+      name: '晚上12點是半夜：明天晚上12點開會＝後天 0 點',
+      input: '明天晚上12點開會',
+      expected: { title: '開會', kind: 'event', date: '2026-10-27', start: '00:00', end: '01:00' },
+    },
+    {
+      name: '今晚12點半：明天 0:30',
+      input: '今晚12點半 看流星',
+      expected: { title: '看流星', kind: 'event', date: '2026-10-26', start: '00:30', end: '01:30' },
+    },
+    {
+      name: '區間結束在晚上12點：算到那天的最後一分鐘，不會被縮成一小時',
+      input: '晚上10點到12點 打報告',
+      expected: { title: '打報告', kind: 'event', start: '22:00', end: '23:59' },
+    },
+    {
+      name: '中午12點和上午10點到12點照舊',
+      input: '上午10點到12點 讀書會',
+      expected: { title: '讀書會', kind: 'event', start: '10:00', end: '12:00' },
+    },
+    {
       name: '今晚會將未標時段的九點視為晚上並套用兩小時長度',
       input: '今晚 9點 看電影 2小時',
       expected: { title: '看電影', kind: 'event', date: TODAY, start: '21:00', end: '23:00' },
