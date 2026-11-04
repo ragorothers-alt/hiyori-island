@@ -13,7 +13,7 @@ import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
-import { PROJECT_LIMITS as PL, projectProgress } from './projects.js'
+import { PROJECT_LIMITS as PL, projectProgress, progressAll } from './projects.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
 const townStages = (stats) => {
@@ -815,6 +815,10 @@ export class Store {
   // 里程碑完成的比例；還沒完成的里程碑，細項和歸在底下的任務做了幾成也算進去（房子跟著多蓋一點）
   progress(p) {
     return projectProgress(p, this.state.tasks)
+  }
+  // 好幾個專案一起算（場景同步每次都要全部的房子）：Map(id → 0..1)
+  progressOf(projects) {
+    return progressAll(projects, this.state.tasks)
   }
   get bond() {
     return bondLevel(this.state.player.bond.pts)

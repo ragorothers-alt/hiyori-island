@@ -133,9 +133,12 @@ export class Character {
     this.ui.setClipVisible?.(!built?.hideClip)
   }
 
-  headAnchor() {
-    if (this.inside && !this.room?.active) return this.cabin.point('roofTop')
-    return this.ui.anchors.headTop.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.38, 0))
+  // 泡泡每幀都要問：給 out 就寫進去，不用每次 new
+  headAnchor(out = new THREE.Vector3()) {
+    if (this.inside && !this.room?.active) return this.cabin.point('roofTop', out)
+    this.ui.anchors.headTop.getWorldPosition(out)
+    out.y += 0.38
+    return out
   }
 
   // ── 對話泡泡 ──
@@ -148,7 +151,8 @@ export class Character {
     const el = document.createElement('div')
     el.className = `bubble ${this.id}`
     el.textContent = text
-    const item = (this.bubble = this.labels.add(el, () => this.headAnchor()))
+    const pos = new THREE.Vector3()
+    const item = (this.bubble = this.labels.add(el, () => this.headAnchor(pos)))
     clearTimeout(this._sayTimer)
     this._sayTimer = setTimeout(() => {
       el.classList.add('out')

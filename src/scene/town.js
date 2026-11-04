@@ -305,9 +305,11 @@ class Resident {
   get district() {
     return this.town.districts[this.info.home]
   }
-  headAnchor() {
+  headAnchor(out = new THREE.Vector3()) {
     this.root.updateMatrixWorld()
-    return this.model.localToWorld(this.model.userData.headTop.clone()).add(new THREE.Vector3(0, 0.15, 0))
+    this.model.localToWorld(out.copy(this.model.userData.headTop))
+    out.y += 0.15
+    return out
   }
 
   say(text, ms = 3400) {
@@ -319,7 +321,8 @@ class Resident {
     const who = document.createElement('small')
     who.textContent = this.info.name
     el.append(who, text)
-    const item = (this.bubble = this.town.labels.add(el, () => this.headAnchor()))
+    const pos = new THREE.Vector3()
+    const item = (this.bubble = this.town.labels.add(el, () => this.headAnchor(pos)))
     this.goal.talk = 1
     clearTimeout(this._sayTimer)
     this._sayTimer = setTimeout(() => {

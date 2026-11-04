@@ -10,7 +10,7 @@ import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
-import { $, $$, esc, ICON, armConfirm, inlineEdit } from './ui/dom.js'
+import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -1405,12 +1405,12 @@ export class UI {
       return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" data-who="${who}" ${locked ? 'disabled' : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
     }).join('')}</div></div>`
     $('#bondCount').textContent = `Lv.${b.level}`
-    $('#bondBox').innerHTML = `
+    setHTML($('#bondBox'), `
       <div class="bond-head"><b>${esc(b.name)}</b><small>${b.next ? `${b.pts} / ${b.next}` : b.pts}</small></div>
       <div class="bond-bar"><i style="width:${pct}%"></i></div>
       <p class="bond-next">${nextText}${acts.length ? `・已學會 ${acts.join('、')}` : ''}</p>
       ${wardrobe('mochi', s.player.bond.outfit)}${wardrobe('fuji', s.player.bond.outfitFuji)}
-      <p class="hint">${this.appMode ? '專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近（回到小島還能摸摸她們）。' : '摸摸もち和ふじ、專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近。'}</p>`
+      <p class="hint">${this.appMode ? '專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近（回到小島還能摸摸她們）。' : '摸摸もち和ふじ、專注、寫回顧、清完本命、每天來看看她們，兩人都會和你更親近。'}</p>`)
   }
 
   // ── ひより町：每間店的階段、下一階還差多少、住在那裡的居民 ──
@@ -1449,10 +1449,10 @@ export class UI {
         <small class="bld-next">${ptNext}</small>
         <small class="bld-res">完成一個里程碑 +1 點、落成一個專案 +3 點；專案多到地不夠時，小鎮也會直接擴建</small>
       </button>`
-    $('#townBox').innerHTML = `
+    setHTML($('#townBox'), `
       <div class="town-head"><b>${esc(t.title)}</b><small>${t.residents.length} 位居民</small></div>
       <div class="town-grid">${ptCard}${cards}</div>
-      <p class="hint">每間店綁著一個功能，用得越多就長得越大；${this.appMode ? '點卡片會切回小島、飛過去看看' : '點卡片飛過去看看'}。</p>`
+      <p class="hint">每間店綁著一個功能，用得越多就長得越大；${this.appMode ? '點卡片會切回小島、飛過去看看' : '點卡片飛過去看看'}。</p>`)
   }
 
   // ── 花の図鑑 ──
@@ -1464,13 +1464,13 @@ export class UI {
     if (!thumbs) this._watchDex()
     const found = list.filter((f) => dex[f.key]).length
     $('#dexCount').textContent = `${found} / ${FLOWERS.length}`
-    $('#dexGrid').innerHTML = list
+    setHTML($('#dexGrid'), list
       .map((f) => {
         const got = dex[f.key]
         return `<button class="dex-cell ${got ? '' : 'unknown'} ${this.dexSel === f.key ? 'on' : ''}" data-k="${f.key}" style="--rc:${RARITIES[f.rarity].color}">
           <img src="${thumbs?.[f.key] || BLANK}" alt="" draggable="false" /><span>${got ? esc(f.name) : '？？？'}</span></button>`
       })
-      .join('')
+      .join(''))
     this._renderDexDetail()
   }
   // 花的縮圖要用 three.js 拍：捲到圖鑑時才載入（App 模式只是來改設定的話，不用下載小島的程式）
@@ -1753,12 +1753,13 @@ export class UI {
       [Math.max(st.bestStreak, s.streak), '天最長連續'],
       [st.projectsDone, '棟房子落成'],
     ]
-    $('#statsGrid').innerHTML = stats.map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')
+    // 紀錄頁每次變更都會重畫：各區內容沒變就不重建（成就印章五十幾枚、圖鑑還帶縮圖）
+    setHTML($('#statsGrid'), stats.map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join(''))
 
     const days = Array.from({ length: 7 }, (_, i) => addDays(s.today, i - 6))
     const vals = days.map((d) => s.peekDay(d))
     const max = Math.max(4, ...vals.map((v) => v.tasks))
-    $('#weekChart').innerHTML = days
+    setHTML($('#weekChart'), days
       .map((d, i) => {
         const v = vals[i]
         const h = (v.tasks / max) * 100
@@ -1768,7 +1769,7 @@ export class UI {
           <span class="wk-m" style="--mc:${mood?.color || 'transparent'}">${mood?.kanji || ''}</span>
           <span class="wk-n">${v.tasks || ''}</span><div class="wk-bar ${v.tasks ? '' : 'zero'}" style="height:${Math.max(3, h * 0.72)}%"></div><span class="wk-d">${WEEK_ZH[wd]}</span></div>`
       })
-      .join('')
+      .join(''))
 
     this.renderSettings()
     this.renderBond()
@@ -1776,31 +1777,31 @@ export class UI {
     this.renderDex()
     const entries = s.journalList(14)
     $('#journalTitle').hidden = !entries.length
-    $('#journalList').innerHTML = entries
+    setHTML($('#journalList'), entries
       .map(([d, j]) => {
         const m = moodOf(j.mood)
         const dd = parseDate(d)
         return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p></div></li>`
       })
-      .join('')
+      .join(''))
     $('#reviewBtn').textContent = s.state.journal[s.today] ? '修改今天的回顧' : '寫下今天的回顧'
 
     const lv = s.level.level
-    $('#unlockList').innerHTML = UNLOCKS.map(
+    setHTML($('#unlockList'), UNLOCKS.map(
       (u) => `<li class="${lv >= u.level ? 'got' : ''}"><b>Lv.${u.level}</b>${u.name}<small>${lv >= u.level ? u.jp : '未解鎖'}</small></li>`,
-    ).join('')
+    ).join(''))
 
     const got = s.player.achievements
     const n = ACHIEVEMENTS.filter((a) => got[a.id]).length
     $('#achCount').textContent = `${n} / ${ACHIEVEMENTS.length}`
-    $('#achGrid').innerHTML = ACHIEVEMENTS.map((a) => {
+    setHTML($('#achGrid'), ACHIEVEMENTS.map((a) => {
       const ok = !!got[a.id]
       return `<div class="stamp ${ok ? '' : 'locked'}" tabindex="0">
         <div class="stamp-k">${ok ? a.kanji : '？'}</div>
         <div class="stamp-n">${ok ? esc(a.title) : '？？？'}</div>
         <div class="tip"><b>${esc(a.name)}・${esc(a.title)}</b>${esc(a.desc)}${ok ? `<br><small>${new Date(got[a.id]).toLocaleDateString('zh-TW')} 取得</small>` : ''}</div>
       </div>`
-    }).join('')
+    }).join(''))
   }
 
   // ── HUD / 每日任務 / 日期 ──
@@ -1852,7 +1853,9 @@ export class UI {
         ? `<button class="q-claim" data-weekly="1">領取</button>`
         : `<span class="q-xp" title="獎勵：+${XP.weekly} XP＋${esc(prize)}">${w.daysLeft ? `剩 ${w.daysLeft} 天` : '今天截止'}</span>`
     const weekly = row({ ...w, sub: `${w.sub}・獎勵 ${prize}` }, wAct, 'weekly', '<i class="wk-badge">週</i>')
-    $('#questList').innerHTML = $('#questMini').innerHTML = [...daily, weekly].join('')
+    const html = [...daily, weekly].join('')
+    setHTML($('#questList'), html)
+    setHTML($('#questMini'), html)
   }
 
   render() {

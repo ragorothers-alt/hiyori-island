@@ -69,6 +69,14 @@ export function inlineEdit(el, value, onSave, maxLength = 60) {
   input.addEventListener('blur', () => finish(true))
 }
 
+// 內容沒變就不動 DOM：避免重播動畫、保留 hover 與焦點，也省掉重建節點
+export function setHTML(el, html) {
+  if (el._html === html) return false
+  el._html = html
+  el.innerHTML = html
+  return true
+}
+
 // 依 key 重用子節點：內容沒變就不碰，正在輸入的表單與焦點不會被打斷。
 // item：{ k, html } 或 { k, kids }，可加 tag、cls、style
 export function patch(box, items) {

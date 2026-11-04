@@ -1,3 +1,4 @@
+import * as THREE from 'three'
 import { LAYOUT } from './island.js'
 import { tween, ease } from './util.js'
 import { buildCabin } from './models/cabin.js'
@@ -24,8 +25,8 @@ export class Cabin {
   }
 
   // 模型標好的位置（doorway 門外、inside 門內、roofTop 屋頂上方）換成世界座標
-  point(key) {
-    return this.group.localToWorld(this.group.userData[key].clone())
+  point(key, out = new THREE.Vector3()) {
+    return this.group.localToWorld(out.copy(this.group.userData[key]))
   }
 
   // instant：重新整理後接著專注，直接亮燈

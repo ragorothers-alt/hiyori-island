@@ -207,7 +207,16 @@ async function boot() {
   // ── 遊戲事件 → 音效、通知、台詞（島上的演出在 islandScene.js）──
   // 花圃上有這朵花（看的那天的花圃）：完成任務時才有慶祝
   const inGarden = (t) => store.gardenTasks(store.selectedDate).some((x) => x.id === t.id)
-  store.on('change', () => ui.render())
+  // 一個操作可能連發好幾次 change（一口氣領好幾個獎勵、同步拉回後補算）：同一輪只重畫一次
+  let renderQueued = false
+  store.on('change', () => {
+    if (renderQueued) return
+    renderQueued = true
+    queueMicrotask(() => {
+      renderQueued = false
+      ui.render()
+    })
+  })
   store.on('itemPlaced', ({ item }) => {
     sfx.plant()
     talk('shopPlace', { item: item.name }, undefined, `${item.name}擺好了！`)

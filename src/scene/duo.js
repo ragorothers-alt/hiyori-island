@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+const _head = new THREE.Vector3()
 
 // もち和ふじ：一起走進小木屋專注、一起出來擊掌，閒晃時互相讓路，偶爾你一句我一句
 export class Duo {
@@ -19,6 +20,7 @@ export class Duo {
     this.focusing = false
     this.chain = Promise.resolve()
     this.tag = null
+    this._tagPos = new THREE.Vector3()
     world.add(() => {
       // 「並肩專注」：兩人在屋裡時，紙窗上映著她們的影子
       cabin.shadow = this.inside && list[0].abilities.sit ? 1 : 0
@@ -56,11 +58,16 @@ export class Duo {
     }
   }
 
-  _tagAt() {
-    if (this.inside) return this.cabin.point('roofTop').add(new THREE.Vector3(0, 0.45, 0))
-    const p = new THREE.Vector3()
-    for (const c of this.list) p.add(c.headAnchor())
-    return p.multiplyScalar(1 / this.list.length).add(new THREE.Vector3(0, 0.3, 0))
+  // 名牌每幀都會問位置：用同一個向量
+  _tagAt(out = this._tagPos) {
+    if (this.inside) {
+      this.cabin.point('roofTop', out).y += 0.45
+      return out
+    }
+    out.set(0, 0, 0)
+    for (const c of this.list) out.add(c.headAnchor(_head))
+    out.multiplyScalar(1 / this.list.length).y += 0.3
+    return out
   }
 
   _doorway() {

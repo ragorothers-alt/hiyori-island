@@ -236,6 +236,20 @@ describe('任務歸在專案', () => {
     expect(store.progress(p)).toBeCloseTo(0.3)
   })
 
+  it('一次算全部專案的進度（場景同步用）：和一個一個算的一樣', () => {
+    const p = newProject(['一', '二'])
+    const q = store.addProject({ name: '讀書會', milestones: ['讀完'] })
+    const t = store.addTask({ title: '查資料', project: p.id, date: TODAY })
+    store.addTask({ title: '選書', project: q.id, date: TODAY })
+    store.addTask({ title: '不屬於專案', date: TODAY })
+    store.toggleTask(t.id)
+    const all = store.progressOf([p, q])
+    expect([...all.keys()]).toEqual([p.id, q.id])
+    expect(all.get(p.id)).toBe(store.progress(p))
+    expect(all.get(q.id)).toBe(store.progress(q))
+    expect(all.get(p.id)).toBe(0.25)
+  })
+
   it('里程碑勾掉以後：以前做完的任務留在原本的里程碑，還沒做的改算下一個', () => {
     const p = newProject(['一', '二'])
     const [a, b] = p.milestones

@@ -99,9 +99,10 @@ export class World {
     this.powerSave = true
     // 全螢幕面板蓋住場景時：不更新也不畫，畫面停在最後一幀；
     // 只每半秒跑一次 coveredTick(dt)，給不能停的輕量工作（例如天色到了晚上要換深色玻璃）
-    this.covered = false
+    this._covered = false
     // App 模式：整個場景藏起來（不只被蓋住），連補畫都不用；_redraw 會留著，回到小島時補上
-    this.hidden = false
+    this._hidden = false
+    this._tickTimer = 0
     this.coveredTick = null
     this._lastTick = 0
     // 改了 canvas 尺寸會清空畫面，蓋住時也要補畫一幀
@@ -199,6 +200,43 @@ export class World {
   }
 
   start() {
+    this._started = true
+    this.renderer.setAnimationLoop((t) => this._frame(t))
+    this._syncLoop()
+  }
+
+  get covered() {
+    return this._covered
+  }
+  set covered(v) {
+    this._covered = !!v
+    this._syncLoop()
+  }
+  get hidden() {
+    return this._hidden
+  }
+  set hidden(v) {
+    this._hidden = !!v
+    this._syncLoop()
+  }
+  // 藏起來（App 模式）時整個停掉每幀的迴圈：只是提早返回的話，一整天一秒還是會被喚醒 60 次。
+  // 改用每半秒一次的計時器跑 coveredTick；回到小島再接回迴圈
+  _syncLoop() {
+    if (!this._started) return
+    const sleep = this._covered && this._hidden
+    if (sleep === !!this._tickTimer) return
+    if (sleep) {
+      this.renderer.setAnimationLoop(null)
+      let last = performance.now()
+      this._tickTimer = setInterval(() => {
+        const now = performance.now()
+        this.coveredTick?.(Math.min((now - last) / 1000, 1))
+        last = now
+      }, 500)
+      return
+    }
+    clearInterval(this._tickTimer)
+    this._tickTimer = 0
     this.renderer.setAnimationLoop((t) => this._frame(t))
   }
 
@@ -293,7 +331,7 @@ export class World {
   }
 
   _frame(t) {
-    if (this.covered && (this.hidden || !this._redraw)) {
+    if (this._covered && (this._hidden || !this._redraw)) {
       // dt 用實際經過的秒數：切換外觀時的天色快轉才會照真實時間跑完
       if (t - this._lastTick >= 500) {
         this.coveredTick?.(Math.min((t - this._lastTick) / 1000, 1))

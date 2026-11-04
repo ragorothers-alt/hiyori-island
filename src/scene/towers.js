@@ -306,9 +306,11 @@ export class Towers {
     return tw.group.position.clone().add(new THREE.Vector3(0, top ? tw.topY() * tw.s : 0, 0))
   }
 
-  labelAnchor(id) {
+  labelAnchor(id, out = new THREE.Vector3()) {
     const tw = this.towers.get(id)
     if (!tw) return null
-    return tw.group.position.clone().add(new THREE.Vector3(0, Math.max(tw.ghostTopY(), tw.topY()) * tw.s + 0.3, 0))
+    out.copy(tw.group.position)
+    out.y += Math.max(tw.ghostTopY(), tw.topY()) * tw.s + 0.3
+    return out
   }
 }

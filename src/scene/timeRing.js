@@ -15,9 +15,9 @@ const fitRadius = () => {
 const Y = -0.55
 const LANE_H = 0.26
 
-export const ringPos = (minutes, r = (R_IN + R_OUT) / 2, y = Y) => {
+export const ringPos = (minutes, r = (R_IN + R_OUT) / 2, y = Y, out = new THREE.Vector3()) => {
   const phi = (minutes / 1440) * Math.PI * 2
-  return new THREE.Vector3(Math.sin(phi) * r, y, -Math.cos(phi) * r)
+  return out.set(Math.sin(phi) * r, y, -Math.cos(phi) * r)
 }
 
 // 在 XY 平面畫出扇環，旋轉 -90° 後 (x, y) → 世界 (x, -y)，因此 y 取 cos 的值
@@ -251,10 +251,10 @@ export class TimeRing {
     tween(0.7, (k) => (m.position.y = y + Math.sin(k * Math.PI) * 0.5), { easing: ease.outCubic })
   }
 
-  anchor(id) {
+  anchor(id, out) {
     const a = this.arcs.get(id)
     if (!a) return null
-    return ringPos((a.m0 + a.m1) / 2, (R_IN + R_OUT) / 2, Y + 0.4 + a.lane * LANE_H)
+    return ringPos((a.m0 + a.m1) / 2, (R_IN + R_OUT) / 2, Y + 0.4 + a.lane * LANE_H, out)
   }
 
   nowAnchor() {
@@ -264,7 +264,7 @@ export class TimeRing {
   update(dt, t) {
     const night = this.sky.night
     const m = this.nowMinutes()
-    this.now.position.copy(ringPos(m, (R_IN + R_OUT) / 2, Y + 0.75 + Math.sin(t * 2) * 0.08))
+    ringPos(m, (R_IN + R_OUT) / 2, Y + 0.75 + Math.sin(t * 2) * 0.08, this.now.position)
     const whole = Math.floor(m)
     if (this.isToday && whole !== this._progMin) {
       this._progMin = whole

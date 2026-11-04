@@ -34,6 +34,17 @@ export function projectProgress(p, tasks = []) {
   return p.milestones.reduce((a, m) => a + msProgress(m, by.get(m.id)), 0) / n
 }
 
+// 一次算好多個專案的進度：任務先依專案分好，不必每個專案都把全部任務掃一遍
+export function progressAll(projects, tasks = []) {
+  const by = new Map()
+  for (const t of tasks) {
+    if (!t.project) continue
+    if (!by.has(t.project)) by.set(t.project, [])
+    by.get(t.project).push(t)
+  }
+  return new Map(projects.map((p) => [p.id, projectProgress(p, by.get(p.id))]))
+}
+
 const linkedTo = (p, tasks) => tasks.filter((t) => t.project === p.id)
 
 // 任務算在哪個里程碑：編輯時選了就照選的；沒選的自動歸——

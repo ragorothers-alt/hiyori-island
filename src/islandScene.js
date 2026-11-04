@@ -28,7 +28,7 @@ import { RARITIES } from './data/flowers.js'
 import { actLevel } from './data/bond.js'
 import { RESIDENTS, MOVE_IN, buildingOf, buildingStage } from './data/town.js'
 import { RESIDENT_LINES, VISITS, TOWN_LINES, TOWN_DUETS } from './data/townLines.js'
-import { esc } from './ui/dom.js'
+import { esc, setHTML } from './ui/dom.js'
 import { pick, short, fill, line } from './voice.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -118,9 +118,9 @@ export async function createIsland(ctx) {
 
   // ── 專案名牌 & 日程提示 ──
   const chips = new Map()
-  function syncChips() {
+  function syncChips(onLots = builtProjects(), prog = store.progressOf(onLots)) {
     // 已落成的房子不掛名牌（整片名牌太擠），點房子可以看是哪個專案
-    const active = builtProjects().filter((p) => store.projectStatus(p) !== 'done')
+    const active = onLots.filter((p) => store.projectStatus(p) !== 'done')
     const ids = new Set(active.map((p) => p.id))
     for (const [id, c] of chips) {
       if (!ids.has(id)) {
@@ -133,36 +133,44 @@ export async function createIsland(ctx) {
       if (!c) {
         const el = document.createElement('div')
         el.className = 'proj-chip'
-        c = labels.add(el, () => houses.labelAnchor(p.id), { declutter: true })
+        const at = new THREE.Vector3()
+        const id = p.id
+        c = labels.add(el, () => houses.labelAnchor(id, at), { declutter: true })
         chips.set(p.id, c)
       }
-      const pct = Math.round(store.progress(p) * 100)
+      const pct = Math.round((prog.get(p.id) ?? store.progress(p)) * 100)
       c.el.style.setProperty('--c', PROJECT_COLORS[p.color % PROJECT_COLORS.length])
       const days = p.deadline && !p.completedAt && !p.pausedAt ? daysBetween(store.today, p.deadline) : null
       const due = days === null || days > 2 ? '' : days < 0 ? '<i class="due late">逾期</i>' : `<i class="due">${days ? `剩 ${days} 天` : '今天截止'}</i>`
       c.el.classList.toggle('paused', !!p.pausedAt)
-      c.el.innerHTML = `${esc(short(p.name, 10))} <b>${pct === 100 ? (p.onTime ? '準時落成' : '落成') : p.pausedAt ? `暫停・${pct}%` : pct + '%'}</b>${due}`
       // 快到期的名牌優先留著，暫停的讓位
       c.priority = due ? 2 : p.pausedAt ? 0 : 1
-      labels.resized(c)
+      // 字沒變就不動：重寫名牌會清掉量測快取，下一幀每張都要重新量
+      if (setHTML(c.el, `${esc(short(p.name, 10))} <b>${pct === 100 ? (p.onTime ? '準時落成' : '落成') : p.pausedAt ? `暫停・${pct}%` : pct + '%'}</b>${due}`)) labels.resized(c)
     }
   }
 
   let nextChip = null
+  let nextKey = ''
   function syncNextEvent() {
+    const now = new Date().getHours() * 60 + new Date().getMinutes()
+    const e = store.selectedDate === store.today ? store.eventsOn(store.today).find((x) => !x.done && toMin(x.end) > now) : null
+    const cur = !!e && toMin(e.start) <= now
+    const html = e ? `${cur ? '進行中' : '下一個'}・${esc(short(e.title, 10))} <b>${e.start}</b>` : ''
+    // 同一個日程、同樣的字：留著原本的名牌（每次變更都拆掉重建會一直重新量）
+    const key = e ? `${e.id}|${e.color}|${html}` : ''
+    if (key === nextKey) return
+    nextKey = key
     if (nextChip) labels.remove(nextChip)
     nextChip = null
-    if (store.selectedDate !== store.today) return
-    const now = new Date().getHours() * 60 + new Date().getMinutes()
-    const evs = store.eventsOn(store.today).filter((e) => !e.done && toMin(e.end) > now)
-    const e = evs[0]
     if (!e) return
-    const cur = toMin(e.start) <= now
     const el = document.createElement('div')
     el.className = 'proj-chip'
     el.style.setProperty('--c', EVENT_COLORS[e.color % EVENT_COLORS.length])
-    el.innerHTML = `${cur ? '進行中' : '下一個'}・${esc(short(e.title, 10))} <b>${e.start}</b>`
-    nextChip = labels.add(el, () => ring.anchor(e.id))
+    el.innerHTML = html
+    const id = e.id
+    const at = new THREE.Vector3()
+    nextChip = labels.add(el, () => ring.anchor(id, at))
   }
   // 每分鐘換一次「下一個」日程
   let lastMin = -1
@@ -177,7 +185,9 @@ export async function createIsland(ctx) {
   function syncScene(animate = true) {
     garden.sync(store.gardenTasks(store.selectedDate), store.selectedDate, store.today)
     const onLots = builtProjects()
-    const built = houses.sync(onLots, (p) => store.progress(p), animate, store.today)
+    // 每個專案的進度這一輪只算一次（房子和名牌共用）
+    const prog = store.progressOf(onLots)
+    const built = houses.sync(onLots, (p) => prog.get(p.id), animate, store.today)
     ptown.setLots(new Set(onLots.map((p) => p.slot)))
     for (const b of built) {
       const p = store.state.projects.find((x) => x.id === b.id)
@@ -191,7 +201,7 @@ export async function createIsland(ctx) {
       if (base) fx.ripple(base, color, 2.4)
     }
     ring.sync(store.eventsOn(store.selectedDate), store.selectedDate === store.today)
-    syncChips()
+    syncChips(onLots, prog)
     syncNextEvent()
   }
 
@@ -280,7 +290,9 @@ export async function createIsland(ctx) {
         store.storeItem(p.id)
       } else closeItemMenu()
     })
-    itemMenu = labels.add(el, () => placed.anchor(id))
+    // 擺飾開著選單時不會動：位置量一次就好（每幀重算包圍盒很貴），被收起來就藏起
+    const at = placed.anchor(id)
+    itemMenu = labels.add(el, () => (placed.items.has(id) ? at : null))
   }
 
   // ── 鏡頭飛去看 ──
@@ -692,8 +704,16 @@ export async function createIsland(ctx) {
   tip.style.display = 'none'
   document.body.append(tip)
 
-  world.onHover = (p, hit, ev) => {
+  world.onHover = (p, hit, ev, same) => {
     hoverCursor(p, hit)
+    // 還停在同一個東西上：提示框跟著滑鼠走就好，不用重找資料、重設高亮
+    if (same) {
+      if (ev && tip.style.display !== 'none') {
+        tip.style.left = ev.clientX + 'px'
+        tip.style.top = ev.clientY + 'px'
+      }
+      return
+    }
     garden.highlight(p?.type === 'task' ? p.id : null)
     ring.highlight(p?.type === 'event' ? p.id : null)
     ui.highlight(p?.type, p?.id)
@@ -877,10 +897,17 @@ export async function createIsland(ctx) {
     fuji.setOutfit(store.player.bond.outfitFuji)
   }
   syncBond()
+  // 跟介面一樣：同一輪連發的 change 只同步一次（特效要找的花、房子在變更前就已經在場上了）
+  let syncQueued = false
   store.on('change', () => {
-    syncScene()
-    if (!placing) placed.sync(store.state.placed)
-    syncBond()
+    if (syncQueued) return
+    syncQueued = true
+    queueMicrotask(() => {
+      syncQueued = false
+      syncScene()
+      if (!placing) placed.sync(store.state.placed)
+      syncBond()
+    })
   })
   store.on('itemPlaced', ({ placed: p }) => {
     const pos = new THREE.Vector3(p.x, 0.3, p.z)

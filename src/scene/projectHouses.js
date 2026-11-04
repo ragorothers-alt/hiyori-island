@@ -278,9 +278,12 @@ export class ProjectHouses {
     return h.group.position.clone().add(new THREE.Vector3(0, top ? h.topY() : 0, 0))
   }
 
-  labelAnchor(id) {
+  // 名牌每幀都要問：給 out 就寫進去，不用每次 new
+  labelAnchor(id, out = new THREE.Vector3()) {
     const h = this.houses.get(id)
     if (!h) return null
-    return h.group.position.clone().add(new THREE.Vector3(0, Math.max(h.ghostTopY(), h.topY()) + 0.3, 0))
+    out.copy(h.group.position)
+    out.y += Math.max(h.ghostTopY(), h.topY()) + 0.3
+    return out
   }
 }

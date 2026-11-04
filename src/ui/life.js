@@ -1,5 +1,5 @@
 import './life.css'
-import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH } from './dom.js'
+import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, setHTML } from './dom.js'
 import { LIFE_KINDS, lifeKindOf, ENERGY } from '../data/life.js'
 import { moodOf } from '../theme.js'
 import { sleepStats, fmtDur } from '../planner.js'
@@ -28,14 +28,6 @@ const zhDur = (m) => {
 }
 const spendOf = (life) => life.items.reduce((a, x) => a + (x.kind === 'spend' ? x.amount : 0), 0)
 const weekOf = (date) => WEEK_ZH[parseDate(date).getDay()]
-// 內容沒變就不動 DOM：避免重播動畫、保留 hover
-const setHTML = (el, html) => {
-  if (el._html === html) return false
-  el._html = html
-  el.innerHTML = html
-  return true
-}
-
 // 規律度：就寢時間最早與最晚差幾分鐘 → 五格與一句話
 function regularity(spread, n) {
   if (n < 2) return { lv: 0, say: '多記幾天，就看得出睡眠的節奏了' }
