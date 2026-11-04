@@ -87,7 +87,11 @@ export class ProjectView {
       if (e.target.classList?.contains('pt-done')) this.doneOpen = e.target.open
     }, true)
     // 關掉分頁或重新整理：還沒存的字先存起來
-    addEventListener('pagehide', () => this._flushAll())
+    addEventListener('pagehide', () => {
+      this._flushAll()
+      // 存檔很大時存檔會排隊等一下才寫：頁面要關了，現在就寫
+      this.store.flushSave()
+    })
     // 按著滑鼠或手指的時候先不重畫：欄位失焦時存檔會觸發重畫，正要點的按鈕被換掉，那一下就點空了。
     // 等 click 跑完再補畫（拖出去沒有 click 的話，過一下子也會補）
     const flush = () => {

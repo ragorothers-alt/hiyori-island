@@ -129,6 +129,22 @@ describe('雲端資料夾同步', () => {
     expect(titles(JSON.parse(file.content).state)).toContain('新任務')
   })
 
+  it('存檔大到改成停手才寫：同步前先寫好，不會因為「還沒存進去」卡住', async () => {
+    const a = device()
+    await link(a, file)
+    later()
+    await a.run(async (s, sync) => {
+      s._slowSave = true
+      s.addTask({ title: '還在排隊的' })
+      expect(s.saved).toBe(false)
+      await sync.sync()
+      expect(s.saved).toBe(true)
+      expect(sync.state).toBe('linked')
+    })
+    expect(titles(JSON.parse(file.content).state)).toContain('還在排隊的')
+    expect(titles(JSON.parse(a.mem.getItem('hiyori-daily-v1')))).toContain('還在排隊的')
+  })
+
   it('全新裝置連結既有檔案會直接載入，不會問衝突', async () => {
     const a = device()
     await a.run((s) => s.addTask({ title: 'A 的任務' }))

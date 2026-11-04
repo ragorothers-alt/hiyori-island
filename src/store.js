@@ -33,6 +33,9 @@ const BACKUP_KEY = 'hiyori-backup'
 export const RESCUE_KEY = 'hiyori-rescue'
 // 記住最近幾輪專注的 id（兩個分頁同一輪只記一次）
 const POMO_SIDS = 20
+// 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
+const SLOW_SAVE = 8
+const SAVE_WAIT = 400
 
 // ── 被取代的那一份（只留最近一份；雲端、資料夾同步和兩個分頁同時改了資料都共用） ──
 export function readBackup() {
@@ -639,6 +642,9 @@ export class Store {
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready
     globalThis.addEventListener?.('storage', (e) => this._otherTabSaved(e))
+    // 排隊中的存檔：切走或關掉前寫好
+    globalThis.addEventListener?.('pagehide', () => this.flushSave())
+    globalThis.document?.addEventListener('visibilitychange', () => document.hidden && this.flushSave())
   }
 
   // 同一個瀏覽器開著兩個分頁：另一邊存檔時，這邊換成那一版（跟同步拉回一樣就地更新）。
@@ -713,10 +719,14 @@ export class Store {
     // 同一個動作裡的幾次存檔併成一次，而且在這個動作結束前就寫好：另一個分頁的存檔事件插不進中間
     if (this._saveQueued) return
     this._saveQueued = true
-    queueMicrotask(() => {
-      this._saveQueued = false
-      this.saveNow()
-    })
+    // 存檔已經大到寫一次會卡住畫面（用了好幾年）：連續的動作（一口氣勾好幾件）併成一次，停手後再寫。
+    // 切走、關掉頁面和同步前一定先寫好（flushSave）；這段時間另一個分頁也存了的話，照兩邊都改了處理（那一版留成備份）
+    if (this._slowSave) this._saveTimer = setTimeout(() => this.flushSave(), SAVE_WAIT)
+    else queueMicrotask(() => this.flushSave())
+  }
+  // 還在排隊的存檔現在寫出去
+  flushSave() {
+    return this._saveQueued ? this.saveNow() : this.saved
   }
   // 版本號一定比上一版大：就算這台電腦的時鐘比別台慢，新的變更也不會被當成舊的
   _nextVersion() {
@@ -724,6 +734,8 @@ export class Store {
   }
   // 回傳有沒有寫進去。寫不進去（多半是瀏覽器空間滿了）時發一次 saveFailed，之後又寫得進去時發 saveRecovered
   saveNow() {
+    this._saveQueued = false
+    clearTimeout(this._saveTimer)
     // 存檔讀不進來、原文也沒能另外留下來：使用者自己改資料之前，不拿範例島蓋掉它
     if (this.loadFailed && !this.loadFailed.rescued && !this.state.rev) return false
     try {
@@ -740,7 +752,9 @@ export class Store {
         } catch {}
         if (peer?.rev && !keepBackup(peer, 'tab', peer.updatedAt)) throw new Error('空間不夠，沒辦法先備份另一個分頁的版本')
       }
+      const t0 = performance.now()
       localStorage.setItem(KEY, JSON.stringify(this.state))
+      this._slowSave = performance.now() - t0 > SLOW_SAVE
       localStorage.setItem(REV_KEY, this.state.rev || '')
       this._diskRev = this.state.rev || ''
     } catch (e) {

@@ -798,6 +798,34 @@ describe('存檔讀不進來、存不進去', () => {
     expect(store.saved).toBe(true)
   })
 
+  it('存檔大到寫一次會卡：連續的動作停手後才寫一次；切走頁面、同步前都會先寫好', async () => {
+    const titles = () => titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))
+    // 這次寫入花了 20ms（假裝存檔很大）
+    let clock = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => (clock += 10))
+    store.addTask({ title: '很大的存檔' })
+    store.saveNow()
+    vi.mocked(performance.now).mockRestore()
+    await Promise.resolve()
+    const write = vi.spyOn(localStorage, 'setItem')
+    store.addTask({ title: '連勾一' })
+    store.addTask({ title: '連勾二' })
+    await Promise.resolve()
+    expect(titles()).not.toContain('連勾一')
+    expect(store.saved).toBe(false)
+    vi.advanceTimersByTime(400)
+    expect(titles()).toEqual(expect.arrayContaining(['連勾一', '連勾二']))
+    expect(write.mock.calls.filter(([k]) => k === 'hiyori-daily-v1')).toHaveLength(1)
+    expect(store.saved).toBe(true)
+    // 寫得快了就回到每個動作馬上寫
+    store.addTask({ title: '切走前' })
+    expect(store.flushSave()).toBe(true)
+    expect(titles()).toContain('切走前')
+    store.addTask({ title: '恢復馬上寫' })
+    await Promise.resolve()
+    expect(titles()).toContain('恢復馬上寫')
+  })
+
   it('兩個分頁都改了資料、另一邊的版本備份不進去：先不蓋掉它', () => {
     store.addTask({ title: '這邊的' })
     store.saveNow()

@@ -135,6 +135,8 @@ export class SyncEngine {
       return
     }
     if (epoch !== this.epoch) return
+    // 存檔很大時會等停手才寫：比對版本前先寫好，base 才推得動
+    this.store.flushSave()
     const local = this.store.state.rev || ''
     if (!remote) return this._write('') // 雲端還沒有資料（剛建立）
     // 同步過的裝置，這台卻沒有自己的小島可推：沒有版本（被清掉了），或存檔讀不進來換成了範例島
