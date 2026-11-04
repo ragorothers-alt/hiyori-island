@@ -10,7 +10,7 @@ import { ACHIEVEMENTS } from './data/achievements.js'
 import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
-import { $, $$, esc, ICON, armConfirm, inlineEdit, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
+import { $, $$, esc, ICON, armConfirm, inlineEdit, editing, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
 import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -897,6 +897,9 @@ export class UI {
     $('#taskTitle').placeholder = isToday ? '種下任務，或打「明天 15:00 開會 #工作」' : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
 
     this._renderStuck(isToday)
+    // 正在就地改名：先不重畫（同步拉回資料時會把正在選字的中文吃掉），改完或取消時會再畫一次
+    if (editing($('#taskList')) || editing($('#overdueBox'))) return
+    const fk = this._listFocus()
     const overdue = isToday ? s.overdue() : []
     $('#overdueBox').innerHTML = overdue.length
       ? `<div class="overdue"><h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><button data-act="allToday">全部移到今天</button></h4><ul class="list">${overdue.map((t) => this._taskItem(t, true)).join('')}</ul></div>`
@@ -906,6 +909,27 @@ export class UI {
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
       : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
           <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
+    this._restoreListFocus(fk)
+  }
+
+  // 任務列表整個重畫：先記下焦點在哪一件的哪一顆按鈕，畫完還回去（鍵盤一路勾下去不會掉回頁首）。
+  // 那一件不見了（刪掉、移走）就落在同一個位置的那一件
+  _listFocus() {
+    const a = document.activeElement
+    const li = a?.closest?.('#taskList .item, #overdueBox .item')
+    if (!li) return null
+    // 剛改完名（焦點還在輸入框裡）：還給那一件的編輯鈕
+    const act = a.dataset.act || (a.classList.contains('inline-input') ? 'edit' : null)
+    return { id: li.dataset.id, act, i: $$('#taskList .item, #overdueBox .item').indexOf(li) }
+  }
+  _restoreListFocus(k) {
+    // 焦點已經在別的地方（不是被重畫弄丟的）就不搶
+    if (!k || (document.activeElement && document.activeElement !== document.body)) return
+    const items = $$('#taskList .item, #overdueBox .item')
+    const li = items.find((x) => x.dataset.id === k.id)
+    const at = li || items[Math.min(k.i, items.length - 1)]
+    const el = (li && k.act && $(`[data-act="${k.act}"]:not(:disabled)`, li)) || (at && $('.check', at)) || $('#taskTitle')
+    el.focus({ preventScroll: true })
   }
 
   // 卡關小卡：一次一件。挪了好幾次或逾期很久的任務，ふじ問要不要拆小（每天開口一次）
@@ -1287,6 +1311,8 @@ export class UI {
     $('#projectDetail').hidden = !open
     if (open) return pv.render()
     if (pv?.id) pv.close()
+    // 正在就地改專案名稱：先不重畫列表（改完或取消時會再畫一次）
+    if (editing($('#projectHome'))) return
     // 進行中的在前，再來暫停的、已落成的
     const all = s.activeProjects()
     const rank = { active: 0, paused: 1, done: 2 }

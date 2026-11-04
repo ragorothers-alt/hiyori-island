@@ -54,6 +54,8 @@ export function inlineEdit(el, value, onSave, maxLength = 60) {
   const finish = (save) => {
     if (done) return
     done = true
+    // 改完了（還沒重畫前輸入框還在）：editing() 不再算它
+    input.dataset.done = '1'
     if (save && input.value.trim() && input.value.trim() !== value) onSave(input.value.trim())
     else onSave(null)
   }
@@ -69,6 +71,9 @@ export function inlineEdit(el, value, onSave, maxLength = 60) {
   })
   input.addEventListener('blur', () => finish(true))
 }
+
+// 這一塊裡有沒有正在就地改名的輸入框（可能正在用中文輸入法選字）：有的話整塊重畫會把字吃掉，先別重畫
+export const editing = (root) => !!root && !!$('.inline-input:not([data-done])', root)
 
 // 捲動要不要有動畫：系統開了「減少動態效果」就直接跳過去（CSS 的 scroll-behavior 管不到 JS 指定的 smooth）
 export const scrollMode = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth')
