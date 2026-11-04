@@ -1453,6 +1453,10 @@ export class Store {
   starsOn(date) {
     return this.tasksOn(date).filter((t) => t.star)
   }
+  // 本命搬到別天：那天已經有 MAX_STARS 件本命了，這件就不再是本命（不然一天變四件，「全清」永遠湊不齊）
+  _fitStar(t) {
+    if (t.star && !t.done && this.starsOn(t.date).filter((x) => x !== t).length >= MAX_STARS) t.star = false
+  }
   toggleStar(id) {
     const t = this._find('tasks', id)
     if (!t || t.done) return
@@ -1510,16 +1514,18 @@ export class Store {
         if (d.tasks === SOFT_CAP + 1) fx.push(['tired', { count: d.tasks }])
         this._gain(xp, fx, { kind: t.star ? 'star' : 'task', id: t.id, tired })
         this._bloom(t, d, fx)
-        if (t.star) {
-          fx.push(['starDone', t])
-          const stars = this.starsOn(this.today)
-          if (t.date === this.today && !d.starAll && stars.length === MAX_STARS && stars.every((x) => x.done)) {
-            d.starAll = true
-            s.starDays++
-            this._gain(XP.starAll, fx, { kind: 'starAll' })
-            this._bondGain(BOND_POINTS.starAll, fx)
-            fx.push(['starAll', stars])
-          }
+        if (t.star) fx.push(['starDone', t])
+      }
+      // 本命全清：放在第一次完成的獎勵外面。完成過又取消、之後才選成本命的那件，再完成時也要算得到（每天只給一次）
+      if (t.star && t.date === this.today) {
+        const d = this.day()
+        const stars = this.starsOn(this.today)
+        if (!d.starAll && stars.length >= MAX_STARS && stars.every((x) => x.done)) {
+          d.starAll = true
+          this.stats.starDays++
+          this._gain(XP.starAll, fx, { kind: 'starAll' })
+          this._bondGain(BOND_POINTS.starAll, fx)
+          fx.push(['starAll', stars])
         }
       }
       const list = this.tasksOn(t.date)
@@ -1571,6 +1577,7 @@ export class Store {
       patch = { ...patch, ms: this._find('projects', pid)?.milestones.some((m) => m.id === ms) ? ms : null }
     }
     Object.assign(t, patch)
+    if (patch.date) this._fitStar(t)
     this._finish()
   }
   // 歸在這個專案的任務：還沒完成的照日期，已完成的新的在前
@@ -1590,6 +1597,7 @@ export class Store {
       if (!t) continue
       if (t.date < this.today && !t.done) t.moved = (t.moved || 0) + 1
       t.date = this.today
+      this._fitStar(t)
     }
     this._finish()
   }
@@ -1700,6 +1708,7 @@ export class Store {
       if (!t || t.done || !TIME_RE.test(p.at)) continue
       if (t.date < date) t.moved = (t.moved || 0) + 1
       t.date = date
+      this._fitStar(t)
       t.at = p.at
       t.dur ||= p.dur
       n++

@@ -264,6 +264,38 @@ describe('本命與每日上限', () => {
     expect(store.player.xp).toBe(120)
   })
 
+  it('本命搬到已經有 3 件本命的日子：不再是本命，那天的全清照樣拿得到', () => {
+    const today = ['甲', '乙', '丙'].map((title) => store.addTask({ title }))
+    today.forEach((t) => store.toggleStar(t.id))
+    const late = store.addTask({ title: '逾期的本命', date: '2026-10-24' })
+    late.star = true
+    store.moveToToday([late.id])
+    expect(late.star).toBe(false)
+    const other = store.addTask({ title: '明天的本命', date: '2026-10-26' })
+    store.toggleStar(other.id)
+    store.updateTask(other.id, { date: TODAY })
+    expect(other.star).toBe(false)
+    expect(store.starsOn(TODAY)).toHaveLength(3)
+    const onAll = vi.fn()
+    store.on('starAll', onAll)
+    today.forEach((t) => store.toggleTask(t.id))
+    expect(onAll).toHaveBeenCalledTimes(1)
+  })
+
+  it('完成過又取消、之後才選成本命的那件：再完成時全清照樣算', () => {
+    const tasks = ['甲', '乙', '丙'].map((title) => store.addTask({ title }))
+    store.toggleTask(tasks[2].id)
+    store.toggleTask(tasks[2].id)
+    tasks.forEach((t) => store.toggleStar(t.id))
+    store.toggleTask(tasks[0].id)
+    store.toggleTask(tasks[1].id)
+    const onAll = vi.fn()
+    store.on('starAll', onAll)
+    store.toggleTask(tasks[2].id)
+    expect(onAll).toHaveBeenCalledTimes(1)
+    expect(store.stats.starDays).toBe(1)
+  })
+
   it('中午前選滿 3 件本命會記下「有計畫」', () => {
     vi.setSystemTime(new Date(2026, 9, 25, 9))
     const tasks = ['甲', '乙', '丙'].map((title) => store.addTask({ title }))
