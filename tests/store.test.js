@@ -1464,6 +1464,28 @@ describe('專案町的總平面', () => {
 })
 
 describe('番茄鐘長度與專注時段', () => {
+  it('同一輪專注（同一個 sid）只記一次：兩個分頁同時到點、或換成另一邊那一版後再記，都不會重複', () => {
+    const xp0 = store.player.xp
+    expect(store.completePomodoro(25, null, null, 'round-1')).toBe(true)
+    expect(store.completePomodoro(25, null, null, 'round-1')).toBe(false)
+    expect(store.stats.pomodoros).toBe(1)
+    const once = store.player.xp - xp0
+    // 另一個分頁換成這邊存的那一版，再用同一輪的 sid 記：不加
+    store.saveNow()
+    const other = new Store()
+    expect(other.completePomodoro(25, null, null, 'round-1')).toBe(false)
+    expect(other.stats.pomodoros).toBe(1)
+    expect(other.completePomodoro(25, null, null, 'round-2')).toBe(true)
+    expect(other.player.xp - xp0).toBe(once * 2)
+    // 沒有 sid（舊的呼叫方式）照常記；只留最近 20 輪
+    expect(store.completePomodoro(25)).toBe(true)
+    for (let i = 0; i < 25; i++) store.completePomodoro(10, null, null, `r${i}`)
+    expect(store.state.pomoSids).toHaveLength(20)
+    expect(store.state.pomoSids.at(-1)).toBe('r24')
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, pomoSids: ['ok-1', '<bad>', 3] }))
+    expect(store.state.pomoSids).toEqual(['ok-1'])
+  })
+
   it('計時方式、長度、休息、輪數存在設定裡，匯出匯入後還在；超出範圍的會被修正', () => {
     expect(store.state.settings).toMatchObject({ focusUp: false, focusMin: 25, breakMin: 5, focusRounds: 1 })
     store.setSetting('focusUp', true)

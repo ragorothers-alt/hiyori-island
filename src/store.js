@@ -31,6 +31,8 @@ const REV_KEY = 'hiyori-daily-rev'
 const BACKUP_KEY = 'hiyori-backup'
 // 讀不進來的存檔原文（壞掉了、或清洗時出錯）：另外留一份，不會被接下來的存檔蓋掉
 export const RESCUE_KEY = 'hiyori-rescue'
+// 記住最近幾輪專注的 id（兩個分頁同一輪只記一次）
+const POMO_SIDS = 20
 
 // ── 被取代的那一份（只留最近一份；雲端、資料夾同步和兩個分頁同時改了資料都共用） ──
 export function readBackup() {
@@ -219,6 +221,8 @@ function seed(samples = true) {
     town: { seen: {}, since: '', plevel: 0 },
     coach: emptyCoach(),
     dates: [],
+    // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
+    pomoSids: [],
     lotsPlan: 1,
     journal: {},
     dex: {},
@@ -586,6 +590,7 @@ function migrate(s) {
     lotsPlan: 1,
     version: 2, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
+    pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
   }
@@ -2258,9 +2263,13 @@ export class Store {
 
   // ── 專注 / 互動 / 每日任務 ──
   // projectId：專注的目標直接選了專案（沒綁任務時才看）
-  completePomodoro(minutes, taskId = null, projectId = null) {
+  // sid：這一輪專注的 id（番茄鐘開始時給的）。同一個 id 只記一次：兩個分頁開著同一個計時、同時到點時，
+  // 另一邊已經記過了（換成了那一版）就回傳 false，不再加一次
+  completePomodoro(minutes, taskId = null, projectId = null, sid = null) {
+    if (sid && this.state.pomoSids.includes(sid)) return false
     // 分鐘數壞掉（NaN、負的）就當 0：一個 NaN 會讓經驗值、金平糖和統計整個變成 NaN，存檔後歸零
     minutes = Number.isFinite(+minutes) ? Math.min(600, Math.max(0, +minutes)) : 0
+    if (ID_RE.test(sid)) this.state.pomoSids = [...this.state.pomoSids, sid].slice(-POMO_SIDS)
     this._refreshToday()
     const task = taskId ? this._find('tasks', taskId) : null
     if (task) task.pomos = (task.pomos || 0) + 1
@@ -2280,6 +2289,7 @@ export class Store {
     this._gain(Math.round(XP.pomodoro * Math.min(2, Math.max(0.4, minutes / 25))), fx, { kind: 'focus' })
     this._bondGain(BOND_POINTS.pomodoro, fx)
     this._finish(fx)
+    return true
   }
   pet() {
     this._refreshToday()

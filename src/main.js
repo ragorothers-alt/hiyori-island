@@ -153,8 +153,9 @@ async function boot() {
       if ((t || p) && ui.focus.mode === 'focus') talk('focusTask', { task: short(t ? t.title : p.name) })
     },
     focusFinished: (minutes, taskId, info = {}) => {
+      // 同一輪另一個分頁已經記過了：這邊不再記、也不再放天燈
+      if (store.completePomodoro(minutes, taskId, info.projectId, info.sid) === false) return scene?.focusStopped()
       sfx.temple()
-      store.completePomodoro(minutes, taskId, info.projectId)
       // 兩人出屋、天燈從小木屋屋頂升起；目標是專案的話，那棟房子泛起一圈光
       scene?.focusFinished(taskId, info.projectId)
       const multi = info.rounds > 1
@@ -181,6 +182,8 @@ async function boot() {
       scene?.focusStopped()
       say('fuji', '沒關係，下次再一起專注。')
     },
+    // 另一個分頁結束或停掉了計時：兩人走出小木屋就好（台詞、天燈那一邊已經放過了）
+    focusSynced: () => scene?.focusStopped(),
   }
   const ui = new UI(store, hooks)
   chatter = (who, text, ms) => ui.chatter(who, text, ms)

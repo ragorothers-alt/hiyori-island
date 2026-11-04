@@ -2036,11 +2036,17 @@ class FocusTimer {
     // 專注的目標：一件任務，或直接是一個專案（兩個只會有一個）
     this.taskId = null
     this.projectId = null
+    this.sid = null // 這一輪專注的 id
     this._loadLengths()
     try {
       const saved = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null')
       if (saved?.mode === 'focus' || saved?.mode === 'break') this._restore(saved)
     } catch {}
+    // 另一個分頁開始、暫停、換目標或結束了計時：這邊跟著換成同一個。
+    // 不然兩邊各自倒數，到點時各記一次專注（同一輪的 sid 一樣，store 那邊也只會記一次）
+    addEventListener('storage', (e) => {
+      if (e.key === FOCUS_KEY) this._otherTab(e.newValue)
+    })
     $('#focusBtn').onclick = () => this.toggle()
     $('#focusStop').onclick = () => this.stop()
     $('#focusLabel').onclick = (e) => {
@@ -2097,11 +2103,35 @@ class FocusTimer {
     this.breakMin = n(saved.breakMin, 0.05, 60, this.breakMin)
     this.rounds = Math.round(n(saved.rounds, 1, 4, 1))
     this.round = Math.round(n(saved.round, 1, this.rounds, 1))
+    this.sid = typeof saved.sid === 'string' && /^[\w-]{1,40}$/.test(saved.sid) ? saved.sid : null
   }
 
   _save() {
-    const { mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds } = this
-    localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds }))
+    const { mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid } = this
+    try {
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid }))
+    } catch {}
+  }
+
+  // 另一個分頁存了計時狀態：換成那一份，小島上的兩人也跟著進出小木屋（不放台詞、不記專注）
+  _otherTab(text) {
+    let saved = null
+    try {
+      saved = JSON.parse(text || 'null')
+    } catch {}
+    const was = this.mode
+    if (saved?.mode === 'focus' || saved?.mode === 'break') this._restore(saved)
+    else {
+      this.mode = 'idle'
+      this.paused = null
+      this._loadLengths()
+    }
+    this._shown = null
+    this.toggleSet(false)
+    if (this.mode === 'idle') this.toggleBig(false)
+    this.render()
+    if (this.mode === 'focus' && was !== 'focus') this.hooks.focusStarted(true, this.task?.id || null, this.info)
+    else if (this.mode !== 'focus' && was === 'focus') this.hooks.focusSynced?.()
   }
 
   // 綁定的任務若已完成或刪除就自動解除
@@ -2123,7 +2153,7 @@ class FocusTimer {
     return this.up && this.mode === 'focus'
   }
   get info() {
-    return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null }
+    return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
   }
   // 可以選的目標：今天還沒做完的任務、進行中的專案（暫停的也可以）
   _targets() {
@@ -2374,6 +2404,8 @@ class FocusTimer {
     this.mode = 'focus'
     this.paused = null
     this.endAt = this.up ? Date.now() : Date.now() + this.focusMin * 60000
+    // 這一輪的 id：記專注時用來認出「同一輪」（兩個分頁同時到點只記一次）
+    this.sid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
     if (!this.task) this.taskId = null
     if (this.taskId || !this.project) this.projectId = null
     this.togglePicker(false)
