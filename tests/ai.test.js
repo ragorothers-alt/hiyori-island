@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 import worker from '../worker/src/index.js'
+import { AI_FAILS } from '../worker/src/ai.js'
+import { createD1 } from './helpers/d1.js'
 
 // Worker 的 /v1/ai：Claude 的用戶端換成假的（env.AI_CLIENT），只檢查送出去的參數和回應的處理
 const PASS = '春天的通行碼 2026'
@@ -126,6 +128,44 @@ describe('送給 Claude 的參數', () => {
     await call(envOf(c, { AI_MODEL: 'claude-sonnet-5-5' }), { task: 'steps', model: 'gpt-x', data: {} })
     expect(c.create.mock.calls[1][0].model).toBe('claude-sonnet-5-5')
     expect(c.create.mock.calls[1][0].fallbacks).toBe('default')
+  })
+
+  it('每種工作的 max_tokens 照它要寫的量給', async () => {
+    const c = fakeClient()
+    await call(envOf(c), { task: 'coach', data: coachData })
+    await call(envOf(c), { task: 'steps', data: {} })
+    await call(envOf(c), { task: 'summary', data: {} })
+    await call(envOf(c), { task: 'insight', data: {} })
+    expect(c.create.mock.calls.map((x) => x[0].max_tokens)).toEqual([8000, 2000, 4000, 2000])
+  })
+})
+
+describe('濫用防護（有資料庫時）', () => {
+  it('通行碼一小時內錯太多次：整個 AI 暫停，對的通行碼也先擋；過了一小時恢復', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 4, 10))
+    try {
+      const c = fakeClient()
+      const env = envOf(c, { DB: createD1() })
+      for (let i = 0; i < AI_FAILS; i++) expect((await call(env, { task: 'ping' }, '猜猜看' + i)).status).toBe(401)
+      const locked = await call(env, { task: 'ping' })
+      expect(locked).toEqual({ status: 429, body: { error: 'locked' } })
+      expect(c.models.retrieve).not.toHaveBeenCalled()
+      vi.setSystemTime(new Date(2026, 10, 4, 11, 1))
+      expect((await call(env, { task: 'ping' })).status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('一天呼叫 Claude 的次數有上限；測試連線不算', async () => {
+    const c = fakeClient({ out: { steps: [], tip: '' } })
+    const env = envOf(c, { DB: createD1(), AI_DAILY: '2' })
+    expect((await call(env, { task: 'steps', data: {} })).status).toBe(200)
+    expect((await call(env, { task: 'ping' })).status).toBe(200)
+    expect((await call(env, { task: 'steps', data: {} })).status).toBe(200)
+    expect(await call(env, { task: 'steps', data: {} })).toEqual({ status: 429, body: { error: 'daily limit' } })
+    expect(c.create).toHaveBeenCalledTimes(2)
   })
 })
 

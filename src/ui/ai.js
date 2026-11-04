@@ -1,6 +1,6 @@
 import './ai.css'
 import { esc, armConfirm } from './dom.js'
-import { AI_MODELS, aiModel, aiPass, askAI, setAiModel, setAiPass } from '../ai.js'
+import { AI_MODELS, PASS_MIN, aiModel, aiPass, askAI, setAiModel, setAiPass } from '../ai.js'
 
 // 設定裡「ふじ的 AI」那一列：填通行碼、選模型、測試連線。
 // Claude API 金鑰不經過這裡：它放在自己的 Worker 的 secret，這裡只放通行碼（只存在這台裝置）。
@@ -89,6 +89,9 @@ export class AiView {
       btns = [['edit', '設定通行碼', 1]]
     } else {
       info = `${esc(this.result || `已設定・用 ${model.label}`)}`
+      // 通行碼太短容易被猜中：提醒到 Worker 重設一組長一點的（這裡跟著改）
+      const len = [...aiPass()].length
+      if (len < PASS_MIN) info += `<br><span class="ai-warn">通行碼只有 ${len} 個字，容易被猜中。建議在 worker 資料夾執行 <code>npx wrangler@4 secret put AI_PASS</code> 換成 ${PASS_MIN} 個字以上，再按「改通行碼」</span>`
       btns = [['test', '測試連線'], ['edit', '改通行碼'], ['off', '停用']]
     }
     this.$('.ai-info').innerHTML = info
@@ -106,7 +109,7 @@ export class AiView {
     if (key === 'edit') {
       panel.innerHTML = `<input class="cloud-input ai-pass" type="password" maxlength="200" autocomplete="off" spellcheck="false" placeholder="通行碼" aria-label="Claude 通行碼">
         <details class="ai-how"><summary>還沒設定 Worker？</summary>
-          <p>在專案的 <code>worker</code> 資料夾執行下面兩行，照提示貼上（Claude Console → API Keys 建立的金鑰，和自己想的一組通行碼）。金鑰只存在 Cloudflare，不會出現在這個網頁裡。</p>
+          <p>在專案的 <code>worker</code> 資料夾執行下面兩行，照提示貼上（Claude Console → API Keys 建立的金鑰，和自己想的一組通行碼，至少 ${PASS_MIN} 個字）。金鑰只存在 Cloudflare，不會出現在這個網頁裡。</p>
           <pre>npx wrangler@4 secret put ANTHROPIC_API_KEY
 npx wrangler@4 secret put AI_PASS</pre>
           <p>用到 AI 的功能會把那一項的資料（例如專案的日誌、筆記、這週的數字）經過你的 Worker 交給 Claude；費用照你 Claude Console 的帳單計算。</p>

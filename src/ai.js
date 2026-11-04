@@ -48,7 +48,12 @@ const TEXT = {
   'too long': '回答太長被截斷了，再試一次',
   'bad output': '回答的格式不對，再試一次',
   'too large': '要整理的資料太多了',
+  locked: '通行碼最近錯太多次，AI 先暫停一小時（防止有人亂猜）',
+  'daily limit': '今天問ふじ的次數到上限了，明天再來',
+  'server error': 'Worker 出了點狀況，等一下再試',
 }
+// 通行碼太短容易被猜中：設定裡提醒（Worker 那邊錯太多次會暫停，但長一點最安全）
+export const PASS_MIN = 8
 
 export class AiError extends Error {
   constructor(code, detail = '') {

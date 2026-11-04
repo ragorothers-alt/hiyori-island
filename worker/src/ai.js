@@ -2,10 +2,16 @@
 // Claude API 金鑰只存在 Worker 的 secret（ANTHROPIC_API_KEY），前端只帶使用者自己設的通行碼（secret AI_PASS）。
 // 提示詞和回傳格式都寫在這裡，前端只送資料、不能自己寫提示詞；回傳一律是照 JSON schema 的固定格式（structured outputs）。
 import Anthropic from '@anthropic-ai/sdk'
-import { HttpError } from './http.js'
+import { HttpError, bump, count } from './http.js'
 
 // 請求內容上限（位元組；中文一個字 3 個位元組）
 export const AI_MAX = 120_000
+// 擋猜通行碼：一小時內錯了這麼多次（不分 IP），整個 AI 先停到那一小時過完（對的通行碼也一樣）
+export const AI_FAILS = 20
+// 一天最多呼叫幾次 Claude（測試連線不算；可以用 [vars] AI_DAILY 改）：通行碼外洩也燒不完額度
+export const AI_DAILY = 200
+const HOUR = 3_600_000
+const DAY = 86_400_000
 // 能選的模型；第一個是預設（也可以用 [vars] AI_MODEL 改預設）
 export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
 // 被安全機制擋下時，伺服器端改用備援模型重跑（Haiku 沒有備援）
@@ -32,10 +38,12 @@ const names = (v) => {
   return [...new Set(v)]
 }
 
+// maxTokens：照每種工作實際要寫的量給上限（JSON 本身不長），被濫用時一次也燒不了太多
 const TASKS = {
   // 排程教練：把主攻項目排進接下來幾天的空檔（前端會再檢查一次每段都在空檔裡）
   coach: {
     effort: 'medium',
+    maxTokens: 8000,
     system: `工作：替使用者把「主攻項目」排進接下來幾天的空檔，做成一份讀書／工作計畫。
 資料說明：
 - days：可以排的日子。free 是那天可用的空檔（"HH:MM-HH:MM"，已經扣掉三餐、睡眠、日程和已排的任務）；busy 是那天已經有的安排，只是讓你知道那天多忙。
@@ -65,6 +73,7 @@ const TASKS = {
   // 把一個里程碑拆成細項
   steps: {
     effort: 'low',
+    maxTokens: 2000,
     system: `工作：把專案裡的一個里程碑拆成 3～7 個細項（做完一步勾一步的小步驟）。
 - 每個細項是一個具體的動作，動詞開頭，20 字以內，例如「列出訪談問題」「整理三份逐字稿」。
 - 由先到後排；一個細項大約半小時到半天能做完。
@@ -76,6 +85,7 @@ const TASKS = {
   // 整理專案目前的進度
   summary: {
     effort: 'medium',
+    maxTokens: 4000,
     system: `工作：整理這個專案目前的進度，寫一份簡短的進度報告。
 - summary：2～3 句，說明整體走到哪裡、最近在忙什麼（以進度日誌、完成的里程碑和任務為準）。
 - done：最近完成的重點，最多 5 點，每點 30 字以內。
@@ -88,6 +98,7 @@ const TASKS = {
   // 週報洞察
   insight: {
     effort: 'low',
+    maxTokens: 2000,
     system: `工作：讀這一週的回顧數字，寫一段週報洞察。
 - 資料：week 是本週到今天為止，prev 是上週同一段（星期一到同一個星期幾）；rate 是任務完成率（0～1），focus 是專注分鐘，habitRate 是習慣達成率（null 代表沒有習慣），insights 是 App 自己算出來的觀察。
 - headline：一句 20 字以內的標題，點出這週最明顯的變化或亮點。
@@ -122,6 +133,18 @@ export async function checkAI(env, auth) {
   if (!(await passOk(auth, env.AI_PASS))) throw new HttpError(401, 'bad pass')
 }
 
+// 檢查通行碼之前：最近錯太多次就先停（計數器在 D1 的 counters；沒有資料庫時不算）
+export async function aiGate(env, now) {
+  if ((await count(env.DB, 'ai-fail', now)) >= AI_FAILS) throw new HttpError(429, 'locked')
+}
+export const aiFailed = (env, now) => bump(env.DB, 'ai-fail', HOUR, now)
+// 通過通行碼之後、呼叫 Claude 之前：算進今天的次數，超過上限就不呼叫
+export async function aiCount(env, body, now) {
+  if (body.task === 'ping') return
+  const limit = Number(env.AI_DAILY) > 0 ? Number(env.AI_DAILY) : AI_DAILY
+  if ((await bump(env.DB, 'ai-day', DAY, now)) > limit) throw new HttpError(429, 'daily limit')
+}
+
 // 通行碼已經檢查過（checkAI）
 export async function askAI(env, body) {
   const name = typeof body.task === 'string' ? body.task : ''
@@ -140,7 +163,7 @@ export async function askAI(env, body) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, 'bad data')
     const params = {
       model,
-      max_tokens: 16000,
+      max_tokens: task.maxTokens,
       system: `${PERSONA}\n\n${task.system}`,
       output_config: { effort: task.effort, format: { type: 'json_schema', schema: task.schema(data) } },
       messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${task.ask}` }],

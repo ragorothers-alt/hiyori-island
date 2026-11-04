@@ -386,4 +386,71 @@ describe('同步伺服器', () => {
     expect(await (await post('/v1/pull', { id, have: 'r2' })).json()).toEqual({ rev: 'r2', savedAt: 3, same: true })
     expect(await (await post('/v1/pull', { id, have: 'r1' })).json()).toEqual({ rev: 'r2', savedAt: 3, data: 'AQ==' })
   })
+
+  it('寫入和刪除要帶對的 auth：只知道 id 的人讀得到密文，但不能寫、不能刪', async () => {
+    const auth = 'c'.repeat(64)
+    const wrong = 'd'.repeat(64)
+    expect((await post('/v1/create', { id, auth: 'short' })).status).toBe(400)
+    expect((await post('/v1/create', { id, auth })).status).toBe(200)
+    expect(vaults()[0].auth).toMatch(/^[0-9a-f]{64}$/)
+    expect(vaults()[0].auth).not.toBe(auth)
+    const push = (extra) => post('/v1/push', { id, base: null, rev: 'r1', savedAt: 5, data: 'AA==', ...extra })
+    expect((await push({})).status).toBe(403)
+    expect((await push({ auth: wrong })).status).toBe(403)
+    expect((await push({ auth })).status).toBe(200)
+    // 版本對不上時：auth 錯的先擋（403），對的才告訴它雲端是哪一版（409）
+    expect((await push({ auth: wrong, rev: 'r9' })).status).toBe(403)
+    expect((await push({ auth, rev: 'r9' })).status).toBe(409)
+    expect((await post('/v1/pull', { id })).status).toBe(200)
+    expect((await post('/v1/delete', { id })).status).toBe(403)
+    expect((await post('/v1/delete', { id, auth: wrong })).status).toBe(403)
+    expect(vaults()).toHaveLength(1)
+    expect((await post('/v1/delete', { id, auth })).status).toBe(200)
+    expect(vaults()).toHaveLength(0)
+    // 本來就沒有的 vault 也算刪好了
+    expect((await post('/v1/delete', { id, auth })).status).toBe(200)
+  })
+
+  it('舊的 vault（沒有 auth）：舊版前端照常寫；第一次帶 auth 寫入就記下來，之後不帶的寫不進去', async () => {
+    const auth = 'e'.repeat(64)
+    await post('/v1/create', { id })
+    expect((await post('/v1/push', { id, base: null, rev: 'r1', savedAt: 5, data: 'AA==' })).status).toBe(200)
+    expect((await post('/v1/push', { id, auth, base: 'r1', rev: 'r2', savedAt: 6, data: 'AA==' })).status).toBe(200)
+    expect((await post('/v1/push', { id, base: 'r2', rev: 'r3', savedAt: 7, data: 'AA==' })).status).toBe(403)
+    expect((await post('/v1/push', { id, auth, base: 'r2', rev: 'r3', savedAt: 7, data: 'AA==' })).status).toBe(200)
+  })
+
+  it('線上同步會帶 auth：伺服器記下了，只拿到 id 的人寫不進去', async () => {
+    const { a } = await pair()
+    expect(vaults()[0].auth).toBeTruthy()
+    const before = vaults()[0].rev
+    const res = await post('/v1/push', { id: a.sync.keys.id, base: before, rev: 'evil1', savedAt: 1, data: 'AA==' })
+    expect(res.status).toBe(403)
+    expect(vaults()[0].rev).toBe(before)
+  })
+
+  it('一天能建立的 vault 有上限；建了一天以上還沒放資料的會清掉；資料庫滿了不能再建', async () => {
+    env.CREATE_DAILY = 2
+    const ids = ['1', '2', '3'].map((c) => c.repeat(64))
+    expect((await post('/v1/create', { id: ids[0] })).status).toBe(200)
+    expect((await post('/v1/create', { id: ids[1] })).status).toBe(200)
+    const busy = await post('/v1/create', { id: ids[2] })
+    expect(busy.status).toBe(429)
+    expect(await busy.json()).toEqual({ error: 'busy' })
+    // 隔天：前兩個一直沒放資料，被清掉，又能建
+    later(86_400_000 + 1000)
+    expect((await post('/v1/create', { id: ids[2] })).status).toBe(200)
+    expect(vaults().map((v) => v.created_at)).toHaveLength(1)
+    env.MAX_TOTAL = 3
+    await post('/v1/push', { id: ids[2], base: null, rev: 'r1', savedAt: 5, data: 'AAAA' })
+    later(86_400_000 + 1000)
+    expect((await post('/v1/create', { id: ids[0] })).status).toBe(507)
+  })
+
+  it('沒料到的錯誤也回 JSON 和 CORS 標頭', async () => {
+    const res = await worker.fetch(new Request('https://sync.test/v1/pull', { method: 'POST', body: JSON.stringify({ id }) }), {})
+    expect(res.status).toBe(500)
+    expect(res.headers.get('access-control-allow-origin')).toBe('*')
+    expect(await res.json()).toEqual({ error: 'server error' })
+  })
 })

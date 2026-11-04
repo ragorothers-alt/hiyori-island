@@ -46,12 +46,15 @@ export const cloudSupported = () =>
   typeof CompressionStream === 'function' && typeof DecompressionStream === 'function' && !!globalThis.crypto?.subtle
 
 // ── 加密 ──
+// id：給伺服器找資料（讀得到密文）；auth：寫入和刪除時帶的驗證碼（伺服器只存雜湊）；key：加解密，只留在裝置上。
+// 三者都由同步碼推導，彼此推不出來：只知道 id 的人不能寫、也解不開
 export async function deriveKeys(code) {
   const ikm = await crypto.subtle.importKey('raw', enc(code.replace(/-/g, '')), 'HKDF', false, ['deriveBits', 'deriveKey'])
   const params = (info) => ({ name: 'HKDF', hash: 'SHA-256', salt: enc('hiyori-sync-v1'), info: enc(info) })
   const id = hex(await crypto.subtle.deriveBits(params('vault-id'), ikm, 256))
+  const auth = hex(await crypto.subtle.deriveBits(params('vault-auth'), ikm, 256))
   const key = await crypto.subtle.deriveKey(params('vault-key'), ikm, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-  return { id, key }
+  return { id, auth, key }
 }
 
 const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer())
@@ -137,6 +140,7 @@ export class CloudSync extends SyncEngine {
     if (e?.status === 404) return this._set('error', '雲端找不到這組同步碼，可能已經被刪除了')
     if (e?.status === 429) return this._set('error', '同步太頻繁，等一下再試')
     if (e?.status === 413) return this._set('error', '資料太大，超過同步的上限')
+    if (e?.status === 403) return this._set('error', '同步伺服器拒絕了這次寫入。重新整理頁面、更新到最新版再試；還是不行的話，重新輸入同步碼')
     this._set('error', e?.message || String(e))
   }
 
@@ -164,8 +168,14 @@ export class CloudSync extends SyncEngine {
   // 這台開一組新的同步碼，把目前的小島放上去
   async start() {
     const code = newCode()
-    const { id } = await deriveKeys(code)
-    await call('/v1/create', { id })
+    const { id, auth } = await deriveKeys(code)
+    try {
+      await call('/v1/create', { id, auth })
+    } catch (e) {
+      if (e.status === 429) throw new Error('同步伺服器現在很忙，過一陣子再開始同步')
+      if (e.status === 507) throw new Error('同步伺服器的空間滿了，暫時不能開新的同步')
+      throw e
+    }
     await this._link(code)
     return code
   }
@@ -205,7 +215,7 @@ export class CloudSync extends SyncEngine {
   // 刪除雲端的資料，這台也停止同步（其他裝置下次同步會看到「找不到這組同步碼」）
   async destroy() {
     if (!this.keys) return
-    await call('/v1/delete', { id: this.keys.id })
+    await call('/v1/delete', { id: this.keys.id, auth: this.keys.auth })
     this.stop()
   }
 
@@ -233,10 +243,10 @@ export class CloudSync extends SyncEngine {
   }
 
   async _push(expect, { rev, savedAt }, json, { keepalive } = {}) {
-    const { id, key } = this.keys
+    const { id, auth, key } = this.keys
     const data = await seal(key, `{"app":"hiyori","version":1,"state":${json}}`)
     try {
-      await call('/v1/push', { id, base: expect || null, rev, savedAt, data }, { keepalive })
+      await call('/v1/push', { id, auth, base: expect || null, rev, savedAt, data }, { keepalive })
     } catch (e) {
       if (e.status === 409) return false
       throw e

@@ -4,15 +4,24 @@
 // 版本識別 rev 是前端每次修改都換一個的隨機字串（savedAt 只是那一版的修改時間，顯示用）。
 // 上傳要帶 base（「我以為雲端現在是哪一版」，空的 vault 是 null），對不上代表別台剛寫過，
 // 回 409 讓前端重新比對，不會蓋掉別台的變更。
+// 寫入和刪除還要帶 auth（前端由同步碼另外推導，跟 vault id 互相推不出來）：只知道 id 的人不能寫。
+// 舊版前端不帶 auth：vault 還沒記下 auth 時照舊讓它寫，記下之後就要對得上（見 migrations/0003）。
 // /v1/ai：ふじ的 AI，經過這裡呼叫 Claude（見 ai.js；金鑰和通行碼都是 Worker 的 secret）。
 import { HttpError } from './http.js'
-import { askAI, checkAI, AI_MAX } from './ai.js'
+import { askAI, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
 
 const ID = /^[0-9a-f]{64}$/
+const AUTH = /^[0-9a-f]{64}$/
 const REV = /^[\w-]{1,40}$/
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 // base64 字元數；D1 每列上限 2 MB
 export const MAX_DATA = 1_500_000
+const DAY = 86_400_000
+// 被大量亂建 vault 時的保護（可以用 [vars] 改）：一天最多建立幾個、整個資料庫最多放多少（base64 字元數）。
+// 擋的是新建立，已經在用的 vault 照常同步
+export const CREATE_DAILY = 300
+export const MAX_TOTAL = 400_000_000
+const cap = (v, d) => (Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : d)
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,8 +39,17 @@ export default {
     try {
       await limit(env, req, pathname)
       const ai = pathname === '/v1/ai'
-      // AI：通行碼不對就不讀內容
-      if (ai) await checkAI(env, req.headers.get('Authorization'))
+      const now = Date.now()
+      if (ai) {
+        // 通行碼錯太多次時先整個停一陣子（擋猜通行碼）；通行碼不對就不讀內容
+        await aiGate(env, now)
+        try {
+          await checkAI(env, req.headers.get('Authorization'))
+        } catch (e) {
+          if (e.status === 401) await aiFailed(env, now)
+          throw e
+        }
+      }
       const text = await readBody(req, ai ? AI_MAX : MAX_DATA + 1000)
       let body
       try {
@@ -40,16 +58,20 @@ export default {
         throw new HttpError(400, 'bad json')
       }
       if (!body || typeof body !== 'object') throw new HttpError(400, 'bad request')
-      if (ai) return json(await askAI(env, body))
-      const now = Date.now()
-      if (pathname === '/v1/create') return json(await create(env.DB, body, now))
+      if (ai) {
+        await aiCount(env, body, now)
+        return json(await askAI(env, body))
+      }
+      if (pathname === '/v1/create') return json(await create(env, body, now))
       if (pathname === '/v1/pull') return json(await pull(env.DB, body))
       if (pathname === '/v1/push') return json(await push(env.DB, body, now))
       if (pathname === '/v1/delete') return json(await remove(env.DB, body))
       throw new HttpError(404, 'not found')
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message, ...e.extra }, e.status)
-      throw e
+      // 沒料到的錯誤也回 JSON 和 CORS 標頭：不然瀏覽器只看到「連不上」，分不出是伺服器出錯
+      console.error('[hiyori-sync]', e)
+      return json({ error: 'server error' }, 500)
     }
   },
 }
@@ -92,19 +114,36 @@ async function limit(env, req, pathname) {
   if (!success) throw new HttpError(429, 'too many requests')
 }
 
+async function sha256(s) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
 async function vaultHash(id) {
   if (typeof id !== 'string' || !ID.test(id)) throw new HttpError(400, 'bad id')
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id))
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  return sha256(id)
+}
+// 寫入的驗證碼存成雜湊；沒帶（舊版前端）是 null
+async function authHash(auth) {
+  if (auth == null) return null
+  if (typeof auth !== 'string' || !AUTH.test(auth)) throw new HttpError(400, 'bad auth')
+  return sha256(auth)
 }
 
 const time = (v) => Number.isSafeInteger(v) && v >= 0
 
-async function create(db, body, now) {
+async function create(env, body, now) {
+  const db = env.DB
   const hash = await vaultHash(body.id)
+  const auth = await authHash(body.auth)
+  // 建了一天以上卻一直沒放資料的 vault：裡面沒有東西，清掉
+  await db.prepare('DELETE FROM vaults WHERE rev IS NULL AND created_at < ?1').bind(now - DAY).run()
+  const recent = await db.prepare('SELECT COUNT(*) AS n FROM vaults WHERE created_at > ?1').bind(now - DAY).first()
+  if (recent.n >= cap(env.CREATE_DAILY, CREATE_DAILY)) throw new HttpError(429, 'busy')
+  const total = await db.prepare('SELECT COALESCE(SUM(size), 0) AS s FROM vaults').first()
+  if (total.s >= cap(env.MAX_TOTAL, MAX_TOTAL)) throw new HttpError(507, 'full')
   const r = await db
-    .prepare('INSERT INTO vaults (hash, rev, saved_at, created_at, updated_at) VALUES (?1, NULL, 0, ?2, ?2) ON CONFLICT (hash) DO NOTHING')
-    .bind(hash, now)
+    .prepare('INSERT INTO vaults (hash, rev, saved_at, created_at, updated_at, auth) VALUES (?1, NULL, 0, ?2, ?2, ?3) ON CONFLICT (hash) DO NOTHING')
+    .bind(hash, now, auth)
     .run()
   if (!r.meta.changes) throw new HttpError(409, 'exists')
   return { rev: null }
@@ -129,19 +168,27 @@ async function push(db, body, now) {
   }
   if (typeof data !== 'string' || !BASE64.test(data)) throw new HttpError(400, 'bad data')
   if (data.length > MAX_DATA) throw new HttpError(413, 'too large')
-  // rev IS ?2：base 是 null 時也比得到（空的 vault）
+  const auth = await authHash(body.auth)
+  // rev IS ?2：base 是 null 時也比得到（空的 vault）。auth：記下了就要對得上；還沒記（舊的 vault）就記這一把
   const r = await db
-    .prepare('UPDATE vaults SET rev = ?3, saved_at = ?4, data = ?5, size = ?6, updated_at = ?7 WHERE hash = ?1 AND rev IS ?2')
-    .bind(hash, base, rev, savedAt, data, data.length, now)
+    .prepare(
+      `UPDATE vaults SET rev = ?3, saved_at = ?4, data = ?5, size = ?6, updated_at = ?7, auth = COALESCE(auth, ?8)
+       WHERE hash = ?1 AND rev IS ?2 AND (auth IS NULL OR auth = ?8)`,
+    )
+    .bind(hash, base, rev, savedAt, data, data.length, now, auth)
     .run()
   if (r.meta.changes) return { rev }
-  const row = await db.prepare('SELECT rev FROM vaults WHERE hash = ?1').bind(hash).first()
+  const row = await db.prepare('SELECT rev, auth FROM vaults WHERE hash = ?1').bind(hash).first()
   if (!row) throw new HttpError(404, 'unknown vault')
+  if (row.auth && row.auth !== auth) throw new HttpError(403, 'forbidden')
   throw new HttpError(409, 'conflict', { rev: row.rev })
 }
 
 async function remove(db, body) {
   const hash = await vaultHash(body.id)
-  await db.prepare('DELETE FROM vaults WHERE hash = ?1').bind(hash).run()
+  const auth = await authHash(body.auth)
+  const r = await db.prepare('DELETE FROM vaults WHERE hash = ?1 AND (auth IS NULL OR auth = ?2)').bind(hash, auth).run()
+  // 本來就沒有這個 vault 也算刪好了；有、但 auth 對不上就不刪
+  if (!r.meta.changes && (await db.prepare('SELECT 1 FROM vaults WHERE hash = ?1').bind(hash).first())) throw new HttpError(403, 'forbidden')
   return { ok: true }
 }

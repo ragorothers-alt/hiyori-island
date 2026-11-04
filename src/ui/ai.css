@@ -11,4 +11,7 @@ body.night .ai-tag { color: #cbbcff; }
 body.night .ai-how summary { color: #cbbcff; }
 .ai-how p { margin: 6px 0; line-height: 1.65; }
 .ai-how code, .ai-how pre { font-family: var(--font-num); font-size: 11.5px; }
+.ai-warn { color: #c0607e; }
+.ai-warn code { font-family: var(--font-num); font-size: 11px; user-select: all; overflow-wrap: anywhere; }
+body.night .ai-warn { color: #ffa3bd; }
 .ai-how pre { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--field); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
