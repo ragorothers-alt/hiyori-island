@@ -5,7 +5,7 @@ import { parseQuick, describeQuick } from '../src/parse.js'
 import { XP } from '../src/theme.js'
 import {
   activity, msProgress, msSteps, msTasks, noteHTML, noteSnippet, noteTitle, noteTodos, projectMarkdown, projectProgress, projectStats, projectTimeline,
-  taskMilestone, taskTimeline, textHTML, toggleNoteLine, latestLog,
+  taskMilestone, taskTimeline, textHTML, toggleNoteLine, latestLog, lastTouched,
 } from '../src/projects.js'
 
 const TODAY = '2026-11-02'
@@ -538,5 +538,77 @@ describe('任務頁：每件任務的說明和紀錄', () => {
     const parts = store.splitTask(t.id)
     expect(parts[0].note).toBe('說明')
     expect(p.logs[0].task).toBe(parts[0].id)
+  })
+})
+
+describe('最近動過的專案（editedAt）', () => {
+  const later = () => vi.advanceTimersByTime(60000)
+
+  it('建立時記下；改名、里程碑、細項、進度、筆記、目標、截止日、暫停都會更新', () => {
+    // 留一個不勾的里程碑：全勾完就落成了，落成的專案不能暫停
+    const p = newProject(['一', '留著'])
+    expect(p.editedAt).toBe(Date.now())
+    const mid = p.milestones[0].id
+    const steps = [
+      () => store.updateProject(p.id, { name: '改名' }),
+      () => store.addMilestone(p.id, '二'),
+      () => store.toggleMilestone(p.id, p.milestones[2].id),
+      () => store.updateMilestone(p.id, mid, { note: '備註' }),
+      () => store.addStep(p.id, mid, '細項'),
+      () => store.toggleStep(p.id, mid, p.milestones[0].steps[0].id),
+      () => store.addProjectLog(p.id, { text: '推進' }),
+      () => store.addProjectNote(p.id, { title: '筆記' }),
+      () => store.updateProjectNote(p.id, p.notes[0].id, { body: '打字中' }, { quiet: true }),
+      () => store.setProjectGoal(p.id, '目標'),
+      () => store.setDeadline(p.id, addDays(TODAY, 7)),
+      () => store.pauseProject(p.id, true),
+    ]
+    for (const [i, step] of steps.entries()) {
+      later()
+      step()
+      expect(p.editedAt, `第 ${i} 步：${step}`).toBe(Date.now())
+    }
+  })
+
+  it('歸在專案的任務：新增、完成、改、刪都算；換專案時兩邊都算；專注在專案上也算', () => {
+    const p = newProject()
+    const q = store.addProject({ name: '另一個' })
+    later()
+    const t = store.addTask({ title: '任務', project: p.id, date: TODAY })
+    expect(p.editedAt).toBe(Date.now())
+    later()
+    store.toggleTask(t.id)
+    expect(p.editedAt).toBe(Date.now())
+    later()
+    store.updateTask(t.id, { project: q.id })
+    expect(p.editedAt).toBe(Date.now())
+    expect(q.editedAt).toBe(Date.now())
+    later()
+    store.deleteTask(t.id)
+    expect(q.editedAt).toBe(Date.now())
+    later()
+    store.completePomodoro(25, null, p.id)
+    expect(p.editedAt).toBe(Date.now())
+    // 沒歸專案的任務不影響
+    const before = p.editedAt
+    later()
+    store.addTask({ title: '自己的', date: TODAY })
+    expect(p.editedAt).toBe(before)
+  })
+
+  it('匯出匯入保留；舊存檔沒有 editedAt 時從留下來的時間推回去', () => {
+    const p = newProject()
+    later()
+    store.addProjectLog(p.id, { text: '推進' })
+    const at = p.editedAt
+    expect(roundTrip().state.projects[0].editedAt).toBe(at)
+    const raw = JSON.parse(store.exportJSON())
+    delete raw.projects[0].editedAt
+    later()
+    const other = new Store()
+    other.importJSON(JSON.stringify(raw))
+    // 最後一則進度的時間
+    expect(other.state.projects[0].editedAt).toBe(at)
+    expect(lastTouched({ createdAt: 5, milestones: [{ doneAt: 9 }], logs: [], notes: [{ updatedAt: 7 }] })).toBe(9)
   })
 })

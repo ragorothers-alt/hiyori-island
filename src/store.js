@@ -13,7 +13,7 @@ import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
-import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone } from './projects.js'
+import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched } from './projects.js'
 import { isEvent } from './events.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
@@ -474,7 +474,7 @@ function migrate(s) {
         if (v) focus[d] = v
       }
     }
-    return {
+    const out = {
       id: str(p.id), name, color: num(p.color, 0, 99, 0), deadline: ymd(p.deadline, ''), createdAt: ts(p.createdAt) || Date.now(),
       milestones, completedAt: ts(p.completedAt), archived: !!p.archived, onTime: !!p.onTime,
       // 暫停的時間；null = 進行中（已落成的不會暫停）
@@ -485,6 +485,9 @@ function migrate(s) {
       // 範例專案被寫進自己的東西了（清範例時留著）
       mine: !!p.mine,
     }
+    // 最後一次動到這個專案的時間（專案列表照這個排，最近的在前）；舊存檔從留下來的時間推回去
+    out.editedAt = ts(p.editedAt) || lastTouched(out, tasks)
+    return out
   })
   // 任務歸屬的專案已經不在了（被刪掉、或匯入的檔案對不上）：拿掉歸屬，任務照留；
   // 選的里程碑不在那個專案裡：改回自動
@@ -1464,6 +1467,7 @@ export class Store {
     }
     if (!t.title) return null
     this.state.tasks.push(t)
+    this._editedTask(t)
     this._finish([['taskAdded', t]])
     return t
   }
@@ -1500,6 +1504,7 @@ export class Store {
     this._refreshToday()
     t.done = !t.done
     t.doneAt = t.done ? Date.now() : null
+    this._editedTask(t)
     const fx = []
     if (t.done) {
       fx.push(['taskDone', t])
@@ -1595,7 +1600,10 @@ export class Store {
       patch = { ...patch, ms: this._find('projects', pid)?.milestones.some((m) => m.id === ms) ? ms : null }
     }
     const moved = pid && pid !== t.project
+    // 原本歸的專案和（換過去的）新專案都算動到了
+    this._editedTask(t)
     Object.assign(t, patch)
+    this._editedTask(t)
     if (patch.date) this._fitStar(t)
     if (moved) this._gatherTaskLogs(t)
     this._finish()
@@ -1632,6 +1640,7 @@ export class Store {
     return { todo, done }
   }
   deleteTask(id) {
+    this._editedTask(this._find('tasks', id))
     this.state.tasks = this.state.tasks.filter((t) => t.id !== id)
     this._dropTaskRefs()
     this._finish([['taskDeleted', id]])
@@ -1679,6 +1688,7 @@ export class Store {
     for (const p of this.state.projects) for (const l of p.logs) if (l.task === t.id) l.task = parts[0].id
     const at = this.state.tasks.indexOf(t)
     this.state.tasks.splice(at, 1, ...parts)
+    this._editedTask(t)
     fx.push(['taskSplit', { task: t, parts }])
     this._finish(fx)
     return parts
@@ -2069,6 +2079,7 @@ export class Store {
     const p = this._find('projects', id)
     if (!p || p.completedAt || !!p.pausedAt === paused) return
     p.pausedAt = paused ? Date.now() : null
+    this._edited(p)
     this._finish()
   }
   // 還沒有地的專案依序分到空地（進行中的優先、再來暫停的、已落成的最後，同狀態先建立的先）
@@ -2089,7 +2100,7 @@ export class Store {
     if (!this.canAddProject() || !name.trim()) return null
     const slot = this.freeSlot()
     const p = {
-      id: uid(), name: name.trim(), color, deadline: DATE_RE.test(deadline) ? deadline : '', slot, createdAt: Date.now(),
+      id: uid(), name: name.trim(), color, deadline: DATE_RE.test(deadline) ? deadline : '', slot, createdAt: Date.now(), editedAt: Date.now(),
       milestones: milestones.map((t) => t.trim()).filter(Boolean).map((t) => ms(t)),
       completedAt: null, pausedAt: null, archived: false, ...projectDetails(),
     }
@@ -2104,6 +2115,7 @@ export class Store {
     patch = cleanPatch(p, patch, PROJECT_PATCH)
     if ('name' in patch) this._authored(p)
     Object.assign(p, patch)
+    this._edited(p)
     this._finish()
   }
   // 範例專案裡寫進了自己的東西（名字、目標、里程碑、細項、進度、筆記）：從此算使用者的，清範例時留著。
@@ -2111,12 +2123,20 @@ export class Store {
   _authored(p) {
     if (p.id.startsWith('ex-')) p.mine = true
   }
+  // 動到了這個專案（改名、里程碑、細項、進度、筆記、歸在它底下的任務、專注在它上面…）：專案列表把它排到前面
+  _edited(p) {
+    if (p) p.editedAt = Date.now()
+  }
+  _editedTask(t) {
+    if (t?.project) this._edited(this._find('projects', t.project))
+  }
   // 改截止日；空字串 = 不設截止日
   setDeadline(id, date) {
     const p = this._find('projects', id)
     const d = DATE_RE.test(date) ? date : ''
     if (!p || p.deadline === d) return
     p.deadline = d
+    this._edited(p)
     this._finish()
   }
   // 刪掉專案時，歸在它底下的任務留著，只是不再歸屬
@@ -2137,6 +2157,7 @@ export class Store {
     if (!archived && !this.canAddProject()) return false
     p.archived = archived
     p.slot = -1
+    this._edited(p)
     this._finish()
     return true
   }
@@ -2145,6 +2166,7 @@ export class Store {
     if (!p || !title.trim()) return
     this._authored(p)
     p.milestones.push(ms(title.trim()))
+    this._edited(p)
     this._finish()
   }
   deleteMilestone(pid, mid) {
@@ -2154,6 +2176,7 @@ export class Store {
     // 進度日誌裡標著這個里程碑的，留著字、拿掉標記；選了它的任務改回自動
     for (const l of p.logs) if (l.ms === mid) l.ms = null
     for (const t of this.state.tasks) if (t.ms === mid) t.ms = null
+    this._edited(p)
     const fx = []
     this._completeProject(p, fx)
     this._finish(fx)
@@ -2180,6 +2203,7 @@ export class Store {
     this._refreshToday()
     const fx = []
     this._setMilestone(p, m, !m.done, fx)
+    this._edited(p)
     this._finish(fx)
   }
   // 完成／取消一個里程碑（經驗只給第一次）；全部完成時專案落成
@@ -2212,6 +2236,7 @@ export class Store {
     if (typeof patch.title === 'string' && patch.title.trim()) m.title = patch.title.trim().slice(0, 120)
     if (typeof patch.note === 'string') m.note = patch.note.trim().slice(0, PL.msNote)
     if ('due' in patch) m.due = DATE_RE.test(patch.due) ? patch.due : ''
+    this._edited(p)
     this._finish()
   }
   // 往上（-1）或往下（1）挪一格
@@ -2222,6 +2247,7 @@ export class Store {
     if (i < 0 || j < 0 || j >= p.milestones.length) return
     const list = p.milestones
     ;[list[i], list[j]] = [list[j], list[i]]
+    this._edited(p)
     this._finish()
   }
   // ── 里程碑的細項：最後一項打勾時里程碑跟著完成，取消任何一項時里程碑也回到未完成 ──
@@ -2232,6 +2258,7 @@ export class Store {
     this._authored(p)
     const step = { id: uid(), title, done: false }
     m.steps.push(step)
+    this._edited(p)
     this._finish()
     return step
   }
@@ -2244,6 +2271,7 @@ export class Store {
     const fx = []
     if (step.done && !m.done && m.steps.every((x) => x.done)) this._setMilestone(p, m, true, fx)
     else if (!step.done && m.done) this._setMilestone(p, m, false, fx)
+    this._edited(p)
     this._finish(fx)
   }
   renameStep(pid, mid, sid, title) {
@@ -2253,6 +2281,7 @@ export class Store {
     if (!step || !title) return
     this._authored(p)
     step.title = title
+    this._edited(p)
     this._finish()
   }
   deleteStep(pid, mid, sid) {
@@ -2263,6 +2292,7 @@ export class Store {
     const fx = []
     // 剩下的都做完了：里程碑也算完成
     if (!m.done && m.steps.length && m.steps.every((x) => x.done)) this._setMilestone(p, m, true, fx)
+    this._edited(p)
     this._finish(fx)
   }
 
@@ -2273,6 +2303,7 @@ export class Store {
     if (!p || p.goal === goal) return
     this._authored(p)
     p.goal = goal
+    this._edited(p)
     this._finish()
   }
   // 寫一則進度。date：這則進度是哪天的事（可以補記以前，不能記未來）；mins：花了多久；ms：跟哪個里程碑有關；
@@ -2293,6 +2324,7 @@ export class Store {
     p.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
     if (p.logs.length > PL.logs) p.logs.splice(0, p.logs.length - PL.logs)
     this.stats.projectLogs++
+    this._edited(p)
     const fx = []
     const first = p.logDay !== this.today
     if (first) {
@@ -2318,6 +2350,7 @@ export class Store {
     if (DATE_RE.test(patch.date) && patch.date <= this.today) l.date = patch.date
     if ('ms' in patch) l.ms = p.milestones.some((m) => m.id === patch.ms) ? patch.ms : null
     p.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
+    this._edited(p)
     this._finish()
   }
   deleteProjectLog(pid, lid) {
@@ -2328,6 +2361,7 @@ export class Store {
     if (p.logs.length === n) return
     // 跟生活記錄一樣：刪掉的進度不算進累計筆數
     this.stats.projectLogs = Math.max(0, this.stats.projectLogs - 1)
+    this._edited(p)
     this._finish()
   }
   addProjectNote(pid, { title = '', body = '' } = {}) {
@@ -2337,6 +2371,7 @@ export class Store {
     const now = Date.now()
     const note = { id: uid(), title: String(title).slice(0, PL.noteTitle), body: String(body).slice(0, PL.noteBody), pinned: false, createdAt: now, updatedAt: now }
     p.notes.push(note)
+    this._edited(p)
     this._finish()
     return note
   }
@@ -2350,6 +2385,7 @@ export class Store {
     if (typeof patch.body === 'string') n.body = patch.body.slice(0, PL.noteBody)
     if ('pinned' in patch) n.pinned = !!patch.pinned
     else n.updatedAt = Date.now()
+    this._edited(p)
     if (!quiet) return this._finish()
     this.save()
     this.emit('noteSaved', { project: p, note: n })
@@ -2358,6 +2394,7 @@ export class Store {
     const p = this._find('projects', pid)
     if (!p) return
     p.notes = p.notes.filter((x) => x.id !== nid)
+    this._edited(p)
     this._finish()
   }
 
@@ -2519,7 +2556,10 @@ export class Store {
     if (task) task.pomos = (task.pomos || 0) + 1
     // 任務歸在某個專案、或目標就是專案：專注的分鐘記到專案上（專案的時間軸和統計用）
     const proj = this._find('projects', task ? task.project : projectId) || null
-    if (proj && minutes) proj.focus[this.today] = Math.min(1440, (proj.focus[this.today] || 0) + Math.round(minutes))
+    if (proj && minutes) {
+      proj.focus[this.today] = Math.min(1440, (proj.focus[this.today] || 0) + Math.round(minutes))
+      this._edited(proj)
+    }
     const fx = [['pomodoro', { minutes, task, project: proj }]]
     this.stats.pomodoros++
     this.stats.focusMinutes += minutes

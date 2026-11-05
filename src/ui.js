@@ -404,6 +404,11 @@ export class UI {
   }
 
   setTab(tab) {
+    // 進到專案分頁：照最近動過的重新排一次
+    if (tab === 'projects' && this.tab !== 'projects') {
+      this._projRank = null
+      this._stale?.add('projects')
+    }
     this.tab = tab
     // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
     document.body.dataset.tab = tab
@@ -1304,6 +1309,8 @@ export class UI {
     if (!pv) return
     const id = pv.id
     pv.close()
+    // 回到列表：剛剛動過的專案排到前面
+    this._projRank = null
     this._stale?.add('projects')
     this._renderPage('projects')
     // 回到列表上剛剛那張卡
@@ -1324,10 +1331,13 @@ export class UI {
     if (pv?.id) pv.close()
     // 正在就地改專案名稱：先不重畫列表（改完或取消時會再畫一次）
     if (editing($('#projectHome'))) return
-    // 進行中的在前，再來暫停的、已落成的
+    // 最近動過的專案在前（store 的 editedAt）。順序只在進到這一頁時重排（切到專案分頁、從詳情回來）：
+    // 待在列表上勾里程碑、改名、暫停時，卡片不會在游標底下跳走；這段時間新建立或放回來的排在最前面
     const all = s.activeProjects()
-    const rank = { active: 0, paused: 1, done: 2 }
-    const active = all.sort((a, b) => rank[s.projectStatus(a)] - rank[s.projectStatus(b)] || a.createdAt - b.createdAt)
+    const recent = (a, b) => (b.editedAt || b.createdAt) - (a.editedAt || a.createdAt)
+    if (!this._projRank) this._projRank = new Map([...all].sort(recent).map((p, i) => [p.id, i]))
+    const rankOf = (p) => this._projRank.get(p.id) ?? -1
+    const active = all.sort((a, b) => rankOf(a) - rankOf(b) || recent(a, b))
     const archived = s.state.projects.filter((p) => p.archived)
     // 狀態篩選：有兩種以上狀態時才出現
     const count = { all: all.length, active: 0, paused: 0, done: 0 }

@@ -108,6 +108,18 @@ function timeline() {
   return { day, addLog, list }
 }
 
+// 舊存檔還沒有 editedAt（最後一次動到這個專案的時間）時，從留下來的時間推回去：
+// 建立、落成、暫停、進度、筆記、完成的里程碑和歸在它底下的任務，取最晚的那一個
+export function lastTouched(p, tasks = []) {
+  let t = p.createdAt || 0
+  for (const v of [p.completedAt, p.pausedAt]) t = Math.max(t, v || 0)
+  for (const l of p.logs || []) t = Math.max(t, l.at || 0)
+  for (const n of p.notes || []) t = Math.max(t, n.updatedAt || 0)
+  for (const m of p.milestones || []) t = Math.max(t, m.doneAt || 0)
+  for (const x of linkedTo(p, tasks)) t = Math.max(t, x.doneAt || 0, x.createdAt || 0)
+  return t
+}
+
 // 最新的一則進度（日期新的優先，同一天看寫下的時間）
 export function latestLog(p) {
   let best = null
