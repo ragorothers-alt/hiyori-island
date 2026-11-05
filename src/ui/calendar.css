@@ -259,7 +259,7 @@ body.night .cd-amt { color: #f3cf7f; }
 .cd-mood .stamp-k { flex: none; width: 38px; height: 38px; font-size: 18px; color: var(--mc); border-color: var(--mc); background: transparent; }
 .cd-mood b { font-weight: 500; font-size: 13.5px; margin-right: 6px; }
 .cd-mood small { font-size: 11.5px; color: var(--ink-faint); }
-.cd-mood p { margin: 4px 0 0; font-size: 13px; line-height: 1.6; color: var(--ink-soft); word-break: break-word; }
+.cd-mood p { margin: 4px 0 0; font-size: 13px; line-height: 1.6; color: var(--ink-soft); word-break: break-word; white-space: pre-line; }
 .cd-hint { font-size: 12px; color: var(--ink-faint); padding: 4px 4px; }
 .cd-energy { display: flex; align-items: center; gap: 8px; padding: 2px 4px 4px; font-size: 12px; color: var(--ink-soft); }
 .cd-energy b { font-weight: 500; color: var(--ink); }

@@ -1,15 +1,16 @@
 import './today.css'
 import { $, esc, ICON } from './dom.js'
-import { tagOf, EVENT_COLORS, XP, WEEK_ZH } from '../theme.js'
+import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS } from '../theme.js'
 import { TODAY_QUOTES, TODAY_LEADS } from '../data/todayLines.js'
-import { addDays, parseDate, toMin, weekKey } from '../store.js'
+import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
 import { applies, countOn, doneOn, streak } from '../habits.js'
-import { taskDur } from '../planner.js'
+import { taskDur, nowGuide, toHHMM } from '../planner.js'
 import heroDay from '../assets/today/hero-day.webp'
 import heroNight from '../assets/today/hero-night.webp'
 
-// App 模式的首頁「今日總覽」：今天的進度、一句話、今日行程、前三要務（本命）、每日任務、這週的習慣。
-// 只看今天（不跟著上方選的日期走）；資料一變就整頁重畫，焦點用 data-fk 接回去；每分鐘重畫一次讓「現在」的紅線往下走
+// App 模式的首頁「今日總覽」：今天的進度、一句話、今日行程、前三要務（本命）、每日任務、這週的習慣、今日反思。
+// 只看今天（不跟著上方選的日期走）；資料一變就整頁重畫，焦點用 data-fk 接回去；每分鐘重畫一次讓「現在」的紅線往下走。
+// 今日反思就是晚間回顧那一篇（store.saveReview）：重畫時把打到一半的字和游標接回去，中文組字中先不重畫
 
 const pad = (n) => String(n).padStart(2, '0')
 const hhmm = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`
@@ -42,6 +43,7 @@ const IC = {
   food: svg('<path d="M7 4v7a2 2 0 0 0 4 0V4M9 11v9M16 4c-1.7 1.3-2.5 3.3-2.5 6h2.5v10"/>'),
   play: svg('<path d="M8.5 6v12l9.5-6z"/>'),
   star: svg('<path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.7.9 5.1L12 16.4l-4.6 2.4.9-5.1-3.8-3.7 5.2-.8z"/>'),
+  pen: svg('<path d="M5 19l1.2-4.2L15.6 5.4a2 2 0 0 1 2.9 0l.1.1a2 2 0 0 1 0 2.9l-9.4 9.4z"/><path d="M14 7l3 3M4.5 19.5h7"/>'),
   sakura: svg('<path d="M12 12c-1.2-2.8-1.7-5.2-.3-7.3.8.5 1.5.9 2.4.6.5 2.6-.4 4.6-2.1 6.7zM12 12c2.6-1.6 5-2.2 7.2-1.1-.4.9-.7 1.6-.3 2.5-2.5.9-4.6.2-6.9-1.4zM12 12c2.1 2.1 3.2 4.3 2.5 6.7-.9-.3-1.7-.4-2.4.2-1.7-2-1.8-4.3-.1-6.9zM12 12c-.3 3-1.3 5.2-3.6 6.3-.4-.9-.9-1.5-1.9-1.5.1-2.7 1.8-4.2 5.5-4.8zM12 12c-3 .6-5.4.3-7.1-1.5.7-.6 1.2-1.3 1.1-2.3 2.6-.3 4.4 1 6 3.8z"/><circle cx="12" cy="12" r="1"/>'),
 }
 // 行程的小圖示：照標題猜（會議、信件、運動、閱讀、休息、吃飯），猜不到就是日程／任務
@@ -55,6 +57,25 @@ const GUESS = [
 ]
 const iconOf = (title, kind) => IC[GUESS.find(([re]) => re.test(title))?.[1] || (kind === 'task' ? 'check' : 'cal')]
 const dur = (m) => `${m} 分`
+// 「3 小時 20 分」「45 分」
+const hm = (m) => {
+  const h = Math.floor(m / 60)
+  return h ? `${h} 小時${m % 60 ? ` ${m % 60} 分` : ''}` : `${m} 分`
+}
+// 「現在」卡片：作息的哪一段、適合做什麼
+const PHASE = {
+  peak: ['精神最好的時段', '先做最重要、最需要專注的那件事'],
+  dip: ['午後容易累', '做輕一點、短一點的事，或起來走走、喝杯水'],
+  windDown: ['睡前一小時', '收尾的時間：寫今日反思、看一下明天，別再開新的大事'],
+  over: ['過了就寢時間', '今天就到這裡，早點睡，明天再繼續'],
+}
+const phaseOf = (g, wake) => {
+  if (PHASE[g.phase]) return PHASE[g.phase]
+  if (g.phase === 'early') return ['還沒到起床時間', `起床是 ${wake}；早起的話先喝水、伸展，看一下今天的行程`]
+  if (g.nowMin < 12 * 60) return ['上午', '頭腦還清楚：推進一件重要的事']
+  if (g.nowMin < 18 * 60) return ['下午', '適合處理溝通、整理和例行的事']
+  return ['晚上', '適合學習、閱讀，或做自己想做的事']
+}
 
 export class TodayView {
   constructor(root, store, hooks) {
@@ -74,11 +95,42 @@ export class TodayView {
     }
     addEventListener('pointerup', up)
     addEventListener('pointercancel', up)
-    setInterval(() => this._tick(), 60000)
+    // 對齊到整分：「現在」的時鐘跟手機上的時間同一刻跳
+    setTimeout(() => {
+      this._tick()
+      setInterval(() => this._tick(), 60000)
+    }, 60000 - (Date.now() % 60000) + 50)
+    // 今日反思：選了天氣還沒記下（refMood）、Ctrl／⌘＋Enter 記下；中文組字中先不重畫，組完再補
+    this.refMood = null
+    this.refDate = null
+    root.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.matches?.('.td-ref-text') && !e.isComposing) {
+        e.preventDefault()
+        this._saveRef()
+      }
+    })
+    root.addEventListener('input', (e) => {
+      if (e.target.matches?.('.td-ref-text')) this._syncRefBtn()
+    })
+    root.addEventListener('compositionstart', () => (this._composing = true))
+    root.addEventListener('compositionend', () => {
+      this._composing = false
+      if (this._held) {
+        this._held = false
+        this.render()
+      }
+    })
   }
 
   _tick() {
     this._late = this._down
+    // 正在寫反思：只換時鐘的數字，其他的晚一點再重畫，不打斷打字
+    if (document.activeElement?.matches?.('.td-ref-text')) {
+      const t = $('.tn-time', this.root)
+      const n = new Date()
+      if (t) t.textContent = hhmm(n.getHours() * 60 + n.getMinutes())
+      return
+    }
     if (!this._down && this.root.offsetParent) this.render()
   }
 
@@ -101,10 +153,43 @@ export class TodayView {
         if (s.weekly().ready && !s.weekly().claimed) s.claimWeekly()
         return
       case 'habit': return s.checkHabit(id)
+      case 'slot': return s.updateTask(id, { at: b.dataset.v })
+      case 'mood':
+        this.refMood = b.dataset.v
+        this.refDate = s.today
+        return this.render()
+      case 'refSave': return this._saveRef()
     }
   }
 
+  // 記下今日反思：天氣用剛選的、沒選就沿用已經記下的那個
+  _saveRef() {
+    const s = this.store
+    const mood = this._refMood() || s.state.journal[s.today]?.mood
+    const ta = $('.td-ref-text', this.root)
+    if (!mood || !ta) return
+    this.refMood = null
+    // 存完會重畫：框裡的字就是剛記下的，不用當成打到一半的接回去
+    this._clean = true
+    s.saveReview(s.today, mood, ta.value)
+  }
+  // 選了但還沒記下的天氣（換日了就作廢）
+  _refMood() {
+    return this.refDate === this.store.today ? this.refMood : null
+  }
+  // 框裡的字跟記下的不一樣：標出「還沒記下」
+  _syncRefBtn() {
+    const ta = $('.td-ref-text', this.root)
+    const box = ta?.closest('.td-ref')
+    if (box) box.classList.toggle('dirty', ta.value.trim() !== ta.defaultValue.trim() || !!this._refMood())
+  }
+
   render() {
+    // 中文組字中：整頁換掉會打斷組字，組完再畫
+    if (this._composing) {
+      this._held = true
+      return
+    }
     // 焦點在某個按鈕上（例如剛勾完一件）：重畫後接回同一個；那個按鈕不見了（☆ 選成本命、推薦的那件做完了），
     // 就接到同一件的勾選或專注鈕，再不然是同一張卡片裡的第一個按鈕
     const a = document.activeElement
@@ -112,31 +197,45 @@ export class TodayView {
     const card = fk && [...(a.closest('.td-card')?.classList || [])].find((c) => c !== 'td-card')
     // 行程、習慣卡片裡捲到的位置也留著
     const scroll = ['.td-tl', '.td-hg'].map((sel) => [sel, $(sel, this.root)?.scrollTop, $(sel, this.root)?.scrollLeft])
+    // 今日反思打到一半的字（跟記下的不一樣才算）和游標
+    const ta = $('.td-ref-text', this.root)
+    const draft = !this._clean && ta && ta.value !== ta.defaultValue ? ta.value : null
+    const caret = ta && ta === a ? [ta.selectionStart, ta.selectionEnd] : null
+    this._clean = false
     const s = this.store
     const today = s.today
     const now = new Date()
     const nowMin = now.getHours() * 60 + now.getMinutes()
     const tasks = s.tasksOn(today)
-    this.root.innerHTML = `<div class="td">
+    this.root.innerHTML = `<div class="td${this._drawn ? '' : ' td-enter'}">
       ${this._heroHTML(today, tasks, now)}
       <div class="td-grid">
+        ${this._nowHTML(today, tasks, nowMin)}
         ${this._progHTML(tasks, nowMin)}
         ${this._quoteHTML(today)}
         ${this._schedHTML(today, tasks, nowMin)}
         ${this._topHTML(today, tasks)}
         ${this._questHTML()}
         ${this._habitHTML(today)}
+        ${this._refHTML(today)}
       </div>
     </div>`
+    this._drawn = true
     for (const [sel, top, left] of scroll) {
       const el = $(sel, this.root)
       if (el && top != null) Object.assign(el, { scrollTop: top, scrollLeft: left })
+    }
+    const nt = $('.td-ref-text', this.root)
+    if (nt && draft != null) {
+      nt.value = draft
+      this._syncRefBtn()
     }
     if (!fk) return
     const id = fk.replace(/^[a-z]+-/, '')
     const by = (k) => $(`[data-fk="${CSS.escape(k)}"]:not(:disabled)`, this.root)
     const to = by(fk) || by(`tg-${id}`) || by(`fc-${id}`) || (card && ($(`.${card} :is(li, .td-hr) button:not(:disabled)`, this.root) || $(`.${card} button:not(:disabled)`, this.root)))
     to?.focus({ preventScroll: true })
+    if (to === nt && caret) nt.setSelectionRange(...caret)
   }
 
   // ── 最上面：日期、標題、一句問候（依今天的狀態） ──
@@ -150,6 +249,63 @@ export class TodayView {
       <h2 class="td-title">今天的總覽<i class="td-sakura">${IC.sakura}</i></h2>
       <p class="td-lead">${esc(lead.zh)}<small>${esc(lead.ja)}</small></p>
     </header>`
+  }
+
+  // ── 現在：幾點、到就寢還有多久、扣掉三餐／行程／已排的任務還剩多少空檔、眼前這段空檔適合做什麼 ──
+  _nowHTML(today, tasks, nowMin) {
+    const s = this.store
+    const r = s.state.rhythm
+    const g = nowGuide({ rhythm: r, date: today, nowMin, events: s.eventsOn(today), tasks })
+    const [label, tip] = phaseOf(g, r.wake)
+    const awake = g.phase !== 'early' && g.phase !== 'over'
+    const num = (k, v, sub = '') => `<div><dt>${k}</dt><dd>${v}${sub ? `<small>${sub}</small>` : ''}</dd></div>`
+    const nums = awake
+      ? num('距離就寢', hm(g.toBed), hhmm(g.bed)) + num('還能做事的空檔', hm(g.freeMin), '扣掉三餐、行程和已排的任務')
+        + num('還沒排時段的任務', `${g.open.count} 件`, g.open.count ? `約 ${hm(g.open.min)}${g.open.min > g.freeMin ? '・放不下全部' : ''}` : '')
+      : num('就寢', r.sleep) + num('起床', r.wake)
+    // 從現在到就寢：空檔畫成亮的
+    const bar = awake && g.toBed > 0
+      ? `<div class="tn-bar" role="img" aria-label="從現在到就寢 ${hm(g.toBed)}，空檔共 ${hm(g.freeMin)}">${g.free.map(([a, b]) => `<i style="left:${((a - nowMin) / g.toBed) * 100}%;width:${((b - a) / g.toBed) * 100}%"></i>`).join('')}</div>
+        <div class="tn-axis"><span>現在</span><span>${hhmm(g.bed)} 就寢</span></div>`
+      : ''
+    // 現在正在做的、眼前這段空檔
+    let line = ''
+    if (g.current) line = `<b>${g.current.kind === 'task' ? '正在做' : '正在'}</b>${esc(g.current.title)}（到 ${hhmm(g.current.end)}）`
+    if (awake && g.next) {
+      const room = g.next.end - g.next.start
+      line += `${line ? '<span>・</span>' : ''}${g.next.start <= nowMin + 1 ? `現在到 ${hhmm(g.next.end)} 有 <b>${hm(room)}</b> 空檔` : `下一段空檔 ${hhmm(g.next.start)}–${hhmm(g.next.end)}（<b>${hm(room)}</b>）`}`
+    } else if (awake && g.phase !== 'windDown') line += `${line ? '<span>・</span>' : ''}今天剩下的時間都排滿了`
+    // 放得下眼前這段的任務：專注、或直接排進這段
+    const slotAt = g.next && toHHMM(Math.min(Math.ceil(g.next.start / 5) * 5, g.next.end))
+    const fit = (t) => {
+      const k = esc(t.id)
+      const d = taskDur(t)
+      const at = Math.ceil(g.next.start / 5) * 5 + d <= g.next.end ? slotAt : toHHMM(g.next.start)
+      return `<li><i style="--c:${tagOf(t.tag).color}"></i><span>${t.star ? '★ ' : ''}${esc(t.title)}</span><small>${dur(d)}</small>
+        <button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="nf-${k}" title="專注在這件事上" aria-label="專注在「${esc(t.title)}」">${IC.play}</button>
+        <button type="button" class="tn-slot" data-act="slot" data-id="${k}" data-v="${at}" data-fk="ns-${k}" title="排進這段空檔">排進 ${at}</button></li>`
+    }
+    let sug = ''
+    if (g.fits.length) sug = `<p class="tn-k">適合現在做</p><ul class="tn-fits">${g.fits.map(fit).join('')}</ul>`
+    else if (awake && g.phase !== 'windDown' && g.next) {
+      const room = g.next.end - g.next.start
+      sug = `<p class="tn-none">${room < 10 ? '空檔很短：喝口水、伸展一下就好'
+        : g.open.count ? '還沒排的任務都比這段空檔長：先做其中一小段，或到日程排進後面的空檔'
+          : g.scheduled.count ? '今天的任務都排好時段了，照著走就好' : '今天沒有還沒做的任務：可以加一件，或好好休息'}</p>`
+    }
+    const habits = awake ? s.state.habits.filter((h) => h.kind === 'build' && !h.archived && applies(h, today) && !doneOn(h, today)) : []
+    const hb = habits.length ? `<p class="tn-hb">還沒打卡的習慣：${habits.slice(0, 4).map((h) => esc(h.name)).join('、')}${habits.length > 4 ? '…' : ''}</p>` : ''
+    return `<section class="td-card td-nowc tn-${g.phase}" aria-label="現在">
+      <header class="td-h">${IC.clock}<h3>現在<small>いま</small></h3><button type="button" class="td-more" data-act="tab" data-v="schedule" data-fk="to-plan">到日程排一下<i>›</i></button></header>
+      <div class="tn-top">
+        <div class="tn-clock"><b class="tn-time">${hhmm(nowMin)}</b><span>${label}</span></div>
+        <dl class="tn-nums">${nums}</dl>
+      </div>
+      ${bar}
+      ${line ? `<p class="tn-line">${line}</p>` : ''}
+      <p class="tn-tip">${esc(tip)}</p>
+      ${sug}${hb}
+    </section>`
   }
 
   // ── 今日進度：完成／進行中（開始專注過、或排的時間已經到了）／待完成 ──
@@ -253,6 +409,30 @@ export class TodayView {
     return `<section class="td-card td-quest">
       <header class="td-h">${IC.spark}<h3>每日任務<small>デイリークエスト</small></h3>${ready ? '<button type="button" class="td-more" data-act="claimAll" data-fk="claimAll">全部領取<i>›</i></button>' : ''}</header>
       <ul class="td-qs">${list.map(row).join('')}</ul>
+    </section>`
+  }
+
+  // ── 今日反思：選今天的天氣、寫幾句話（就是晚間回顧那一篇，第一次記下有經驗值） ──
+  _refHTML(today) {
+    const s = this.store
+    const saved = s.state.journal[today]
+    const mood = this._refMood() || saved?.mood || null
+    const pending = this._refMood() && this._refMood() !== saved?.mood
+    const at = saved ? new Date(saved.at) : null
+    const stamp = at ? `<small class="td-ref-at">${pending ? '天氣還沒記下' : `已記下・${pad(at.getHours())}:${pad(at.getMinutes())}`}</small>` : ''
+    const moods = MOODS.map((m) => `<button type="button" class="td-mood${m.key === mood ? ' on' : ''}" data-act="mood" data-v="${m.key}" data-fk="md-${m.key}" style="--mc:${m.color}" aria-pressed="${m.key === mood}" title="${m.desc}"><b>${m.kanji}</b><span>${m.name}</span></button>`).join('')
+    const hint = !mood
+      ? '先選今天的天氣，再記下來'
+      : saved
+        ? '晚上的回顧也是這一篇；紀錄頁的小日記和日曆上看得到'
+        : `第一次記下 +${XP.review} XP・Ctrl＋Enter 也可以記下`
+    return `<section class="td-card td-ref${pending ? ' dirty' : ''}" aria-label="今日反思">
+      <header class="td-h">${IC.pen}<h3>今日反思<small>きょうのふりかえり</small></h3>${stamp}</header>
+      <div class="td-moods" role="group" aria-label="今天的天氣（心情）">${moods}</div>
+      <textarea class="td-ref-text" data-fk="ref-text" rows="3" maxlength="${REVIEW_TEXT}" aria-label="今日反思"
+        placeholder="今天過得怎麼樣？做得好的、想改進的、明天想試試的">${esc(saved?.text || '')}</textarea>
+      <div class="td-ref-row"><small class="td-ref-hint">${hint}</small><em class="td-ref-dirty">還沒記下</em>
+        <button type="button" class="btn-primary td-ref-save" data-act="refSave" data-fk="ref-save"${mood ? '' : ' disabled'}>${saved ? '更新' : '記下來'}</button></div>
     </section>`
   }
 

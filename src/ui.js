@@ -1680,6 +1680,12 @@ export class UI {
       this.store.saveReview(this.reviewDate, this.mood, $('#reviewText').value)
       this.closeReview()
     })
+    // 跟以前的一行輸入框一樣 Enter 就記下來；要換行按 Shift＋Enter
+    $('#reviewText').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return
+      e.preventDefault()
+      $('#reviewForm').requestSubmit()
+    })
     $('#reviewLater').onclick = () => {
       try {
         localStorage.setItem('hiyori-review-later', this.store.today)

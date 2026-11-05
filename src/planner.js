@@ -236,6 +236,55 @@ export function nearestSlot({ task, tasks, events, rhythm, date, today, nowMin =
   return r.plan.find((p) => p.id === task.id) || null
 }
 
+// ── 今日總覽的「現在」 ──
+// 現在在作息的哪一段（phase）、到就寢還有多久、扣掉三餐／日程／已排的任務（含緩衝）後還剩多少空檔、
+// 現在正在做的（日程、三餐、排了時段的任務）、眼前這段空檔、這段空檔放得下哪幾件還沒排的任務。
+// phase：early 起床前、peak 精神最好的時段、dip 午後（13–15 點）、normal 其他醒著的時間、windDown 睡前一小時、over 過了就寢時間
+// tasks、events：今天的；nowMin：現在是當天第幾分鐘
+export function nowGuide({ rhythm, date, nowMin, events = [], tasks = [] }) {
+  const wake = toM(rhythm.wake)
+  const bed = bedAt(rhythm)
+  // 就寢在午夜後、現在是午夜到就寢之間：還是前一晚醒著的那段
+  const late = bed > 1440 && nowMin < bed - 1440
+  const end = late ? bed - 1440 : bed
+  const toBed = end - nowMin
+  const peak = PEAKS[rhythm.peak]?.range
+  let phase
+  if (!late && nowMin < wake) phase = bed <= 1440 && nowMin < 4 * 60 ? 'over' : 'early'
+  else if (toBed <= 0) phase = 'over'
+  else if (toBed <= 60) phase = 'windDown'
+  else if (peak && nowMin >= peak[0] && nowMin < peak[1]) phase = 'peak'
+  else if (nowMin >= 13 * 60 && nowMin < 15 * 60) phase = 'dip'
+  else phase = 'normal'
+  const awakeNow = phase !== 'early' && phase !== 'over'
+  const busy = busyOf({ rhythm, date, events, tasks })
+  const free = awakeNow ? gaps(nowMin, end, busy) : []
+  const freeMin = free.reduce((a, [x, y]) => a + (y - x), 0)
+  // 現在正在做的：日程、三餐、排了時段還沒做完的任務（不算緩衝）
+  const cover = (a, b) => a <= nowMin && nowMin < b
+  let current = null
+  for (const e of events) if (!e.done && cover(toM(e.start), toM(e.end))) current = { kind: 'event', title: e.title, end: toM(e.end) }
+  for (const t of tasks) if (!current && !t.done && t.at && cover(toM(t.at), toM(t.at) + taskDur(t))) current = { kind: 'task', title: t.title, end: toM(t.at) + taskDur(t), id: t.id }
+  for (const b of rhythmBlocks(rhythm, date)) if (!current && b.kind === 'meal' && cover(b.start, b.end)) current = { kind: 'meal', title: b.label, end: b.end }
+  // 眼前這段空檔：現在就在空檔裡，或下一段
+  const next = free[0] ? { start: Math.max(free[0][0], nowMin), end: free[0][1] } : null
+  const room = next ? next.end - next.start : 0
+  const later = tasks.filter((t) => !t.done && t.at && toM(t.at) + taskDur(t) > nowMin)
+  const open = tasks.filter((t) => !t.done && !t.at)
+  // 放得下眼前這段的還沒排的任務：精神好的時候重要的先，午後和其他時間短的、輕的先
+  let fits = []
+  if (awakeNow && phase !== 'windDown' && room >= 10) {
+    const order = phase === 'peak' ? planOrder(open, date) : [...planOrder(open, date)].sort((a, b) => (phase === 'dip' ? a.priority - b.priority : 0) || taskDur(a) - taskDur(b))
+    fits = order.filter((t) => taskDur(t) <= room).slice(0, 3)
+  }
+  return {
+    phase, nowMin, bed: end, toBed, free, freeMin, current, next,
+    scheduled: { count: later.length, min: later.reduce((a, t) => a + taskDur(t), 0) },
+    open: { count: open.length, min: open.reduce((a, t) => a + taskDur(t), 0) },
+    fits,
+  }
+}
+
 // ── 睡眠 ──
 // 一筆睡眠紀錄記在「醒來那天」：{ bed: '23:40', wake: '07:10', q: 1–5 }
 export function sleepMinutes(e) {

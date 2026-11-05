@@ -1271,6 +1271,16 @@ describe('商店上架條件', () => {
 })
 
 describe('晚間回顧', () => {
+  it('今日反思可以寫幾句：最多 500 字、留著換行，匯出匯入後還在', () => {
+    const text = '做得好的：報告寫完\n想改進的：太晚開始\n' + '字'.repeat(600)
+    store.saveReview(TODAY, 'rainbow', text)
+    expect(store.state.journal[TODAY].text).toHaveLength(500)
+    expect(store.state.journal[TODAY].text.split('\n')).toHaveLength(3)
+    const other = new Store()
+    other.importJSON(store.exportJSON())
+    expect(other.state.journal[TODAY].text).toBe(store.state.journal[TODAY].text)
+  })
+
   it('當天首次回顧獲得十經驗值與一次統計，再次儲存只更新內容', () => {
     const onSaved = vi.fn()
     store.on('reviewSaved', onSaved)

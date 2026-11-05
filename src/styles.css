@@ -676,14 +676,15 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .mood .stamp-k { width: 40px; height: 40px; font-size: 19px; color: var(--mc); border-color: var(--mc); background: #fff; transform: none; }
 .mood.on .stamp-k { background: var(--mc); color: #fff; transform: rotate(-8deg) scale(1.08); box-shadow: 0 4px 14px color-mix(in srgb, var(--mc) 50%, transparent); }
 .mood span { font-size: 11px; color: var(--ink-soft); }
-.review-card input { width: 100%; border: 0; outline: 0; border-radius: 12px; padding: 10px 12px; font-size: 14px; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); margin-bottom: 14px; }
+.review-card :is(input, textarea) { width: 100%; border: 0; outline: 0; border-radius: 12px; padding: 10px 12px; font-size: 14px; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); margin-bottom: 14px; }
+.review-card textarea { display: block; resize: none; line-height: 1.6; min-height: 66px; max-height: 40vh; text-align: left; }
 .review-actions { display: flex; justify-content: center; gap: 10px; }
 .review-actions .btn-primary { margin: 0; }
 .journal { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .journal li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 14px; background: var(--field); font-size: 13px; line-height: 1.5; }
 .journal .stamp-k { width: 30px; height: 30px; font-size: 14px; flex: none; color: var(--mc); border-color: var(--mc); background: transparent; }
 .journal small { display: block; color: var(--ink-faint); font-family: var(--font-num); font-size: 11px; }
-.journal p { margin: 0; word-break: break-word; }
+.journal p { margin: 0; word-break: break-word; white-space: pre-line; }
 .wk-m { font-family: var(--font-display); font-size: 11px; color: var(--mc); height: 14px; }
 
 /* ── 專注任務 ── */

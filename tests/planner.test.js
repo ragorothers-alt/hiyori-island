@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder } from '../src/planner.js'
+import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide } from '../src/planner.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 0 }
 const MON = '2026-10-26'
@@ -104,5 +104,53 @@ describe('睡眠', () => {
     expect(fmtDur(45)).toBe('45m')
     expect(fmtDur(120)).toBe('2h')
     expect(fmtDur(95)).toBe('1h35m')
+  })
+})
+
+describe('今日總覽的「現在」（nowGuide）', () => {
+  const at = (nowMin, o = {}) => nowGuide({ rhythm: R, date: MON, nowMin, events: [], tasks: [], ...o })
+
+  it('精神時段：扣掉三餐和已排的任務算剩下的空檔；眼前這段放得下的任務', () => {
+    const tasks = [task('排好的', { at: '11:00', dur: 30 }), task('報告', { priority: 3, dur: 30 }), task('長的', { dur: 120 })]
+    const g = at(m('10:00'), { tasks })
+    expect(g.phase).toBe('peak')
+    expect(g.toBed).toBe(m('23:30') - m('10:00'))
+    // 10:00–11:00、11:30–12:00、13:00–18:30、19:30–23:30
+    expect(g.free).toEqual([[600, 660], [690, 720], [780, 1110], [1170, 1410]])
+    expect(g.freeMin).toBe(60 + 30 + 330 + 240)
+    expect(g.next).toEqual({ start: 600, end: 660 })
+    expect(g.fits.map((t) => t.id)).toEqual(['報告'])
+    expect(g.scheduled).toEqual({ count: 1, min: 30 })
+    expect(g.open).toEqual({ count: 2, min: 150 })
+  })
+
+  it('正在吃飯、開會或做排好的任務：current；空檔從結束後算', () => {
+    expect(at(m('12:15')).current).toMatchObject({ kind: 'meal', title: '午餐', end: m('13:00') })
+    expect(at(m('12:15')).next.start).toBe(m('13:00'))
+    expect(at(m('15:10'), { events: [ev('週會', '15:00', '16:00')] }).current).toMatchObject({ kind: 'event', title: '週會' })
+    expect(at(m('10:05'), { tasks: [task('寫', { at: '10:00', dur: 30 })] }).current).toMatchObject({ kind: 'task', id: '寫' })
+  })
+
+  it('午後輕的、短的先；睡前一小時和過了就寢不推任務', () => {
+    const tasks = [task('重', { priority: 3, dur: 50 }), task('輕', { priority: 1, dur: 15 })]
+    const dip = at(m('14:00'), { tasks })
+    expect(dip.phase).toBe('dip')
+    expect(dip.fits.map((t) => t.id)).toEqual(['輕', '重'])
+    const wind = at(m('23:00'), { tasks })
+    expect(wind.phase).toBe('windDown')
+    expect(wind.fits).toEqual([])
+    expect(at(m('23:45')).phase).toBe('over')
+    expect(at(m('00:30')).phase).toBe('over')
+    expect(at(m('06:00')).phase).toBe('early')
+    expect(at(m('06:00')).freeMin).toBe(0)
+  })
+
+  it('就寢在午夜後：午夜到就寢還算前一晚', () => {
+    const r = { ...R, sleep: '01:00' }
+    const g = nowGuide({ rhythm: r, date: MON, nowMin: m('00:30'), events: [], tasks: [] })
+    expect(g.phase).toBe('windDown')
+    expect(g.bed).toBe(60)
+    expect(g.toBed).toBe(30)
+    expect(nowGuide({ rhythm: r, date: MON, nowMin: m('23:00'), events: [], tasks: [] }).toBed).toBe(120)
   })
 })

@@ -44,6 +44,8 @@ const SLOW_SAVE = 8
 const SAVE_WAIT = 400
 // 例行公事「哪幾天生成過」記最近幾天（日期倒退回前一兩天時不會再生一次）
 const MADE_KEEP = 3
+// 每天的回顧（今日反思）最多幾個字：總覽上可以多寫幾句
+export const REVIEW_TEXT = 500
 
 // ── 被取代的資料：留最近 BACKUPS 份，新的在前（雲端、資料夾同步、兩個分頁同時改了資料、匯入和重置前都共用）──
 // 只留一份的話，同步取代了一次、接著又匯入，第一次被取代的那份就不見了
@@ -581,7 +583,7 @@ function migrate(s) {
   if (isObj(s.journal)) {
     for (const [d, v] of Object.entries(s.journal)) {
       if (!DATE_RE.test(d) || !isObj(v) || !moodKeys.has(v.mood)) continue
-      journal[d] = { mood: v.mood, text: str(v.text, 140), at: ts(v.at) || Date.now() }
+      journal[d] = { mood: v.mood, text: str(v.text, REVIEW_TEXT), at: ts(v.at) || Date.now() }
     }
   }
   const quests = {}
@@ -1272,12 +1274,12 @@ export class Store {
     return true
   }
 
-  // ── 晚間回顧 ──
+  // ── 晚間回顧（今日總覽的「今日反思」也是這一篇） ──
   saveReview(date, mood, text) {
     this._refreshToday()
     if (!MOODS.some((m) => m.key === mood)) return
     const first = !this.state.journal[date]
-    this.state.journal[date] = { mood, text: String(text || '').trim().slice(0, 140), at: Date.now() }
+    this.state.journal[date] = { mood, text: String(text || '').trim().slice(0, REVIEW_TEXT), at: Date.now() }
     if (date === this.today) this.day().review = 1
     const fx = [['reviewSaved', { date, mood, first }]]
     if (first) {

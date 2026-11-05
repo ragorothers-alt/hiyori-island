@@ -26,14 +26,16 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
 .td-lead small { display: block; font-family: var(--font-display); font-size: 12px; letter-spacing: .22em; color: color-mix(in srgb, var(--sakura) 80%, var(--ink-faint)); margin-top: 2px; }
 
 /* 版面：寬的時候三欄（進度＋一句話＋行程／前三要務／每日任務＋習慣），中等兩欄，窄的時候一欄 */
-.td-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "prog" "top" "sched" "quest" "habit" "quote"; }
+.td-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "now" "prog" "top" "sched" "quest" "habit" "ref" "quote"; }
 @container (min-width: 700px) {
-  .td-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "prog quote" "top top" "sched sched" "quest habit"; }
+  .td-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "now now" "prog quote" "top top" "sched sched" "quest habit" "ref ref"; }
 }
 @container (min-width: 920px) {
-  .td-grid { grid-template-columns: 1.12fr .78fr 1.1fr; grid-template-areas: "prog quote sched" "top top sched" "quest habit habit"; }
-  .td-sched { max-height: 560px; }
+  .td-grid { grid-template-columns: 1.12fr .78fr 1.1fr; grid-template-areas: "now now sched" "prog quote sched" "top top sched" "quest habit habit" "ref ref ref"; }
+  .td-sched { max-height: 760px; }
 }
+.td-nowc { grid-area: now; }
+.td-ref { grid-area: ref; }
 .td-prog { grid-area: prog; }
 .td-quote { grid-area: quote; }
 .td-sched { grid-area: sched; }
@@ -44,7 +46,7 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
 .td-card {
   min-width: 0; padding: 18px 20px; border-radius: 22px; background: color-mix(in srgb, var(--glass-strong) 92%, transparent);
   border: 1px solid var(--glass-border); box-shadow: 0 10px 32px rgba(120, 110, 170, .1), 0 1px 4px rgba(120, 110, 170, .06);
-  backdrop-filter: blur(10px); animation: fadeUp .4s var(--ease) both;
+  backdrop-filter: blur(10px);
 }
 .td-h { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .td-h > svg { width: 24px; height: 24px; flex: none; fill: none; stroke: var(--sakura); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -201,4 +203,64 @@ body.night .td-claim { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   /* 「還不是本命」在窄的時候放不下：旁邊的 ☆ 和下面的提示已經說明了 */
   .td-tm small em { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .td-card { animation: none; } }
+/* 只有第一次畫出來時淡入：之後每分鐘、每次打勾的重畫不會整頁閃一下 */
+.td-enter .td-card { animation: fadeUp .4s var(--ease) both; }
+@media (prefers-reduced-motion: reduce) { .td-card, .td-enter .td-card { animation: none; } }
+
+/* ── 現在：時鐘、到就寢還有多久、空檔、適合做什麼 ── */
+.tn-top { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 26px; }
+.tn-clock { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+.tn-time { font-family: var(--font-num); font-size: 46px; font-weight: 700; line-height: 1; letter-spacing: .02em; color: var(--ink); }
+.tn-clock span { font-size: 12.5px; letter-spacing: .12em; color: var(--warn-ink); }
+body.night .tn-clock span { color: #ffb3c8; }
+.tn-peak .tn-clock span { color: #8a5f0e; }
+body.night .tn-peak .tn-clock span { color: #f3d28a; }
+.tn-nums { flex: 1; min-width: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px 16px; }
+.tn-nums div { min-width: 0; }
+.tn-nums dt { font-size: 11.5px; color: var(--ink-faint); letter-spacing: .06em; }
+.tn-nums dd { margin: 2px 0 0; font-family: var(--font-num); font-size: 17px; font-weight: 700; color: var(--ink); }
+.tn-nums dd small { display: block; font-family: var(--font-body, inherit); font-size: 11px; font-weight: 400; color: var(--ink-soft); margin-top: 1px; }
+.tn-bar { position: relative; height: 8px; margin: 16px 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--ink-faint) 22%, transparent); overflow: hidden; }
+.tn-bar i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: linear-gradient(90deg, #f4a7bd, #9cc8ec); }
+.tn-axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-faint); }
+.tn-line { margin: 12px 0 0; font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+.tn-line b { color: var(--ink); font-weight: 600; margin-right: 4px; }
+.tn-line span { margin: 0 4px; color: var(--ink-faint); }
+.tn-tip { margin: 8px 0 0; padding: 8px 12px; border-radius: 12px; background: var(--sakura-soft); color: #9a4d65; font-size: 13px; line-height: 1.6; }
+body.night .tn-tip { background: rgba(241, 155, 178, .14); color: #ffc4d4; }
+.tn-k { margin: 12px 0 6px; font-size: 12px; color: var(--ink-faint); letter-spacing: .1em; }
+.tn-fits { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tn-fits li { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 14px; background: var(--field); border: 1px solid var(--glass-border); }
+.tn-fits li > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.tn-fits li > span { flex: 1; min-width: 0; font-size: 13.5px; word-break: break-word; }
+.tn-fits li > small { flex: none; font-size: 11.5px; color: var(--ink-faint); }
+.tn-slot { flex: none; font-size: 12px; padding: 5px 10px; border-radius: 10px; background: var(--sakura-soft); color: #9a4d65; white-space: nowrap; }
+body.night .tn-slot { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
+.tn-none, .tn-hb { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-soft); line-height: 1.6; }
+.tn-hb { color: var(--ink-faint); }
+/* 窄的時候：時鐘一列，三個數字並排在下面 */
+@container (max-width: 520px) {
+  .tn-top { gap: 10px; }
+  .tn-clock { flex-direction: row; align-items: baseline; gap: 10px; }
+  .tn-time { font-size: 40px; }
+  .tn-nums { flex-basis: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
+  .tn-nums dd { font-size: 15px; }
+  .tn-nums dd small { font-size: 10.5px; }
+}
+
+/* ── 今日反思 ── */
+.td-ref-at { flex: none; font-size: 11.5px; color: var(--ink-faint); }
+.td-moods { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.td-mood { display: flex; align-items: center; gap: 6px; padding: 4px 12px 4px 4px; border-radius: 999px; background: var(--field); border: 1px solid var(--glass-border); font-size: 12.5px; color: var(--ink-soft); }
+.td-mood b { width: 26px; height: 26px; border-radius: 50%; display: grid; place-content: center; font-family: var(--font-display); font-weight: 400; font-size: 14px; color: var(--mc); border: 1.5px solid var(--mc); }
+.td-mood:hover { color: var(--ink); }
+.td-mood.on { color: var(--ink); border-color: var(--mc); background: color-mix(in srgb, var(--mc) 16%, var(--field)); }
+.td-mood.on b { background: var(--mc); color: #fff; }
+.td-ref-text { display: block; width: 100%; min-height: 96px; resize: vertical; border: 0; outline: 0; border-radius: 14px; padding: 10px 12px; font-size: 14px; line-height: 1.7; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); }
+.td-ref-text:focus-visible { box-shadow: inset 0 0 0 1px var(--glass-border), 0 0 0 2px var(--focus); }
+.td-ref-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; }
+.td-ref-hint { flex: 1; min-width: 0; font-size: 11.5px; color: var(--ink-faint); }
+.td-ref-dirty { display: none; font-style: normal; font-size: 11.5px; color: var(--warn-ink); }
+.td-ref.dirty .td-ref-dirty { display: inline; }
+.td-ref-save { margin: 0; padding: 7px 18px; }
+.td-ref-save:disabled { opacity: .5; cursor: default; }
