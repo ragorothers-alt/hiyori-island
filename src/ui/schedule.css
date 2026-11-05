@@ -171,3 +171,15 @@ body.night .ec-proj select option { color: #222; }
   .ec-grid { grid-template-columns: 1fr 1fr; }
   .ec-grid label:first-child { grid-column: 1 / -1; }
 }
+
+/* ── 整天的日程：時間軸上面一排，不佔時段 ── */
+.allday-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; }
+.allday-bar:empty { display: none; }
+.ad-k { font-size: 11.5px; color: var(--ink-faint); letter-spacing: .1em; margin-right: 2px; }
+.ad-chip { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; padding: 6px 12px; border-radius: 12px; text-align: left;
+  background: color-mix(in srgb, var(--c) 26%, var(--field)); border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); border-left: 4px solid var(--c); }
+.ad-chip b { font-weight: 600; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.ad-chip small { font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+.ad-chip:hover { background: color-mix(in srgb, var(--c) 38%, var(--field)); }
+body.night .ad-chip { background: color-mix(in srgb, var(--c) 22%, transparent); }
+.ec-until input[type=date], #eventUntil { font-family: var(--font-num); }

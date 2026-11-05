@@ -1931,3 +1931,69 @@ describe('卡關提醒與設定', () => {
     expect(store.state.settings.glass).toBe(50)
   })
 })
+
+describe('整天的日程', () => {
+  it('新增：沒有時段、不出現在有時段的日程裡；好幾天的每一天都查得到', () => {
+    const e = store.addEvent({ title: '朋友來玩', date: '2026-11-17', allDay: true, endDate: '2026-11-19' })
+    expect(e).toMatchObject({ allDay: true, date: '2026-11-17', endDate: '2026-11-19', start: '00:00', end: '23:59' })
+    for (const d of ['2026-11-17', '2026-11-18', '2026-11-19']) {
+      expect(store.allDayOn(d).map((x) => x.id)).toEqual([e.id])
+      expect(store.eventsOn(d)).toEqual([])
+      expect(store.daySummary(d).allDay.map((x) => x.id)).toEqual([e.id])
+      expect(store.daySummary(d).events).toEqual([])
+    }
+    expect(store.allDayOn('2026-11-16')).toEqual([])
+    expect(store.allDayOn('2026-11-20')).toEqual([])
+  })
+
+  it('只有一天：最後一天跟開始同一天；最後一天寫錯（在開始之前）也一樣', () => {
+    expect(store.addEvent({ title: 'a', date: TODAY, allDay: true }).endDate).toBe(TODAY)
+    expect(store.addEvent({ title: 'b', date: TODAY, allDay: true, endDate: addDays(TODAY, -3) }).endDate).toBe(TODAY)
+    expect(store.addEvent({ title: 'c', date: TODAY, allDay: true, endDate: '亂寫' }).endDate).toBe(TODAY)
+  })
+
+  it('最多 31 天', () => {
+    const e = store.addEvent({ title: '長途旅行', date: TODAY, allDay: true, endDate: addDays(TODAY, 90) })
+    expect(e.endDate).toBe(addDays(TODAY, 30))
+  })
+
+  it('不佔時段：排程、空檔都不會把整天的日程算成 00:00–23:59', () => {
+    store.addEvent({ title: '朋友來玩', date: TODAY, allDay: true })
+    store.addEvent({ title: '吃飯', date: TODAY, start: '18:00', end: '19:00' })
+    expect(store.eventsOn(TODAY).map((e) => e.title)).toEqual(['吃飯'])
+    expect(store.coachContext([TODAY]).events.map((e) => e.title)).toEqual(['吃飯'])
+  })
+
+  it('有時段 ↔ 整天可以互換；改回有時段時用表單給的時間', () => {
+    const e = store.addEvent({ title: '聚餐', date: TODAY, start: '18:00', end: '20:00' })
+    store.updateEvent(e.id, { allDay: true, endDate: addDays(TODAY, 1) })
+    expect(store.allDayOn(addDays(TODAY, 1)).map((x) => x.id)).toEqual([e.id])
+    expect([e.start, e.end]).toEqual(['00:00', '23:59'])
+    store.updateEvent(e.id, { allDay: false, start: '12:00', end: '13:30' })
+    expect(e).toMatchObject({ allDay: false, endDate: '', start: '12:00', end: '13:30' })
+    expect(store.eventsOn(TODAY).map((x) => x.id)).toEqual([e.id])
+    expect(store.allDayOn(TODAY)).toEqual([])
+  })
+
+  it('例行公事長出來的日程不能改成整天', () => {
+    store.addRoutine({ kind: 'event', title: '晚課', repeat: { type: 'daily' }, start: '21:00', end: '22:00', date: TODAY })
+    const e = store.eventsOn(TODAY).find((x) => x.title === '晚課')
+    store.updateEvent(e.id, { allDay: true, endDate: addDays(TODAY, 2) })
+    expect(e).toMatchObject({ allDay: false, endDate: '', start: '21:00' })
+  })
+
+  it('匯出再匯入：整天與最後一天都留著；壞掉的欄位會被整理', () => {
+    const e = store.addEvent({ title: '朋友來玩', date: '2026-11-17', allDay: true, endDate: '2026-11-19' })
+    store.importJSON(store.exportJSON())
+    expect(store.allDayOn('2026-11-18').map((x) => x.id)).toEqual([e.id])
+    const raw = JSON.parse(store.exportJSON())
+    raw.events = [
+      { id: 'ev1', title: '太長', date: TODAY, start: '09:00', end: '10:00', allDay: true, endDate: addDays(TODAY, 100) },
+      { id: 'ev2', title: '有時段', date: TODAY, start: '09:00', end: '10:00', endDate: addDays(TODAY, 2) },
+    ]
+    store.importJSON(JSON.stringify(raw))
+    const [a, b] = store.state.events
+    expect(a).toMatchObject({ allDay: true, start: '00:00', end: '23:59', endDate: addDays(TODAY, 30) })
+    expect(b).toMatchObject({ allDay: false, endDate: '', start: '09:00' })
+  })
+})

@@ -264,3 +264,13 @@ body.night .tn-slot { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .td-ref.dirty .td-ref-dirty { display: inline; }
 .td-ref-save { margin: 0; padding: 7px 18px; }
 .td-ref-save:disabled { opacity: .5; cursor: default; }
+
+/* ── 今日行程上面的整天日程 ── */
+.td-allday { display: flex; flex-direction: column; gap: 6px; margin: -4px 0 12px; }
+.td-adc { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; border-radius: 12px; text-align: left;
+  background: color-mix(in srgb, var(--c) 24%, var(--field)); border-left: 4px solid var(--c); }
+.td-adc em { flex: none; font-style: normal; font-size: 11px; color: var(--ink-soft); letter-spacing: .08em; }
+.td-adc span { flex: 1; min-width: 0; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.td-adc small { flex: none; font-size: 11px; color: var(--ink-soft); }
+.td-adc:hover { background: color-mix(in srgb, var(--c) 36%, var(--field)); }
+body.night .td-adc { background: color-mix(in srgb, var(--c) 20%, transparent); }

@@ -1,7 +1,7 @@
 import './schedule.css'
-import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne } from './dom.js'
+import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
-import { addDays, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
+import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
 import { taskMilestone } from '../projects.js'
 
@@ -67,6 +67,7 @@ export class ScheduleView {
     if (this.preview && (this.preview.date !== s.selectedDate || s.selectedDate < s.today)) this.preview = null
     this._week()
     this._sleepCard()
+    this._allDay()
     this._planBar()
     this._tray()
     this._dayline()
@@ -82,7 +83,7 @@ export class ScheduleView {
       days
         .map((d) => {
           const dd = parseDate(d)
-          const ev = s.eventsOn(d).length
+          const ev = s.eventsOn(d).length + s.allDayOn(d).length
           const left = s.tasksOn(d).filter((t) => !t.done).length
           const name = `${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）${ev ? `・${ev} 個日程` : ''}${left ? `・${left} 件待辦` : ''}`
           return `<button class="ws-day ${d === s.selectedDate ? 'on' : ''} ${d === s.today ? 'today' : ''} ${dd.getDay() % 6 === 0 ? 'weekend' : ''}" data-date="${d}" aria-label="${name}" aria-pressed="${d === s.selectedDate}"${d === s.today ? ' aria-current="date"' : ''}>
@@ -119,6 +120,23 @@ export class ScheduleView {
       <div class="form-row sc-foot"><div class="seg" data-q>${[1, 2, 3, 4, 5].map((q) => `<button type="button" data-v="${q}" class="${q === 3 ? 'on' : ''}" aria-pressed="${q === 3}">${QUALITY[q]}</button>`).join('')}</div>
         <button class="btn-primary" type="submit">記下</button></div>
     </form>`
+  }
+
+  // 這天的整天日程（朋友來玩、旅行…）：排在時間軸上面，不佔時段；點一下編輯
+  _allDay() {
+    const s = this.store
+    const date = s.selectedDate
+    const list = s.allDayOn(date)
+    const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+    $('#allDayBar').innerHTML = list.length
+      ? `<span class="ad-k">整天</span>${list
+        .map((e) => {
+          const multi = e.endDate && e.endDate !== e.date
+          const sub = multi ? `${md(e.date)}–${md(e.endDate)}・第 ${daysBetween(e.date, date) + 1}／${daysBetween(e.date, e.endDate) + 1} 天` : ''
+          return `<button type="button" class="ad-chip" data-ad="${esc(e.id)}" style="--c:${EVENT_COLORS[e.color % EVENT_COLORS.length]}" title="編輯${multi ? `（${md(e.date)}–${md(e.endDate)}）` : ''}"><b>${esc(e.title)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`
+        })
+        .join('')}`
+      : ''
   }
 
   // 目前已排的狀況（不含還沒排的任務）
@@ -284,7 +302,7 @@ export class ScheduleView {
     const s = this.store
     const item = type === 'event' ? s.state.events.find((e) => e.id === id) : s.state.tasks.find((t) => t.id === id)
     if (!item) return
-    this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life' }
+    this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay }
     this._sheet(item)
   }
   openCreate(minute) {
@@ -300,7 +318,7 @@ export class ScheduleView {
     if (id) {
       requestAnimationFrame(() => {
         const a = document.activeElement
-        if (!a || a === document.body) $(`.blk[data-id="${CSS.escape(id)}"] [data-edit]`)?.focus({ preventScroll: true })
+        if (!a || a === document.body) $(`.blk[data-id="${CSS.escape(id)}"] [data-edit], .ad-chip[data-ad="${CSS.escape(id)}"]`)?.focus({ preventScroll: true })
       })
     }
   }
@@ -310,12 +328,16 @@ export class ScheduleView {
     const ev = ed.type === 'event'
     const routine = this.store.routineOf(item)
     const swatches = EVENT_COLORS.map((c, i) => `<button type="button" data-color="${i}" style="--c:${c}" class="${i === ed.color ? 'on' : ''}" aria-pressed="${i === ed.color}" aria-label="顏色 ${i + 1}"></button>`).join('')
+    // 整天：藏起開始和結束，換成「到哪天」；例行公事長出來的那一天不能改成整天
+    const ad = !!ed.allDay
     const body = ev
       ? `<div class="ec-grid">
-          <label>日期<input type="date" name="date" value="${item.date}" required></label>
-          <label>開始<input type="time" name="start" value="${item.start}" required></label>
-          <label>結束<input type="time" name="end" value="${item.end}" required></label>
+          <label><span class="ec-dk">${ad ? '從' : '日期'}</span><input type="date" name="date" value="${item.date}" required></label>
+          <label class="ec-timed"${ad ? ' hidden' : ''}>開始<input type="time" name="start" value="${ad ? '09:00' : item.start}"></label>
+          <label class="ec-timed"${ad ? ' hidden' : ''}>結束<input type="time" name="end" value="${ad ? '10:00' : item.end}"></label>
+          <label class="ec-until"${ad ? '' : ' hidden'}>到<input type="date" name="until" value="${item.endDate || item.date}" aria-label="最後一天（只有一天就跟開始同一天）"></label>
         </div>
+        ${routine ? '' : `<div class="form-row"><button type="button" class="chip-toggle${ad ? ' on' : ''}" data-allday aria-pressed="${ad}" title="沒有時段的日程，例如朋友來玩、旅行（可以好幾天）">整天</button></div>`}
         <div class="swatches ec-colors">${swatches}</div>
         <textarea name="note" maxlength="200" rows="2" placeholder="備註：地點、要帶的東西…" aria-label="備註">${esc(item.note || '')}</textarea>`
       : `<div class="ec-grid">
@@ -333,7 +355,7 @@ export class ScheduleView {
       ${routine ? `<p class="hint ec-hint">這是例行${ev ? '日程' : '任務'}，這裡只改這一天</p>` : ''}
       <div class="ec-actions">
         ${ed.create ? '' : `<button type="button" class="btn-ghost danger" data-ec="delete">刪除</button>
-          <button type="button" class="btn-ghost" data-ec="done">${item.done ? '改回未完成' : '完成'}</button>`}
+          ${ev && ad ? '' : `<button type="button" class="btn-ghost" data-ec="done">${item.done ? '改回未完成' : '完成'}</button>`}`}
         ${!ev && !item.done ? `<button type="button" class="btn-ghost" data-ec="slot">${item.at ? '移到最近空檔' : '排進最近空檔'}</button>` : ''}
         ${!ev && item.at ? '<button type="button" class="btn-ghost" data-ec="unplan">移回未排時段</button>' : ''}
         <span class="sp"></span>
@@ -373,7 +395,14 @@ export class ScheduleView {
     const title = form.title.value.trim()
     if (!title) return form.title.focus()
     const date = form.date.value || s.selectedDate
-    if (ed.type === 'event') {
+    if (ed.type === 'event' && ed.allDay) {
+      const note = form.note.value.trim().slice(0, 200)
+      const all = { title, color: ed.color, date, note, allDay: true, endDate: form.until.value }
+      if (ed.create) {
+        s.addEvent(all)
+        this.lastColor = ed.color
+      } else s.updateEvent(ed.id, all)
+    } else if (ed.type === 'event') {
       const start = form.start.value || '09:00'
       let end = form.end.value || '10:00'
       if (toMin(end) <= toMin(start)) end = hm(toMin(start) + 30)
@@ -381,7 +410,7 @@ export class ScheduleView {
       if (ed.create) {
         s.addEvent({ title, start, end, color: ed.color, date, note })
         this.lastColor = ed.color
-      } else s.updateEvent(ed.id, { title, start, end, color: ed.color, date, note })
+      } else s.updateEvent(ed.id, { title, start, end, color: ed.color, date, note, allDay: false })
     } else {
       const at = form.at.value || null
       const proj = form.elements.project
@@ -415,6 +444,11 @@ export class ScheduleView {
       if (b.dataset.date) s.selectDate(b.dataset.date)
       else if (b.dataset.week) s.selectDate(addDays(s.selectedDate, +b.dataset.week))
       else if (b.hasAttribute('data-cal')) this.hooks.openCalendar(s.selectedDate)
+    })
+
+    $('#allDayBar').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ad]')
+      if (b) this.openEdit('event', b.dataset.ad)
     })
 
     const card = $('#sleepCard')
@@ -583,6 +617,19 @@ export class ScheduleView {
       if (tag) {
         ed.tag = tag.dataset.tag
         pickOne(sheet.querySelectorAll('[data-tag]'), (x) => x === tag)
+      }
+      // 整天／有時段：只換看得到的欄位，打到一半的名稱和備註都留著
+      const adBtn = e.target.closest('[data-allday]')
+      if (adBtn) {
+        ed.allDay = !ed.allDay
+        setOn(adBtn, ed.allDay)
+        for (const el of sheet.querySelectorAll('.ec-timed')) el.hidden = ed.allDay
+        sheet.querySelector('.ec-until').hidden = !ed.allDay
+        sheet.querySelector('.ec-dk').textContent = ed.allDay ? '從' : '日期'
+        const until = sheet.querySelector('[name="until"]')
+        const from = sheet.querySelector('[name="date"]').value
+        if (!until.value || until.value < from) until.value = from
+        return
       }
       const act = e.target.closest('[data-ec]')?.dataset.ec
       if (!act) return

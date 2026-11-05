@@ -1,5 +1,5 @@
 import './styles.css'
-import { Store, toMin, minToHHMM, repeatLabel } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween } from './store.js'
 import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
@@ -529,6 +529,19 @@ async function boot() {
       const title = today ? `今天是「${e.title}」` : `明天就是「${e.title}」`
       ui.toast({ icon: DATE_KINDS[e.kind]?.kanji || '旗', title, sub: today ? '照自己的步調來就好' : '今天先留點時間準備吧', ms: 9000 })
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, '', e.id)
+      return
+    }
+    // 整天的日程：前一天、當天早上ふじ提醒
+    if (kind === 'allday') {
+      const today = min === 0
+      sfx.chime()
+      talk(today ? 'allDayToday' : 'allDaySoon', { title: short(e.title) }, 6000, '', 'fuji')
+      const title = `${today ? '今天' : '明天'}整天：${e.title}`
+      const multi = e.endDate && e.endDate !== e.date
+      const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+      const sub = multi ? `${md(e.date)}–${md(e.endDate)}・共 ${daysBetween(e.date, e.endDate) + 1} 天` : today ? '其他事少排一點也沒關係' : '記得先準備一下'
+      ui.toast({ icon: '日', title, sub, ms: 9000 })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, multi ? sub : '', e.id)
       return
     }
     if (kind === 'bed') {

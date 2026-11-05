@@ -109,6 +109,21 @@ export class Reminders {
         this.onRemind(d, d.days, 'date')
       }
     }
+    // 整天的日程：前一天和第一天，早上 8 點後提醒一次（跨好幾天的只在開始時提醒）。關掉日程提醒就不提醒。
+    // 上一輪檢查還沒有的（剛加上、剛改成整天）：才剛自己記下，記成提醒過就好；打開 App 時已經在的照常提醒
+    if (lead >= 0) {
+      const known = this.allDayKnown
+      this.allDayKnown = new Set()
+      for (const [date, days] of [[today, 0], [tomorrow, 1]]) {
+        for (const e of this.store.allDayOn(date)) {
+          this.allDayKnown.add(e.id)
+          const key = `allday-${e.id}@${e.date}`
+          if (e.date !== date || sent.includes(key)) continue
+          if (known && !known.has(e.id)) this._claim(today, key)
+          else if (mins >= 480 && this._claim(today, key)) this.onRemind(e, days, 'allday')
+        }
+      }
+    }
     // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）
     const yesterday = addDays(today, -1)
     for (const d of Object.keys(this.sent)) {

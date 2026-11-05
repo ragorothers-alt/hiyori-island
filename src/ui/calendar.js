@@ -21,6 +21,8 @@ const md = (date) => {
   const d = parseDate(date)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
+// 整天日程的範圍：「整天」或「11/17–11/19」
+const allDayRange = (e) => (e.endDate && e.endDate !== e.date ? `${md(e.date)}–${md(e.endDate)}` : '整天')
 const addMonths = (date, n) => {
   const d = parseDate(date)
   const t = new Date(d.getFullYear(), d.getMonth() + n, 1)
@@ -453,7 +455,8 @@ export class CalendarView {
     const s = this.store
     const sum = s.daySummary(date)
     const d = parseDate(date)
-    const evs = [...sum.events, ...ghosts]
+    // 整天的日程排最前面（跨好幾天的每一天都會出現）
+    const evs = [...sum.allDay, ...sum.events, ...ghosts]
     const total = sum.tasks.length
     const done = sum.tasksDone
     const past = date <= s.today
@@ -461,7 +464,7 @@ export class CalendarView {
 
     const evHtml = evs
       .slice(0, bars)
-      .map((e) => `<span class="cc-ev${e.done ? ' done' : ''}${e.ghost ? ' ghost' : ''}" style="--c:${colorOf(e.color)}">${esc(e.title)}</span>`)
+      .map((e) => `<span class="cc-ev${e.allDay ? ' allday' : ''}${e.done ? ' done' : ''}${e.ghost ? ' ghost' : ''}" style="--c:${colorOf(e.color)}">${esc(e.title)}</span>`)
       .join('')
     const more = evs.length > bars ? `<span class="cc-more">+${evs.length - bars}</span>` : ''
     const marks = [
@@ -562,6 +565,7 @@ export class CalendarView {
         const left = untimed.filter((t) => !t.done).length
         const hb = sum.habits
         const chips = [
+          ...sum.allDay.map((e) => `<button type="button" class="cw-chip a" style="--c:${colorOf(e.color)}" data-open="event" data-id="${esc(e.id)}" title="${esc(`${e.title}・${allDayRange(e)}`)}">${esc(e.title)}</button>`),
           ...s.datesOn(date).map((x) => `<span class="cw-chip d" title="${esc(x.title)}"><em>${DATE_KINDS[x.kind].kanji}</em>${esc(x.title)}</span>`),
           ...s.milestoneDues(date).map((x) => `<span class="cw-chip d" title="${esc(`${x.projectName}・${x.title}（里程碑期限）`)}"><em>${DUE_KINDS.milestone.kanji}</em>${esc(x.title)}</span>`),
           untimed.length &&
@@ -661,6 +665,17 @@ export class CalendarView {
     const gTasks = ghosts.filter((r) => r.kind === 'task')
     const mood = sum.mood && moodOf(sum.mood.mood)
     const secs = []
+
+    // 整天的日程
+    if (sum.allDay.length) {
+      const rows = sum.allDay
+        .map(
+          (e) =>
+            `<li><button type="button" class="cd-row ev ad" style="--c:${colorOf(e.color)}" data-open="event" data-id="${esc(e.id)}" title="編輯日程"><span class="cd-time">整天${e.endDate && e.endDate !== e.date ? `<small>${allDayRange(e)}</small>` : ''}</span><span class="cd-t">${esc(e.title)}</span></button></li>`,
+        )
+        .join('')
+      secs.push(this._sec('整天', 'いちにち', '', rows))
+    }
 
     // 日程
     const evs = [...sum.events, ...gEvents].sort((a, b) => toMin(a.start) - toMin(b.start))
@@ -766,6 +781,7 @@ export class CalendarView {
 
     const chips = [
       sum.tasks.length && `<span>任務<b>${sum.tasksDone}/${sum.tasks.length}</b></span>`,
+      sum.allDay.length && `<span>整天<b>${sum.allDay.length}</b></span>`,
       sum.events.length && `<span>日程<b>${sum.events.length}</b></span>`,
       past && sum.habits.total && `<span>習慣<b>${sum.habits.done}/${sum.habits.total}</b></span>`,
       sum.focus && `<span>專注<b>${sum.focus}</b>分</span>`,

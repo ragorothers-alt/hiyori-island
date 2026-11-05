@@ -224,3 +224,49 @@ describe('任務的預估時間', () => {
     expect([ev.kind, ev.start, ev.end, ev.dur]).toEqual(['event', '15:00', '17:00', undefined])
   })
 })
+
+describe('整天的日程', () => {
+  it('「11/17 朋友來玩 整天」：整天的日程，標題拿掉「整天」', () => {
+    const r = parseQuick('11/17 朋友來玩 整天', { today: TODAY })
+    expect(r).toMatchObject({ kind: 'event', title: '朋友來玩', date: '2026-11-17', allDay: true, start: null, end: null })
+    expect(r.endDate).toBeUndefined()
+    expect(describeQuick(r, TODAY)).toEqual(['整天的日程', '11/17（二）'])
+  })
+
+  it('沒寫日期也可以：加在上面選的那天', () => {
+    const r = parseQuick('全天 研習', { today: TODAY })
+    expect(r).toMatchObject({ kind: 'event', title: '研習', date: null, allDay: true })
+  })
+
+  it('「11/17到11/19」「11/17-19」：好幾天的整天日程', () => {
+    const a = parseQuick('11/17到11/19 朋友來玩', { today: TODAY })
+    expect(a).toMatchObject({ kind: 'event', title: '朋友來玩', date: '2026-11-17', endDate: '2026-11-19', allDay: true })
+    expect(describeQuick(a, TODAY)).toEqual(['整天的日程', '11/17（二）–11/19（四）'])
+    expect(parseQuick('11/17-19 旅行', { today: TODAY })).toMatchObject({ title: '旅行', date: '2026-11-17', endDate: '2026-11-19', allDay: true })
+    expect(parseQuick('11月17日～11月18日 出差', { today: TODAY })).toMatchObject({ title: '出差', date: '2026-11-17', endDate: '2026-11-18' })
+  })
+
+  it('跨年也接得上：12/30到1/2', () => {
+    expect(parseQuick('12/30到1/2 回老家', { today: TODAY })).toMatchObject({ date: '2026-12-30', endDate: '2027-01-02', allDay: true })
+  })
+
+  it('寫了時間就是有時段的日程（「整天」只是順口）', () => {
+    const r = parseQuick('11/17 下午3點 整天 開會', { today: TODAY })
+    expect(r).toMatchObject({ kind: 'event', date: '2026-11-17', start: '15:00' })
+    expect(r.allDay).toBeUndefined()
+    expect(r.endDate).toBeUndefined()
+  })
+
+  it('倒過來或超過一個月的範圍不當成整天日程', () => {
+    const back = parseQuick('11/19-17 朋友來玩', { today: TODAY })
+    expect(back.endDate).toBeUndefined()
+    expect(back.allDay).toBeUndefined()
+    const long = parseQuick('11/1到12/31 展覽', { today: TODAY })
+    expect(long.endDate).toBeUndefined()
+  })
+
+  it('一般的日期與時段不受影響', () => {
+    expect(parseQuick('11/17 牙醫', { today: TODAY }).allDay).toBeUndefined()
+    expect(parseQuick('14:00-15:30 牙醫', { today: TODAY }).allDay).toBeUndefined()
+  })
+})

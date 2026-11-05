@@ -266,3 +266,49 @@ describe('任務與就寢提醒', () => {
     expect(callback).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('整天的日程', () => {
+  it('前一天和第一天早上八點後各提醒一次；跨好幾天的中間不再提醒', () => {
+    const e = store.addEvent({ title: '朋友來玩', date: '2026-10-26', allDay: true, endDate: '2026-10-28' })
+    const allday = () => callback.mock.calls.filter((c) => c[2] === 'allday')
+    reminders.check(at(7, 59))
+    expect(allday()).toHaveLength(0)
+    reminders.check(at(8, 0))
+    reminders.check(at(12, 0))
+    expect(allday()).toHaveLength(1)
+    expect(allday()[0][0].id).toBe(e.id)
+    expect(allday()[0][1]).toBe(1)
+    for (const [d, n] of [[26, 2], [27, 2], [28, 2]]) {
+      vi.setSystemTime(new Date(2026, 9, d, 9, 0))
+      store._refreshToday()
+      reminders.check(new Date(2026, 9, d, 9, 0))
+      expect(allday()).toHaveLength(n)
+    }
+    expect(allday()[1][1]).toBe(0)
+  })
+
+  it('不會被當成 00:00 開始的日程提醒；關掉日程提醒就不提醒', () => {
+    store.addEvent({ title: '研習', date: TODAY, allDay: true })
+    reminders.check(at(0, 0))
+    expect(callback).not.toHaveBeenCalled()
+    store.setSetting('remindLead', -1)
+    reminders.check(at(9, 0))
+    expect(callback.mock.calls.filter((c) => c[2] === 'allday')).toHaveLength(0)
+  })
+
+  it('剛加上的（上一輪檢查還沒有）不馬上提醒；重新打開 App 時已經在的照常提醒', () => {
+    reminders.check(at(9, 0))
+    const e = store.addEvent({ title: '朋友來玩', date: TODAY, allDay: true })
+    reminders.check(at(9, 1))
+    reminders.check(at(9, 2))
+    expect(callback.mock.calls.filter((c) => c[2] === 'allday')).toHaveLength(0)
+    // 明天的也一樣；到了當天早上才提醒
+    const t = store.addEvent({ title: '旅行', date: '2026-10-26', allDay: true })
+    reminders.check(at(9, 3))
+    expect(callback.mock.calls.filter((c) => c[2] === 'allday')).toHaveLength(0)
+    localStorage.clear()
+    const fresh = vi.fn()
+    new Reminders(store, fresh).check(at(9, 5))
+    expect(fresh.mock.calls.filter((c) => c[2] === 'allday').map((c) => c[0].id)).toEqual([e.id, t.id])
+  })
+})

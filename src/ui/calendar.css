@@ -355,3 +355,14 @@ body.night .cd-amt { color: #f3cf7f; }
 @media (prefers-reduced-motion: reduce) {
   .calendar, .cal-card, .cd-sec { animation: none; }
 }
+
+/* ── 整天的日程 ── */
+/* 月格：實心的色條，跟有時段的日程分得出來 */
+.cc-ev.allday { background: var(--c); border-left-color: color-mix(in srgb, var(--c) 70%, #000); color: #3a2f3a; font-weight: 600; }
+/* 週檢視摘要列：可以點開編輯 */
+.cw-chip.a { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-body); font-weight: 600; color: #3a2f3a; background: var(--c); border-left: 3px solid color-mix(in srgb, var(--c) 70%, #000); border-radius: 6px; cursor: pointer; }
+.cw-chip.a:hover { filter: brightness(1.04); }
+.cw-chip.a:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+/* 日詳情 */
+.cd-row.ad { background: color-mix(in srgb, var(--c) 22%, transparent); }
+.cd-row.ad .cd-time { color: var(--ink); }

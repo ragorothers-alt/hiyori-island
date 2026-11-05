@@ -756,7 +756,14 @@ export class UI {
       const date = p.date || s.selectedDate
       const repeat = p.repeat || this._repeatValue('#taskRepeat')
       const md = date.slice(5).replace('-', '/')
-      if (p.kind === 'event') {
+      if (p.kind === 'event' && p.allDay) {
+        // 整天的日程（例行公事只有有時段的）
+        s.addEvent({ title: p.title, color: this.eventColor, date, allDay: true, endDate: p.endDate })
+        this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
+        this._syncPickers()
+        const until = p.endDate && p.endDate !== date ? `–${p.endDate.slice(5).replace('-', '/')}` : ''
+        this.toast({ icon: '環', title: '已加入整天的日程', sub: `${p.title}・${md}${until}` })
+      } else if (p.kind === 'event') {
         const ev = { title: p.title, start: p.start, end: p.end, color: this.eventColor, date }
         if (repeat) s.addRoutine({ kind: 'event', ...ev, repeat })
         else s.addEvent(ev)
@@ -1053,11 +1060,32 @@ export class UI {
       const st = toMin($('#eventStart').value)
       if (toMin($('#eventEnd').value) <= st) $('#eventEnd').value = minToHHMM(Math.min(st + 60, 1439))
     })
+    // 整天：藏起時段和重複（例行公事只有有時段的），換成「到哪天」
+    const allDayMode = (on) => {
+      setOn($('#eventAllDay'), on)
+      for (const el of $$('#eventForm .ev-timed')) el.hidden = on
+      $('#eventForm .ev-until').hidden = !on
+      const until = $('#eventUntil')
+      until.min = this.store.selectedDate
+      if (on && (!until.value || until.value < this.store.selectedDate)) until.value = this.store.selectedDate
+    }
+    $('#eventAllDay').addEventListener('click', () => allDayMode(!$('#eventAllDay').classList.contains('on')))
     $('#eventForm').addEventListener('submit', (e) => {
       e.preventDefault()
       const title = $('#eventTitle').value
       if (!title.trim()) {
         $('#eventTitle').focus()
+        return
+      }
+      if ($('#eventAllDay').classList.contains('on')) {
+        const date = this.store.selectedDate
+        const until = $('#eventUntil').value
+        this.store.addEvent({ title, color: this.eventColor, date, allDay: true, endDate: until })
+        $('#eventTitle').value = ''
+        this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
+        this._syncPickers()
+        allDayMode(false)
+        $('#eventUntil').value = ''
         return
       }
       const ev = { title, start: $('#eventStart').value || '09:00', end: $('#eventEnd').value || '10:00', color: this.eventColor }

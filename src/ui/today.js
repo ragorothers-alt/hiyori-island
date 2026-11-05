@@ -345,7 +345,18 @@ export class TodayView {
       // 做完的任務不留在行程裡（日程做完了照樣留著，跟日程分頁的時間軸一樣）
       ...tasks.filter((t) => t.at && !t.done).map((t) => ({ kind: 'task', id: t.id, title: t.title, at: toMin(t.at), len: taskDur(t), done: t.done, color: tagOf(t.tag).color })),
     ].sort((a, b) => a.at - b.at || (a.kind === 'event' ? -1 : 1))
-    const head = `<header class="td-h">${IC.cal}<h3>今日行程<small>きょうのよてい</small></h3><button type="button" class="td-more" data-act="cal" data-fk="cal">月曆<i>›</i></button></header>`
+    // 整天的日程（朋友來玩、旅行）排在最上面，不在時間線上
+    const all = this.store.allDayOn(today)
+    const allHTML = all.length
+      ? `<div class="td-allday">${all
+        .map((e) => {
+          const multi = e.endDate && e.endDate !== e.date
+          const nth = multi ? `<small>第 ${Math.round((parseDate(today) - parseDate(e.date)) / 864e5) + 1}／${Math.round((parseDate(e.endDate) - parseDate(e.date)) / 864e5) + 1} 天</small>` : ''
+          return `<button type="button" class="td-adc" data-act="edit" data-type="event" data-id="${esc(e.id)}" data-fk="ad-${esc(e.id)}" style="--c:${EVENT_COLORS[e.color % EVENT_COLORS.length]}"><em>整天</em><span>${esc(e.title)}</span>${nth}</button>`
+        })
+        .join('')}</div>`
+      : ''
+    const head = `<header class="td-h">${IC.cal}<h3>今日行程<small>きょうのよてい</small></h3><button type="button" class="td-more" data-act="cal" data-fk="cal">月曆<i>›</i></button></header>${allHTML}`
     if (!items.length) {
       return `<section class="td-card td-sched">${head}<div class="td-empty"><p>今天還沒有排時段的行程</p><button type="button" class="btn-ghost" data-act="tab" data-v="schedule" data-fk="to-sched">到日程排一下</button></div></section>`
     }

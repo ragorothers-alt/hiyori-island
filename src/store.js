@@ -46,6 +46,13 @@ const SAVE_WAIT = 400
 const MADE_KEEP = 3
 // 每天的回顧（今日反思）最多幾個字：總覽上可以多寫幾句
 export const REVIEW_TEXT = 500
+// 整天的日程（朋友來玩、旅行）：從 date 到 endDate（含），最多連續這麼多天
+export const ALLDAY_MAX = 31
+const allDayEnd = (end, date) => {
+  const e = DATE_RE.test(end) && end > date ? end : date
+  const last = addDays(date, ALLDAY_MAX - 1)
+  return e > last ? last : e
+}
 
 // ── 被取代的資料：留最近 BACKUPS 份，新的在前（雲端、資料夾同步、兩個分頁同時改了資料、匯入和重置前都共用）──
 // 只留一份的話，同步取代了一次、接著又匯入，第一次被取代的那份就不見了
@@ -329,6 +336,8 @@ const EVENT_PATCH = {
   end: (v, e) => (TIME_RE.test(v) ? v : e.end),
   color: (v, e) => num(v, 0, 99, e.color),
   note: (v) => str(v, 200),
+  allDay: (v) => !!v,
+  endDate: (v) => (DATE_RE.test(v) ? v : ''),
 }
 const PROJECT_PATCH = {
   name: (v, p) => str(v, 60).trim() || p.name,
@@ -417,9 +426,13 @@ function migrate(s) {
     let end = TIME_RE.test(e.end) ? e.end : '10:00'
     if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const done = !!e.done
+    const date = ymd(e.date, today)
+    // 整天的日程：沒有時段（開始、結束填成一整天，只是佔位），從 date 到 endDate
+    const allDay = !!e.allDay && !ID_RE.test(e.routineId)
     return {
-      id: str(e.id), title, date: ymd(e.date, today), start, end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done,
+      id: str(e.id), title, date, start: allDay ? '00:00' : start, end: allDay ? '23:59' : end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done,
       routineId: ID_RE.test(e.routineId) ? e.routineId : null, note: str(e.note, 200),
+      allDay, endDate: allDay ? allDayEnd(e.endDate, date) : '',
     }
   })
   const routines = cleanList(s.routines, (r) => {
@@ -937,8 +950,15 @@ export class Store {
     )
     return [...list, ...late]
   }
+  // 那天有時段的日程（時間軸、空檔、排程、時之環、提醒都只看這些）；整天的另外用 allDayOn
   eventsOn(date) {
-    return this.state.events.filter((e) => e.date === date).sort((a, b) => toMin(a.start) - toMin(b.start))
+    return this.state.events.filter((e) => e.date === date && !e.allDay).sort((a, b) => toMin(a.start) - toMin(b.start))
+  }
+  // 那天落在裡面的整天日程（跨好幾天的每一天都算）：先開始的在前
+  allDayOn(date) {
+    return this.state.events
+      .filter((e) => e.allDay && e.date <= date && date <= (e.endDate || e.date))
+      .sort((a, b) => a.date.localeCompare(b.date) || (b.endDate || b.date).localeCompare(a.endDate || a.date) || a.title.localeCompare(b.title))
   }
   // 島上有塔的專案
   towerProjects() {
@@ -1697,10 +1717,15 @@ export class Store {
   }
 
   // ── 日程 ──
-  addEvent({ title, start, end, color = 0, date = this.selectedDate, note = '' }) {
+  // allDay：整天的（沒有時段），endDate 是最後一天（不填就是一天）
+  addEvent({ title, start = '09:00', end = '10:00', color = 0, date = this.selectedDate, note = '', allDay = false, endDate = '' }) {
     if (!title.trim()) return null
-    if (toMin(end) <= toMin(start)) end = start === '23:30' ? '23:59' : minToHHMM(Math.min(toMin(start) + 60, 1439))
-    const e = { id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false, note: String(note || '').trim().slice(0, 200) }
+    if (allDay) [start, end] = ['00:00', '23:59']
+    else if (toMin(end) <= toMin(start)) end = start === '23:30' ? '23:59' : minToHHMM(Math.min(toMin(start) + 60, 1439))
+    const e = {
+      id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false, note: String(note || '').trim().slice(0, 200),
+      allDay: !!allDay, endDate: allDay ? allDayEnd(endDate, date) : '',
+    }
     this.state.events.push(e)
     this._finish([['eventAdded', e]])
     return e
@@ -1726,6 +1751,13 @@ export class Store {
     const e = this._find('events', id)
     if (!e) return
     Object.assign(e, cleanPatch(e, patch, EVENT_PATCH))
+    // 例行公事長出來的那一天不能改成整天（例行公事本身有時段）
+    if (e.routineId) e.allDay = false
+    if (e.allDay) {
+      e.start = '00:00'
+      e.end = '23:59'
+      e.endDate = allDayEnd(e.endDate, e.date)
+    } else e.endDate = ''
     // 結束要在開始之後（跟讀存檔時一樣：不然補成一小時）
     if (toMin(e.end) <= toMin(e.start)) e.end = minToHHMM(Math.min(toMin(e.start) + 60, 1439))
     this._finish()
@@ -2010,7 +2042,7 @@ export class Store {
     const habits = this.state.habits.filter((h) => !h.archived && h.kind === 'build' && applies(h, date))
     const life = this.lifeOn(date)
     return {
-      date, tasks, events,
+      date, tasks, events, allDay: this.allDayOn(date),
       tasksDone: tasks.filter((t) => t.done).length,
       habits: { total: habits.length, done: habits.filter((h) => doneOn(h, date)).length },
       slips: this.state.habits.filter((h) => h.kind === 'quit' && h.slips.some((x) => dateStr(new Date(x.at)) === date)).length,
@@ -2405,7 +2437,7 @@ export class Store {
   coachContext(dates) {
     const set = new Set(dates)
     const n = new Date()
-    const events = this.state.events.filter((e) => set.has(e.date))
+    const events = this.state.events.filter((e) => set.has(e.date) && !e.allDay)
     for (const date of dates) {
       if (date <= this.today) continue
       for (const r of this.state.routines) {

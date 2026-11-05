@@ -137,16 +137,34 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
       out.date = addDays(today, (target - dow + 7) % 7)
     }
   })
-  take(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, (_, y, m, d) => {
-    if (!realDay(+y, +m, +d)) return false
-    out.date = dateStr(new Date(+y, +m - 1, +d))
-  })
-  take(/(?<![\d:：])(\d{1,2})\s*(?:\/|月)\s*(\d{1,2})\s*(?:日|號|号)?(?![\d:：])/g, (_, m, d) => {
+  // 好幾天：11/17到11/19、11/17-19（只寫日的話跟開始同一個月）→ 整天的日程
+  const md = (m, d) => {
     const y = parseDate(today).getFullYear()
     const on = (yy) => (realDay(yy, +m, +d) ? dateStr(new Date(yy, +m - 1, +d)) : null)
     let ds = on(y)
     // 已經過了一個月以上（或今年沒有這一天，例如 2/29），就當成明年
     if (!ds || ds < addDays(today, -30)) ds = on(y + 1) || ds
+    return ds
+  }
+  take(/(?<![\d:：])(\d{1,2})\s*(?:\/|月)\s*(\d{1,2})\s*(?:日|號|号)?\s*(?:-|~|〜|～|–|到|至)\s*(?:(\d{1,2})\s*(?:\/|月)\s*)?(\d{1,2})\s*(?:日|號|号)?(?![\d:：])/g, (_, m1, d1, m2, d2) => {
+    const a = md(m1, d1)
+    // 跨年（12/30到1/2）：1/2 已經過去很久，md 會當成明年，自然接在後面
+    const b = a && md(m2 || m1, d2)
+    if (!a || !b || b < a || b > addDays(a, 30)) return false
+    out.date = a
+    out.endDate = b
+    out.allDay = true
+  })
+  // 整天：「11/17 朋友來玩 整天」
+  take(/一整天|整天|全天|整日/g, () => {
+    out.allDay = true
+  })
+  take(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, (_, y, m, d) => {
+    if (!realDay(+y, +m, +d)) return false
+    out.date = dateStr(new Date(+y, +m - 1, +d))
+  })
+  take(/(?<![\d:：])(\d{1,2})\s*(?:\/|月)\s*(\d{1,2})\s*(?:日|號|号)?(?![\d:：])/g, (_, m, d) => {
+    const ds = md(m, d)
     // 2/30、13/5 這種日曆上沒有的：不當成日期，留在標題裡（不要默默進位成下個月）
     if (!ds) return false
     out.date = ds
@@ -209,6 +227,12 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
     out.kind = 'event'
     out.start = minToHHMM(out.start)
     out.end = minToHHMM(out.end)
+    // 寫了時間就是有時段的日程（「整天」只是順口）
+    delete out.allDay
+    delete out.endDate
+  } else if (out.allDay) {
+    // 沒寫日期時跟任務一樣，加在上面選的那天
+    out.kind = 'event'
   }
   out.title = text.replace(/\s+/g, ' ').replace(/^[\s,，、:：]+|[\s,，、:：]+$/g, '').trim()
   return out
@@ -217,8 +241,14 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
 // 給輸入框下方的預覽用
 export function describeQuick(p, today) {
   const chips = []
-  if (p.kind === 'event') chips.push('日程')
-  if (p.date && p.date !== today) {
+  if (p.kind === 'event') chips.push(p.allDay ? '整天的日程' : '日程')
+  if (p.allDay && p.endDate && p.endDate !== p.date) {
+    const f = (x) => {
+      const d = parseDate(x)
+      return `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`
+    }
+    chips.push(`${f(p.date)}–${f(p.endDate)}`)
+  } else if (p.date && p.date !== today) {
     const d = parseDate(p.date)
     chips.push(`${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`)
   } else if (p.date) chips.push('今天')

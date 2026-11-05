@@ -142,10 +142,12 @@
         <form class="add-form" id="eventForm" autocomplete="off" data-fold>
           <input id="eventTitle" maxlength="60" placeholder="新增日程，例如：設計週會" aria-label="新日程的名稱" />
           <div class="form-row">
-            <label class="time-field"><input type="time" id="eventStart" value="09:00" aria-label="開始時間" /></label>
-            <span class="tilde">〜</span>
-            <label class="time-field"><input type="time" id="eventEnd" value="10:00" aria-label="結束時間" /></label>
-            <select class="repeat-pick" id="eventRepeat" aria-label="重複"></select>
+            <button type="button" class="chip-toggle ev-allday" id="eventAllDay" aria-pressed="false" title="沒有時段的日程，例如朋友來玩、旅行（可以好幾天）">整天</button>
+            <label class="time-field ev-timed"><input type="time" id="eventStart" value="09:00" aria-label="開始時間" /></label>
+            <span class="tilde ev-timed">〜</span>
+            <label class="time-field ev-timed"><input type="time" id="eventEnd" value="10:00" aria-label="結束時間" /></label>
+            <label class="time-field ev-until" hidden>到 <input type="date" id="eventUntil" aria-label="最後一天（只有一天就不用改）" /></label>
+            <select class="repeat-pick ev-timed" id="eventRepeat" aria-label="重複"></select>
             <div class="swatches" id="eventColor" role="group" aria-label="日程的顏色"></div>
             <button class="btn-primary" type="submit">加入</button>
           </div>
@@ -164,6 +166,7 @@
         </div>
         </div>
         <div class="pg-main">
+        <div class="allday-bar" id="allDayBar"></div>
         <div class="plan-bar" id="planBar"></div>
         <div class="tray" id="planTray"></div>
         <div class="dayline" id="dayline"></div>
