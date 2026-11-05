@@ -186,7 +186,9 @@ export class ScheduleView {
     const date = s.selectedDate
     const r = s.state.rhythm
     const events = s.eventsOn(date)
-    const tasks = s.tasksOn(date).filter((t) => t.at)
+    // 做完的任務離開時間軸（那段時間空出來了，排程也不再算它）；取消完成就回到原本的時段。
+    // 日程（會議、約會）做完了照樣留著：那段時間確實有那件事
+    const tasks = s.tasksOn(date).filter((t) => t.at && !t.done)
     const blocks = itemBlocks(events, tasks)
     const clash = findConflicts(blocks)
     const ghosts = (this.preview?.result.plan || []).map((p) => ({ id: p.id, kind: 'ghost', start: toMin(p.at), end: toMin(p.at) + p.dur }))

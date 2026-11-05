@@ -342,7 +342,8 @@ export class TodayView {
   _schedHTML(today, tasks, nowMin) {
     const items = [
       ...this.store.eventsOn(today).map((e) => ({ kind: 'event', id: e.id, title: e.title, at: toMin(e.start), len: toMin(e.end) - toMin(e.start), done: e.done, color: EVENT_COLORS[e.color % EVENT_COLORS.length] })),
-      ...tasks.filter((t) => t.at).map((t) => ({ kind: 'task', id: t.id, title: t.title, at: toMin(t.at), len: taskDur(t), done: t.done, color: tagOf(t.tag).color })),
+      // 做完的任務不留在行程裡（日程做完了照樣留著，跟日程分頁的時間軸一樣）
+      ...tasks.filter((t) => t.at && !t.done).map((t) => ({ kind: 'task', id: t.id, title: t.title, at: toMin(t.at), len: taskDur(t), done: t.done, color: tagOf(t.tag).color })),
     ].sort((a, b) => a.at - b.at || (a.kind === 'event' ? -1 : 1))
     const head = `<header class="td-h">${IC.cal}<h3>今日行程<small>きょうのよてい</small></h3><button type="button" class="td-more" data-act="cal" data-fk="cal">月曆<i>›</i></button></header>`
     if (!items.length) {
