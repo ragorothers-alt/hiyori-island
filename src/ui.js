@@ -348,7 +348,7 @@ export class UI {
     }
     if (this._shopWait) this.toggleShop(false)
     else if (typing) document.activeElement.blur()
-    else if (this.tab === 'projects' && this._project.view?.id) this.closeProject()
+    else if (this.tab === 'projects' && this._project.view?.id) this._project.view.closeTask() || this.closeProject()
     else this.toggleFull(false)
   }
   // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）
@@ -805,7 +805,7 @@ export class UI {
         const i = TAGS.findIndex((x) => x.id === t.tag)
         s.updateTask(id, { tag: TAGS[(i + 1) % TAGS.length].id })
       } else if (act === 'today') s.moveToToday([id])
-      else if (act === 'proj') this.openProject(s.state.tasks.find((x) => x.id === id)?.project)
+      else if (act === 'proj') this.openProject(s.state.tasks.find((x) => x.id === id)?.project, undefined, id)
       else if (act === 'focus') this.focus.startWith(id)
       else if (!act && !e.target.closest('input')) this.hooks.focusTask(id)
     }
@@ -860,7 +860,7 @@ export class UI {
     const proj = t.project && this.store.state.projects.find((p) => p.id === t.project)
     if (proj) {
       const name = proj.name.length > 8 ? `${proj.name.slice(0, 8)}…` : proj.name
-      meta.push(`<button class="proj-tag" data-act="proj" style="--pc:${PROJECT_COLORS[proj.color % PROJECT_COLORS.length]}" title="打開專案「${esc(proj.name)}」">${esc(name)}</button>`)
+      meta.push(`<button class="proj-tag" data-act="proj" style="--pc:${PROJECT_COLORS[proj.color % PROJECT_COLORS.length]}" title="打開這件任務在專案「${esc(proj.name)}」裡的頁面（說明和紀錄）">${esc(name)}</button>`)
     }
     const rt = this.store.routineOf(t)
     if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
@@ -1289,14 +1289,15 @@ export class UI {
   }
 
   // ── 專案詳情 ──
-  openProject(id, sec) {
-    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec))
-    this._project.view.open(id, sec)
+  // taskId：直接打開那件任務在專案裡的頁面
+  openProject(id, sec, taskId = null) {
+    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId))
+    this._project.view.open(id, sec, taskId)
     this._stale?.add('projects')
     if (this.tab === 'projects') this._renderPage('projects')
     else this.setTab('projects')
     $('#panel .panel-body')?.scrollTo({ top: 0 })
-    requestAnimationFrame(() => $('#projectDetail .pd-back')?.focus({ preventScroll: true }))
+    requestAnimationFrame(() => this._project.view.focusBack())
   }
   closeProject() {
     const pv = this._project.view

@@ -5,7 +5,7 @@ import { parseQuick, describeQuick } from '../src/parse.js'
 import { XP } from '../src/theme.js'
 import {
   activity, msProgress, msSteps, msTasks, noteHTML, noteSnippet, noteTitle, noteTodos, projectMarkdown, projectProgress, projectStats, projectTimeline,
-  taskMilestone, textHTML, toggleNoteLine, latestLog,
+  taskMilestone, taskTimeline, textHTML, toggleNoteLine, latestLog,
 } from '../src/projects.js'
 
 const TODAY = '2026-11-02'
@@ -449,5 +449,94 @@ describe('存檔、匯入與時間軸', () => {
     expect(md).toContain('### 筆記')
     expect(md).toContain('- 推進（1 小時 30 分）')
     expect(md).toContain('- [ ] 任務（11/2・一）')
+  })
+})
+
+describe('任務頁：每件任務的說明和紀錄', () => {
+  const setup = () => {
+    const p = newProject(['一', '二'])
+    const t = store.addTask({ title: '訪談整理', project: p.id, date: TODAY })
+    return { p, t }
+  }
+
+  it('在任務頁寫的紀錄記在專案的進度日誌裡，多記是哪件任務；里程碑跟著任務算的那個', () => {
+    const { p, t } = setup()
+    const xp0 = store.player.xp
+    const log = store.addProjectLog(p.id, { text: '整理了三份逐字稿', mins: 60, task: t.id })
+    expect(log).toMatchObject({ task: t.id, ms: p.milestones[0].id, mins: 60 })
+    // 跟一般的進度一樣給經驗、算統計
+    expect(store.player.xp).toBe(xp0 + XP.projectLog)
+    expect(projectStats(p, store.state.tasks)).toMatchObject({ logs: 1, logMins: 60 })
+    expect(store.taskLogs(t).map((l) => l.text)).toEqual(['整理了三份逐字稿'])
+    // 不是這個專案的任務：當成一般的進度
+    const other = store.addTask({ title: '別的', date: TODAY })
+    expect(store.addProjectLog(p.id, { text: '亂指', task: other.id }).task).toBeNull()
+  })
+
+  it('任務的時間軸：紀錄、完成、建立；專案的時間軸也看得到這些紀錄', () => {
+    const { p, t } = setup()
+    vi.advanceTimersByTime(60000)
+    store.addProjectLog(p.id, { text: '開頭', task: t.id })
+    vi.advanceTimersByTime(60000)
+    store.addProjectLog(p.id, { text: '專案的事' })
+    vi.advanceTimersByTime(60000)
+    store.toggleTask(t.id)
+    const days = taskTimeline(p, t)
+    expect(days).toHaveLength(1)
+    expect(days[0].items.map((it) => it.kind)).toEqual(['task', 'log', 'start'])
+    expect(days[0].items[1].log.text).toBe('開頭')
+    const all = projectTimeline(p, store.state.tasks)[0].items.filter((it) => it.kind === 'log').map((it) => it.log.text)
+    expect(all).toEqual(['專案的事', '開頭'])
+  })
+
+  it('說明：可以改、會清洗長度，經過匯出匯入還在', () => {
+    const { p, t } = setup()
+    store.updateTask(t.id, { note: '  訪談要問到預算  ' })
+    expect(t.note).toBe('訪談要問到預算')
+    store.updateTask(t.id, { note: 'x'.repeat(900) })
+    expect(t.note).toHaveLength(500)
+    store.updateTask(t.id, { note: '訪談要問到預算' })
+    store.addProjectLog(p.id, { text: '紀錄', task: t.id })
+    const other = roundTrip()
+    const t2 = other.state.tasks.find((x) => x.id === t.id)
+    expect(t2.note).toBe('訪談要問到預算')
+    expect(other.state.projects[0].logs[0].task).toBe(t.id)
+    expect(projectMarkdown(p, store.state.tasks)).toContain('任務「訪談整理」')
+  })
+
+  it('任務換到別的專案：紀錄跟著搬；只是移出專案時留在原本的專案，放回來還認得', () => {
+    const { p, t } = setup()
+    const q = store.addProject({ name: '另一個', milestones: ['甲'] })
+    store.addProjectLog(p.id, { text: '在 A 寫的', task: t.id })
+    store.addProjectLog(p.id, { text: '專案 A 自己的' })
+    store.updateTask(t.id, { project: null })
+    expect(p.logs.map((l) => l.task)).toEqual([t.id, null])
+    expect(store.taskLogs(t)).toEqual([])
+    store.updateTask(t.id, { project: p.id })
+    expect(store.taskLogs(t).map((l) => l.text)).toEqual(['在 A 寫的'])
+    store.updateTask(t.id, { project: q.id })
+    expect(p.logs.map((l) => l.text)).toEqual(['專案 A 自己的'])
+    expect(q.logs).toMatchObject([{ text: '在 A 寫的', task: t.id, ms: null }])
+  })
+
+  it('任務刪掉了：紀錄留在專案裡，不再指著它；讀檔時對不上的也拿掉', () => {
+    const { p, t } = setup()
+    store.addProjectLog(p.id, { text: '紀錄', task: t.id })
+    store.deleteTask(t.id)
+    expect(p.logs).toMatchObject([{ text: '紀錄', task: null }])
+    const raw = JSON.parse(store.exportJSON())
+    raw.projects[0].logs[0].task = 'nope'
+    const other = new Store()
+    other.importJSON(JSON.stringify(raw))
+    expect(other.state.projects[0].logs[0].task).toBeNull()
+  })
+
+  it('拆成三小步：紀錄和說明交給第一步', () => {
+    const { p, t } = setup()
+    store.updateTask(t.id, { note: '說明' })
+    store.addProjectLog(p.id, { text: '紀錄', task: t.id })
+    const parts = store.splitTask(t.id)
+    expect(parts[0].note).toBe('說明')
+    expect(p.logs[0].task).toBe(parts[0].id)
   })
 })

@@ -4,6 +4,7 @@
 // 上限抓寬一點：一般使用碰不到，只防匯入的檔案把存檔撐爆
 export const PROJECT_LIMITS = {
   goal: 300, logText: 1000, logs: 1000, logMins: 1440, noteTitle: 60, noteBody: 10000, notes: 100, msNote: 500, steps: 30, stepTitle: 80, focusDays: 400,
+  taskNote: 500,
 }
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -69,27 +70,42 @@ export function msTasks(p, tasks = []) {
 // 時間軸：自己寫的進度、完成的里程碑、綁在專案上的任務、專注的分鐘、開工和落成，依日期分組（新的在前）。
 // 回傳 [{ date, items: [{ kind: 'log'|'ms'|'task'|'done'|'start', at, ... }], logMins, focus }]
 export function projectTimeline(p, tasks = []) {
+  const { day, addLog, list } = timeline()
+  for (const log of p.logs || []) addLog(log)
+  for (const m of p.milestones) if (m.done && m.doneAt) day(dayOf(m.doneAt)).items.push({ kind: 'ms', at: m.doneAt, milestone: m })
+  for (const t of linkedTo(p, tasks)) if (t.done && t.doneAt) day(dayOf(t.doneAt)).items.push({ kind: 'task', at: t.doneAt, task: t })
+  for (const [date, min] of Object.entries(p.focus || {})) if (min > 0) day(date).focus += min
+  if (p.completedAt) day(dayOf(p.completedAt)).items.push({ kind: 'done', at: p.completedAt })
+  if (p.createdAt) day(dayOf(p.createdAt)).items.push({ kind: 'start', at: p.createdAt })
+  return list()
+}
+// 任務頁的時間軸：在任務頁寫的紀錄、完成和建立這件任務，格式同 projectTimeline（'start' 是建立任務）
+export function taskTimeline(p, t) {
+  const { day, addLog, list } = timeline()
+  for (const log of p.logs || []) if (log.task === t.id) addLog(log)
+  if (t.done && t.doneAt) day(dayOf(t.doneAt)).items.push({ kind: 'task', at: t.doneAt, task: t })
+  if (t.createdAt) day(dayOf(t.createdAt)).items.push({ kind: 'start', at: t.createdAt })
+  return list()
+}
+// 依日期分組的時間軸：新的日子在前；同一天裡新的在上面，開頭（開工、建立）永遠在那天最下面，落成排在同一刻完成的里程碑上面
+function timeline() {
   const days = new Map()
-  const dayEntry = (date) => {
+  const day = (date) => {
     let d = days.get(date)
     if (!d) days.set(date, (d = { date, items: [], logMins: 0, focus: 0 }))
     return d
   }
-  for (const log of p.logs || []) {
-    const d = dayEntry(log.date)
+  const addLog = (log) => {
+    const d = day(log.date)
     d.items.push({ kind: 'log', at: log.at, log })
     d.logMins += log.mins || 0
   }
-  for (const m of p.milestones) if (m.done && m.doneAt) dayEntry(dayOf(m.doneAt)).items.push({ kind: 'ms', at: m.doneAt, milestone: m })
-  for (const t of linkedTo(p, tasks)) if (t.done && t.doneAt) dayEntry(dayOf(t.doneAt)).items.push({ kind: 'task', at: t.doneAt, task: t })
-  for (const [date, min] of Object.entries(p.focus || {})) if (min > 0) dayEntry(date).focus += min
-  if (p.completedAt) dayEntry(dayOf(p.completedAt)).items.push({ kind: 'done', at: p.completedAt })
-  if (p.createdAt) dayEntry(dayOf(p.createdAt)).items.push({ kind: 'start', at: p.createdAt })
-  // 同一天裡新的在上面；開工永遠在那天最下面，落成排在同一刻完成的里程碑上面
   const rank = (it) => (it.kind === 'start' ? -1 : it.kind === 'done' ? it.at + 0.5 : it.at)
-  return [...days.values()]
-    .map((d) => ({ ...d, items: d.items.sort((a, b) => rank(b) - rank(a)) }))
-    .sort((a, b) => b.date.localeCompare(a.date))
+  const list = () =>
+    [...days.values()]
+      .map((d) => ({ ...d, items: d.items.sort((a, b) => rank(b) - rank(a)) }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+  return { day, addLog, list }
 }
 
 // 最新的一則進度（日期新的優先，同一天看寫下的時間）
@@ -278,6 +294,7 @@ export function projectMarkdown(p, tasks = []) {
     for (const t of linked) {
       const m = taskMilestone(p, t)
       L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${md(t.date)}${m ? `・${m.title}` : ''}）`)
+      if (t.note) L.push(...t.note.split('\n').map((x) => `  > ${x}`))
     }
     L.push('')
   }
@@ -295,7 +312,8 @@ export function projectMarkdown(p, tasks = []) {
         if (it.kind !== 'log') continue
         const l = it.log
         const ms = l.ms && p.milestones.find((m) => m.id === l.ms)
-        const extra = [l.mins && fmtMins(l.mins), ms && `里程碑「${ms.title}」`].filter(Boolean)
+        const task = l.task && tasks.find((t) => t.id === l.task)
+        const extra = [l.mins && fmtMins(l.mins), task && `任務「${task.title}」`, ms && `里程碑「${ms.title}」`].filter(Boolean)
         L.push(`- ${l.text.replace(/\n/g, '\n  ')}${extra.length ? `（${extra.join('・')}）` : ''}`)
       }
       L.push('')

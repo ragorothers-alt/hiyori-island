@@ -3,7 +3,7 @@ import { $, $$, esc, ICON, armConfirm, inlineEdit, patch, dateLabel } from './do
 import { PROJECT_COLORS, tagOf } from '../theme.js'
 import { addDays, daysBetween, parseDate } from '../store.js'
 import {
-  projectTimeline, projectStats, activity, msProgress, msSteps, msTasks, taskMilestone, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
+  projectTimeline, taskTimeline, projectStats, activity, msProgress, msSteps, msTasks, taskMilestone, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
   projectMarkdown, NOTE_TEMPLATES, dayOf, PROJECT_LIMITS as PL,
 } from '../projects.js'
 import { aiReady, askAI } from '../ai.js'
@@ -11,6 +11,8 @@ import { FUJI_LINES } from '../data/lines.js'
 
 // 專案詳情：目標與統計、進度日誌（自己寫的＋自動帶進來的里程碑、任務、專注）、筆記、里程碑的細項與備註、歸在專案的任務。
 // 窄的時候四塊用分頁切換；寬的時候里程碑和任務固定在右欄。
+// 點任務打開那件任務自己的頁面（說明、紀錄）：疊在專案詳情上面，專案那邊藏起來但不拆掉（打到一半的字、編輯中的筆記都還在）。
+// 任務的紀錄就是專案的進度日誌、多記一個 task，所以也會出現在專案的進度裡、算進專案的統計。
 // 任何資料變動都會重畫：輸入框標了 data-keep，重畫前後把打到一半的字和游標接回去；
 // 筆記編輯中的內容不跟著重畫（打開時拍一張快照當 HTML），打字時隔一下子自動存
 
@@ -127,6 +129,8 @@ export class ProjectView {
     this.editLog = null // 正在改的那則進度
     this.mins = 0 // 寫進度時選的「花了多久」
     this.doneOpen = false
+    this.taskId = null // 打開的任務頁
+    this.tmins = 0 // 任務頁寫紀錄時選的「花了多久」
     // ふじ（Claude）正在做或做好的事：{ kind: 'steps', mid, … } 拆細項、{ kind: 'summary', … } 整理進度
     // 換專案或關掉時清掉；回來的結果對不上這個物件就丟掉
     this.ai = null
@@ -135,13 +139,53 @@ export class ProjectView {
   get project() {
     return (this.id && this.store.state.projects.find((p) => p.id === this.id)) || null
   }
+  // 打開的任務（要還歸在這個專案裡）
+  get task() {
+    return (this.taskId && this.store.state.tasks.find((t) => t.id === this.taskId && t.project === this.id)) || null
+  }
 
-  open(id, sec = 'log') {
+  // taskId：直接打開那件任務的頁面
+  open(id, sec = 'log', taskId = null) {
     this._flushAll()
     this.id = id
     this._reset()
     if (SECS.some(([k]) => k === sec)) this.sec = sec
+    this.taskId = taskId
     this.root.replaceChildren()
+  }
+
+  // 任務頁：記下專案這邊捲到哪裡，回來時接回去
+  openTask(tid) {
+    if (!this.store.state.tasks.some((t) => t.id === tid && t.project === this.id)) return
+    this._flushAll()
+    if (!this.taskId) this._scrollY = this._scroller()?.scrollTop ?? 0
+    this.taskId = tid
+    this.tmins = 0
+    this.editLog = null
+    this.render()
+    this._scroller()?.scrollTo({ top: 0 })
+    this.focusBack()
+  }
+  closeTask() {
+    const tid = this.taskId
+    if (!tid) return false
+    this._flushAll()
+    this.taskId = null
+    this.editLog = null
+    this.render()
+    this._grow()
+    this._scroller()?.scrollTo({ top: this._scrollY || 0 })
+    // 回到列表上剛剛那件任務
+    const open = $$(`[data-act="task-open"][data-id="${CSS.escape(tid)}"]`, this.root).find((b) => b.offsetParent)
+    ;(open || $('.pd-back', this.root))?.focus({ preventScroll: true })
+    return true
+  }
+  // 看得到的那顆「返回」
+  focusBack() {
+    $(this.taskId ? '.pd-task .pd-back' : '.pd-back', this.root)?.focus({ preventScroll: true })
+  }
+  _scroller() {
+    return this.root.closest('.panel-body')
   }
 
   close() {
@@ -166,8 +210,12 @@ export class ProjectView {
     if (this.noteId && !p.notes.some((n) => n.id === this.noteId)) this.noteId = this.noteSnap = this.noteBase = null
     if (this.editLog && !p.logs.some((l) => l.id === this.editLog)) this.editLog = null
     for (const id of this.openMs) if (!p.milestones.some((m) => m.id === id)) this.openMs.delete(id)
+    // 任務頁的任務不在了（刪掉、移出專案）：回到專案
+    const task = this.task
+    if (this.taskId && !task) this.taskId = null
     this.root.style.setProperty('--c', colorOf(p))
     this.root.dataset.sec = this.sec
+    this.root.toggleAttribute('data-task', !!task)
     const st = projectStats(p, tasks)
     const note = this.noteId && p.notes.find((n) => n.id === this.noteId)
     if (note && this.noteEdit) this._syncNote(p, note)
@@ -212,6 +260,17 @@ export class ProjectView {
           },
         ],
       },
+      // 任務頁放在最後：專案那幾塊不用搬動位置（搬動會讓焦點掉出去）
+      ...(task
+        ? [{
+          k: `task-${task.id}`, cls: 'pd-task', kids: [
+            { k: 'ttop', cls: 'pd-top', html: this._taskTopHTML(p, task, today) },
+            { k: 'tsum', cls: 'pd-sum pk-sum', html: this._taskHeadHTML(p, task, today) },
+            { k: 'tcompose', cls: 'pd-compose-box', html: this._taskComposeHTML(today) },
+            { k: 'ttl', cls: 'pk-tl', html: this._taskTimelineHTML(p, task, today) },
+          ],
+        }]
+        : []),
     ]
     const kept = this._capture()
     patch(this.root, items)
@@ -323,23 +382,30 @@ export class ProjectView {
     </form>`
   }
 
+  // 一則進度。inTask：畫在任務頁上（不標任務名；同一則只在看得到的那一頁打開修改）
+  _logHTML(p, l, today, inTask = false) {
+    if (this.editLog === l.id && !!this.task === inTask) return this._logEditHTML(p, l, today)
+    const m = !inTask && l.ms && p.milestones.find((x) => x.id === l.ms)
+    // 在任務頁寫的：標出是哪件任務，還歸在這個專案的話點了打開它的頁面
+    const t = !inTask && l.task && this.store.state.tasks.find((x) => x.id === l.task)
+    const tag = !t ? '' : t.project === p.id
+      ? `<button type="button" class="tl-task" data-act="task-open" data-id="${esc(t.id)}" title="打開這件任務的頁面">${esc(t.title)}</button>`
+      : `<span class="tl-task">${esc(t.title)}</span>`
+    const meta = [
+      dayOf(l.at) === l.date ? hhmm(l.at) : `${md(dayOf(l.at))} 補記`,
+      l.mins ? `<span class="tl-mins">${dur(l.mins)}</span>` : '',
+      tag,
+      m ? `<span class="tl-ms">${esc(m.title)}</span>` : '',
+    ].filter(Boolean).join('')
+    return `<li class="tl-log"><i class="tl-dot"></i><div class="tl-main">${l.text ? `<p class="tl-text">${textHTML(l.text)}</p>` : ''}<div class="tl-meta">${meta}</div></div>
+      <div class="tl-acts"><button type="button" class="mini" data-act="log-edit" data-id="${esc(l.id)}" title="修改">${ICON.edit}</button><button type="button" class="mini" data-act="log-del" data-id="${esc(l.id)}" title="刪除">${ICON.del}</button></div></li>`
+  }
+
   _timelineHTML(p, tasks, today) {
     const days = projectTimeline(p, tasks)
     const shown = days.slice(0, this.logDays)
-    const msOf = (id) => p.milestones.find((m) => m.id === id)
     const item = (it) => {
-      if (it.kind === 'log') {
-        const l = it.log
-        if (this.editLog === l.id) return this._logEditHTML(p, l, today)
-        const m = l.ms && msOf(l.ms)
-        const meta = [
-          dayOf(l.at) === l.date ? hhmm(l.at) : `${md(dayOf(l.at))} 補記`,
-          l.mins ? `<span class="tl-mins">${dur(l.mins)}</span>` : '',
-          m ? `<span class="tl-ms">${esc(m.title)}</span>` : '',
-        ].filter(Boolean).join('')
-        return `<li class="tl-log"><i class="tl-dot"></i><div class="tl-main">${l.text ? `<p class="tl-text">${textHTML(l.text)}</p>` : ''}<div class="tl-meta">${meta}</div></div>
-          <div class="tl-acts"><button type="button" class="mini" data-act="log-edit" data-id="${esc(l.id)}" title="修改">${ICON.edit}</button><button type="button" class="mini" data-act="log-del" data-id="${esc(l.id)}" title="刪除">${ICON.del}</button></div></li>`
-      }
+      if (it.kind === 'log') return this._logHTML(p, it.log, today)
       if (it.kind === 'ms') return `<li class="tl-ev tl-msdone"><i class="tl-dot">${ICON.check}</i><span>完成里程碑「${esc(it.milestone.title)}」</span><small>${hhmm(it.at)}</small></li>`
       if (it.kind === 'task') return `<li class="tl-ev"><i class="tl-dot"></i><span>完成任務「${esc(it.task.title)}」</span><small>${hhmm(it.at)}</small></li>`
       if (it.kind === 'done') return `<li class="tl-ev tl-built"><i class="tl-dot">${ICON.spark}</i><span>${p.onTime ? '準時落成' : '落成'}！所有里程碑都完成了</span></li>`
@@ -482,7 +548,7 @@ export class ProjectView {
       const k = esc(t.id)
       return `<li class="${t.done ? 'done' : ''}">
         <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
-        <span class="pm-st pm-tk"><span>${esc(t.title)}</span><small>${taskWhen(t, today)}</small></span>
+        <button type="button" class="pm-st pm-tk" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span>${esc(t.title)}</span><small>${taskWhen(t, today)}</small></button>
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯（也可以換到別的里程碑）">${ICON.edit}</button></li>`
     }
     return `<div class="pm-tasks"><span class="pc-k">任務</span><ul class="pm-steps">${[...todo, ...done].map(row).join('')}</ul></div>`
@@ -490,13 +556,17 @@ export class ProjectView {
 
   _tasksHTML(p, today) {
     const { todo, done } = this.store.projectTasks(p.id)
+    // 每件任務寫了幾則紀錄
+    const logs = new Map()
+    for (const l of p.logs) if (l.task) logs.set(l.task, (logs.get(l.task) || 0) + 1)
     const row = (t) => {
       const k = esc(t.id)
       const late = !t.done && t.date < today
       const m = taskMilestone(p, t)
+      const n = logs.get(t.id)
       return `<li class="pt ${t.done ? 'done' : ''}">
         <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
-        <span class="pt-main"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></span>
+        <button type="button" class="pt-main" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${n ? `・紀錄 ${n}` : ''}${t.note ? '・<i class="pt-has">註</i>' : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></button>
         ${!t.done && t.date === today ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯日期、時間和優先度">${ICON.edit}</button>
         <button type="button" class="mini" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在）">${ICON.minus}</button>
@@ -510,7 +580,80 @@ export class ProjectView {
         <button class="mini" type="submit" title="新增">${ICON.plus}</button></form>
       ${todo.length ? `<ul class="pt-list">${todo.map(row).join('')}</ul>` : ''}
       ${done.length ? `<details class="pt-done" ${this.doneOpen ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
-      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。做完的任務會推進里程碑，專注在這些任務上的時間會記進這個專案。</p>`}`
+      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。做完的任務會推進里程碑，專注在這些任務上的時間會記進這個專案。點一件任務可以打開它自己的頁面，寫說明和紀錄。</p>`}`
+  }
+
+  // ── 任務頁 ──
+  _taskTopHTML(p, t, today) {
+    const k = esc(t.id)
+    return `<button type="button" class="pd-back" data-act="task-back">${ICON.prev}<span>${esc(p.name)}</span></button>
+      <span class="sp"></span>
+      ${!t.done && t.date === today ? `<button type="button" class="pd-tbtn" data-act="task-focus" data-id="${k}" title="用番茄鐘專注在這件事上">◷ 專注</button>` : ''}
+      <button type="button" class="pd-tbtn" data-act="task-edit" data-id="${k}" title="改名稱、日期、時間、優先度、里程碑">編輯</button>
+      <button type="button" class="pd-tbtn" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在；寫過的紀錄留在專案的進度裡）">移出專案</button>`
+  }
+
+  _taskHeadHTML(p, t, today) {
+    const k = esc(t.id)
+    const tag = tagOf(t.tag)
+    const m = taskMilestone(p, t)
+    const late = !t.done && t.date < today
+    const meta = [
+      `<span class="${late ? 'warn' : ''}">${taskWhen(t, today)}</span>`,
+      t.at ? `<span>${t.at} 開始</span>` : '',
+      t.dur ? `<span>預估 ${dur(t.dur)}</span>` : '',
+      `<span class="pd-chip pk-tag" style="--tc:${tag.color}">${tag.label}</span>`,
+      m ? `<span class="pk-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : '',
+      `<span>${md(dayOf(t.createdAt))} 建立</span>`,
+    ].filter(Boolean).join('')
+    // 這件任務的紀錄：幾則、記了多少時間、最近一次
+    const logs = this.store.taskLogs(t)
+    const mins = logs.reduce((a, l) => a + l.mins, 0)
+    const last = logs.reduce((a, l) => (l.date > a ? l.date : a), '')
+    const n = (v, label) => `<span><b>${v}</b>${label}</span>`
+    const nums = [
+      n(logs.length, '則紀錄'),
+      mins ? n(hrs(mins), '投入') : '',
+      t.pomos ? n(t.pomos, '輪專注') : '',
+      `<span class="pk-last">${last ? `最近紀錄：${ago(last, today)}` : '還沒有紀錄'}</span>`,
+    ].filter(Boolean).join('')
+    return `<div class="pd-title">
+        <button type="button" class="check ${t.done ? 'on' : ''}" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tag.color}">${ICON.check}</button>
+        <div class="pd-tl"><h2 class="pd-name ${t.done ? 'pk-done' : ''}">${t.star ? '<i class="pt-star" title="今日の本命">★</i>' : ''}${esc(t.title)}</h2><div class="pd-meta">${meta}</div></div>
+      </div>
+      <label class="pd-goal"><span class="pd-k">說明</span><textarea data-keep="tnote" data-tnote="${k}" data-grow rows="1" maxlength="${PL.taskNote}"
+        placeholder="要做到什麼程度？需要的資料、要注意的事">${esc(t.note || '')}</textarea></label>
+      <div class="pd-nums">${nums}</div>`
+  }
+
+  _taskComposeHTML(today) {
+    return `<form class="pd-compose" data-form="tlog" autocomplete="off">
+      <textarea name="text" data-keep="tlog-text" data-grow rows="2" maxlength="1000" aria-label="寫下這件任務的紀錄"
+        placeholder="這次做了什麼？卡在哪裡、下一步是什麼"></textarea>
+      <div class="pc-row pc-mins" role="group" aria-label="花了多久"><span class="pc-k">花了</span>${MINS.map((m) => `<button type="button" data-act="tmins" data-v="${m}" class="${this.tmins === m ? 'on' : ''}" aria-pressed="${this.tmins === m}">${m ? dur(m) : '不記'}</button>`).join('')}</div>
+      <div class="pc-row">
+        <label class="pc-sel"><span class="pc-k">哪天</span><input type="date" name="date" data-keep="tlog-date" value="${today}" max="${today}"></label>
+        <span class="sp"></span>
+        <button class="btn-primary" type="submit" title="Ctrl＋Enter 也可以送出">記下來</button>
+      </div>
+    </form>`
+  }
+
+  _taskTimelineHTML(p, t, today) {
+    const days = taskTimeline(p, t)
+    const item = (it) => {
+      if (it.kind === 'log') return this._logHTML(p, it.log, today, true)
+      if (it.kind === 'task') return `<li class="tl-ev tl-msdone"><i class="tl-dot">${ICON.check}</i><span>完成這件任務</span><small>${hhmm(it.at)}</small></li>`
+      return '<li class="tl-ev tl-start"><i class="tl-dot"></i><span>建立這件任務</span></li>'
+    }
+    const hint = days.some((d) => d.logMins || d.items.some((it) => it.kind === 'log'))
+      ? ''
+      : `<div class="pd-hint"><b>把這件事的每一步記下來</b>做了什麼、卡在哪裡、下一步是什麼。這裡寫的紀錄也會出現在「${esc(p.name)}」的進度裡。</div>`
+    const list = days.map((d) => {
+      const sum = d.logMins ? `<small>投入 ${dur(d.logMins)}</small>` : ''
+      return `<section class="tl-day"><h4 class="tl-date"><b>${dayTitle(d.date, today)}</b>${sum}</h4><ul>${d.items.map(item).join('')}</ul></section>`
+    })
+    return hint + list.join('')
   }
 
   // ── ふじ（Claude）──
@@ -778,7 +921,22 @@ export class ProjectView {
       case 'task-toggle': return s.toggleTask(id)
       case 'task-focus': return this.hooks.startFocus(id)
       case 'task-edit': return this.hooks.openEdit('task', id)
-      case 'task-unlink': return s.updateTask(id, { project: null })
+      case 'task-unlink':
+        // 任務頁上的那顆要按兩下（移出去頁面就關了）
+        if (b.closest('.pd-task')) return armConfirm(b, '確定移出？', () => s.updateTask(id, { project: null }))
+        return s.updateTask(id, { project: null })
+      case 'task-open': return this.openTask(id)
+      case 'task-back': return this.closeTask()
+      case 'tmins': {
+        this.tmins = +b.dataset.v
+        for (const x of $$('[data-act="tmins"]', this.root)) {
+          x.classList.toggle('on', +x.dataset.v === this.tmins)
+          x.setAttribute('aria-pressed', String(+x.dataset.v === this.tmins))
+        }
+        const box = $('[data-k="tcompose"]', this.root)
+        if (box) box._html = null
+        return
+      }
     }
   }
 
@@ -804,9 +962,26 @@ export class ProjectView {
         s.addProjectLog(p.id, entry)
         return
       }
+      case 'tlog': {
+        const t = this.task
+        const text = el.text.value.trim()
+        if (!t) return
+        if (!text && !this.tmins) return el.text.focus()
+        const entry = { text, mins: this.tmins, date: el.date.value, task: t.id }
+        el.text.value = ''
+        el.date.value = s.today
+        this.tmins = 0
+        const box = $('[data-k="tcompose"]', this.root)
+        if (box) box._html = null
+        s.addProjectLog(p.id, entry)
+        return
+      }
       case 'log-edit': {
         this.editLog = null
-        s.updateProjectLog(p.id, f.dataset.id, { text: el.text.value, mins: +el.mins.value, date: el.date.value, ms: el.ms ? el.ms.value || null : undefined })
+        // 專案沒有里程碑（表單裡沒有選單）：不動它
+        const patch = { text: el.text.value, mins: +el.mins.value, date: el.date.value }
+        if (el.ms) patch.ms = el.ms.value || null
+        s.updateProjectLog(p.id, f.dataset.id, patch)
         return
       }
       case 'deadline':
@@ -857,6 +1032,7 @@ export class ProjectView {
     const p = this.project
     if (!p) return
     if (el.matches('[data-goal]')) return this.store.setProjectGoal(p.id, el.value)
+    if (el.dataset.tnote) return this.store.updateTask(el.dataset.tnote, { note: el.value })
     if (el.dataset.msnote) return this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })
     if (el.dataset.msdue) return this.store.updateMilestone(p.id, el.dataset.msdue, { due: el.value })
     // 拆細項的勾選：只改按鈕上的數字，不整塊重畫（焦點留在勾選框上）
@@ -878,7 +1054,7 @@ export class ProjectView {
     if (e.isComposing || e.keyCode === 229) return
     const el = e.target
     // Ctrl／⌘＋Enter 送出進度
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && el.form?.matches('[data-form="log"], [data-form="log-edit"]')) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && el.form?.matches('[data-form="log"], [data-form="tlog"], [data-form="log-edit"]')) {
       e.preventDefault()
       return el.form.requestSubmit()
     }
@@ -1002,6 +1178,8 @@ export class ProjectView {
     const goal = $('[data-goal]', this.root)
     if (goal && dirty(goal)) this.store.setProjectGoal(p.id, goal.value)
     for (const el of $$('[data-msnote]', this.root)) if (dirty(el)) this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })
+    const tnote = $('[data-tnote]', this.root)
+    if (tnote && dirty(tnote)) this.store.updateTask(tnote.dataset.tnote, { note: tnote.value })
   }
 
   _export() {
@@ -1053,7 +1231,8 @@ export class ProjectView {
       sel = `[data-act="${CSS.escape(focus.act)}"]`
       for (const k of ['id', 'sid', 'v']) if (focus[k]) sel += `[data-${k}="${CSS.escape(focus[k])}"]`
     }
-    const el = $(sel, this.root)
+    // 任務頁開著時專案那邊藏起來了：先找任務頁裡的
+    const el = (this.taskId && $(sel, $('.pd-task', this.root) || this.root)) || $(sel, this.root)
     if (!el) return
     el.focus({ preventScroll: true })
     if (focus.keep && focus.start != null) {

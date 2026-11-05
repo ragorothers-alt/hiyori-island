@@ -223,6 +223,25 @@ body.night .tl-mins { filter: none; }
 .pt .mini { width: 24px; height: 24px; opacity: 0; }
 .pt:hover .mini, .pt:focus-within .mini { opacity: 1; }
 .pt-done summary { cursor: pointer; font-size: 12px; color: var(--ink-soft); padding: 4px 2px; margin-bottom: 4px; }
+/* 任務名稱點了打開任務頁 */
+.pt-main { text-align: left; padding: 1px 2px; margin: -1px -2px; border-radius: 8px; }
+.pt-main:hover .pt-t, .pm-tk:hover > span { color: var(--sky-deep); }
+.pm-steps .pm-tk { cursor: pointer; text-align: left; padding: 0; }
+.pt-has { font-style: normal; font-family: var(--font-display); }
+
+/* ── 任務頁：疊在專案詳情上，專案那幾塊先藏起來 ── */
+#projectDetail[data-task] > :not(.pd-task) { display: none; }
+.pd-task { animation: fadeUp .3s var(--ease) both; }
+.pk-sum .pd-title { align-items: flex-start; }
+.pk-sum .pd-title > .check { margin-top: 2px; }
+.pk-done { color: var(--ink-faint); text-decoration: line-through; }
+.pk-tag { background: color-mix(in srgb, var(--tc) 32%, transparent); color: var(--ink); }
+.pk-ms::before { content: "▸ "; }
+.pk-sum .pk-last { margin-left: auto; color: var(--ink-faint); }
+.pd-task .pd-compose { margin: 14px 0 16px; }
+.tl-task { font-size: 11px; color: var(--ink-soft); padding: 0 6px; border-radius: 7px; background: rgba(140, 170, 200, .16); }
+.tl-task::before { content: "任務・"; color: var(--ink-faint); }
+button.tl-task:hover { color: var(--ink); background: rgba(140, 170, 200, .28); }
 @media (hover: none) { .tl-acts, .pm-steps .mini, .pt .mini { opacity: .7; } }
 
 /* 寬的時候：里程碑和任務固定在右欄，左邊切換進度／筆記 */

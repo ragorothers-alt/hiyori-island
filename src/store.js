@@ -13,7 +13,7 @@ import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
-import { PROJECT_LIMITS as PL, projectProgress, progressAll } from './projects.js'
+import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone } from './projects.js'
 import { isEvent } from './events.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
@@ -318,6 +318,7 @@ const TASK_PATCH = {
   dur: (v, t) => (v ? num(v, 5, 600, t.dur || 30) : null),
   project: (v) => (ID_RE.test(v) ? v : null),
   ms: (v) => (ID_RE.test(v) ? v : null),
+  note: (v) => str(v, PL.taskNote).trim(),
 }
 const EVENT_PATCH = {
   title: (v, e) => str(v).trim() || e.title,
@@ -402,8 +403,11 @@ function migrate(s) {
       // project：歸在哪個專案；ms：自己選的里程碑，null＝自動（下面清完專案後，對不上的拿掉）
       project: ID_RE.test(t.project) ? t.project : null,
       ms: ID_RE.test(t.ms) ? t.ms : null,
+      // 任務頁上的說明（要做到什麼程度、要注意的事）
+      note: str(t.note, PL.taskNote),
     }
   })
+  const taskIds = new Set(tasks.map((t) => t.id))
   const events = cleanList(s.events, (e) => {
     const title = str(e.title).trim()
     if (!title) return null
@@ -448,12 +452,13 @@ function migrate(s) {
       return { id: str(m.id), title, done, rewarded: !!m.rewarded || done, doneAt: done ? ts(m.doneAt) : null, note: str(m.note, PL.msNote), due: ymd(m.due, ''), steps }
     })
     const msIds = new Set(milestones.map((m) => m.id))
-    // 進度日誌：日期舊的在前（同一天照寫下的時間）；只記了時間沒寫字也算一則
+    // 進度日誌：日期舊的在前（同一天照寫下的時間）；只記了時間沒寫字也算一則。
+    // task：在任務頁寫的（那件任務的紀錄）；任務不在了就只是專案的進度
     const logs = cleanList(p.logs, (l) => {
       const text = str(l.text, PL.logText).trim()
       const mins = num(l.mins, 0, PL.logMins, 0)
       if (!text && !mins) return null
-      return { id: str(l.id), date: ymd(l.date, today), at: ts(l.at) || Date.now(), text, mins, ms: msIds.has(l.ms) ? l.ms : null }
+      return { id: str(l.id), date: ymd(l.date, today), at: ts(l.at) || Date.now(), text, mins, ms: msIds.has(l.ms) ? l.ms : null, task: taskIds.has(l.task) ? l.task : null }
     })
       .sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
       .slice(-PL.logs)
@@ -1445,6 +1450,7 @@ export class Store {
     const keep = (x) => x.routineId !== id || x.done || x.date < this.today
     this.state.tasks = this.state.tasks.filter(keep)
     this.state.events = this.state.events.filter(keep)
+    this._dropTaskRefs()
     this._finish()
   }
 
@@ -1588,9 +1594,35 @@ export class Store {
       const ms = 'ms' in patch ? patch.ms : null
       patch = { ...patch, ms: this._find('projects', pid)?.milestones.some((m) => m.id === ms) ? ms : null }
     }
+    const moved = pid && pid !== t.project
     Object.assign(t, patch)
     if (patch.date) this._fitStar(t)
+    if (moved) this._gatherTaskLogs(t)
     this._finish()
+  }
+  // 任務歸到（另一個）專案：在任務頁寫的紀錄跟著搬過去。只是移出專案時紀錄留在原本的專案，當成那個專案的進度
+  // （之後放回來也還認得）。搬過去的紀錄不再指著原本專案的里程碑
+  _gatherTaskLogs(t) {
+    const to = this._find('projects', t.project)
+    if (!to) return
+    for (const p of this.state.projects) {
+      if (p === to || !p.logs.some((l) => l.task === t.id)) continue
+      for (const l of p.logs) if (l.task === t.id) to.logs.push({ ...l, ms: null })
+      p.logs = p.logs.filter((l) => l.task !== t.id)
+      this._authored(to)
+    }
+    to.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
+    if (to.logs.length > PL.logs) to.logs.splice(0, to.logs.length - PL.logs)
+  }
+  // 任務刪掉了：指著它的紀錄留在專案裡，只是不再算那件任務的
+  _dropTaskRefs() {
+    const ids = new Set(this.state.tasks.map((t) => t.id))
+    for (const p of this.state.projects) for (const l of p.logs) if (l.task && !ids.has(l.task)) l.task = null
+  }
+  // 那件任務在任務頁寫的紀錄（日期舊的在前）
+  taskLogs(t) {
+    const p = t?.project && this._find('projects', t.project)
+    return p ? p.logs.filter((l) => l.task === t.id) : []
   }
   // 歸在這個專案的任務：還沒完成的照日期，已完成的新的在前
   projectTasks(pid) {
@@ -1601,6 +1633,7 @@ export class Store {
   }
   deleteTask(id) {
     this.state.tasks = this.state.tasks.filter((t) => t.id !== id)
+    this._dropTaskRefs()
     this._finish([['taskDeleted', id]])
   }
   moveToToday(ids) {
@@ -1637,11 +1670,13 @@ export class Store {
       const p = {
         id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: !!t.rewarded, createdAt: Date.now() + i,
         dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0, pomos: i === 0 ? t.pomos || 0 : 0,
-        project: t.project || null, ms: t.ms || null,
+        project: t.project || null, ms: t.ms || null, note: i === 0 ? t.note || '' : '',
       }
       fx.push(['taskAdded', p])
       return p
     })
+    // 任務頁寫過的紀錄和說明交給第一步
+    for (const p of this.state.projects) for (const l of p.logs) if (l.task === t.id) l.task = parts[0].id
     const at = this.state.tasks.indexOf(t)
     this.state.tasks.splice(at, 1, ...parts)
     fx.push(['taskSplit', { task: t, parts }])
@@ -2240,9 +2275,10 @@ export class Store {
     p.goal = goal
     this._finish()
   }
-  // 寫一則進度。date：這則進度是哪天的事（可以補記以前，不能記未來）；mins：花了多久；ms：跟哪個里程碑有關。
+  // 寫一則進度。date：這則進度是哪天的事（可以補記以前，不能記未來）；mins：花了多久；ms：跟哪個里程碑有關；
+  // task：在任務頁寫的（要是歸在這個專案的任務；沒指定里程碑時跟著那件任務算的里程碑）。
   // 每個專案每天第一則給一點經驗（一天最多算 3 個專案），之後照記但不再給
-  addProjectLog(pid, { text = '', mins = 0, date = null, ms: mid = null } = {}) {
+  addProjectLog(pid, { text = '', mins = 0, date = null, ms: mid = null, task: tid = null } = {}) {
     const p = this._find('projects', pid)
     text = String(text || '').trim().slice(0, PL.logText)
     mins = Math.max(0, Math.min(PL.logMins, Math.round(+mins || 0)))
@@ -2250,7 +2286,9 @@ export class Store {
     this._refreshToday()
     this._authored(p)
     const day = DATE_RE.test(date) && date <= this.today ? date : this.today
-    const log = { id: uid(), date: day, at: Date.now(), text, mins, ms: p.milestones.some((m) => m.id === mid) ? mid : null }
+    const t = tid ? this.state.tasks.find((x) => x.id === tid && x.project === p.id) : null
+    if (t && !mid) mid = taskMilestone(p, t)?.id
+    const log = { id: uid(), date: day, at: Date.now(), text, mins, ms: p.milestones.some((m) => m.id === mid) ? mid : null, task: t ? t.id : null }
     p.logs.push(log)
     p.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
     if (p.logs.length > PL.logs) p.logs.splice(0, p.logs.length - PL.logs)
@@ -2409,6 +2447,7 @@ export class Store {
   undoCoachPlan(id) {
     const before = this.state.tasks.length
     this.state.tasks = this.state.tasks.filter((t) => t.coach !== id || t.done)
+    this._dropTaskRefs()
     const count = before - this.state.tasks.length
     this.state.coach.plans = this.state.coach.plans.filter((p) => p.id !== id)
     this._finish([['coachUndone', { id, count }]])
@@ -2611,6 +2650,7 @@ export class Store {
     // 自己加的任務歸在被清掉的範例專案：任務留著，只拿掉歸屬
     const gone = new Set(x.projects.map((p) => p.id))
     for (const t of this.state.tasks) if (gone.has(t.project)) t.project = t.ms = null
+    this._dropTaskRefs()
     const n = x.tasks.length + x.events.length + x.projects.length
     if (n) this._finish()
     return n
