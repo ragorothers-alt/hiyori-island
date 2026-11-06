@@ -18,11 +18,12 @@ export const useAppMode = (context) =>
   })
 
 // 開機跑完（window.hiyori 有了），而且頁面已經由 Service Worker 接手
+// （CI 的機器慢，等久一點）
 export async function bootReady(page) {
-  await page.waitForFunction(() => !!window.hiyori?.ui, null, { timeout: 30000 })
+  await page.waitForFunction(() => !!window.hiyori?.ui, null, { timeout: 90000 })
 }
 export async function swReady(page) {
-  await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 30000 })
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 60000 })
 }
 
 // 所有快取裡的網址

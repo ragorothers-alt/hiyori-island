@@ -8,8 +8,9 @@ export default defineConfig({
   timeout: 60000,
   expect: { timeout: 10000 },
   fullyParallel: true,
-  // 小島用軟體算圖（沒有顯示卡），好幾個同時建會互相拖慢：同時最多跑 3 個（CI 2 個）
-  workers: process.env.CI ? 2 : 3,
+  // 小島用軟體算圖（沒有顯示卡），好幾個同時建會互相拖慢：同時最多跑 3 個。
+  // CI 的機器只有 2 核心，軟體算圖會吃滿，連隔壁測試的開機都會拖到逾時：一次跑一個
+  workers: process.env.CI ? 1 : 3,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['github']] : 'list',
   outputDir: 'e2e/.out/results',
