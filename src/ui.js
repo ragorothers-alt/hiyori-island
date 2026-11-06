@@ -153,7 +153,7 @@ export class UI {
         this.setTab('tasks')
         $('#taskTitle').focus()
       },
-      startFocus: (id) => this.focus.startWith(id),
+      startFocus: (id) => this.focus.ask(id),
       focusTaskId: () => (this.focus.mode === 'focus' ? this.focus.taskId : null),
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
@@ -164,8 +164,8 @@ export class UI {
             toast: (o) => this.toast(o),
             close: () => this.closeProject(),
             viewOnIsland: (id) => this._onIsland(() => hooks.focusProject(id)),
-            startFocus: (id) => this.focus.startWith(id),
-            startFocusProject: (id) => this.focus.startWith(null, id),
+            startFocus: (id) => this.focus.ask(id),
+            startFocusProject: (id) => this.focus.ask(null, id),
             openEdit: (type, id) => this.schedule.openEdit(type, id),
             appMode: () => !!this.appMode,
           }),
@@ -853,7 +853,7 @@ export class UI {
         s.updateTask(id, { tag: TAGS[(i + 1) % TAGS.length].id })
       } else if (act === 'today') s.moveToToday([id])
       else if (act === 'proj') this.openProject(s.state.tasks.find((x) => x.id === id)?.project, undefined, id)
-      else if (act === 'focus') this.focus.startWith(id)
+      else if (act === 'focus') this.focus.ask(id)
       else if (act === 'subs') {
         const t = s.state.tasks.find((x) => x.id === id)
         if (!t) return
@@ -2486,7 +2486,10 @@ class FocusTimer {
     const open = force ?? el.hidden
     el.hidden = !open
     $('#focusTime').setAttribute('aria-expanded', open)
-    if (!open) return
+    if (!open) {
+      this._asking = false
+      return
+    }
     this.togglePicker(false)
     this._renderSet()
     this._syncRuler()
@@ -2585,7 +2588,13 @@ class FocusTimer {
     })
     $('#fsTarget').addEventListener('change', (e) => this.setTarget(e.target.value))
     $('#fsStart').onclick = () => {
+      // 休息中按了某件事要專注（ask）：結束休息，照剛選的開始
+      const fromBreak = this.mode === 'break' && this._asking
       this.toggleSet(false)
+      if (fromBreak) {
+        this.mode = 'idle'
+        this._loadLengths()
+      }
       if (this.mode === 'idle') this.toggle()
     }
   }
@@ -2602,8 +2611,8 @@ class FocusTimer {
 
   _renderSet() {
     const st = this.ui.store.state.settings
-    // 計時中：計時方式、長度、輪數、休息都照開始時的，只能換目標
-    const live = this.mode !== 'idle'
+    // 計時中：計時方式、長度、輪數、休息都照開始時的，只能換目標（休息中點了某件事要專注的不算）
+    const live = this.mode === 'focus' || (this.mode === 'break' && !this._asking)
     const up = live ? this.up : st.focusUp
     const v = st.focusMin
     $('#focusSet h4').firstChild.textContent = live ? '計時中・換個目標' : '要怎麼專注？'
@@ -2642,6 +2651,21 @@ class FocusTimer {
   }
 
   // 從任務列表或專案頁按「專注」：計時中就換目標，沒在計時就開始
+  // 從總覽、任務列表、專案點了某件事：先打開設定視窗（倒數／正向、長度、輪數、休息），目標已經選好，
+  // 按「開始專注」才開始。已經在專注：直接換目標。休息中：可以照樣設定，開始時結束休息
+  ask(taskId, projectId = null) {
+    if (this.mode === 'focus') return this.startWith(taskId, projectId)
+    this.taskId = taskId
+    this.projectId = taskId ? null : projectId
+    this._save()
+    this.render()
+    this.hooks.focusTaskChanged?.(this.taskId, this.projectId)
+    this._asking = this.mode === 'break'
+    if (this._asking) this.toggleBig?.(false)
+    this.toggleSet(true)
+    $('#fsStart').focus({ preventScroll: true })
+  }
+
   startWith(taskId, projectId = null) {
     this.taskId = taskId
     this.projectId = taskId ? null : projectId
