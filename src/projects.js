@@ -1,9 +1,10 @@
 // 專案的細節（進度日誌、筆記、里程碑細項）用到的純函式：進度怎麼算、時間軸、統計、筆記排版、匯出成 Markdown。
 // store 和介面共用；不碰 DOM，方便測試
 
-// 上限抓寬一點：一般使用碰不到，只防匯入的檔案把存檔撐爆
+// 上限抓寬一點：一般使用碰不到，只防匯入的檔案把存檔撐爆。
+// 筆數的上限（日誌、專注的日子）要遠高於真實使用：到了就不再加，不能為了騰位置刪掉舊的
 export const PROJECT_LIMITS = {
-  goal: 300, logText: 1000, logs: 1000, logMins: 1440, noteTitle: 60, noteBody: 10000, notes: 100, msNote: 500, steps: 30, stepTitle: 80, focusDays: 400,
+  goal: 300, logText: 1000, logs: 20000, logMins: 1440, noteTitle: 60, noteBody: 10000, notes: 100, msNote: 500, steps: 30, stepTitle: 80, focusDays: 20000,
   taskNote: 500, subs: 30, subTitle: 80,
 }
 

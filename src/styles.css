@@ -234,8 +234,9 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .tag-pick button i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 .tag-pick button.on { border-color: var(--c); color: var(--ink); background: color-mix(in srgb, var(--c) 18%, transparent); }
 .btn-primary {
-  margin-left: auto; padding: 7px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; letter-spacing: .1em;
-  color: #fff; background: linear-gradient(135deg, #8cc6ea, #f2a8bf); box-shadow: 0 4px 14px rgba(240, 160, 190, .35);
+  margin-left: auto; padding: 7px 16px; border-radius: 12px; font-size: 13px; font-weight: 600; letter-spacing: .1em;
+  /* 深色字：白字在粉藍漸層上對比只有 2:1 左右，深藍灰兩端都超過 5:1 */
+  color: #2f3a4f; background: linear-gradient(135deg, #8cc6ea, #f2a8bf); box-shadow: 0 4px 14px rgba(240, 160, 190, .35);
   transition: transform .2s, box-shadow .2s;
 }
 .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(240, 160, 190, .45); }

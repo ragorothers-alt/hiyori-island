@@ -273,7 +273,10 @@ export class ScheduleView {
   // 作息設定（摺疊在最下面）
   _rhythm() {
     const el = $('#rhythmForm')
-    if (el.contains(document.activeElement)) return
+    const act = el.contains(document.activeElement) ? document.activeElement : null
+    // 正在打字或選時間時不重畫（會打斷輸入）；按鈕按下去要馬上看到結果，重畫後焦點放回同一顆
+    if (act?.matches('input, select, textarea')) return
+    const key = act && this._rhythmKey(act)
     const r = this.store.state.rhythm
     const time = (attr, v, label) => `<label class="time-field"><input type="time" ${attr} value="${v}" aria-label="${esc(label)}"></label>`
     el.innerHTML = `
@@ -295,6 +298,17 @@ export class ScheduleView {
       <div class="seg rf-peak" data-peak role="group" aria-label="精神最好的時段">${Object.entries(PEAKS).map(([k, p]) => `<button type="button" data-v="${k}" class="${r.peak === k ? 'on' : ''}" aria-pressed="${r.peak === k}">${p.label}</button>`).join('')}</div>
       <div class="rf-row"><span class="rf-k">時段之間留</span><select data-r="buffer" aria-label="緩衝時間">${[0, 5, 10, 15, 20, 30].map((v) => `<option value="${v}" ${r.buffer === v ? 'selected' : ''}>${v ? `${v} 分鐘` : '不留'}</option>`).join('')}</select></div>
       <div class="rf-row"><button type="button" class="chip-toggle ${r.bedRemind ? 'on' : ''}" data-bed aria-pressed="${!!r.bedRemind}">就寢前 30 分鐘，ふじ提醒你：${r.bedRemind ? '開' : '關'}</button></div>`
+    if (key) (el.querySelector(key) || el.querySelector('[data-meal-add], [data-work-toggle]'))?.focus({ preventScroll: true })
+  }
+
+  // 作息表單裡按鈕的選擇器：重畫後用來找回同一顆按鈕
+  _rhythmKey(b) {
+    if (b.dataset.wd != null) return `[data-wd="${b.dataset.wd}"]`
+    if (b.closest('[data-peak]')) return `[data-peak] [data-v="${b.dataset.v}"]`
+    for (const k of ['data-work-toggle', 'data-bed', 'data-meal-add']) if (b.hasAttribute(k)) return `[${k}]`
+    // 刪掉的那一列已經不在了：交給下面的備用按鈕
+    if (b.hasAttribute('data-meal-del')) return '[data-meal-add]'
+    return null
   }
 
   // ── 編輯面板 ──
@@ -654,7 +668,8 @@ export class ScheduleView {
       }
     })
     sheet.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeEdit()
+      // 注音／日文輸入法選字時的 Esc 是取消選字，不是關掉面板
+      if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229) this.closeEdit()
       e.stopPropagation()
     })
   }

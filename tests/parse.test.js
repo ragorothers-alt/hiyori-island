@@ -72,6 +72,31 @@ describe('快速輸入解析', () => {
       expected: { title: '讀書會', kind: 'event', start: '10:00', end: '12:00' },
     },
     {
+      name: '早上的區間：結束沿用早上，不會被猜成下午',
+      input: '早上5點到6點 跑步',
+      expected: { title: '跑步', kind: 'event', start: '05:00', end: '06:00' },
+    },
+    {
+      name: '凌晨的區間',
+      input: '凌晨1點到2點 看球',
+      expected: { title: '看球', kind: 'event', start: '01:00', end: '02:00' },
+    },
+    {
+      name: '上午11點到1點：結束跨過中午',
+      input: '上午11點到1點 午餐會',
+      expected: { title: '午餐會', kind: 'event', start: '11:00', end: '13:00' },
+    },
+    {
+      name: '晚上12點到1點：整段在隔天凌晨',
+      input: '明天晚上12點到1點 看流星',
+      expected: { title: '看流星', kind: 'event', date: '2026-10-27', start: '00:00', end: '01:00' },
+    },
+    {
+      name: '9am到11am',
+      input: '9am到11am 晨會',
+      expected: { title: '晨會', kind: 'event', start: '09:00', end: '11:00' },
+    },
+    {
       name: '今晚會將未標時段的九點視為晚上並套用兩小時長度',
       input: '今晚 9點 看電影 2小時',
       expected: { title: '看電影', kind: 'event', date: TODAY, start: '21:00', end: '23:00' },

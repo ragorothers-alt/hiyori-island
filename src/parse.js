@@ -38,10 +38,11 @@ function toMinutes(period, h, m, guessPm = false) {
   return h * 60 + m
 }
 
-function readTime(match, offset, evening = false) {
+// inherit：區間的結束沒寫時段時，沿用開始那一端的時段
+function readTime(match, offset, evening = false, inherit = null) {
   // offset：TIME 在整個正規式中的第一個群組位置
   const g = (i) => match[offset + i]
-  const period = g(0)
+  const period = g(0) || inherit
   let h
   let m = 0
   let guess = false
@@ -59,7 +60,8 @@ function readTime(match, offset, evening = false) {
     h = parseInt(g(5), 10)
     if (/pm/i.test(g(6)) && h < 12) h += 12
     if (/am/i.test(g(6)) && h === 12) h = 0
-    return { period: 'x', minutes: toMinutes(null, h, m) }
+    // 時段記成上午／下午：區間的另一端沒寫時可以沿用（9am到11 是上午 11 點）
+    return { period: /pm/i.test(g(6)) ? '下午' : '上午', minutes: toMinutes(null, h, m) }
   }
   // 「今晚 9點」：沒寫時段就當晚上（今晚 12 點是半夜）
   if (!period && evening && h <= 12) return { period: '晚上', minutes: toMinutes('晚上', h, m) }
@@ -175,7 +177,20 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
   const rm = text.match(range)
   if (rm) {
     const a = readTime(rm, 1, evening)
-    const b = readTime(rm, 8, evening)
+    let b = readTime(rm, 8, evening)
+    // 結束沒寫時段（早上5點到6點、凌晨1點到2點）：沿用開始的時段，
+    // 不要被「1～6 點多半是下午」猜成下午；rm[8] 是結束的時段、rm[13] 是 am/pm 的數字
+    if (a.period && a.minutes != null && !rm[8] && rm[13] == null) {
+      if (a.minutes >= 1440) {
+        // 晚上12點到1點：結束是隔天凌晨
+        b = readTime(rm, 8, false, '凌晨')
+        if (b.minutes != null) b.minutes += 1440
+      } else {
+        b = readTime(rm, 8, false, a.period)
+        // 上午11點到1點、上午9點到12點：結束跨過中午
+        if (b.minutes != null && b.minutes <= a.minutes && b.minutes + 720 > a.minutes && b.minutes + 720 <= 1440) b.minutes += 720
+      }
+    }
     if (a.minutes != null && b.minutes != null) {
       let start = a.minutes
       let end = b.minutes
@@ -185,8 +200,6 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
         start -= 1440
         if (end >= 1440) end -= 1440
       }
-      // 「下午3點到5點」「晚上10點到12點」：結束沒寫時段時沿用開始的時段（12 點就是半夜）
-      if (!b.period && a.period && end < start && end <= 720) end += 720
       // 結束在半夜：那天的最後一分鐘
       if (end >= 1440) end = 1439
       if (end <= start) end = Math.min(start + 60, 1439)

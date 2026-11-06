@@ -371,8 +371,10 @@ function cleanDates(list) {
     const title = str(d.title, 30).trim()
     if (!title || !DATE_RE.test(d.date)) return null
     return { id: str(d.id), title, date: d.date, kind: DATE_KINDS[d.kind] ? d.kind : 'exam', createdAt: ts(d.createdAt) || Date.now() }
-  }).slice(-60)
+  }).slice(-DATES_MAX)
 }
+// 重要日子的上限：只防異常大的匯入；新增時到了就不再加，讀檔不會刪掉合法的紀錄
+export const DATES_MAX = 1000
 
 function cleanList(list, fn) {
   if (!Array.isArray(list)) return []
@@ -1646,8 +1648,8 @@ export class Store {
       p.logs = p.logs.filter((l) => l.task !== t.id)
       this._authored(to)
     }
+    // 搬過來的紀錄一則都不丟（就算超過上限，讀檔時也只擋異常大的匯入）
     to.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
-    if (to.logs.length > PL.logs) to.logs.splice(0, to.logs.length - PL.logs)
   }
   // 任務刪掉了：指著它的紀錄留在專案裡，只是不再算那件任務的
   _dropTaskRefs() {
@@ -1715,6 +1717,8 @@ export class Store {
     for (const p of this.state.projects) for (const l of p.logs) if (l.task === t.id) l.task = parts[0].id
     const at = this.state.tasks.indexOf(t)
     this.state.tasks.splice(at, 1, ...parts)
+    // 逾期的本命搬到今天：今天的本命已經滿了就不再算本命
+    this._fitStar(parts[0])
     this._editedTask(t)
     fx.push(['taskSplit', { task: t, parts }])
     this._finish(fx)
@@ -2396,7 +2400,8 @@ export class Store {
     const p = this._find('projects', pid)
     text = String(text || '').trim().slice(0, PL.logText)
     mins = Math.max(0, Math.min(PL.logMins, Math.round(+mins || 0)))
-    if (!p || (!text && !mins)) return null
+    // 滿了就不再加（不刪舊的騰位置）
+    if (!p || (!text && !mins) || p.logs.length >= PL.logs) return null
     this._refreshToday()
     this._authored(p)
     const day = DATE_RE.test(date) && date <= this.today ? date : this.today
@@ -2405,7 +2410,6 @@ export class Store {
     const log = { id: uid(), date: day, at: Date.now(), text, mins, ms: p.milestones.some((m) => m.id === mid) ? mid : null, task: t ? t.id : null }
     p.logs.push(log)
     p.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
-    if (p.logs.length > PL.logs) p.logs.splice(0, p.logs.length - PL.logs)
     this.stats.projectLogs++
     this._edited(p)
     const fx = []
@@ -2581,7 +2585,7 @@ export class Store {
   // ── 重要日子 ──
   addDate({ title, date, kind = 'exam' }) {
     title = str(title, 30).trim()
-    if (!title || !DATE_RE.test(date)) return null
+    if (!title || !DATE_RE.test(date) || this.state.dates.length >= DATES_MAX) return null
     const d = { id: uid(), title, date, kind: DATE_KINDS[kind] ? kind : 'exam', createdAt: Date.now() }
     this.state.dates.push(d)
     this._finish([['dateAdded', { ...d, days: daysBetween(this.today, date) }]])

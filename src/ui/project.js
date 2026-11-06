@@ -965,6 +965,12 @@ export class ProjectView {
     }
   }
 
+  // 日誌滿了沒記進去：剛打的字放回去，說一聲（舊的不會被刪掉騰位置）
+  _logFull(el, text) {
+    el.text.value = text
+    this.hooks.toast({ icon: '記', title: '這個專案的進度日誌已經滿了', sub: '先把專案匯出成 Markdown 留底，或開一個新專案接著記' })
+  }
+
   _submit(e) {
     const f = e.target.closest('form[data-form]')
     const p = this.project
@@ -984,7 +990,7 @@ export class ProjectView {
         this.mins = 0
         const box = $('[data-k="compose"]', this.root)
         if (box) box._html = null
-        s.addProjectLog(p.id, entry)
+        if (!s.addProjectLog(p.id, entry)) this._logFull(el, text)
         return
       }
       case 'tlog': {
@@ -998,7 +1004,7 @@ export class ProjectView {
         this.tmins = 0
         const box = $('[data-k="tcompose"]', this.root)
         if (box) box._html = null
-        s.addProjectLog(p.id, entry)
+        if (!s.addProjectLog(p.id, entry)) this._logFull(el, text)
         return
       }
       case 'log-edit': {

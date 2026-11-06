@@ -1486,14 +1486,37 @@ export class UI {
       .map(([k, label]) => `<button type="button" data-f="${k}" class="${k === filter ? 'on' : ''}">${label} ${count[k]}</button>`)
       .join('')
     const shown = filter === 'all' ? active : active.filter((p) => s.projectStatus(p) === filter)
+    // 「新增里程碑」打到一半的字：重畫（勾別的里程碑、其他分頁同步）時照專案留著，游標也放回去
+    const drafts = new Map()
+    let caret = null
+    for (const inp of $$('#projectList .ms-add input')) {
+      const id = inp.closest('.proj')?.dataset.id
+      if (!id) continue
+      if (inp.value) drafts.set(id, inp.value)
+      if (inp === document.activeElement) caret = { id, a: inp.selectionStart, b: inp.selectionEnd }
+    }
+    // 剛送出的那張卡：字已經變成里程碑了，清空並留在輸入框繼續打
+    if (this._keepMsFocus) {
+      drafts.delete(this._keepMsFocus)
+      caret = { id: this._keepMsFocus, a: 0, b: 0 }
+      this._keepMsFocus = null
+    }
     $('#projectList').innerHTML = active.length
       ? shown.map((p) => this._projectCard(p)).join('')
       : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段${this.appMode ? '（回到小島就看得到）' : ''}。</div>`
     $('#archiveBox').hidden = !archived.length
     $('#archiveList').innerHTML = archived.map((p) => this._projectCard(p, true)).join('')
-    if (this._keepMsFocus) {
-      $(`.proj[data-id="${CSS.escape(this._keepMsFocus)}"] .ms-add input`)?.focus()
-      this._keepMsFocus = null
+    const msInput = (id) => $(`#projectList .proj[data-id="${CSS.escape(id)}"] .ms-add input`)
+    for (const [id, v] of drafts) {
+      const inp = msInput(id)
+      if (inp) inp.value = v
+    }
+    const inp = caret && msInput(caret.id)
+    if (inp) {
+      inp.focus({ preventScroll: true })
+      try {
+        inp.setSelectionRange(caret.a ?? inp.value.length, caret.b ?? inp.value.length)
+      } catch {}
     }
   }
 

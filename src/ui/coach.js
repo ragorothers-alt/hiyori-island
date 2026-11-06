@@ -166,6 +166,8 @@ export class CoachView {
   // 任務頁「讓ふじ排這天」
   preset({ scope, date = null }) {
     this._stop()
+    // 從任務頁「讓ふじ排這天」進來：停在週報那一頁時也要切回排程
+    this.view = 'plan'
     this.a.scope = scope
     this.a.date = date
     this.step = 'ask'

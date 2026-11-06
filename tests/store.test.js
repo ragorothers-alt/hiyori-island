@@ -5,7 +5,7 @@ import {
 import { restoreBackup } from '../src/sync.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
-import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS } from '../src/theme.js'
+import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS, MAX_STARS } from '../src/theme.js'
 import { LAYOUT } from '../src/scene/island.js'
 import { PLAN, TOWN_POINTS, townLevel, levelFor, lotsAt, onStreet, inTown, propPrints, islandRadius, ISLAND_BASE_R } from '../src/data/projectTown.js'
 
@@ -1815,6 +1815,35 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(store.upcomingDates().map((d) => d.title)).toEqual(['結婚紀念日', '官網改版'])
   })
 
+  it('重要日子超過 60 個也不會在重新載入時被刪；上限 1000 個時拒絕新增', () => {
+    for (let i = 0; i < 70; i++) store.addDate({ title: `日子${i}`, date: addDays(TODAY, i + 1) })
+    store.importJSON(store.exportJSON())
+    expect(store.state.dates).toHaveLength(70)
+    expect(store.state.dates[0].title).toBe('日子0')
+    const many = JSON.parse(store.exportJSON())
+    many.dates = Array.from({ length: 1000 }, (_, i) => ({ id: `d${i}`, title: `x${i}`, date: addDays(TODAY, 1), kind: 'day', createdAt: i + 1 }))
+    store.importJSON(JSON.stringify(many))
+    expect(store.state.dates).toHaveLength(1000)
+    expect(store.addDate({ title: '再一個', date: addDays(TODAY, 2) })).toBeNull()
+  })
+
+  it('專案的進度日誌、每天專注分鐘很多年也不會被截掉舊的', () => {
+    const p = store.addProject({ name: '長期計畫', milestones: ['一'] })
+    const data = JSON.parse(store.exportJSON())
+    const proj = data.projects.find((x) => x.id === p.id)
+    proj.logs = Array.from({ length: 1500 }, (_, i) => ({ id: `l${i}`, date: addDays(TODAY, -1500 + i), at: i + 1, text: `第${i}則`, mins: 0 }))
+    proj.focus = Object.fromEntries(Array.from({ length: 600 }, (_, i) => [addDays(TODAY, -600 + i), 25]))
+    store.importJSON(JSON.stringify(data))
+    const back = store.state.projects.find((x) => x.id === p.id)
+    expect(back.logs).toHaveLength(1500)
+    expect(back.logs[0].text).toBe('第0則')
+    expect(Object.keys(back.focus)).toHaveLength(600)
+    // 寫新的一則照常加在後面，舊的不動
+    store.addProjectLog(p.id, { text: '今天的進度' })
+    expect(back.logs).toHaveLength(1501)
+    expect(back.logs[0].text).toBe('第0則')
+  })
+
   it('排程的避開清單：這幾天的日程、未來的例行公事日程、排了時段的任務', () => {
     store.addEvent({ title: '開會', start: '19:00', end: '20:00', date: TODAY })
     store.addRoutine({ kind: 'event', title: '晚課', repeat: { type: 'daily' }, start: '21:00', end: '22:00', date: TODAY })
@@ -1908,6 +1937,17 @@ describe('卡關提醒與設定', () => {
     expect(parts.every((p) => p.date === TODAY && p.priority === 3)).toBe(true)
     expect(store.state.tasks.some((x) => x.id === t.id)).toBe(false)
     expect(onSplit).toHaveBeenCalled()
+  })
+
+  it('拆逾期的本命：今天的本命已經滿了，搬過來的第一步就不再是本命', () => {
+    const old = store.addTask({ title: '昨天的本命', date: TODAY })
+    store.toggleStar(old.id)
+    store.updateTask(old.id, { date: addDays(TODAY, -1) })
+    for (let i = 0; i < MAX_STARS; i++) store.toggleStar(store.addTask({ title: `今天${i}`, date: TODAY }).id)
+    expect(store.starsOn(TODAY)).toHaveLength(MAX_STARS)
+    const parts = store.splitTask(old.id)
+    expect(parts[0].star).toBe(false)
+    expect(store.starsOn(TODAY)).toHaveLength(MAX_STARS)
   })
 
   it('字體大小和卡關提醒存在設定裡；不在選項裡的倍率回到標準', () => {

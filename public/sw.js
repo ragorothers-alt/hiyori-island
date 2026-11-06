@@ -127,9 +127,12 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   event.waitUntil(
     (async () => {
+      // 同一個網域下可能還有別的網站（github.io）：只把這個 App 範圍裡的視窗叫到前面
+      const scope = self.registration.scope
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      if (all.length) return all[0].focus()
-      return self.clients.openWindow('./')
+      const mine = all.find((c) => c.url.startsWith(scope))
+      if (mine) return mine.focus()
+      return self.clients.openWindow(scope)
     })(),
   )
 })
