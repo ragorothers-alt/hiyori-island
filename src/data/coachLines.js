@@ -127,6 +127,26 @@ export const COACH_FUJI = {
     '今天有「{title}」，待辦少一點也沒關係。',
     '今天就交給「{title}」吧，玩得開心。',
   ],
+  // 訂閱扣款：{when} 是「明天」「3 天後」，{price} 是「NT$ 390」
+  subSoon: [
+    '「{title}」{when}會扣 {price}，還有在用的話就放心吧。',
+    '提醒一下，「{title}」{when}扣款，{price}。',
+    '「{title}」{when}要續訂了，最近有用到嗎？',
+    '{when}「{title}」會扣 {price}，帳戶的錢夠嗎？',
+    '「{title}」{when}扣款，想換方案的話現在還來得及。',
+  ],
+  subToday: [
+    '今天「{title}」會扣 {price}，記一下喔。',
+    '「{title}」今天扣款，{price}。',
+    '今天是「{title}」的扣款日，這個月也用得開心嗎？',
+    '「{title}」今天續訂了，{price}。',
+  ],
+  trialEnd: [
+    '「{title}」的免費試用{when}結束，之後就開始收費了。',
+    '「{title}」試用{when}到期，還想繼續用嗎？',
+    '試用快結束了，「{title}」不想留的話記得先取消。',
+    '「{title}」{when}開始收 {price}，要留下來嗎？',
+  ],
   msDue: [
     '{project}的「{title}」明天到期，先推一點吧。',
     '{project}的「{title}」明天到期，看看剩哪些細項。',

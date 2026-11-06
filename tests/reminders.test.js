@@ -312,3 +312,47 @@ describe('整天的日程', () => {
     expect(fresh.mock.calls.filter((c) => c[2] === 'allday').map((c) => c[0].id)).toEqual([e.id, t.id])
   })
 })
+describe('訂閱扣款提醒', () => {
+  const subCalls = () => callback.mock.calls.filter((c) => c[2] === 'sub')
+  const day = (d, h = 9) => new Date(2026, 9, d, h, 0)
+
+  it('照提前天數，早上 8 點後第一次打開時提醒一次；同一次扣款隔天打開不會再響', () => {
+    store.addSubscription({ name: 'Netflix', price: 390, start: '2026-10-28', remind: 3 })
+    // 開機時已經在的訂閱（這裡是新的 Reminders 第一次檢查）照常提醒
+    const fresh = new Reminders(store, callback)
+    vi.setSystemTime(day(25, 7))
+    fresh.check(day(25, 7))
+    expect(subCalls()).toHaveLength(0)
+    vi.setSystemTime(day(25))
+    fresh.check(day(25))
+    expect(subCalls()).toHaveLength(1)
+    expect(subCalls()[0][0]).toMatchObject({ date: '2026-10-28', days: 3, trial: false })
+    expect(subCalls()[0][1]).toBe(3)
+    fresh.check(day(25, 10))
+    // 隔天、扣款當天再打開：同一次扣款不再提醒（另一個分頁也一樣）
+    vi.setSystemTime(day(26))
+    fresh.check(day(26))
+    vi.setSystemTime(day(28))
+    new Reminders(store, callback).check(day(28))
+    expect(subCalls()).toHaveLength(1)
+    // 下一次扣款（11/28）進到提醒天數內時再提醒
+    vi.setSystemTime(new Date(2026, 10, 25, 9))
+    fresh.check(new Date(2026, 10, 25, 9))
+    expect(subCalls()).toHaveLength(2)
+    expect(subCalls()[1][0].date).toBe('2026-11-28')
+  })
+
+  it('開著 App 時剛新增的訂閱不馬上響（畫面上已經看得到）；不提醒、取消的都不響', () => {
+    vi.setSystemTime(day(25))
+    reminders.check(day(25))
+    store.addSubscription({ name: 'Spotify', price: 149, start: '2026-10-26', remind: 1 })
+    store.addSubscription({ name: '安靜', price: 1, start: '2026-10-25', remind: -1 })
+    reminders.check(day(25, 10))
+    reminders.check(day(25, 11))
+    expect(subCalls()).toHaveLength(0)
+    const s = store.addSubscription({ name: 'KKBOX', price: 149, start: '2026-11-20', remind: 1 })
+    store.cancelSubscription(s.id)
+    reminders.check(day(25, 12))
+    expect(subCalls()).toHaveLength(0)
+  })
+})

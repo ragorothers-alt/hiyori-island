@@ -3,6 +3,8 @@
 import { addDays, dateStr, toMin } from './store.js'
 
 const KEY = 'hiyori-reminded'
+// 訂閱：每個訂閱最近提醒過的那次扣款日 { 訂閱 id: 'YYYY-MM-DD' }
+const SUB_KEY = 'hiyori-sub-reminded'
 // 兩次檢查隔了這麼久，代表電腦睡著、手機鎖著時錯過了：剛開始不久的（LATE 分鐘內）還是補提醒
 const GAP = 2 * 60000
 const LATE = 15
@@ -57,6 +59,24 @@ export class Reminders {
     if (!mine.includes(key)) mine.push(key)
     if (taken) return false
     this._save()
+    return true
+  }
+
+  // 訂閱這一次的扣款（date）提醒過了沒：每個訂閱只記最近提醒的那次扣款日。
+  // 每次都重讀存著的（另一個分頁可能剛提醒過），寫回去時拿掉已經刪掉的訂閱
+  _claimSub(id, date) {
+    let map = {}
+    try {
+      map = JSON.parse(localStorage.getItem(SUB_KEY) || '{}')
+    } catch {}
+    if (!map || typeof map !== 'object' || Array.isArray(map)) map = {}
+    if (map[id] === date) return false
+    const ids = new Set(this.store.state.subscriptions?.map((s) => s.id) || [])
+    for (const k of Object.keys(map)) if (!ids.has(k)) delete map[k]
+    map[id] = date
+    try {
+      localStorage.setItem(SUB_KEY, JSON.stringify(map))
+    } catch {}
     return true
   }
 
@@ -122,6 +142,18 @@ export class Reminders {
           if (known && !known.has(e.id)) this._claim(today, key)
           else if (mins >= 480 && this._claim(today, key)) this.onRemind(e, days, 'allday')
         }
+      }
+    }
+    // 訂閱扣款：照每個訂閱設的提前天數（免費試用結束至少前 3 天），早上 8 點後第一次打開時提醒。
+    // 同一次扣款只提醒一次：提前好幾天時，隔天再打開不會又響（記在 SUB_KEY，不跟著上面三天一輪的紀錄清掉）。
+    // 上一輪檢查時還沒有的訂閱（剛新增的）：新增時畫面上就看得到下次扣款，記成提醒過就好。
+    // 已經在的訂閱隔天才進到提醒天數內（開著過了午夜）照常提醒
+    {
+      const known = this.subKnown
+      this.subKnown = new Set(this.store.state.subscriptions?.map((s) => s.id) || [])
+      for (const r of this.store.subReminders?.() || []) {
+        if (known && !known.has(r.id)) this._claimSub(r.id, r.date)
+        else if (mins >= 480 && this._claimSub(r.id, r.date)) this.onRemind(r, r.days, 'sub')
       }
     }
     // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）

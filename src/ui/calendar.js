@@ -5,6 +5,7 @@ import { addDays, dateStr, daysBetween, minToHHMM, parseDate, repeatMatches, toM
 import { applies, countOn, doneOn } from '../habits.js'
 import { awake, DEFAULT_RHYTHM, fmtDur, sleepMinutes, taskDur } from '../planner.js'
 import { ENERGY, lifeKindOf } from '../data/life.js'
+import { SUB_CATS, cycleLabel, fmtMoney } from '../subs.js'
 
 // 日曆：全畫面浮層。月檢視（6×7、週一開頭）／週檢視（時間格）／三日檢視（手機用的寬欄時間格），右側（手機在下方）是那天的詳情
 
@@ -242,6 +243,13 @@ export class CalendarView {
     if (act === 'today') return this.moveTo(this.store.today)
     if (act === 'go') return this.goTo(this.date)
     if (act === 'review') return this.hooks.openReview(this.date)
+    // 扣款的訂閱：關掉日曆，到紀錄頁打開那個訂閱
+    if (btn.dataset.open === 'sub') {
+      // 焦點要留在打開的訂閱卡上，不要等關完又跳回原本按的那顆
+      this._back = null
+      this.close()
+      return this.hooks.openSub?.(btn.dataset.id)
+    }
     if (btn.dataset.open) {
       const day = btn.closest('[data-day]')?.dataset.day
       if (day && day !== this.date) this.moveTo(day)
@@ -444,6 +452,7 @@ export class CalendarView {
           <span><i class="cc-mk mk-sleep">眠</i>睡眠</span>
           <span><i class="cc-mk mk-life">記</i>生活記錄</span>
           <span><i class="cc-mk mk-slip">再</i>重新開始</span>
+          ${this.store.state.subscriptions.length ? '<span><i class="cc-mk mk-sub">払</i>訂閱扣款</span>' : ''}
           ${anyGhost ? '<span><i class="cl-ghost"></i>例行公事預覽</span>' : ''}
           <span class="cl-tip cl-desk">再點日期前往・方向鍵移動・PgUp／PgDn 換月</span>
           <span class="cl-tip cl-touch">再點一次到那一天</span>
@@ -473,6 +482,7 @@ export class CalendarView {
       sum.slips && `<i class="cc-mk mk-slip" title="重新開始 ${sum.slips} 次">再</i>`,
       ...s.datesOn(date).map((x) => `<i class="cc-mk mk-date" title="${esc(x.title)}">${DATE_KINDS[x.kind].kanji}</i>`),
       ...s.milestoneDues(date).map((x) => `<i class="cc-mk mk-date" title="${esc(`${x.projectName}・${x.title}（里程碑期限）`)}">${DUE_KINDS.milestone.kanji}</i>`),
+      this._subMark(date),
     ]
       .filter(Boolean)
       .join('')
@@ -568,6 +578,7 @@ export class CalendarView {
           ...sum.allDay.map((e) => `<button type="button" class="cw-chip a" style="--c:${colorOf(e.color)}" data-open="event" data-id="${esc(e.id)}" title="${esc(`${e.title}・${allDayRange(e)}`)}">${esc(e.title)}</button>`),
           ...s.datesOn(date).map((x) => `<span class="cw-chip d" title="${esc(x.title)}"><em>${DATE_KINDS[x.kind].kanji}</em>${esc(x.title)}</span>`),
           ...s.milestoneDues(date).map((x) => `<span class="cw-chip d" title="${esc(`${x.projectName}・${x.title}（里程碑期限）`)}"><em>${DUE_KINDS.milestone.kanji}</em>${esc(x.title)}</span>`),
+          ...s.subChargesOn(date).map((x) => `<span class="cw-chip d" title="${esc(`扣款：${x.name} ${fmtMoney(x.price, x.cur)}`)}"><em>払</em>${esc(x.name)}</span>`),
           untimed.length &&
             `<span class="cw-chip t${left ? '' : ' ok'}" title="沒排時段的任務：還有 ${left} 件／共 ${untimed.length} 件"><em>未排</em>${left ? left : '✓'}</span>`,
           ghostTasks && `<span class="cw-chip g" title="例行任務 ${ghostTasks} 件（到那天會自動出現）"><em>例行</em>${ghostTasks}</span>`,
@@ -675,6 +686,18 @@ export class CalendarView {
         )
         .join('')
       secs.push(this._sec('整天', 'いちにち', '', rows))
+    }
+    // 那天要扣款的訂閱（點了到紀錄頁看那個訂閱）
+    const subs = s.subChargesOn(date)
+    if (subs.length) {
+      const rows = subs
+        .map((x) => {
+          const c = SUB_CATS[x.cat]
+          const trial = x.trial && date === x.start
+          return `<li><button type="button" class="cd-row lf sb" style="--c:${c.color}" data-open="sub" data-id="${esc(x.id)}" title="到紀錄頁看這個訂閱"><i class="cd-k" title="${c.label}">${c.kanji}</i><span class="cd-t">${esc(x.name)}<small>${cycleLabel(x)}${trial ? '・試用結束，開始收費' : ''}</small></span><small class="cd-amt">${fmtMoney(x.price, x.cur)}</small></button></li>`
+        })
+        .join('')
+      secs.push(this._sec('扣款', 'サブスク', subs.length > 1 ? `${subs.length} 筆` : '', rows))
     }
 
     // 日程
@@ -809,6 +832,14 @@ export class CalendarView {
       </div>
       ${chips ? `<div class="cd-chips">${chips}</div>` : ''}
       ${secs.join('')}${empty}`
+  }
+
+  // 那天要扣款的訂閱：月格上一個「払」，滑過去看是哪些
+  _subMark(date) {
+    const list = this.store.subChargesOn(date)
+    if (!list.length) return ''
+    const t = list.map((x) => `${x.name} ${fmtMoney(x.price, x.cur)}`).join('、')
+    return `<i class="cc-mk mk-sub" title="${esc(`扣款：${t}`)}">払</i>`
   }
 
   _sec(title, jp, count, rows) {

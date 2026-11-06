@@ -18,6 +18,7 @@ import { LifeView } from './ui/life.js'
 import { latestLog, msProgress, msSteps, msTasks, projectStats, PROJECT_LIMITS as PL } from './projects.js'
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
+import { SubsView } from './ui/subs.js'
 import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
 import { TodayView } from './ui/today.js'
@@ -140,10 +141,16 @@ export class UI {
       hoverEvent: (id) => hooks.hoverEvent(id),
       openWeekCard: (wk) => this.openWeekCard(wk),
       openProject: (id, sec) => this.openProject(id, sec),
+      // 日曆上點了扣款的訂閱：到紀錄頁、打開那一張
+      openSub: (id) => {
+        this.setTab('records')
+        this.subs.reveal(id)
+      },
     }
     this.schedule = new ScheduleView(store, viewHooks)
     this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
     this.life = new LifeView($('#lifeRoot'), store, viewHooks)
+    this.subs = new SubsView($('#subsRoot'), store, viewHooks)
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
     this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)))
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
@@ -2032,6 +2039,7 @@ export class UI {
 
   renderRecords() {
     this.life.render()
+    this.subs.render()
     const s = this.store
     const st = s.stats
     const stats = [

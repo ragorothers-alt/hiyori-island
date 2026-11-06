@@ -83,6 +83,8 @@ body.night .is-sat .cc-num { color: #9fcdf0; }
 .mk-life { --mk: #8f78d2; }
 .mk-slip { --mk: #dd6487; }
 .mk-date { --mk: #c98a3c; }
+.mk-sub { --mk: #3f9a83; }
+body.night .mk-sub { --mk: #93d4c4; }
 body.night .mk-sleep { --mk: #9fcdf0; }
 body.night .mk-life { --mk: #c6b6ff; }
 body.night .mk-slip { --mk: #ff9fb8; }

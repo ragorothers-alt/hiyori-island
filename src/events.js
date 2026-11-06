@@ -36,6 +36,9 @@ export const EVENTS = {
   coachApplied: '套用ふじ排的計畫',
   coachUndone: '撤銷ふじ排的計畫',
   dateAdded: '新增重要日子',
+  subAdded: '新增訂閱',
+  subChanged: '訂閱改了（內容或重新訂閱）',
+  subCancelled: '取消訂閱',
   sleepLogged: '記下睡眠',
 
   // ── 專注 ──

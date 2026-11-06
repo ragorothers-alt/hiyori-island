@@ -5,6 +5,7 @@ import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify } from './reminders.js'
+import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
@@ -542,6 +543,19 @@ async function boot() {
       const sub = multi ? `${md(e.date)}–${md(e.endDate)}・共 ${daysBetween(e.date, e.endDate) + 1} 天` : today ? '其他事少排一點也沒關係' : '記得先準備一下'
       ui.toast({ icon: '日', title, sub, ms: 9000 })
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, multi ? sub : '', e.id)
+      return
+    }
+    // 訂閱扣款：照訂閱設的天數提前，ふじ提醒；免費試用要結束時問一聲還要不要繼續
+    if (kind === 'sub') {
+      const s = e.sub
+      const when = min === 0 ? '今天' : min === 1 ? '明天' : `${min} 天後`
+      const price = fmtMoney(s.price, s.cur)
+      sfx.chime()
+      talk(e.trial ? 'trialEnd' : min === 0 ? 'subToday' : 'subSoon', { title: short(s.name), when, price }, 6000, '', 'fuji')
+      const title = e.trial ? `「${s.name}」的免費試用${when}結束` : `「${s.name}」${when}扣款`
+      const sub = e.trial ? `之後${cycleLabel(s)} ${price}・不想繼續的話記得先取消` : `${price}・${cycleLabel(s)}${s.pay ? `・${s.pay}` : ''}`
+      ui.toast({ icon: SUB_CATS[s.cat]?.kanji || '訂', title, sub, ms: 9000 })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, sub, `sub-${s.id}`)
       return
     }
     if (kind === 'bed') {

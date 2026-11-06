@@ -15,6 +15,7 @@ import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
 import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched } from './projects.js'
 import { isEvent } from './events.js'
+import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, chargesBetween, looksLikeCardNumber, nextCharge, paidCount, subsSummary } from './subs.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
 const townStages = (stats) => {
@@ -282,6 +283,8 @@ function seed(samples = true) {
     town: { seen: {}, since: '', plevel: 0 },
     coach: emptyCoach(),
     dates: [],
+    subscriptions: [],
+    subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
     pomoSids: [],
     lotsPlan: 1,
@@ -377,6 +380,50 @@ function cleanDates(list) {
 }
 // 重要日子的上限：只防異常大的匯入；新增時到了就不再加，讀檔不會刪掉合法的紀錄
 export const DATES_MAX = 1000
+
+// ── 訂閱服務（扣款日、月費怎麼算在 src/subs.js）──
+// 上限只防異常大的匯入；新增時到了就不再加
+export const SUBS_MAX = 300
+const money = (v) => (v !== '' && v != null && Number.isFinite(+v) && +v >= 0 ? Math.min(1e7, Math.round(+v * 100) / 100) : null)
+// 管理（取消）訂閱的網址：只收 http／https
+const httpUrl = (v) => {
+  const s = str(v, 300).trim()
+  if (!s) return ''
+  try {
+    const u = new URL(s)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : ''
+  } catch {
+    return ''
+  }
+}
+function cleanSub(x, today) {
+  const name = str(x.name, 40).trim()
+  const price = money(x.price)
+  if (!name || price == null) return null
+  const pay = str(x.pay, 20).trim()
+  const status = x.status === 'cancelled' ? 'cancelled' : 'active'
+  return {
+    id: str(x.id), name, price, cur: CURRENCIES[x.cur] ? x.cur : 'TWD',
+    every: num(x.every, 1, 36, 1), unit: SUB_UNITS[x.unit] ? x.unit : 'month',
+    start: ymd(x.start, today), trial: !!x.trial, cat: SUB_CATS[x.cat] ? x.cat : 'other',
+    remind: x.remind === -1 || REMIND_DAYS.includes(x.remind) ? x.remind : 1,
+    // 付款方式只是個名字（信用卡、Apple ID）：看起來像卡號的不存
+    pay: looksLikeCardNumber(pay) ? '' : pay, url: httpUrl(x.url), note: str(x.note, 200).trim(),
+    status, end: status === 'cancelled' ? ymd(x.end, '') : '', paid0: money(x.paid0) || 0,
+    createdAt: ts(x.createdAt) || Date.now(),
+  }
+}
+const cleanSubs = (list, today) => cleanList(list, (x) => cleanSub(x, today)).slice(0, SUBS_MAX)
+// 外幣匯率（1 單位外幣大約多少新台幣）：沒設或不合理的用預設
+function cleanRates(obj) {
+  const out = {}
+  for (const k of Object.keys(CURRENCIES)) {
+    if (k === 'TWD') continue
+    const v = isObj(obj) ? +obj[k] : NaN
+    out[k] = Number.isFinite(v) && v > 0 && v <= 10000 ? Math.round(v * 10000) / 10000 : CURRENCIES[k].rate
+  }
+  return out
+}
 
 function cleanList(list, fn) {
   if (!Array.isArray(list)) return []
@@ -724,6 +771,7 @@ function migrate(s) {
     lotsPlan: 1,
     version: newer ? Number(s.version) : DATA_VERSION, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
+    subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
@@ -2607,6 +2655,98 @@ export class Store {
   forgetFocus(label) {
     this.state.coach.items = this.state.coach.items.filter((x) => x.label !== label)
     this._finish()
+  }
+
+  // ── 訂閱服務 ──
+  // 回傳新的訂閱；名稱、金額不對或已經到上限是 null
+  addSubscription(data = {}) {
+    this._refreshToday()
+    if (this.state.subscriptions.length >= SUBS_MAX) return null
+    const sub = cleanSub({ ...data, id: uid(), status: 'active', end: '', paid0: 0, createdAt: Date.now() }, this.today)
+    if (!sub) return null
+    this.state.subscriptions.push(sub)
+    this._finish([['subAdded', sub]])
+    return sub
+  }
+  subscription(id) {
+    return this.state.subscriptions.find((x) => x.id === id) || null
+  }
+  // 改名稱、金額、週期、提醒…；狀態（取消、重新訂閱）和付過的金額只能用下面的方法改
+  updateSubscription(id, patch = {}) {
+    const old = this.subscription(id)
+    if (!old) return false
+    const { id: _, status, end, paid0, createdAt, ...rest } = patch
+    const next = cleanSub({ ...old, ...rest }, this.today)
+    if (!next) return false
+    Object.assign(old, next)
+    this._finish([['subChanged', old]])
+    return true
+  }
+  // 取消訂閱：end 是不再扣款的那一天（預設下一次扣款日，到那天之前照樣能用；今天剛好扣款的話今天這筆還是算）
+  cancelSubscription(id, end = null) {
+    this._refreshToday()
+    const s = this.subscription(id)
+    if (!s || s.status === 'cancelled') return false
+    s.status = 'cancelled'
+    s.end = DATE_RE.test(end) ? end : nextCharge({ ...s, status: 'active' }, addDays(this.today, 1))
+    this._finish([['subCancelled', s]])
+    return true
+  }
+  // 重新訂閱：
+  // - 還沒用完就反悔（沒給 start）：照原本的週期繼續扣，回傳 'kept'
+  // - 已經停掉了：之前那段付過的錢記進 paid0，從 start（預設今天）重新算扣款，回傳 'restart'
+  resumeSubscription(id, start = null) {
+    this._refreshToday()
+    const s = this.subscription(id)
+    if (!s || s.status !== 'cancelled') return false
+    if (!start && s.end && s.end > this.today) {
+      s.status = 'active'
+      s.end = ''
+      this._finish([['subChanged', s]])
+      return 'kept'
+    }
+    s.paid0 = Math.round((s.paid0 + paidCount(s, this.today) * s.price) * 100) / 100
+    s.status = 'active'
+    s.end = ''
+    s.trial = false
+    s.start = DATE_RE.test(start) ? start : this.today
+    this._finish([['subChanged', s]])
+    return 'restart'
+  }
+  deleteSubscription(id) {
+    const n = this.state.subscriptions.length
+    this.state.subscriptions = this.state.subscriptions.filter((x) => x.id !== id)
+    if (this.state.subscriptions.length !== n) this._finish()
+  }
+  setSubRate(cur, rate) {
+    if (!CURRENCIES[cur] || cur === 'TWD') return false
+    this.state.subRates = cleanRates({ ...this.state.subRates, [cur]: rate })
+    this._finish()
+    return true
+  }
+  // 合計、這個月還要付、接下來的扣款、分類比例（見 subs.js 的 subsSummary）
+  subsSummary(days = 30) {
+    this._refreshToday()
+    return subsSummary(this.state.subscriptions, this.today, this.state.subRates, days)
+  }
+  // 那天要扣款的訂閱（日曆用）
+  subChargesOn(date) {
+    return this.state.subscriptions.filter((s) => chargesBetween(s, date, date).length)
+  }
+  // 現在該提醒的扣款：訂閱中、下次扣款在提醒天數內（免費試用的第一次扣款至少提前 3 天）。
+  // days：還有幾天；trial：這次是試用結束後的第一次扣款
+  subReminders() {
+    this._refreshToday()
+    const out = []
+    for (const s of this.state.subscriptions) {
+      if (s.status !== 'active' || s.remind < 0) continue
+      const date = nextCharge(s, this.today)
+      if (!date) continue
+      const trial = s.trial && date === s.start
+      const days = daysBetween(this.today, date)
+      if (days <= (trial ? Math.max(3, s.remind) : s.remind)) out.push({ id: s.id, sub: s, date, days, trial })
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date))
   }
 
   // ── 重要日子 ──
