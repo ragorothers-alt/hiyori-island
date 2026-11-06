@@ -3,3 +3,4 @@ dist
 .playwright-mcp
 art
 .wrangler
+e2e/.out

@@ -1,4 +1,4 @@
-# ひより日和 · 開 PR（或更新 PR）時：跑測試、確認建置得起來。不發布（發布在 pages.yml，推上 main 才跑）
+# ひより日和 · 開 PR（或更新 PR）時：跑單元測試和瀏覽器端對端測試、確認建置得起來。不發布（發布在 pages.yml，推上 main 才跑）
 name: 測試與建置（PR）
 
 on:
@@ -25,3 +25,23 @@ jobs:
         run: npm test
       - name: 建置
         run: npm run build
+
+  # 瀏覽器端對端測試：離線、自動更新（e2e/，用 Playwright 開 Chromium）
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps --only-shell chromium
+      - name: 端對端測試
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-results
+          path: e2e/.out/results
+          retention-days: 7

@@ -61,6 +61,13 @@ const islandPreload = () => ({
   },
 })
 
+// 端對端測試（e2e/）要模擬「部署了新版」：HIYORI_BUILD_TAG=b 時每個檔名多一段 -b，
+// 跟正常建置的檔名全部錯開（正式部署不設，檔名照舊）
+const tag = process.env.HIYORI_BUILD_TAG
+const tagged = tag
+  ? { entryFileNames: `assets/[name]-[hash]-${tag}.js`, chunkFileNames: `assets/[name]-[hash]-${tag}.js`, assetFileNames: `assets/[name]-[hash]-${tag}[extname]` }
+  : {}
+
 export default defineConfig({
   // 相對路徑：部署到子目錄（例如 GitHub Pages）也能正常運作
   base: './',
@@ -71,7 +78,7 @@ export default defineConfig({
     // CSS 要給瀏覽器版本：只寫 es2022 時壓縮器會把標準的 backdrop-filter 丟掉、只留 -webkit-，Chrome 就沒有毛玻璃
     cssTarget: ['chrome107', 'edge107', 'firefox104', 'safari16'],
     // three.js 單獨一包：App 更新時它的檔名不變，瀏覽器和 Service Worker 的快取可以繼續用
-    rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'three', test: /node_modules[\\/]three[\\/]/ }] } } },
+    rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'three', test: /node_modules[\\/]three[\\/]/ }] }, ...tagged } },
     chunkSizeWarningLimit: 900,
   },
 })

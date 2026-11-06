@@ -2,13 +2,14 @@
 
 用 three.js 打造的遊戲化日程／生活管理 App。你的一天是一座漂浮在雲海上的小島，風格走日系清透路線。島上住著兩位貓娘：活潑、照顧花圃的もち，和沉穩、幫你看時間與日程的ふじ，她們陪你一起努力、一起成長。
 
-**線上玩：<https://ragorothers-alt.github.io/hiyori-island/>**（推上 `main` 就會自動跑測試、建置並發布到 GitHub Pages；開 PR 時也會跑測試和建置，但不發布）
+**線上玩：<https://ragorothers-alt.github.io/hiyori-island/>**（推上 `main` 就會自動跑單元測試和瀏覽器端對端測試、建置並發布到 GitHub Pages；開 PR 時也會跑，但不發布）
 
 ```bash
 npm install
 npm run dev      # http://localhost:5199
 npm run build    # 輸出到 dist/
 npm test         # 單元測試（Vitest）
+npm run test:e2e # 瀏覽器端對端測試：離線、自動更新（Playwright；第一次先跑 npx playwright install chromium）
 ```
 
 ## 玩法
@@ -178,6 +179,17 @@ npx wrangler@4 d1 migrations apply hiyori-sync --remote   # 套用 migrations/ �
 
 開發時可以用 `VITE_SYNC_API=http://localhost:8787 npm run dev` 指到本機的 `npx wrangler@4 dev`。
 
+## 瀏覽器端對端測試（e2e/）
+
+Service Worker 只在正式版註冊，所以這組測試用正式建置跑：開始前先建兩個版本，`e2e/.out/a` 是跟部署一樣的建置（使用者手上的舊版），`e2e/.out/b` 是每個檔名多一段 `-b` 的建置（之後部署上去的新版，`HIYORI_BUILD_TAG=b`）。每個測試開自己的小伺服器（`e2e/server.js`，App 放在 `/hiyori-island/` 子目錄，跟 GitHub Pages 一樣），途中可以換成新版、讓某個檔案回 404，或整台斷線；瀏覽器 context 也是全新的。
+
+- **離線**：App 模式打開過一次後斷網重開，任務還在、離線時新增的也存得下來，月曆和教練（延後載入的畫面）從快取打開；小島模式看過一次小島後斷網重開，小島照樣建得起來
+- **自動更新**：開著舊版時部署了新版，新的 Service Worker 接手後舊快取清掉；舊頁面要載入還沒載過的畫面（切回小島）時自動重新整理成新版。手上有打到一半的字時不自動重新整理，改成「重新整理」按鈕、字留著，按了才換
+- **新版有檔案下載不到**：新的 Service Worker 裝不起來，舊版和舊快取都留著，斷網重開還是舊版、打得開
+- 沒有新版時檢查更新什麼都不動
+
+小島用軟體算圖（沒有顯示卡也能跑），同時最多跑 3 個測試（CI 2 個）。推上 `main` 時端對端測試沒過就不發布；失敗時的截圖和 trace 在 `e2e/.out/results`（CI 上是 `e2e-results` artifact）。
+
 ## 開發用參數
 
 - `?hour=20.5`：預覽指定時刻的天色（不影響資料）
@@ -245,4 +257,5 @@ public/
   manifest.webmanifest
 worker/            線上同步後端（Cloudflare Worker + D1），以及ふじ的 AI（/v1/ai，呼叫 Claude）
 tests/             Vitest 單元測試
+e2e/               Playwright 瀏覽器端對端測試（離線、自動更新），playwright.config.js 是設定
 ```
