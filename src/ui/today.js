@@ -146,7 +146,13 @@ export class TodayView {
       case 'edit': return this.hooks.openEdit(b.dataset.type, id)
       case 'toggle': return s.toggleTask(id)
       case 'star': return s.toggleStar(id)
-      case 'focus': return this.hooks.startFocus(id)
+      case 'focus':
+        // 已經在專注這件了：不用重來
+        if (id === this.hooks.focusTaskId?.()) return
+        return this.hooks.startFocus(id)
+      case 'more':
+        this.moreOpen = !this.moreOpen
+        return this.render()
       case 'claim': return b.dataset.weekly ? s.claimWeekly() : s.claimQuest(id)
       case 'claimAll':
         for (const q of s.quests()) if (q.ready && !q.claimed) s.claimQuest(q.id)
@@ -271,6 +277,13 @@ export class TodayView {
     // 現在正在做的、眼前這段空檔
     let line = ''
     if (g.current) line = `<b>${g.current.kind === 'task' ? '正在做' : '正在'}</b>${esc(g.current.title)}（到 ${hhmm(g.current.end)}）`
+    // 排在現在這段的任務：一鍵開始專注
+    const cur = g.current?.kind === 'task' && g.current.id
+    if (cur) {
+      line += cur === this.hooks.focusTaskId?.()
+        ? ' <em class="td-focusing">專注中</em>'
+        : ` <button type="button" class="tn-go" data-act="focus" data-id="${esc(cur)}" data-fk="cur-${esc(cur)}" aria-label="開始專注在「${esc(g.current.title)}」">${IC.play}專注</button>`
+    }
     if (awake && g.next) {
       const room = g.next.end - g.next.start
       line += `${line ? '<span>・</span>' : ''}${g.next.start <= nowMin + 1 ? `現在到 ${hhmm(g.next.end)} 有 <b>${hm(room)}</b> 空檔` : `下一段空檔 ${hhmm(g.next.start)}–${hhmm(g.next.end)}（<b>${hm(room)}</b>）`}`
@@ -281,8 +294,8 @@ export class TodayView {
       const k = esc(t.id)
       const d = taskDur(t)
       const at = Math.ceil(g.next.start / 5) * 5 + d <= g.next.end ? slotAt : toHHMM(g.next.start)
-      return `<li><i style="--c:${tagOf(t.tag).color}"></i><span>${t.star ? '★ ' : ''}${esc(t.title)}</span><small>${dur(d)}</small>
-        <button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="nf-${k}" title="專注在這件事上" aria-label="專注在「${esc(t.title)}」">${IC.play}</button>
+      return `<li><i style="--c:${tagOf(t.tag).color}"></i>${this._focusName(t, `${t.star ? '★ ' : ''}${esc(t.title)}`, 'tn-name', `nf-${k}`)}<small>${dur(d)}</small>
+        <button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="開始專注在這件事上">${IC.play}</button>
         <button type="button" class="tn-slot" data-act="slot" data-id="${k}" data-v="${at}" data-fk="ns-${k}" title="排進這段空檔">排進 ${at}</button></li>`
     }
     let sug = ''
@@ -360,11 +373,20 @@ export class TodayView {
     if (!items.length) {
       return `<section class="td-card td-sched">${head}<div class="td-empty"><p>今天還沒有排時段的行程</p><button type="button" class="btn-ghost" data-act="tab" data-v="schedule" data-fk="to-sched">到日程排一下</button></div></section>`
     }
-    const row = (it) => `<li class="td-ev${it.done ? ' done' : ''}${it.at + Math.max(it.len, 0) <= nowMin && !it.done ? ' past' : ''}" style="--c:${it.color}">
+    // 任務旁邊多一顆 ▶：直接開始專注（點色塊本身照舊是編輯）
+    const focusId = this.hooks.focusTaskId?.()
+    const go = (it) => {
+      if (it.kind !== 'task' || it.done) return ''
+      const k = esc(it.id)
+      return it.id === focusId
+        ? '<span class="td-focusing" title="正在專注這件事">專注中</span>'
+        : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="eg-${k}" title="開始專注在這件事上" aria-label="開始專注在「${esc(it.title)}」">${IC.play}</button>`
+    }
+    const row = (it) => `<li class="td-ev${it.done ? ' done' : ''}${it.at + Math.max(it.len, 0) <= nowMin && !it.done ? ' past' : ''}${it.kind === 'task' && !it.done ? ' has-go' : ''}" style="--c:${it.color}">
         <time>${hhmm(it.at)}</time><i class="td-dot"></i>
         <button type="button" class="td-evc" data-act="edit" data-type="${it.kind}" data-id="${esc(it.id)}" data-fk="ev-${esc(it.id)}">
           ${it.done ? IC.check : iconOf(it.title, it.kind)}<span>${esc(it.title)}</span>${it.len > 0 ? `<small>${dur(it.len)}</small>` : ''}
-        </button></li>`
+        </button>${go(it)}</li>`
     const nowRow = `<li class="td-now" aria-label="現在 ${hhmm(nowMin)}"><time>${hhmm(nowMin)}</time><i></i></li>`
     const at = items.findIndex((it) => it.at > nowMin)
     const rows = items.map(row)
@@ -383,23 +405,54 @@ export class TodayView {
     if (!list.length) {
       return `<section class="td-card td-top">${head}<div class="td-empty"><p>${tasks.length ? '今天的任務都完成了，辛苦了' : '今天還沒有任務'}</p>${tasks.length ? '' : '<button type="button" class="btn-ghost" data-act="add" data-fk="add2">種下一件</button>'}</div></section>`
     }
+    const focusId = this.hooks.focusTaskId?.()
     const row = (t, i) => {
       const k = esc(t.id)
       const tag = tagOf(t.tag)
       const sug = !t.star
       const subs = t.subs || []
       const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
-      return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}">
+      const on = t.id === focusId
+      const meta = `<span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${on ? '<em class="td-focusing">專注中</em>' : sug ? '<em>還不是本命</em>' : ''}</small>`
+      return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}${on ? ' on' : ''}">
         <b class="td-n">${i + 1}</b>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
-        <div class="td-tm"><span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${sug ? '<em>還不是本命</em>' : ''}</small></div>
+        ${this._focusName(t, meta, 'td-tm', `fc-${k}`)}
         ${t.dur ? `<span class="td-dur">${IC.timer}${dur(t.dur)}</span>` : ''}
         ${sug ? `<button type="button" class="td-mini" data-act="star" data-id="${k}" data-fk="st-${k}" title="選為今天的本命（完成時雙倍 XP）" aria-label="把「${esc(t.title)}」選為本命">${IC.star}</button>` : ''}
-        ${t.done ? '' : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="fc-${k}" title="專注在這件事上" aria-label="專注在「${esc(t.title)}」">${IC.play}</button>`}
+        ${t.done || on ? '' : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="開始專注在這件事上">${IC.play}</button>`}
       </li>`
     }
     const hint = stars.length < 3 && list.some((t) => !t.star) ? '<p class="td-hint">按 ☆ 把它選成本命：今天最重要的三件，完成時雙倍 XP</p>' : ''
-    return `<section class="td-card td-top">${head}<ol class="td-tops">${list.map(row).join('')}</ol>${hint}</section>`
+    return `<section class="td-card td-top">${head}<ol class="td-tops">${list.map(row).join('')}</ol>${hint}${this._moreHTML(tasks, list, focusId)}</section>`
+  }
+
+  // 任務名稱：還沒做完的是一顆按鈕，點了就開始專注（旁邊的 ▶ 只是給滑鼠的捷徑，鍵盤走名稱這顆）
+  _focusName(t, inner, cls, fk) {
+    if (t.done) return `<div class="${cls}">${inner}</div>`
+    const k = esc(t.id)
+    const label = t.id === this.hooks.focusTaskId?.() ? `正在專注「${esc(t.title)}」` : `開始專注在「${esc(t.title)}」`
+    return `<button type="button" class="${cls} td-go" data-act="focus" data-id="${k}" data-fk="${fk}" title="點一下開始專注" aria-label="${label}">${inner}</button>`
+  }
+
+  // 前三件以外、今天還沒做的任務：收在「其他任務」裡，展開後一樣點名稱就開始專注
+  _moreHTML(tasks, shown, focusId) {
+    const ids = new Set(shown.map((t) => t.id))
+    const order = (a, b) => b.priority - a.priority || (a.at ? toMin(a.at) : 1e4) - (b.at ? toMin(b.at) : 1e4) || a.createdAt - b.createdAt
+    const rest = tasks.filter((t) => !t.done && !ids.has(t.id)).sort(order)
+    if (!rest.length) return ''
+    const open = this.moreOpen
+    const row = (t) => {
+      const k = esc(t.id)
+      const on = t.id === focusId
+      const inner = `<i style="--c:${tagOf(t.tag).color}"></i><span>${esc(t.title)}</span>${on ? '<em class="td-focusing">專注中</em>' : ''}${t.at ? `<small>${t.at}</small>` : ''}<small>${dur(taskDur(t))}</small>`
+      return `<li>
+        <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="false">${ICON.check}</button>
+        ${this._focusName(t, inner, 'td-mo', `mo-${k}`)}
+        ${on ? '' : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="開始專注在這件事上">${IC.play}</button>`}</li>`
+    }
+    return `<button type="button" class="td-more-btn" data-act="more" data-fk="more" aria-expanded="${open}">${open ? '收起' : `其他今天的任務 ${rest.length} 件`}<i>${open ? '▴' : '▾'}</i></button>
+      ${open ? `<ul class="td-mos">${rest.map(row).join('')}</ul>` : ''}`
   }
 
   // ── 每日任務（三個）＋每週挑戰 ──

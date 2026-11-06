@@ -857,6 +857,10 @@ body.night .quick-preview span { color: #bfe0f7; }
 /* ── 例行公事 ── */
 .repeat-pick { border: 0; outline: 0; border-radius: 10px; padding: 4px 6px; font-size: 12px; background: rgba(140, 170, 200, .14); color: var(--ink-soft); cursor: pointer; max-width: 92px; }
 .repeat-pick.on { color: #fff; background: linear-gradient(135deg, #9fcbe8, #b9a7e6); }
+/* 新增任務時要歸到的專案：選了之後一直亮著，提醒接下來的任務都會歸過去 */
+.proj-pick { max-width: 128px; text-overflow: ellipsis; }
+.proj-pick.on { color: #3e4a5c; font-weight: 500; background: linear-gradient(135deg, #d3e8f6, #e3d8f6); }
+body.night .proj-pick.on { color: #f1f4fa; background: rgba(185, 167, 230, .34); }
 body.night .repeat-pick { color-scheme: dark; }
 .rep { color: #8b7fc9; letter-spacing: .02em; }
 body.night .rep { color: #c3b6ff; }

@@ -141,6 +141,32 @@ body.night .td-now time { background: rgba(241, 155, 178, .2); color: #ffb3c8; }
 .td-mini[data-act="focus"] svg { fill: currentColor; stroke: none; }
 .td-mini[data-act="star"]:hover { color: #e3a33c; }
 
+/* 點任務名稱就開始專注：名稱本身是按鈕，滑過時名稱和旁邊的 ▶ 一起亮 */
+.td-go { text-align: left; cursor: pointer; border-radius: 10px; padding: 3px 6px; margin: -3px -6px; transition: background .2s; }
+.td-go:hover { background: color-mix(in srgb, var(--n, var(--sky)) 14%, transparent); }
+:is(.td-t, .td-mos li, .tn-fits li):has(.td-go:hover) .td-mini[data-act="focus"] { color: var(--ink); background: rgba(140, 170, 200, .16); }
+.td-t.on { border-color: color-mix(in srgb, var(--n) 70%, transparent); background: color-mix(in srgb, var(--n) 10%, var(--field)); }
+.td-focusing, .td-tm small em.td-focusing { display: inline-block; flex: none; font-style: normal; font-size: 11px; letter-spacing: .06em; padding: 1px 7px; border-radius: 7px; color: #9a4d65; background: rgba(241, 155, 178, .22); }
+body.night .td-focusing, body.night .td-tm small em.td-focusing { color: #ffbfd0; }
+/* 今日行程：排了時段的任務右邊有 ▶ */
+.td-tl li.has-go { grid-template-columns: 52px 20px minmax(0, 1fr) auto; }
+.td-tl li.has-go > .td-mini, .td-tl li.has-go > .td-focusing { margin-left: 6px; }
+/* 前三件以外的今天任務 */
+.td-more-btn { display: flex; align-items: center; gap: 6px; margin: 10px auto 0; padding: 4px 12px; border-radius: 10px; font-size: 12.5px; color: var(--ink-soft); }
+.td-more-btn:hover { background: rgba(140, 170, 200, .14); color: var(--ink); }
+.td-more-btn i { font-style: normal; font-size: 10px; }
+.td-mos { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.td-mos li { --n: var(--sky); display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border-radius: 14px; background: var(--field); border: 1px solid var(--glass-border); }
+.td-mo { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.td-mo > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.td-mo > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-mo > small { flex: none; font-family: var(--font-num); font-size: 12px; color: var(--ink-faint); }
+/* 「現在」：排在這段的任務旁的專注鈕 */
+.tn-go { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 9px 1px 7px; border-radius: 8px; font-size: 12px; vertical-align: 1px; color: #2f5f80; background: color-mix(in srgb, var(--sky) 26%, transparent); }
+.tn-go:hover { background: color-mix(in srgb, var(--sky) 40%, transparent); }
+.tn-go svg { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+body.night .tn-go { color: #cfe6f7; }
+
 /* 每日任務 */
 .td-qs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .td-q { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 14px; background: var(--field); border: 1px solid var(--glass-border); }
@@ -232,7 +258,7 @@ body.night .tn-tip { background: rgba(241, 155, 178, .14); color: #ffc4d4; }
 .tn-fits { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .tn-fits li { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 14px; background: var(--field); border: 1px solid var(--glass-border); }
 .tn-fits li > i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
-.tn-fits li > span { flex: 1; min-width: 0; font-size: 13.5px; word-break: break-word; }
+.tn-fits li > :is(span, .tn-name) { flex: 1; min-width: 0; font-size: 13.5px; word-break: break-word; }
 .tn-fits li > small { flex: none; font-size: 11.5px; color: var(--ink-faint); }
 .tn-slot { flex: none; font-size: 12px; padding: 5px 10px; border-radius: 10px; background: var(--sakura-soft); color: #9a4d65; white-space: nowrap; }
 body.night .tn-slot { background: rgba(241, 155, 178, .2); color: #ffc4d4; }

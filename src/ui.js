@@ -116,6 +116,8 @@ export class UI {
     this.hlKey = null
     // 任務列表上自己展開／收起過子任務的那幾件（id → true／false）；沒碰過的：有還沒做完的子任務就展開
     this.subsView = new Map()
+    // 新增任務時選的專案（跟分類、優先度一樣會留著，連續加同一個專案的任務比較快）
+    this.taskProject = null
     this._initStatic()
     this._bindTasks()
     this._bindSchedule()
@@ -681,6 +683,9 @@ export class UI {
     const p = v.trim() ? parseQuick(v, { today: this.store.today, projects: this.store.activeProjects() }) : null
     const chips = p ? describeQuick(p, this.store.today) : []
     if (p?.tag && p.kind === 'task') chips.push(tagOf(p.tag).label)
+    // 沒打「@專案」時，歸到下拉選的專案（例行任務不歸專案）
+    const proj = p?.kind === 'task' && !p.projectName && !p.repeat && $('#taskRepeat').value === 'none' && this._taskProject()
+    if (proj) chips.push(`專案・${proj.name}`)
     box.hidden = !chips.length
     box.innerHTML = chips.map((c, i) => `<span class="${i === 0 && p.kind === 'event' ? 'kind' : ''}">${esc(c)}</span>`).join('')
   }
@@ -699,6 +704,23 @@ export class UI {
       sel.innerHTML = `<option value="none">不重複</option><option value="daily">每天</option><option value="weekdays">平日</option><option value="weekly">每週${wd}</option>`
       sel.value = v
     }
+  }
+
+  // 新增任務時選的專案：還在的才算（被收藏、刪掉了就回到不歸專案）
+  _taskProject() {
+    return (this.taskProject && this.store.activeProjects().find((p) => p.id === this.taskProject)) || null
+  }
+  // 專案下拉：最近動過的在前；選單內容沒變就不重建（開著選單時不會被關掉）
+  _renderProjectPick() {
+    const sel = $('#taskProject')
+    const list = [...this.store.activeProjects()].sort((a, b) => (b.editedAt || 0) - (a.editedAt || 0))
+    const cur = this._taskProject()
+    this.taskProject = cur?.id || null
+    sel.hidden = !list.length
+    setHTML(sel, `<option value="">不歸專案</option>${list.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}`)
+    sel.value = this.taskProject || ''
+    sel.classList.toggle('on', !!this.taskProject)
+    sel.title = cur ? `新任務會歸到「${cur.name}」` : '新任務要歸到哪個專案（也可以在輸入框打 @專案名）'
   }
 
   renderRoutines() {
@@ -746,6 +768,12 @@ export class UI {
       this._syncPickers()
     })
     $('#taskTitle').addEventListener('input', () => this._renderQuickPreview())
+    $('#taskProject').addEventListener('change', (e) => {
+      this.taskProject = e.target.value || null
+      this._renderProjectPick()
+      this._renderQuickPreview()
+    })
+    $('#taskRepeat').addEventListener('change', () => this._renderQuickPreview())
     $('#taskForm').addEventListener('submit', (e) => {
       e.preventDefault()
       const input = $('#taskTitle')
@@ -774,12 +802,16 @@ export class UI {
         this.toast({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${p.start}–${p.end}` })
       } else {
         const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur }
-        if (repeat) s.addRoutine({ kind: 'task', ...t, repeat })
-        else {
-          const added = s.addTask({ ...t, project: p.project })
+        // 「@專案」優先，沒打就用下拉選的專案
+        const proj = p.project ? { id: p.project, name: p.projectName } : this._taskProject()
+        if (repeat) {
+          s.addRoutine({ kind: 'task', ...t, repeat })
+          if (proj) this.toast({ icon: '↻', title: '已加入例行任務', sub: `例行任務不會歸到專案「${proj.name}」` })
+        } else {
+          const added = s.addTask({ ...t, project: proj?.id || null })
           if (added && p.star) s.toggleStar(added.id)
         }
-        if (date !== s.selectedDate) this.toast({ icon: '種', title: `已種在 ${md}`, sub: p.title })
+        if (date !== s.selectedDate) this.toast({ icon: '種', title: `已種在 ${md}`, sub: proj && !repeat ? `${p.title}・${proj.name}` : p.title })
       }
       $('#taskRepeat').value = 'none'
       $('#taskRepeat').classList.remove('on')
@@ -985,6 +1017,7 @@ export class UI {
       $('#bloomSub').textContent = `還有 ${n - k} 個花苞等著你`
     }
     this._renderStarBar(tasks)
+    this._renderProjectPick()
     $('#taskTitle').placeholder = isToday ? '種下任務，或打「明天 15:00 開會 #工作」' : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
 
     this._renderStuck(isToday)
