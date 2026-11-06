@@ -89,9 +89,14 @@ body.night .cm-link { color: #cbbcff; }
 .coach-say input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 6px 8px; font-size: 13.5px; color: var(--ink); }
 .coach-say .btn-primary { margin: 0; }
 
-/* ── 任務頁：だいじな日 ── */
+/* ── 日程頁：だいじな日 ── */
 .dates-box { margin-bottom: 10px; }
+.dt-h { display: flex; align-items: center; gap: 8px; margin: 0 2px 6px 4px; }
+.dt-lb { flex: none; font-size: 11.5px; color: var(--ink-faint); letter-spacing: .1em; }
+.dt-h small { min-width: 0; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 手機左右滑；有滑鼠的電腦上換行，不用找捲軸 */
 .dt-row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 1px; }
+@media (hover: hover) and (pointer: fine) { .dt-row { flex-wrap: wrap; overflow: visible; } }
 .dt-row::-webkit-scrollbar { display: none; }
 .dt-chip { position: relative; flex: none; display: flex; align-items: center; gap: 7px; padding: 6px 10px 6px 6px; border-radius: 14px; background: var(--glass-strong); border: 1px solid var(--glass-border); max-width: 180px; }
 .dt-chip[data-act] { cursor: pointer; }
@@ -108,9 +113,8 @@ body.night .dt-chip.soon small { color: #ffb0c4; }
 .dt-chip:hover .dt-del, .dt-del:focus-visible, .dt-del.armed { opacity: 1; }
 @media (hover: none) { .dt-del { opacity: .6; } }
 .dt-del svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2.4; }
-.dt-add { flex: none; padding: 0 12px; min-height: 40px; border-radius: 14px; border: 1px dashed rgba(120, 150, 190, .45); color: var(--ink-soft); font-size: 13px; }
-.dt-add.wide { flex: 1; text-align: left; font-size: 12.5px; color: var(--ink-faint); }
-.dt-add:hover { background: var(--glass-hover); color: var(--ink); }
+.dt-add { flex: none; margin-left: auto; padding: 0 12px; min-height: 32px; border-radius: 12px; border: 1px dashed rgba(120, 150, 190, .45); color: var(--ink-soft); font-size: 12.5px; }
+.dt-add:hover, .dt-add[aria-expanded="true"] { background: var(--glass-hover); color: var(--ink); }
 .dt-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; padding: 10px; border-radius: 16px; background: var(--glass-strong); border: 1px solid var(--glass-border); animation: fadeUp .3s var(--ease); }
 .dt-form input { border: 0; outline: 0; padding: 7px 10px; border-radius: 11px; background: var(--field); font-size: 13px; color: var(--ink); }
 .dt-form input[name="title"] { flex: 1; min-width: 120px; }

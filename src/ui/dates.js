@@ -2,7 +2,7 @@ import './coach.css'
 import { $, esc, ICON, armConfirm, pickOne } from './dom.js'
 import { DATE_KINDS, DUE_KINDS } from '../theme.js'
 
-// 任務頁最上面的「だいじな日」：考試、截止日、紀念日的倒數小卡；專案的截止日和里程碑期限也一起列（唯讀，點了打開那個專案）
+// 日程頁的「だいじな日」（新增日程表單下面）：考試、截止日、紀念日的倒數小卡；專案的截止日和里程碑期限也一起列（唯讀，點了打開那個專案）
 export class DatesView {
   constructor(root, store, hooks) {
     this.root = root
@@ -81,6 +81,7 @@ export class DatesView {
           <button type="button" class="btn-ghost" data-act="cancel">取消</button><button class="btn-primary" type="submit">加入</button>
         </form>`
       : ''
-    this.root.innerHTML = `<div class="dt-row">${chips}<button type="button" class="dt-add${list.length ? '' : ' wide'}" data-act="add">${list.length ? '＋' : '＋ 重要日子（考試、截止日…）'}</button></div>${form}`
+    // 標題一行（新增鈕固定在右邊，小卡再多也看得到），小卡在下一行
+    this.root.innerHTML = `<div class="dt-h"><span class="dt-lb">重要日子</span>${list.length ? '' : '<small>考試、截止日、紀念日的倒數</small>'}<button type="button" class="dt-add" data-act="add" aria-expanded="${this.adding}">＋ 新增</button></div>${list.length ? `<div class="dt-row">${chips}</div>` : ''}${form}`
   }
 }

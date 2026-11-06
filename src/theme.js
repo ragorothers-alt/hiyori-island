@@ -56,7 +56,7 @@ export const MOODS = [
 ]
 export const moodOf = (key) => MOODS.find((m) => m.key === key)
 
-// 重要日子的種類（任務頁的倒數、日曆上的記號）
+// 重要日子的種類（日程頁的倒數、日曆上的記號）
 export const DATE_KINDS = {
   exam: { label: '考試', kanji: '考' },
   deadline: { label: '截止', kanji: '期' },
