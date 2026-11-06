@@ -339,6 +339,30 @@ body.night .proj-pct { filter: none; }
 .ms:hover .mini, .ms:focus-within .mini { opacity: 1; }
 /* 觸控裝置沒有「滑過」：任務和里程碑的小按鈕直接淡淡地顯示，不然找不到 */
 @media (hover: none) { .item-actions, .ms .mini { opacity: .7; } }
+/* 子任務：展開時任務列表的勾勾和按鈕靠上，子任務排在標題下面 */
+.item.subs-open { align-items: flex-start; }
+.item.subs-open > .check { margin-top: 1px; }
+.item-meta .subs-tag { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-num); }
+.item-meta .subs-tag svg, .item-actions [data-act="subs"] svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.item-meta .subs-tag.ok { color: #3f8f6e; }
+body.night .item-meta .subs-tag.ok { color: #a6e3c8; }
+.subs { margin: 6px 0 2px; }
+.subs ul { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.subs li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 26px; }
+/* 已完成的任務裡，沒勾的子任務照樣是空的圈 */
+.subs .check, .item.done .subs .check { width: 17px; height: 17px; background: transparent; }
+.subs .check svg, .item.done .subs .check svg { width: 9px; height: 9px; opacity: 0; transform: scale(.4); }
+.item .subs li.done .check { background: var(--c, var(--sky)); }
+.item .subs li.done .check svg { opacity: 1; transform: none; }
+.sub-t { flex: 1; min-width: 0; word-break: break-word; cursor: text; border-radius: 6px; }
+.subs li.done .sub-t { color: var(--ink-faint); text-decoration: line-through; }
+.subs .mini { width: 22px; height: 22px; opacity: 0; }
+.subs li:hover .mini, .subs li:focus-within .mini { opacity: 1; }
+@media (hover: none) { .subs .mini { opacity: .6; } }
+.sub-add { display: flex; align-items: center; gap: 4px; }
+.sub-add input { flex: 1; min-width: 0; border: 0; outline: 0; background: rgba(140, 170, 200, .12); border-radius: 10px; padding: 5px 9px; font-size: 12.5px; color: var(--ink); }
+.sub-add input:focus { box-shadow: 0 0 0 2px var(--focus); }
+.sub-add input::placeholder { color: var(--ink-faint); }
 .ms-add { display: flex; gap: 6px; margin-top: 6px; }
 .ms-add input { flex: 1; border: 0; outline: 0; background: rgba(140, 170, 200, .12); border-radius: 10px; padding: 5px 9px; font-size: 12.5px; }
 .proj-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 6px; }

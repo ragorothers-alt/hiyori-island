@@ -699,7 +699,11 @@ export class CalendarView {
           .map((t) => {
             const tag = tagOf(t.tag)
             const when = t.at ? `${t.at}–${minToHHMM(Math.min(1439, toMin(t.at) + taskDur(t)))}` : '未排時段'
-            const meta = [tag.label, when, fmtDur(taskDur(t)), t.star && '<em class="cd-star">本命</em>', t.priority === 3 && '<em class="cd-hi">高優先</em>']
+            const subs = t.subs || []
+            const meta = [
+              tag.label, when, fmtDur(taskDur(t)), subs.length && `子任務 ${subs.filter((x) => x.done).length}/${subs.length}`,
+              t.star && '<em class="cd-star">本命</em>', t.priority === 3 && '<em class="cd-hi">高優先</em>',
+            ]
               .filter(Boolean)
               .join('・')
             return `<li><button type="button" class="cd-row tk${t.done ? ' done' : ''}" style="--c:${tag.color}" data-open="task" data-id="${esc(t.id)}" title="編輯任務">

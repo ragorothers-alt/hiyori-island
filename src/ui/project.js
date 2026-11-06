@@ -564,9 +564,11 @@ export class ProjectView {
       const late = !t.done && t.date < today
       const m = taskMilestone(p, t)
       const n = logs.get(t.id)
+      const subs = t.subs || []
+      const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
       return `<li class="pt ${t.done ? 'done' : ''}">
         <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
-        <button type="button" class="pt-main" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${n ? `・紀錄 ${n}` : ''}${t.note ? '・<i class="pt-has">註</i>' : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></button>
+        <button type="button" class="pt-main" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${sub}${n ? `・紀錄 ${n}` : ''}${t.note ? '・<i class="pt-has">註</i>' : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></button>
         ${!t.done && t.date === today ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯日期、時間和優先度">${ICON.edit}</button>
         <button type="button" class="mini" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在）">${ICON.minus}</button>
@@ -623,7 +625,23 @@ export class ProjectView {
       </div>
       <label class="pd-goal"><span class="pd-k">說明</span><textarea data-keep="tnote" data-tnote="${k}" data-grow rows="1" maxlength="${PL.taskNote}"
         placeholder="要做到什麼程度？需要的資料、要注意的事">${esc(t.note || '')}</textarea></label>
+      ${this._taskSubsHTML(t, tag.color)}
       <div class="pd-nums">${nums}</div>`
+  }
+
+  // 子任務：跟里程碑的細項一樣，全部勾完這件任務就完成
+  _taskSubsHTML(t, color) {
+    const k = esc(t.id)
+    const subs = t.subs || []
+    const sd = subs.filter((x) => x.done).length
+    const rows = subs.map((x) => `<li class="${x.done ? 'done' : ''}">
+        <button type="button" class="check" data-act="sub-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」" style="--c:${color}">${ICON.check}</button>
+        <span class="pm-st" role="button" tabindex="0" data-act="sub-rename" data-id="${k}" data-sid="${esc(x.id)}" title="點一下改名" aria-label="改名「${esc(x.title)}」">${esc(x.title)}</span>
+        <button type="button" class="mini" data-act="sub-del" data-id="${k}" data-sid="${esc(x.id)}" title="刪除子任務">${ICON.del}</button></li>`).join('')
+    const add = subs.length >= PL.subs
+      ? ''
+      : `<form class="pm-add" data-form="tsub" data-id="${k}"><input data-keep="tsub-${k}" maxlength="${PL.subTitle}" placeholder="${subs.length ? '再加一個子任務' : '拆成子任務：全部勾完，這件任務就完成'}" aria-label="新增子任務"><button class="mini" type="submit" title="新增子任務">${ICON.plus}</button></form>`
+    return `<div class="pk-subs"><span class="pd-k">子任務${subs.length ? `<b>${sd}/${subs.length}</b>` : ''}</span><div>${rows ? `<ul class="pm-steps">${rows}</ul>` : ''}${add}</div></div>`
   }
 
   _taskComposeHTML(today) {
@@ -918,6 +936,13 @@ export class ProjectView {
       case 'ai-close':
         this.ai = null
         return this.render()
+      case 'sub-toggle': return s.toggleSub(id, b.dataset.sid)
+      case 'sub-del': return s.deleteSub(id, b.dataset.sid)
+      case 'sub-rename': {
+        const x = s.state.tasks.find((t) => t.id === id)?.subs?.find((y) => y.id === b.dataset.sid)
+        if (!x) return
+        return inlineEdit(b, x.title, (v) => (v ? s.renameSub(id, x.id, v) : this._redraw('tsum')), PL.subTitle)
+      }
       case 'task-toggle': return s.toggleTask(id)
       case 'task-focus': return this.hooks.startFocus(id)
       case 'task-edit': return this.hooks.openEdit('task', id)
@@ -1001,6 +1026,14 @@ export class ProjectView {
         if (!v) return
         input.value = ''
         if (!s.addStep(p.id, f.dataset.id, v)) this.hooks.toast({ icon: '細', title: '細項已經滿了', sub: '試著把這個里程碑拆成兩個' })
+        return
+      }
+      case 'tsub': {
+        const input = f.querySelector('input')
+        const v = input.value.trim()
+        if (!v) return
+        input.value = ''
+        if (!s.addSub(f.dataset.id, v)) this.hooks.toast({ icon: '細', title: '子任務已經滿了', sub: `一件任務最多 ${PL.subs} 個` })
         return
       }
       case 'task': {

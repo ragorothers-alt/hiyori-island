@@ -11,6 +11,7 @@ export const ICON = {
   play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  subs: '<svg viewBox="0 0 24 24"><path d="M11 7h9M11 12h9M11 17h9"/><path d="M4 7l1.5 1.5L8.5 5.5M4 12l1.5 1.5 3-3"/><path d="M5 17h2"/></svg>',
   minus: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
   today: '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
   prev: '<svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>',

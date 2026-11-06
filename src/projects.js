@@ -4,7 +4,7 @@
 // 上限抓寬一點：一般使用碰不到，只防匯入的檔案把存檔撐爆
 export const PROJECT_LIMITS = {
   goal: 300, logText: 1000, logs: 1000, logMins: 1440, noteTitle: 60, noteBody: 10000, notes: 100, msNote: 500, steps: 30, stepTitle: 80, focusDays: 400,
-  taskNote: 500,
+  taskNote: 500, subs: 30, subTitle: 80,
 }
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -306,6 +306,7 @@ export function projectMarkdown(p, tasks = []) {
     for (const t of linked) {
       const m = taskMilestone(p, t)
       L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${md(t.date)}${m ? `・${m.title}` : ''}）`)
+      for (const s of t.subs || []) L.push(`  - [${s.done ? 'x' : ' '}] ${s.title}`)
       if (t.note) L.push(...t.note.split('\n').map((x) => `  > ${x}`))
     }
     L.push('')

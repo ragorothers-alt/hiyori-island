@@ -416,6 +416,11 @@ function migrate(s) {
       ms: ID_RE.test(t.ms) ? t.ms : null,
       // 任務頁上的說明（要做到什麼程度、要注意的事）
       note: str(t.note, PL.taskNote),
+      // 子任務：全部勾完時任務跟著完成（跟里程碑的細項一樣）
+      subs: cleanList(t.subs, (x) => {
+        const title = str(x.title, PL.subTitle).trim()
+        return title ? { id: str(x.id), title, done: !!x.done } : null
+      }).slice(0, PL.subs),
     }
   })
   const taskIds = new Set(tasks.map((t) => t.id))
@@ -1485,7 +1490,7 @@ export class Store {
     const t = {
       id: uid(), title: title.trim(), date, priority, tag, done: false, rewarded: false, createdAt: Date.now(),
       dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: TIME_RE.test(at) ? at : null,
-      project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null,
+      project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null, subs: [],
     }
     if (!t.title) return null
     this.state.tasks.push(t)
@@ -1701,12 +1706,12 @@ export class Store {
       const p = {
         id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: !!t.rewarded, createdAt: Date.now() + i,
         dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0, pomos: i === 0 ? t.pomos || 0 : 0,
-        project: t.project || null, ms: t.ms || null, note: i === 0 ? t.note || '' : '',
+        project: t.project || null, ms: t.ms || null, note: i === 0 ? t.note || '' : '', subs: i === 0 ? t.subs || [] : [],
       }
       fx.push(['taskAdded', p])
       return p
     })
-    // 任務頁寫過的紀錄和說明交給第一步
+    // 任務頁寫過的紀錄、說明和子任務交給第一步
     for (const p of this.state.projects) for (const l of p.logs) if (l.task === t.id) l.task = parts[0].id
     const at = this.state.tasks.indexOf(t)
     this.state.tasks.splice(at, 1, ...parts)
@@ -1714,6 +1719,50 @@ export class Store {
     fx.push(['taskSplit', { task: t, parts }])
     this._finish(fx)
     return parts
+  }
+
+  // ── 子任務：跟里程碑的細項一樣，最後一個勾完時任務跟著完成（經驗值、開花照常），
+  // 任務完成後又取消其中一個時任務回到未完成。子任務本身沒有經驗值 ──
+  _sub(id, sid) {
+    const t = this._find('tasks', id)
+    return { t, x: t?.subs?.find((y) => y.id === sid) }
+  }
+  addSub(id, title) {
+    const t = this._find('tasks', id)
+    title = String(title || '').trim().slice(0, PL.subTitle)
+    if (!t || !title) return null
+    t.subs ??= []
+    if (t.subs.length >= PL.subs) return null
+    const x = { id: uid(), title, done: false }
+    t.subs.push(x)
+    this._editedTask(t)
+    this._finish()
+    return x
+  }
+  toggleSub(id, sid) {
+    const { t, x } = this._sub(id, sid)
+    if (!x) return
+    x.done = !x.done
+    this._editedTask(t)
+    if (x.done ? !t.done && t.subs.every((y) => y.done) : t.done) return this.toggleTask(id)
+    this._finish()
+  }
+  renameSub(id, sid, title) {
+    const { t, x } = this._sub(id, sid)
+    title = String(title || '').trim().slice(0, PL.subTitle)
+    if (!x || !title) return
+    x.title = title
+    this._editedTask(t)
+    this._finish()
+  }
+  deleteSub(id, sid) {
+    const { t, x } = this._sub(id, sid)
+    if (!x) return
+    t.subs = t.subs.filter((y) => y !== x)
+    this._editedTask(t)
+    // 剩下的都做完了：任務也算完成
+    if (!t.done && t.subs.length && t.subs.every((y) => y.done)) return this.toggleTask(id)
+    this._finish()
   }
 
   // ── 日程 ──

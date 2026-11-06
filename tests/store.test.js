@@ -1997,3 +1997,93 @@ describe('整天的日程', () => {
     expect(b).toMatchObject({ allDay: false, endDate: '', start: '09:00' })
   })
 })
+
+describe('子任務', () => {
+  it('新增、改名、刪除；空白的不加，標題有長度上限', () => {
+    const t = store.addTask({ title: '寫報告' })
+    expect(t.subs).toEqual([])
+    const a = store.addSub(t.id, '  找資料  ')
+    expect(a).toMatchObject({ title: '找資料', done: false })
+    expect(store.addSub(t.id, '   ')).toBeNull()
+    expect(store.addSub('nope', '寫大綱')).toBeNull()
+    const b = store.addSub(t.id, 'x'.repeat(200))
+    expect(b.title).toHaveLength(80)
+    store.renameSub(t.id, b.id, '寫大綱')
+    store.renameSub(t.id, b.id, '  ')
+    expect(t.subs.map((x) => x.title)).toEqual(['找資料', '寫大綱'])
+    store.deleteSub(t.id, a.id)
+    expect(t.subs.map((x) => x.title)).toEqual(['寫大綱'])
+  })
+
+  it('最多 30 個', () => {
+    const t = store.addTask({ title: '大掃除' })
+    for (let i = 0; i < 30; i++) expect(store.addSub(t.id, `第 ${i + 1} 區`)).not.toBeNull()
+    expect(store.addSub(t.id, '多的')).toBeNull()
+    expect(t.subs).toHaveLength(30)
+  })
+
+  it('最後一個勾完：任務跟著完成，經驗值照常；子任務本身沒有經驗值', () => {
+    const t = store.addTask({ title: '寫報告', priority: 2 })
+    const [a, b] = [store.addSub(t.id, '找資料'), store.addSub(t.id, '寫大綱')]
+    const xp0 = store.state.player.xp
+    store.toggleSub(t.id, a.id)
+    expect(t.done).toBe(false)
+    expect(store.state.player.xp).toBe(xp0)
+    store.toggleSub(t.id, b.id)
+    expect(t.done).toBe(true)
+    expect(t.rewarded).toBe(true)
+    expect(store.state.player.xp).toBeGreaterThan(xp0)
+    expect(store.stats.tasksDone).toBe(1)
+  })
+
+  it('任務完成後取消其中一個：任務回到未完成；再勾回來不會再給一次經驗值', () => {
+    const t = store.addTask({ title: '寫報告' })
+    const a = store.addSub(t.id, '找資料')
+    store.toggleSub(t.id, a.id)
+    expect(t.done).toBe(true)
+    const xp = store.state.player.xp
+    store.toggleSub(t.id, a.id)
+    expect(t.done).toBe(false)
+    store.toggleSub(t.id, a.id)
+    expect(t.done).toBe(true)
+    expect(store.state.player.xp).toBe(xp)
+    expect(store.stats.tasksDone).toBe(1)
+  })
+
+  it('直接完成任務：子任務維持原樣；刪掉唯一沒做完的那個時任務算完成', () => {
+    const t = store.addTask({ title: '搬家' })
+    const [a, b] = [store.addSub(t.id, '打包'), store.addSub(t.id, '叫車')]
+    store.toggleTask(t.id)
+    expect(t.subs.map((x) => x.done)).toEqual([false, false])
+    store.toggleTask(t.id)
+    store.toggleSub(t.id, a.id)
+    store.deleteSub(t.id, b.id)
+    expect(t.done).toBe(true)
+  })
+
+  it('任務還沒完成時，新加的子任務不影響；全部刪光也不會自動完成', () => {
+    const t = store.addTask({ title: '整理房間' })
+    const a = store.addSub(t.id, '收衣服')
+    store.deleteSub(t.id, a.id)
+    expect(t.done).toBe(false)
+    expect(t.subs).toEqual([])
+  })
+
+  it('拆成三小步時子任務交給第一步；匯出再匯入都還在，壞掉的會被整理', () => {
+    const t = store.addTask({ title: '寫報告' })
+    store.addSub(t.id, '找資料')
+    const parts = store.splitTask(t.id)
+    expect(parts[0].subs.map((x) => x.title)).toEqual(['找資料'])
+    expect(parts[1].subs).toEqual([])
+    store.importJSON(store.exportJSON())
+    expect(store.state.tasks.find((x) => x.id === parts[0].id).subs.map((x) => x.title)).toEqual(['找資料'])
+    const raw = JSON.parse(store.exportJSON())
+    raw.tasks = [{ id: 'tk1', title: '舊任務', date: TODAY, subs: [{ title: '  ' }, 'x', { id: 'bad id!', title: '留著', done: 1 }, ...Array.from({ length: 40 }, (_, i) => ({ title: `s${i}` }))] }, { id: 'tk2', title: '沒有子任務', date: TODAY }]
+    store.importJSON(JSON.stringify(raw))
+    const [a, b] = store.state.tasks
+    expect(a.subs).toHaveLength(30)
+    expect(a.subs[0]).toMatchObject({ title: '留著', done: true })
+    expect(a.subs[0].id).toMatch(/^[a-z0-9]+$/)
+    expect(b.subs).toEqual([])
+  })
+})

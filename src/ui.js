@@ -15,7 +15,7 @@ import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './da
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
-import { latestLog, msProgress, msSteps, msTasks, projectStats } from './projects.js'
+import { latestLog, msProgress, msSteps, msTasks, projectStats, PROJECT_LIMITS as PL } from './projects.js'
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { CloudView } from './ui/cloud.js'
@@ -114,6 +114,8 @@ export class UI {
     this.eventColor = 0
     this.projectColor = 0
     this.hlKey = null
+    // 任務列表上自己展開／收起過子任務的那幾件（id → true／false）；沒碰過的：有還沒做完的子任務就展開
+    this.subsView = new Map()
     this._initStatic()
     this._bindTasks()
     this._bindSchedule()
@@ -799,7 +801,8 @@ export class UI {
         return
       }
       const li = e.target.closest('.item')
-      if (!li) return
+      // 點在正在改名的輸入框裡（它在可以按的字裡面）：不要再觸發一次
+      if (!li || e.target.closest('.inline-input')) return
       const id = li.dataset.id
       const act = e.target.closest('[data-act]')?.dataset.act
       const s = this.store
@@ -819,7 +822,46 @@ export class UI {
       } else if (act === 'today') s.moveToToday([id])
       else if (act === 'proj') this.openProject(s.state.tasks.find((x) => x.id === id)?.project, undefined, id)
       else if (act === 'focus') this.focus.startWith(id)
-      else if (!act && !e.target.closest('input')) this.hooks.focusTask(id)
+      else if (act === 'subs') {
+        const t = s.state.tasks.find((x) => x.id === id)
+        if (!t) return
+        const open = !this._subsOpen(t)
+        this.subsView.set(id, open)
+        this.renderTasks()
+        // 還沒有子任務：打開就直接打字
+        if (open && !(t.subs || []).length) $(`.item[data-id="${CSS.escape(id)}"] .sub-add input`)?.focus()
+      } else if (act === 'sub-toggle' || act === 'sub-del' || act === 'sub-rename') {
+        const sid = e.target.closest('[data-sid]').dataset.sid
+        if (act === 'sub-toggle') s.toggleSub(id, sid)
+        else if (act === 'sub-del') s.deleteSub(id, sid)
+        else {
+          const x = s.state.tasks.find((t) => t.id === id)?.subs?.find((y) => y.id === sid)
+          if (x) inlineEdit(e.target.closest('.sub-t'), x.title, (v) => (v ? s.renameSub(id, sid, v) : this.renderTasks()), PL.subTitle)
+        }
+      } else if (!act && !e.target.closest('input, .subs')) this.hooks.focusTask(id)
+    }
+    // 子任務：Enter 加一個，輸入框留著接著打下一個
+    const onSubAdd = (e) => {
+      const f = e.target.closest('.sub-add')
+      if (!f) return
+      e.preventDefault()
+      const input = $('input', f)
+      const v = input.value.trim()
+      if (!v) return
+      input.value = ''
+      this.subsView.set(f.dataset.id, true)
+      if (!this.store.addSub(f.dataset.id, v)) this.toast({ icon: '細', title: '子任務已經滿了', sub: `一件任務最多 ${PL.subs} 個` })
+    }
+    // 子任務的名稱是可以按的字：Enter、空白鍵也能改名
+    const onSubKey = (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.sub-t[data-act]')) {
+        e.preventDefault()
+        e.target.click()
+      }
+    }
+    for (const el of [$('#taskList'), $('#overdueBox')]) {
+      el.addEventListener('submit', onSubAdd)
+      el.addEventListener('keydown', onSubKey)
     }
     $('#taskList').addEventListener('click', onList)
     $('#stuckBox').addEventListener('click', (e) => {
@@ -878,19 +920,46 @@ export class UI {
     if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
     if (t.done && t.doneAt) meta.push(`<span>${hhmm(t.doneAt)} 綻放</span>`)
     if (overdue) meta.push(`<span>${esc(t.date.slice(5).replace('-', '/'))}</span>`)
-    return `<li class="item ${t.done ? 'done' : ''} ${t.star ? 'starred' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
+    const subs = t.subs || []
+    const open = this._subsOpen(t)
+    const sd = subs.filter((x) => x.done).length
+    if (subs.length) {
+      meta.push(`<button class="subs-tag${sd === subs.length ? ' ok' : ''}" data-act="subs" aria-expanded="${open}" title="${open ? '收起' : '展開'}子任務">${ICON.subs}${sd}/${subs.length}</button>`)
+    }
+    return `<li class="item ${t.done ? 'done' : ''} ${t.star ? 'starred' : ''} ${open ? 'subs-open' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
       <button class="check" data-act="toggle" aria-label="完成">${ICON.check}</button>
       <div class="item-main">
         <div class="item-title">${esc(t.title)}</div>
         <div class="item-meta">${meta.join('')}</div>
+        ${open ? this._subsHTML(t) : ''}
       </div>
       <div class="item-actions">
         ${overdue ? `<button class="mini" data-act="today" title="移到今天">${ICON.today}</button>` : ''}
         ${!t.done && !overdue && t.date === this.store.today ? `<button class="mini" data-act="focus" title="專注在這件事上">${ICON.play}</button>` : ''}
+        ${subs.length ? '' : `<button class="mini" data-act="subs" aria-expanded="${open}" title="${open ? '收起子任務' : '拆成子任務'}">${ICON.subs}</button>`}
         <button class="mini" data-act="edit" title="編輯">${ICON.edit}</button>
         <button class="mini" data-act="delete" title="刪除">${ICON.del}</button>
       </div>
     </li>`
+  }
+
+  // 子任務展開了沒：自己按過就照按的；沒按過的，還有沒做完的子任務就展開
+  _subsOpen(t) {
+    return this.subsView.get(t.id) ?? (!t.done && (t.subs || []).some((x) => !x.done))
+  }
+  _subsHTML(t) {
+    const id = esc(t.id)
+    const subs = t.subs || []
+    const rows = subs
+      .map((x) => `<li class="${x.done ? 'done' : ''}">
+        <button class="check" data-act="sub-toggle" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」">${ICON.check}</button>
+        <span class="sub-t" role="button" tabindex="0" data-act="sub-rename" data-sid="${esc(x.id)}" title="點一下改名">${esc(x.title)}</span>
+        <button class="mini" data-act="sub-del" data-sid="${esc(x.id)}" title="刪除子任務" aria-label="刪除子任務「${esc(x.title)}」">${ICON.del}</button></li>`)
+      .join('')
+    const full = subs.length >= PL.subs
+    return `<div class="subs">${rows ? `<ul>${rows}</ul>` : ''}${full ? '' : `<form class="sub-add" data-id="${id}" autocomplete="off">
+      <input data-act="sub-input" maxlength="${PL.subTitle}" placeholder="${subs.length ? '再加一個子任務' : '拆成子任務：做完一個勾一個'}" aria-label="新增子任務（Enter 加入）">
+      <button class="mini" type="submit" title="加入">${ICON.plus}</button></form>`}</div>`
   }
 
   renderTasks() {
@@ -919,8 +988,9 @@ export class UI {
     $('#taskTitle').placeholder = isToday ? '種下任務，或打「明天 15:00 開會 #工作」' : `為 ${s.selectedDate.slice(5).replace('-', '/')} 種下任務…`
 
     this._renderStuck(isToday)
-    // 正在就地改名：先不重畫（同步拉回資料時會把正在選字的中文吃掉），改完或取消時會再畫一次
-    if (editing($('#taskList')) || editing($('#overdueBox'))) return
+    // 正在就地改名、或正在打新的子任務：先不重畫（同步拉回資料時會把正在選字的中文吃掉），改完或送出時會再畫一次
+    const a = document.activeElement
+    if (editing($('#taskList')) || editing($('#overdueBox')) || (a?.matches('.sub-add input') && a.value)) return
     const fk = this._listFocus()
     const overdue = isToday ? s.overdue() : []
     $('#overdueBox').innerHTML = overdue.length
@@ -941,8 +1011,10 @@ export class UI {
     const li = a?.closest?.('#taskList .item, #overdueBox .item')
     if (!li) return null
     // 剛改完名（焦點還在輸入框裡）：還給那一件的編輯鈕
-    const act = a.dataset.act || (a.classList.contains('inline-input') ? 'edit' : null)
-    return { id: li.dataset.id, act, i: $$('#taskList .item, #overdueBox .item').indexOf(li) }
+    // 子任務的改名框在子任務名稱裡：還給那個名稱
+    const sub = a.closest('[data-sid]')
+    const act = a.dataset.act || (sub ? sub.dataset.act : a.classList.contains('inline-input') ? 'edit' : null)
+    return { id: li.dataset.id, act, sid: sub?.dataset.sid, i: $$('#taskList .item, #overdueBox .item').indexOf(li) }
   }
   _restoreListFocus(k) {
     // 焦點已經在別的地方（不是被重畫弄丟的）就不搶
@@ -950,7 +1022,9 @@ export class UI {
     const items = $$('#taskList .item, #overdueBox .item')
     const li = items.find((x) => x.dataset.id === k.id)
     const at = li || items[Math.min(k.i, items.length - 1)]
-    const el = (li && k.act && $(`[data-act="${k.act}"]:not(:disabled)`, li)) || (at && $('.check', at)) || $('#taskTitle')
+    const sid = k.sid ? `[data-sid="${CSS.escape(k.sid)}"]` : ''
+    // 子任務刪掉了：落在同一件任務的新增子任務框
+    const el = (li && k.act && ($(`[data-act="${k.act}"]${sid}:not(:disabled)`, li) || (sid && $('.sub-add input', li)))) || (at && $('.check', at)) || $('#taskTitle')
     el.focus({ preventScroll: true })
   }
 

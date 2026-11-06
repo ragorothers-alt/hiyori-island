@@ -387,10 +387,12 @@ export class TodayView {
       const k = esc(t.id)
       const tag = tagOf(t.tag)
       const sug = !t.star
+      const subs = t.subs || []
+      const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
       return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}">
         <b class="td-n">${i + 1}</b>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
-        <div class="td-tm"><span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sug ? '<em>還不是本命</em>' : ''}</small></div>
+        <div class="td-tm"><span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${sug ? '<em>還不是本命</em>' : ''}</small></div>
         ${t.dur ? `<span class="td-dur">${IC.timer}${dur(t.dur)}</span>` : ''}
         ${sug ? `<button type="button" class="td-mini" data-act="star" data-id="${k}" data-fk="st-${k}" title="選為今天的本命（完成時雙倍 XP）" aria-label="把「${esc(t.title)}」選為本命">${IC.star}</button>` : ''}
         ${t.done ? '' : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="fc-${k}" title="專注在這件事上" aria-label="專注在「${esc(t.title)}」">${IC.play}</button>`}

@@ -504,6 +504,16 @@ describe('任務頁：每件任務的說明和紀錄', () => {
     expect(projectMarkdown(p, store.state.tasks)).toContain('任務「訪談整理」')
   })
 
+  it('子任務也匯出成 Markdown 的待辦', () => {
+    const { p, t } = setup()
+    const a = store.addSub(t.id, '約時間')
+    store.addSub(t.id, '寫逐字稿')
+    store.toggleSub(t.id, a.id)
+    const md = projectMarkdown(p, store.state.tasks)
+    expect(md).toContain('  - [x] 約時間')
+    expect(md).toContain('  - [ ] 寫逐字稿')
+  })
+
   it('任務換到別的專案：紀錄跟著搬；只是移出專案時留在原本的專案，放回來還認得', () => {
     const { p, t } = setup()
     const q = store.addProject({ name: '另一個', milestones: ['甲'] })
