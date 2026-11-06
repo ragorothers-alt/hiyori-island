@@ -2258,15 +2258,35 @@ export class UI {
   }
 
   // ── 通知 ──
-  toast({ icon = '花', title, sub = '', stamp = false, ms = 3400 }) {
+  // action：{ label, run }，toast 右邊多一顆按鈕（例如「重新整理」）
+  toast({ icon = '花', title, sub = '', stamp = false, ms = 3400, action = null }) {
     const el = document.createElement('div')
     el.className = 'toast'
     el.innerHTML = `${stamp ? `<div class="stamp-k">${esc(icon)}</div>` : `<div class="t-icon">${esc(icon)}</div>`}<div><b>${esc(title)}</b><small>${esc(sub)}</small></div>`
+    if (action) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'toast-act'
+      b.textContent = action.label
+      b.addEventListener('click', () => action.run())
+      el.append(b)
+      el.classList.add('has-act')
+    }
     $('#toasts').append(el)
     setTimeout(() => {
       el.classList.add('out')
       setTimeout(() => el.remove(), 500)
     }, ms)
+  }
+
+  // 畫面上有沒有打到一半的字（自動換新版、重新整理之前檢查）。
+  // 跟畫出來時的值不一樣就算：寧可多問一次，也不要把使用者打的字刷掉
+  hasDraft() {
+    return $$('input:not([type]), input[type="text"], input[type="search"], textarea, [contenteditable="true"]').some((el) => {
+      if (!el.getClientRects().length) return false
+      if (el.isContentEditable) return document.activeElement === el && !!el.textContent.trim()
+      return !!el.value.trim() && el.value !== el.defaultValue
+    })
   }
 
   showLevelUp(level, unlock) {

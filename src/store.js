@@ -1845,11 +1845,15 @@ export class Store {
   // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數
   applyPlan(date, plan, left = 0) {
     this._refreshToday()
+    // 過去的日子不排；今天已經過去的時段也不排（預覽放太久時，介面會先重新預覽）
+    if (date < this.today) return
+    const n0 = new Date()
+    const nowMin = date === this.today ? n0.getHours() * 60 + n0.getMinutes() : -1
     const fx = []
     let n = 0
     for (const p of plan) {
       const t = this._find('tasks', p.id)
-      if (!t || t.done || !TIME_RE.test(p.at)) continue
+      if (!t || t.done || !TIME_RE.test(p.at) || toMin(p.at) < nowMin) continue
       if (t.date < date) t.moved = (t.moved || 0) + 1
       t.date = date
       this._fitStar(t)
@@ -2788,6 +2792,20 @@ export class Store {
   reset({ force = false } = {}) {
     // 存檔是新版 App 寫的：這一版刪了它就找不回來
     if (this.newerApp) throw new Error(NEWER_MSG)
+    // 刪之前重讀一次存檔：另一個分頁（可能是新版）剛寫過、這邊還沒收到通知時，
+    // 只備份記憶體裡這份舊的就刪掉，那一版就找不回來了
+    let disk = null
+    try {
+      disk = JSON.parse(localStorage.getItem(KEY) || 'null')
+    } catch {}
+    if (newerData(disk)) {
+      this._newer()
+      throw new Error(NEWER_MSG)
+    }
+    if (disk?.rev && disk.rev !== this._diskRev && disk.rev !== this.state.rev) {
+      this._adoptDisk()
+      throw new Error('另一個分頁剛改過資料，這邊已經換成那一版。看一下，確定還要清空的話再按一次重置')
+    }
     if (!keepBackup(this.state, 'reset', this.state.updatedAt) && !force) return false
     try {
       localStorage.removeItem(KEY)

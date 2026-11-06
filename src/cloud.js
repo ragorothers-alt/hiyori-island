@@ -136,6 +136,37 @@ export class CloudSync extends SyncEngine {
     addEventListener('online', () => this.sync())
     // 切到背景時先把還沒送出的變更送出去：手機切走 App 後，頁面可能等不到延遲寫入就被凍結
     document.addEventListener('visibilitychange', () => document.hidden && this.flush())
+    // 同一個瀏覽器的另一個分頁按了「停止同步」或換了同步碼：這邊跟著停／換，
+    // 不要繼續把資料送到使用者已經不要的那組同步碼（key 是 null：整個 localStorage 被清掉）
+    addEventListener('storage', (e) => {
+      if (e.key === CODE_KEY || e.key === null) this._codeChanged()
+    })
+  }
+  // 照存檔裡現在的同步碼換掉這邊記著的；只讀不寫（寫是另一個分頁的事）
+  async _codeChanged() {
+    let code = null
+    try {
+      code = normalizeCode(localStorage.getItem(CODE_KEY))
+    } catch {}
+    if (code === this.code || this.state === 'unsupported') return
+    clearTimeout(this._timer)
+    // 還在路上的請求回來後不再動狀態
+    this.epoch++
+    this.conflict = null
+    this.keys = null
+    this.code = null
+    let base = ''
+    try {
+      base = localStorage.getItem(this.baseKey) || ''
+    } catch {}
+    this.base = base
+    if (!code) return this._set('off')
+    const epoch = this.epoch
+    const keys = await deriveKeys(code)
+    if (epoch !== this.epoch) return
+    this.keys = keys
+    this.code = code
+    this._set('linked')
   }
 
   _ready() {

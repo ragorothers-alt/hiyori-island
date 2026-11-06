@@ -380,6 +380,31 @@ describe('線上同步', () => {
     expect(vaults()[0].data).toBe(cloud)
   })
 
+  it('同一個瀏覽器的另一個分頁停止同步：這個分頁也停下來，不再往那組同步碼送資料', async () => {
+    const { a, b } = await pair()
+    // 同一台的第二個分頁：同一份 localStorage、同一組同步碼
+    const tab2 = new CloudSync(a.store)
+    await a.run(() => tab2.init())
+    expect(tab2.state).toBe('linked')
+    await a.run((_s, sync) => sync.stop())
+    await a.run(() => tab2._codeChanged())
+    expect(tab2.state).toBe('off')
+    expect(tab2.keys).toBeNull()
+    calls = []
+    await a.run(async (s) => {
+      s.addTask({ title: '停了之後寫的' })
+      tab2.flush()
+      await tab2.sync()
+    })
+    expect(calls).toEqual([])
+    // 另一個分頁開了一組新的同步碼：跟著換
+    const fresh = await a.run((_s, sync) => sync.start())
+    expect(fresh).not.toBe(b.sync.code)
+    await a.run(() => tab2._codeChanged())
+    expect(tab2.state).toBe('linked')
+    expect(tab2.code).toBe(fresh)
+  })
+
   it('重新開啟 App 時用記住的同步碼繼續同步', async () => {
     const { a, code } = await pair()
     const again = new CloudSync(a.store)

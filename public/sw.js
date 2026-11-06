@@ -10,13 +10,21 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(VERSION)
-      await cache.addAll(SHELL)
-      // 從首頁找出打包後帶 hash 的 JS／CSS 一起快取，第一次安裝後就能離線
       try {
-        const html = await (await fetch('./', { cache: 'no-store' })).text()
+        // 首頁只抓一次、不經過瀏覽器快取：存起來的首頁和它用到的 JS／CSS 才會是同一版
+        const res = await fetch('./', { cache: 'no-store' })
+        if (!res.ok) throw new Error(`首頁抓不到（${res.status}）`)
+        const html = await res.clone().text()
+        await cache.put('./', res.clone())
+        await cache.put('./index.html', res)
+        // 打包後帶 hash 的入口 JS／CSS 一起快取，第一次安裝後就能離線
         const assets = [...html.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)].map((m) => m[1])
-        await cache.addAll(assets)
-      } catch {}
+        await cache.addAll([...SHELL.filter((f) => f !== './' && f !== './index.html'), ...assets])
+      } catch (err) {
+        // 有檔案沒抓到就不要裝：舊版繼續用、舊快取也不會被清掉，下次打開再試
+        await caches.delete(VERSION)
+        throw err
+      }
       self.skipWaiting()
     })(),
   )

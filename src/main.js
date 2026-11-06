@@ -664,6 +664,17 @@ async function boot() {
   // 開著的時候部署了新版：新的 Service Worker 接手後清掉了舊版的檔案，伺服器上也換成新的了，
   // 這個舊頁面第一次要載入的畫面（切回小島、日曆…）會找不到。重新整理一次換成新版；
   // 離線時不試（那是真的連不上），30 秒內也只試一次，免得一直重新整理
+  // 存檔沒寫進去（空間滿了）或手上有打到一半的字時不自動重新整理：留一顆按鈕，讓使用者收好再按
+  let updateAsked = false
+  const askUpdate = (saved) => {
+    if (updateAsked) return
+    updateAsked = true
+    ui.toast({
+      icon: '新', title: '有新版本了', ms: 30000,
+      sub: saved ? '手上還有沒打完的字，收好再按「重新整理」' : '這次的變更沒能存進去（空間可能滿了），先到「紀錄」匯出備份再重新整理',
+      action: { label: '重新整理', run: () => { store.flushSave(); location.reload() } },
+    })
+  }
   addEventListener('vite:preloadError', (e) => {
     if (!navigator.onLine) return
     let last = 0
@@ -671,14 +682,16 @@ async function boot() {
       last = Number(sessionStorage.getItem(RELOADED_KEY)) || 0
     } catch {}
     if (Date.now() - last < 30000) return
+    // 載入失敗的那幾處看到這個就不再叫人「連上網路」
+    if (e.payload) e.payload.updating = true
+    const safe = () => store.flushSave() !== false && !ui.hasDraft()
+    if (updateAsked || !safe()) return askUpdate(store.flushSave() !== false)
     try {
       sessionStorage.setItem(RELOADED_KEY, String(Date.now()))
     } catch {}
-    // 載入失敗的那幾處看到這個就不再叫人「連上網路」
-    if (e.payload) e.payload.updating = true
     ui.toast({ icon: '新', title: '有新版本了', sub: '重新整理一下，換上新版…' })
-    store.flushSave()
-    setTimeout(() => location.reload(), 1200)
+    // 等的這一下又開始打字：改成問
+    setTimeout(() => (safe() ? location.reload() : askUpdate(store.flushSave() !== false)), 1200)
   })
   // 請瀏覽器在空間吃緊時不要清掉這個網站的資料（iPhone 沒加到主畫面時，Safari 也可能把太久沒開的網站資料清掉）。
   // Chrome 系和安裝成 App 時不會跳出詢問，開機就請；其他瀏覽器（Safari 一般分頁、Firefox 會跳出權限詢問）

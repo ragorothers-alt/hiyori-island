@@ -74,6 +74,21 @@ describe('時段安排', () => {
     store.clearPlan(TODAY)
     expect(store.tasksOn(TODAY).every((x) => !x.at)).toBe(true)
   })
+  it('預覽放太久才套用：已經過去的時段不排、過去的日子不排', () => {
+    setDate(TODAY, 8)
+    const t = store.addTask({ title: '早上排的', date: TODAY })
+    const plan = store.planDay(TODAY).plan
+    expect(plan).toHaveLength(1)
+    // 一路放到下午才按套用
+    setDate(TODAY, 15)
+    store.applyPlan(TODAY, [{ ...plan[0], at: '09:00' }])
+    expect(t.at).toBeNull()
+    expect(store.stats.plansApplied || 0).toBe(0)
+    store.applyPlan(addDays(TODAY, -1), [{ ...plan[0], at: '20:00' }])
+    expect(t.at).toBeNull()
+    store.applyPlan(TODAY, [{ ...plan[0], at: '16:00' }])
+    expect(t.at).toBe('16:00')
+  })
   it('手動排進時段與收回', () => {
     const t = store.addTask({ title: 'x', date: TODAY })
     store.scheduleTask(t.id, '14:00', 45)

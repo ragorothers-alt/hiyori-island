@@ -500,8 +500,20 @@ export class ScheduleView {
         this.render(false)
       } else if (act === 'apply') {
         const p = this.preview
+        if (!p) return
+        // 預覽可能放了一陣子：照現在的時間、日程和任務再排一次，結果不一樣就換成新的預覽，請使用者再看一眼
+        const fresh = p.date >= s.today ? s.planDay(p.date, { replan: p.replan }) : null
+        const sig = (r) => `${r.plan.map((x) => `${x.id}@${x.at}+${x.dur}`).join()}|${r.left.length}`
+        if (!fresh || sig(fresh) !== sig(p.result)) {
+          this.preview = fresh ? { ...p, result: fresh } : null
+          this.render(false)
+          this.hooks.toast(fresh
+            ? { icon: '改', title: '時間或日程有變，預覽已經更新', sub: '看一下新的排法，沒問題再按一次套用' }
+            : { icon: '過', title: '這天已經過去了', sub: '只能替今天和之後的日子排時段' })
+          return
+        }
         this.preview = null
-        if (p) s.applyPlan(p.date, p.result.plan, p.result.left.length)
+        s.applyPlan(p.date, p.result.plan, p.result.left.length)
         if (p?.result.left.length) this.hooks.toast({ icon: '満', title: `還有 ${p.result.left.length} 件未排入`, sub: '這天的空檔有點滿，改天安排也沒關係' })
       } else if (act === 'cancel') {
         this.preview = null

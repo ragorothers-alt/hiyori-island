@@ -801,6 +801,31 @@ describe('存檔讀不進來、存不進去', () => {
     expect(titlesOf(readBackup().state)).toContain('重置前')
   })
 
+  it('重置前另一個分頁剛寫過（還沒收到通知）：不刪，先換成那一版；新版 App 寫的更不刪', () => {
+    store.addTask({ title: '這邊的' })
+    store.saveNow()
+    const peer = JSON.parse(localStorage.getItem('hiyori-daily-v1'))
+    peer.rev = 'peerrev1'
+    peer.tasks.push({ id: 'peer1', title: '另一個分頁剛加的', date: TODAY })
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify(peer))
+    localStorage.setItem('hiyori-daily-rev', 'peerrev1')
+    expect(() => store.reset()).toThrow('另一個分頁剛改過資料')
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('另一個分頁剛加的')
+    expect(titlesOf(store.state)).toContain('另一個分頁剛加的')
+    // 看過了再按一次：照常清空，那一版留成備份
+    expect(store.reset()).toBe(true)
+    expect(store.state.tasks).toEqual([])
+    expect(titlesOf(readBackup().state)).toContain('另一個分頁剛加的')
+
+    const newer = JSON.parse(localStorage.getItem('hiyori-daily-v1'))
+    newer.version = 99
+    newer.rev = 'newerrev'
+    newer.tasks = [{ id: 'n1', title: '新版寫的', date: TODAY }]
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify(newer))
+    expect(() => store.reset()).toThrow('新版')
+    expect(JSON.parse(localStorage.getItem('hiyori-daily-v1')).tasks[0].title).toBe('新版寫的')
+  })
+
   it('重置前的備份存不進去：先不清，確定（force）了才清；清完今天的每日任務照樣有', () => {
     store.addTask({ title: '原本的任務' })
     const spy = failOn('hiyori-backup')
