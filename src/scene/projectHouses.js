@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { PLAN } from '../data/projectTown.js'
 import { PROJECT_COLORS } from '../theme.js'
-import { mat, tween, ease, hash } from './util.js'
+import { mat, tween, cancelTween, ease, hash } from './util.js'
 import { daysBetween } from '../store.js'
 import { buildHouse, KINDS_BY_HEIGHT } from './models/projectTown/index.js'
 
@@ -172,14 +172,22 @@ class House {
     }
     // 還沒蓋完：完工樣子的線框
     if (stage < 5 && !this.ghost) {
+      // 剛落成又馬上取消（線框還在淡出）：先停掉淡出，不然它會把新線框（共用同一個材質）一起淡成看不見
+      this._dropFade()
       this.ghost = buildPreview(this.kind, this.base, this.ghostMat)
       this.ghostTop = new THREE.Box3().setFromObject(this.ghost).max.y
       this.group.add(this.ghost)
     } else if (stage === 5 && this.ghost) {
       const g = this.ghost
       this.ghost = null
-      if (animate) tween(0.6, (k) => (this.ghostMat.opacity = GHOST_OPACITY * (1 - k)), { onDone: () => (g.removeFromParent(), disposeModel(g)) })
-      else {
+      if (animate) {
+        const tw = tween(0.6, (k) => (this.ghostMat.opacity = GHOST_OPACITY * (1 - k)), { onDone: () => {
+          this._fade = null
+          g.removeFromParent()
+          disposeModel(g)
+        } })
+        this._fade = { g, tw }
+      } else {
         g.removeFromParent()
         disposeModel(g)
       }
@@ -208,7 +216,18 @@ class House {
     }
   }
 
+  // 停掉還在跑的線框淡出，舊線框直接收掉
+  _dropFade() {
+    const f = this._fade
+    if (!f) return
+    this._fade = null
+    cancelTween(f.tw)
+    f.g.removeFromParent()
+    disposeModel(f.g)
+  }
+
   dispose() {
+    this._dropFade()
     if (this.model) disposeModel(this.model)
     if (this.ghost) disposeModel(this.ghost)
     this.model = this.ghost = null

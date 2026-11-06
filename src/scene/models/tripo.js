@@ -61,14 +61,22 @@ export function swapIn(group, name, { size, rotY = 0, offset = null, keep = () =
     mesh.castShadow = true
     mesh.receiveShadow = true
     tune?.(material, mesh)
-    // 原本的外殼拿掉（不能只藏起來：點選的射線和 bounds() 都會算到看不見的物件）
+    // 原本的外殼拿掉（不能只藏起來：點選的射線和 bounds() 都會算到看不見的物件），
+    // 它們的 geometry 也一起釋放：程序化模型的 geometry 都是每個物件自己 new 的，留著的零件不會用到。
+    // 材質大多是 mat() 共用的快取，不能釋放；只釋放子物件自己帶的 ownedMaterials
+    const keepGeo = new Set()
+    for (const c of group.children) if (keep(c)) c.traverse((o) => o.geometry && keepGeo.add(o.geometry))
+    const gone = new Set()
     for (const c of [...group.children]) {
       if (keep(c)) continue
       group.remove(c)
       c.traverse((o) => {
         if (o.isInstancedMesh) o.dispose()
+        if (o.geometry && !keepGeo.has(o.geometry)) gone.add(o.geometry)
+        for (const m of o.userData?.ownedMaterials || []) m.dispose()
       })
     }
+    for (const g of gone) g.dispose()
     group.add(mesh)
     ;(group.userData.ownedMaterials ??= []).push(material)
     group.userData.swapped = name

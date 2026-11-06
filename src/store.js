@@ -37,6 +37,8 @@ const POMO_SIDS = 20
 // 存檔格式的版本。比這個新的資料是新版 App 寫的：這一版看不懂新的欄位，不能讀進來再用舊的格式寫回去
 // （舊的 PWA 分頁還開著、另一個分頁已經更新了的時候會遇到）
 export const DATA_VERSION = 2
+// 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
+const HABIT_PAID_DAYS = 120
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
 export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version) > DATA_VERSION
 // 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
@@ -416,6 +418,8 @@ function migrate(s) {
       // project：歸在哪個專案；ms：自己選的里程碑，null＝自動（下面清完專案後，對不上的拿掉）
       project: ID_RE.test(t.project) ? t.project : null,
       ms: ID_RE.test(t.ms) ? t.ms : null,
+      // msAuto：沒自己選里程碑時，完成那一刻自動歸到的里程碑（之後里程碑取消又勾回來也不會換）
+      msAuto: done && ID_RE.test(t.msAuto) ? t.msAuto : null,
       // 任務頁上的說明（要做到什麼程度、要注意的事）
       note: str(t.note, PL.taskNote),
       // 子任務：全部勾完時任務跟著完成（跟里程碑的細項一樣）
@@ -514,9 +518,13 @@ function migrate(s) {
   // 任務歸屬的專案已經不在了（被刪掉、或匯入的檔案對不上）：拿掉歸屬，任務照留；
   // 選的里程碑不在那個專案裡：改回自動
   const msOf = new Map(projects.map((p) => [p.id, new Set(p.milestones.map((m) => m.id))]))
+  const projById = new Map(projects.map((p) => [p.id, p]))
   for (const t of tasks) {
     if (t.project && !msOf.has(t.project)) t.project = null
     if (t.ms && !msOf.get(t.project)?.has(t.ms)) t.ms = null
+    if (t.msAuto && !msOf.get(t.project)?.has(t.msAuto)) t.msAuto = null
+    // 以前做完、還沒記下自動歸屬的：照現在的里程碑補上，之後就固定在那裡
+    if (t.done && t.project && !t.ms && !t.msAuto) t.msAuto = taskMilestone(projById.get(t.project), t)?.id || null
   }
   // 重新分配塔位：重複的換到空地，空地不夠就先不上島；進行中的專案超過上限的改為收藏
   const used = new Set()
@@ -669,6 +677,8 @@ function migrate(s) {
       target: num(h.target, 1, 99, 1), unit: str(h.unit, 6).trim() || '次', days: weekdays(h.days),
       start: ymd(h.start, today), createdAt: ts(h.createdAt) || Date.now(), archived: !!h.archived,
       log: counts(h.log), urges: counts(h.urges), slips, ms: num(h.ms, 0, 9999, 0), paid: ymd(h.paid, ''),
+      // 給過獎勵的日子（照日期記，系統日期倒退再走回來也不會重領）；舊存檔只有 paid 那一天
+      paidDays: [...new Set([...(Array.isArray(h.paidDays) ? h.paidDays : []), h.paid].filter((d) => DATE_RE.test(d)))].sort().slice(-HABIT_PAID_DAYS),
       // 戒除里程碑給過經驗的最高天數（舊存檔沒有：當成這段乾淨期走到的都給過了）
       msPaid: num(h.msPaid, 0, 9999, num(h.ms, 0, 9999, 0)),
     }
@@ -1533,6 +1543,9 @@ export class Store {
     this._refreshToday()
     t.done = !t.done
     t.doneAt = t.done ? Date.now() : null
+    // 沒自己選里程碑的專案任務：記下完成這一刻歸到哪個里程碑
+    t.msAuto = null
+    if (t.done && t.project && !t.ms) t.msAuto = taskMilestone(this._find('projects', t.project) || { milestones: [] }, t)?.id || null
     this._editedTask(t)
     const fx = []
     if (t.done) {
@@ -1632,6 +1645,8 @@ export class Store {
     // 原本歸的專案和（換過去的）新專案都算動到了
     this._editedTask(t)
     Object.assign(t, patch)
+    // 換了專案或改了里程碑：做完的任務照新的歸屬重新記一次自動里程碑
+    if ('ms' in patch) t.msAuto = t.done && t.project && !t.ms ? taskMilestone(this._find('projects', t.project), t)?.id || null : null
     this._editedTask(t)
     if (patch.date) this._fitStar(t)
     if (moved) this._gatherTaskLogs(t)
@@ -1838,7 +1853,7 @@ export class Store {
   planDay(date = this.selectedDate, { replan = false } = {}) {
     const n = new Date()
     return optimizeDay({
-      tasks: this.planTasks(date), events: this.eventsOn(date), rhythm: this.state.rhythm, date, today: this.today,
+      tasks: this.planTasks(date), events: this._busyEvents(date), rhythm: this.state.rhythm, date, today: this.today,
       nowMin: date === this.today ? n.getHours() * 60 + n.getMinutes() : null, replan,
     })
   }
@@ -1918,7 +1933,7 @@ export class Store {
     const h = {
       id: uid(), name, kind: kind === 'quit' ? 'quit' : 'build', icon: String(icon || '').slice(0, 2) || (kind === 'quit' ? '禁' : '習'),
       color: num(color, 0, 99, 0), target: num(target, 1, 99, 1), unit: String(unit || '次').trim().slice(0, 6) || '次', days: weekdays(days),
-      start: this.today, createdAt: Date.now(), archived: false, log: {}, urges: {}, slips: [], ms: 0, paid: '', msPaid: 0,
+      start: this.today, createdAt: Date.now(), archived: false, log: {}, urges: {}, slips: [], ms: 0, paid: '', paidDays: [], msPaid: 0,
     }
     this.state.habits.push(h)
     this._finish([['habitAdded', h]])
@@ -1959,8 +1974,9 @@ export class Store {
     else delete h.log[date]
     const fx = [['habitCheck', { habit: h, date, count: n, delta }]]
     // 獎勵只給今天該做的習慣；休息日多做也能記，但不算進完成與連續天數
-    if (!before && doneOn(h, date) && date === this.today && h.paid !== this.today && applies(h, date)) {
+    if (!before && doneOn(h, date) && date === this.today && h.paid !== this.today && !h.paidDays?.includes(this.today) && applies(h, date)) {
       h.paid = this.today
+      h.paidDays = [...(h.paidDays || []), this.today].sort().slice(-HABIT_PAID_DAYS)
       const d = this.day()
       d.habits++
       this.stats.habitChecks++
@@ -2491,16 +2507,22 @@ export class Store {
 
   // ── ふじ的排程教練 ──
   // 排程要避開的東西：這幾天的日程（未來的例行公事日程也算）、排了時段的任務
+  // 未來那天會由例行公事生成、但還沒生成的日程：排程要先避開
+  _routineEventsOn(date) {
+    if (date <= this.today) return []
+    return this.state.routines
+      .filter((r) => r.kind === 'event' && r.startDate <= date && !r.made?.[date] && repeatMatches(r.repeat, date))
+      .map((r) => ({ id: 'r-' + r.id, date, title: r.title, start: r.start, end: r.end, done: false }))
+  }
+  // 排程要避開的日程：有時段的日程，加上還沒生成的例行日程
+  _busyEvents(date) {
+    return [...this.eventsOn(date).filter((e) => !e.allDay), ...this._routineEventsOn(date)]
+  }
   coachContext(dates) {
     const set = new Set(dates)
     const n = new Date()
     const events = this.state.events.filter((e) => set.has(e.date) && !e.allDay)
-    for (const date of dates) {
-      if (date <= this.today) continue
-      for (const r of this.state.routines) {
-        if (r.kind === 'event' && r.startDate <= date && !r.made?.[date] && repeatMatches(r.repeat, date)) events.push({ id: 'r-' + r.id, date, title: r.title, start: r.start, end: r.end, done: false })
-      }
-    }
+    for (const date of dates) events.push(...this._routineEventsOn(date))
     return {
       today: this.today, nowMin: n.getHours() * 60 + n.getMinutes(), rhythm: this.state.rhythm,
       events, tasks: this.state.tasks.filter((t) => set.has(t.date) && t.at && !t.done),
@@ -2519,7 +2541,8 @@ export class Store {
     const now = new Date()
     const nowMin = now.getHours() * 60 + now.getMinutes()
     const busy = {}
-    const busyOn = (date) => (busy[date] ??= busyOf({ rhythm: this.state.rhythm, date, events: this.eventsOn(date), tasks: this.tasksOn(date).filter((t) => t.at && !t.done) }))
+    // 預覽之後才加的例行日程（未來的日子還沒生成）也要算進去
+    const busyOn = (date) => (busy[date] ??= busyOf({ rhythm: this.state.rhythm, date, events: this._busyEvents(date), tasks: this.tasksOn(date).filter((t) => t.at && !t.done) }))
     let skipped = 0
     for (const d of res?.days || []) {
       if (!DATE_RE.test(d.date)) continue

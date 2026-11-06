@@ -5,7 +5,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FinalPass } from './postfx.js'
-import { tween, updateTweens, tweensActive, ease } from './util.js'
+import { tween, updateTweens, tweensActive, ease, reducedMotion } from './util.js'
 
 // 預設視角看的中心：島中心稍微上方
 const HOME_TARGET = new THREE.Vector3(0, 0.5, 0)
@@ -394,7 +394,7 @@ export class World {
     }
     for (const fn of this.updaters) fn(dt, el)
     const idle = performance.now() - this.lastInteract > 25000
-    if (this.idleRotate && idle && !this._focusing && level < 2 && !this.stage) this._swayStep(dt)
+    if (this.idleRotate && idle && !this._focusing && level < 2 && !this.stage && !reducedMotion()) this._swayStep(dt)
     else this._sway = null
     if (this.stage) this.stage.frame(dt, el)
     else this.controls.update(dt)
@@ -577,7 +577,8 @@ export class World {
     this._focusing = true
     this._interacted()
     tween(
-      duration,
+      // 減少動態效果：不飛過去，下一幀直接到
+      reducedMotion() ? 0.001 : duration,
       (k) => {
         c.target.lerpVectors(fromT, toT, k)
         this.camera.position.lerpVectors(fromP, toP, k)
@@ -604,7 +605,7 @@ export class World {
     const toP = this._homePos()
     this._focusing = true
     tween(
-      duration,
+      reducedMotion() ? 0.001 : duration,
       (k) => {
         c.target.lerpVectors(fromT, this.homeTarget, k)
         this.camera.position.lerpVectors(fromP, toP, k)

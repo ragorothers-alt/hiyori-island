@@ -1799,6 +1799,18 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(store.state.coach.plans).toHaveLength(1)
   })
 
+  it('套用時也避開預覽後才加、還沒生成的例行日程；最佳化時程也一樣', () => {
+    store.addRoutine({ kind: 'event', title: '每天的晚課', repeat: { type: 'daily' }, start: '19:00', end: '20:00', date: TODAY })
+    // 後天的晚課還沒生成：19:30 那段撞到它
+    const r = store.applyCoachPlan({ days: [{ date: addDays(TODAY, 2), items: [{ title: '數學・練習題', dur: 50, at: '19:30' }, { title: '英文', dur: 25, at: '21:00' }] }] })
+    expect(r).toMatchObject({ count: 1, skipped: 1 })
+    expect(store.state.tasks.filter((t) => t.coach).map((t) => t.title)).toEqual(['英文'])
+    const t = store.addTask({ title: '後天要做的', date: addDays(TODAY, 2), dur: 60 })
+    const plan = store.planDay(addDays(TODAY, 2)).plan.find((p) => p.id === t.id)
+    const a = toMin(plan.at)
+    expect(a + 60 <= 19 * 60 || a >= 20 * 60).toBe(true)
+  })
+
   it('撤銷：刪掉還沒完成的，做完的留著；匯出匯入後排程紀錄和任務的來源還在', () => {
     const { id } = store.applyCoachPlan(res())
     const first = store.state.tasks.find((t) => t.coach === id)

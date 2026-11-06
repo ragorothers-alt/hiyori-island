@@ -133,6 +133,23 @@ describe('養成習慣', () => {
     expect(store.streak).toBe(1)
     expect(store.daySummary(TODAY).habits).toEqual({ total: 2, done: 2 })
   })
+  it('系統日期倒退又走回來：取消再打卡不會重領同一天的獎勵；匯出匯入後還記得', () => {
+    const h = store.addHabit({ name: '伸展' })
+    store.checkHabit(h.id)
+    expect(store.player.xp).toBe(XP.habit)
+    // 日期被調回昨天（開始日也跟著補到昨天）：昨天那天照常可以領
+    setDate(addDays(TODAY, -1))
+    store.checkHabit(h.id, addDays(TODAY, -1))
+    expect(store.player.xp).toBe(XP.habit * 2)
+    // 再調回今天：今天已經領過，取消再打卡不再給
+    setDate(TODAY)
+    store.importJSON(store.exportJSON())
+    const back = store.habit(h.id)
+    expect(back.paidDays).toEqual([addDays(TODAY, -1), TODAY])
+    store.checkHabit(h.id, TODAY, -1)
+    store.checkHabit(h.id)
+    expect(store.player.xp).toBe(XP.habit * 2)
+  })
   it('休息日多做也能記，但沒有完成獎勵', () => {
     const h = store.addHabit({ name: '游泳', days: [1] })
     store.checkHabit(h.id)

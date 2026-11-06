@@ -23,6 +23,8 @@ import { AiView } from './ui/ai.js'
 import { TodayView } from './ui/today.js'
 import { readBackup, readBackups, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
+import * as clock from './focusClock.js'
+import { FREE_MIN, FREE_MAX } from './focusClock.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 不常用的畫面（月曆、教練、專案詳情）：開場不載，第一次用到才下載。開完閒下來時也會先在背景載好（preloadViews），
@@ -262,6 +264,8 @@ export class UI {
       this.renderChrome()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
+    // 轉向、拉寬視窗時版面會換（手機的底部面板 ↔ 桌面的側邊面板）：收起的面板要不要 inert 跟著重算
+    addEventListener('resize', () => this._syncPanelInert())
     $('#fullBtn').onclick = () => (this.appMode ? this.setAppMode(false) : this.toggleFull())
     $('#appBtn').onclick = () => this.setAppMode(true)
     $('#sideBtn').onclick = () => this.toggleSide()
@@ -439,6 +443,16 @@ export class UI {
     if (collapsed) this.toggleFull(false)
     panel.classList.toggle('collapsed', collapsed)
     document.body.classList.toggle('panel-collapsed', collapsed)
+    this._syncPanelInert()
+  }
+  // 桌面收起時整個面板移到畫面外：設成 inert，Tab 鍵和讀屏軟體不會跑進看不見的按鈕。
+  // 手機收起時分頁列還露在下面（面板內容已經藏起來），照常可以按。
+  // 看 pointer-events：收到畫面外的版面才是 none（它不跑動畫，切換當下就是最後的值）
+  _syncPanelInert() {
+    const panel = $('#panel')
+    const off = panel.classList.contains('collapsed') && getComputedStyle(panel).pointerEvents === 'none'
+    if (off && panel.contains(document.activeElement)) $('#panelBtn')?.focus({ preventScroll: true })
+    panel.inert = off
   }
 
   // 手機直式：在分頁列上往上滑展開面板（收起 → 半開 → 全螢幕），往下滑收回
@@ -585,6 +599,7 @@ export class UI {
     if (save) writeLocal(LAYOUT_KEY, on ? 'app' : 'island')
     if (on) this.toggleShop(false)
     this._setFull(on)
+    this._syncPanelInert()
     if (!on) {
       this.focus.toggleBig(false)
       $('#appChat').hidden = true
@@ -959,7 +974,7 @@ export class UI {
       meta.push(`<button class="subs-tag${sd === subs.length ? ' ok' : ''}" data-act="subs" aria-expanded="${open}" title="${open ? '收起' : '展開'}子任務">${ICON.subs}${sd}/${subs.length}</button>`)
     }
     return `<li class="item ${t.done ? 'done' : ''} ${t.star ? 'starred' : ''} ${open ? 'subs-open' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
-      <button class="check" data-act="toggle" aria-label="完成">${ICON.check}</button>
+      <button class="check" data-act="toggle" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
       <div class="item-main">
         <div class="item-title">${esc(t.title)}</div>
         <div class="item-meta">${meta.join('')}</div>
@@ -984,7 +999,7 @@ export class UI {
     const subs = t.subs || []
     const rows = subs
       .map((x) => `<li class="${x.done ? 'done' : ''}">
-        <button class="check" data-act="sub-toggle" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」">${ICON.check}</button>
+        <button class="check" data-act="sub-toggle" data-sid="${esc(x.id)}" aria-label="完成「${esc(x.title)}」" aria-pressed="${!!x.done}">${ICON.check}</button>
         <span class="sub-t" role="button" tabindex="0" data-act="sub-rename" data-sid="${esc(x.id)}" title="點一下改名">${esc(x.title)}</span>
         <button class="mini" data-act="sub-del" data-sid="${esc(x.id)}" title="刪除子任務" aria-label="刪除子任務「${esc(x.title)}」">${ICON.del}</button></li>`)
       .join('')
@@ -1397,7 +1412,7 @@ export class UI {
       .map((m) => {
         const n = msSteps(m, by.get(m.id))
         return `<li class="ms ${m.done ? 'done' : ''}" data-mid="${esc(m.id)}">
-          <button class="check" data-act="ms-toggle" aria-label="完成" style="--c:${c}">${ICON.check}</button>
+          <button class="check" data-act="ms-toggle" aria-label="完成「${esc(m.title)}」" aria-pressed="${!!m.done}" style="--c:${c}">${ICON.check}</button>
           <span>${esc(m.title)}</span>${n.total && !m.done ? `<small class="ms-n" title="細項和歸在這裡的任務做了幾件">${n.done}/${n.total}</small>` : ''}
           <button class="mini" data-act="ms-delete" title="刪除">${ICON.del}</button>
         </li>`
@@ -2316,11 +2331,7 @@ const debugMin = import.meta.env.DEV && Number.isFinite(rawFocus) && rawFocus > 
 // 倒數長度的刻度尺：10 分到 90 分每 5 分一格（正向計時是另外一個開關）
 const RULER = Array.from({ length: 17 }, (_, i) => 10 + i * 5)
 const RULER_TICK = 14
-// 正向計時（往上數）：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
-const FREE_MIN = 5
-const FREE_MAX = 180
-// 計時在關掉頁面、手機鎖著時早就結束了：結束後一小時內回來照常記，再晚就不照全長記進今天
-const LATE = 60 * 60000
+// 計時規則（正向計時的上下限、放太久的判斷、到點該做什麼）在 focusClock.js
 const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
 
 class FocusTimer {
@@ -2383,9 +2394,7 @@ class FocusTimer {
 
   // 這一段（專注、休息）本來該結束的時間過了太久：例如晚上開始專注後關掉，兩天後才打開
   _stale() {
-    if (this.mode === 'idle' || this.paused != null) return false
-    const end = this.counting ? this.endAt + FREE_MAX * 60000 : this.endAt
-    return Date.now() - end > LATE
+    return clock.isStale(this, Date.now())
   }
   // 不記專注、不接著開下一輪，回到待機，跟使用者說一聲
   _expire() {
@@ -2476,7 +2485,7 @@ class FocusTimer {
   }
   // 往上數中（休息一律倒數）
   get counting() {
-    return this.up && this.mode === 'focus'
+    return clock.counting(this)
   }
   get info() {
     return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
@@ -2729,11 +2738,10 @@ class FocusTimer {
     return (this.mode === 'break' ? this.breakMin : this.focusMin) * 60000
   }
   get left() {
-    if (this.mode === 'idle') return this.focusMin * 60000
-    return this.paused ?? Math.max(0, this.endAt - Date.now())
+    return clock.leftMs(this, Date.now())
   }
   get elapsed() {
-    return this.paused ?? Math.max(0, Date.now() - this.endAt)
+    return clock.elapsedMs(this, Date.now())
   }
 
   toggle() {
@@ -2744,20 +2752,13 @@ class FocusTimer {
       this._startFocus()
       return
     }
-    if (this.paused != null) {
-      this.endAt = this.counting ? Date.now() - this.paused : Date.now() + this.paused
-      this.paused = null
-    } else {
-      this.paused = this.counting ? this.elapsed : Math.max(0, this.endAt - Date.now())
-    }
+    Object.assign(this, clock.pauseToggle(this, Date.now()))
     this._save()
     this.render()
   }
 
   _startFocus() {
-    this.mode = 'focus'
-    this.paused = null
-    this.endAt = this.up ? Date.now() : Date.now() + this.focusMin * 60000
+    Object.assign(this, clock.focusStart(this, Date.now()))
     // 這一輪的 id：記專注時用來認出「同一輪」（兩個分頁同時到點只記一次）
     this.sid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
     if (!this.task) this.taskId = null
@@ -2783,9 +2784,7 @@ class FocusTimer {
   _finishFocus(minutes) {
     const info = { ...this.info, last: this.round >= this.rounds }
     this.toggleSet(false)
-    this.mode = 'break'
-    this.paused = null
-    this.endAt = Date.now() + this.breakMin * 60000
+    Object.assign(this, clock.breakStart(this, Date.now()))
     this._save()
     this.hooks.focusFinished(minutes, this.task?.id || null, info)
     this.render()
@@ -2793,10 +2792,8 @@ class FocusTimer {
 
   stop() {
     // 往上數的專注按 ■ 是「做完了」：滿 5 分鐘就照實際分鐘數記下來
-    if (this.counting && this.elapsed >= FREE_MIN * 60000) {
-      this._finishFocus(Math.floor(this.elapsed / 60000))
-      return
-    }
+    const done = clock.stopMinutes(this, Date.now())
+    if (done != null) return this._finishFocus(done)
     const wasFocus = this.mode === 'focus'
     this.toggleSet(false)
     this.mode = 'idle'
@@ -2809,23 +2806,20 @@ class FocusTimer {
 
   tick() {
     if (this.mode === 'idle' || this.paused != null) return
-    if (this._stale()) return this._expire()
-    if (this.counting) {
-      if (this.elapsed >= FREE_MAX * 60000) this._finishFocus(FREE_MAX)
-    } else if (Date.now() >= this.endAt) {
-      if (this.mode === 'focus') this._finishFocus(Math.max(1, Math.round(this.focusMin)))
-      else if (this.round < this.rounds) {
-        // 還有下一輪：休息完自動接著開始
-        this.round++
-        this.hooks.breakFinished({ next: this.round, rounds: this.rounds })
-        this._startFocus()
-      } else {
-        this.toggleSet(false)
-        this.mode = 'idle'
-        this._loadLengths()
-        this._save()
-        this.hooks.breakFinished(null)
-      }
+    const step = clock.due(this, Date.now())
+    if (step?.do === 'expire') return this._expire()
+    if (step?.do === 'finishFocus') this._finishFocus(step.minutes)
+    else if (step?.do === 'nextRound') {
+      // 還有下一輪：休息完自動接著開始
+      this.round++
+      this.hooks.breakFinished({ next: this.round, rounds: this.rounds })
+      this._startFocus()
+    } else if (step?.do === 'done') {
+      this.toggleSet(false)
+      this.mode = 'idle'
+      this._loadLengths()
+      this._save()
+      this.hooks.breakFinished(null)
     }
     // 每 0.25 秒檢查一次是為了準時結束；畫面上的數字一秒才變一次，沒變就不重寫
     const sec = this.mode === 'idle' ? -1 : Math.floor((this.counting ? this.elapsed : this.left) / 1000)

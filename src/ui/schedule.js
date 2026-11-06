@@ -1,5 +1,5 @@
 import './schedule.css'
-import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn } from './dom.js'
+import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn, keepFocus } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
 import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
@@ -65,12 +65,15 @@ export class ScheduleView {
     if (this.drag?.moved) return
     const s = this.store
     if (this.preview && (this.preview.date !== s.selectedDate || s.selectedDate < s.today)) this.preview = null
-    this._week()
-    this._sleepCard()
-    this._allDay()
-    this._planBar()
-    this._tray()
-    this._dayline()
+    // 每分鐘的刷新、資料一變的重畫：鍵盤停在哪一顆，畫完還在那一顆
+    keepFocus($('[data-page="schedule"]'), () => {
+      this._week()
+      this._sleepCard()
+      this._allDay()
+      this._planBar()
+      this._tray()
+      this._dayline()
+    })
     if (force) this._rhythm()
   }
 
@@ -251,7 +254,7 @@ export class ScheduleView {
         const meta = others ? `時間和 ${others.length} 件重疊` : ev ? (item.note ? esc(item.note) : '') : `${PRIORITIES[item.priority].label}優先${item.star ? '・本命' : ''}`
         return `<div class="blk ${ev ? 'ev' : 'tk'} ${item.done ? 'done' : ''} ${others ? 'clash' : ''} ${past && !item.done ? 'past' : ''} ${short}"
           data-type="${ev ? 'event' : 'task'}" data-id="${esc(b.id)}" data-start="${b.start}" data-end="${b.end}" style="${pos};--c:${c}">
-          <button class="check" data-act="toggle" aria-label="切換完成狀態" style="--c:${c}">${ICON.check}</button>
+          <button class="check" data-act="toggle" aria-label="完成「${esc(item.title)}」" aria-pressed="${!!item.done}" style="--c:${c}">${ICON.check}</button>
           <button type="button" class="blk-txt" data-edit><b>${ev ? '' : item.star ? '<em class="star">★</em>' : ''}${esc(item.title)}</b><small><span class="blk-time">${time}</span>${meta ? `・${meta}` : ''}</small></button>
           <i class="blk-resize" data-resize title="拖曳調整長度"></i>
         </div>`

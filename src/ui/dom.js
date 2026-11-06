@@ -97,6 +97,26 @@ export function setHTML(el, html) {
   return true
 }
 
+// 整塊重畫時保住鍵盤焦點：先用 id 和 data-* 屬性記下焦點在哪一顆，重畫後找回同一顆放回去
+// （原本那顆還在就不動）。每分鐘的刷新、資料一變就重畫的畫面用
+export function keepFocus(root, fn) {
+  const a = document.activeElement
+  const sel = a && a !== root && root?.contains(a) ? focusPath(a, root) : null
+  const out = fn()
+  if (sel && !a.isConnected) root.querySelector(sel)?.focus({ preventScroll: true })
+  return out
+}
+function focusPath(el, root) {
+  const parts = []
+  for (let n = el; n && n !== root; n = n.parentElement) {
+    const attrs = [...n.attributes].filter((x) => x.name === 'id' || (x.name.startsWith('data-') && x.name !== 'data-armed'))
+    if (attrs.length) parts.unshift(n.tagName.toLowerCase() + attrs.map((x) => `[${x.name}="${CSS.escape(x.value)}"]`).join(''))
+    else if (n === el) parts.unshift(n.tagName.toLowerCase())
+    if (n.id) break
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
 // 依 key 重用子節點：內容沒變就不碰，正在輸入的表單與焦點不會被打斷。
 // item：{ k, html } 或 { k, kids }，可加 tag、cls、style
 export function patch(box, items) {

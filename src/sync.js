@@ -133,8 +133,11 @@ export class SyncEngine {
   async _syncOnce() {
     const epoch = this.epoch
     let remote
+    // 這台的存檔讀不進來（換成了範例島）或被清掉了：等一下要整份拿雲端的回來，
+    // 不能帶著 base 去問——雲端沒變的話只會回「同一版」，沒有資料可以復原
+    const restore = !!this.base && (!this.store.state.rev || !!this.store.loadFailed)
     try {
-      remote = await this._pull(this.base)
+      remote = await this._pull(restore ? null : this.base)
     } catch (e) {
       if (epoch === this.epoch) this._fail(e)
       return

@@ -14,6 +14,9 @@ export const ease = {
   outElastic: (t) => (t === 0 || t === 1 ? t : 2 ** (-10 * t) * Math.sin((t * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1),
 }
 
+// 系統開了「減少動態效果」：鏡頭直接切過去、閒置時不自己轉、慶祝特效收小（每次問，使用者中途改設定也跟著變）
+export const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
 // ── 極簡補間器：由 World 每幀呼叫 updateTweens ──
 const tweens = new Set()
 export function tween(dur, onUpdate, { easing = ease.outCubic, delay = 0, onDone } = {}) {

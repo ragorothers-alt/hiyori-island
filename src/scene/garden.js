@@ -279,7 +279,10 @@ class Plant {
     const w = this.wilt
     this.head.rotation.z = sway * (1 - w * 0.7)
     this.head.rotation.x = Math.cos(t * 1.1 + this.phase) * 0.04 * (1 - w) + w * 1.15
-    if (this.open > 0.9) this.head.rotation.y += 0.002
+    // 開好的花慢慢轉：照經過的時間轉（每秒 0.12），不跟著幀率變快變慢
+    const dt = this._t == null ? 0 : Math.min(0.1, Math.max(0, t - this._t))
+    this._t = t
+    if (this.open > 0.9) this.head.rotation.y += 0.12 * dt
   }
 
   dispose() {

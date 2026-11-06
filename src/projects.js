@@ -55,6 +55,9 @@ const linkedTo = (p, tasks) => tasks.filter((t) => t.project === p.id)
 export function taskMilestone(p, t) {
   const picked = t.ms && p.milestones.find((m) => m.id === t.ms)
   if (picked) return picked
+  // 完成時記下的自動歸屬：之後較早的里程碑取消又勾回來（完成時間變晚），也不會把它搬走
+  const fixed = t.done && t.msAuto && p.milestones.find((m) => m.id === t.msAuto)
+  if (fixed) return fixed
   const at = t.done && t.doneAt ? t.doneAt : Infinity
   return p.milestones.find((m) => !(m.done && (m.doneAt || 0) <= at)) || null
 }

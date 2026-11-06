@@ -508,7 +508,7 @@ export class ProjectView {
         m.note ? '<small class="pm-has">註</small>' : '',
       ].join('')
       const steps = m.steps.map((x) => `<li class="${x.done ? 'done' : ''}">
-          <button type="button" class="check" data-act="step-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」" style="--c:${c}">${ICON.check}</button>
+          <button type="button" class="check" data-act="step-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="完成「${esc(x.title)}」" aria-pressed="${!!x.done}" style="--c:${c}">${ICON.check}</button>
           <span class="pm-st" role="button" tabindex="0" data-act="step-rename" data-id="${k}" data-sid="${esc(x.id)}" title="點一下改名" aria-label="改名「${esc(x.title)}」">${esc(x.title)}</span>
           <button type="button" class="mini" data-act="step-del" data-id="${k}" data-sid="${esc(x.id)}" title="刪除細項">${ICON.del}</button></li>`).join('')
       const detail = open
@@ -530,7 +530,7 @@ export class ProjectView {
       const bar = !m.done && n.total && !open ? `<div class="pm-bar"><i style="width:${Math.round((n.done / n.total) * 100)}%"></i></div>` : ''
       return `<li class="pm ${m.done ? 'done' : ''} ${open ? 'open' : ''}">
         <div class="pm-row">
-          <button type="button" class="check" data-act="ms-toggle" data-id="${k}" aria-label="${m.done ? '取消完成' : '完成'}「${esc(m.title)}」" style="--c:${c}">${ICON.check}</button>
+          <button type="button" class="check" data-act="ms-toggle" data-id="${k}" aria-label="完成「${esc(m.title)}」" aria-pressed="${!!m.done}" style="--c:${c}">${ICON.check}</button>
           <button type="button" class="pm-title" data-act="ms-open" data-id="${k}" aria-expanded="${open}"><span class="pm-t">${esc(m.title)}</span>${tags}<i class="pm-chev">${ICON.next}</i></button>
         </div>${bar}${detail}</li>`
     }).join('')
@@ -547,7 +547,7 @@ export class ProjectView {
     const row = (t) => {
       const k = esc(t.id)
       return `<li class="${t.done ? 'done' : ''}">
-        <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
+        <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
         <button type="button" class="pm-st pm-tk" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span>${esc(t.title)}</span><small>${taskWhen(t, today)}</small></button>
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯（也可以換到別的里程碑）">${ICON.edit}</button></li>`
     }
@@ -567,7 +567,7 @@ export class ProjectView {
       const subs = t.subs || []
       const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
       return `<li class="pt ${t.done ? 'done' : ''}">
-        <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
+        <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
         <button type="button" class="pt-main" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${sub}${n ? `・紀錄 ${n}` : ''}${t.note ? '・<i class="pt-has">註</i>' : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></button>
         ${!t.done && t.date === today ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯日期、時間和優先度">${ICON.edit}</button>
@@ -620,7 +620,7 @@ export class ProjectView {
       `<span class="pk-last">${last ? `最近紀錄：${ago(last, today)}` : '還沒有紀錄'}</span>`,
     ].filter(Boolean).join('')
     return `<div class="pd-title">
-        <button type="button" class="check ${t.done ? 'on' : ''}" data-act="task-toggle" data-id="${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" style="--c:${tag.color}">${ICON.check}</button>
+        <button type="button" class="check ${t.done ? 'on' : ''}" data-act="task-toggle" data-id="${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}" style="--c:${tag.color}">${ICON.check}</button>
         <div class="pd-tl"><h2 class="pd-name ${t.done ? 'pk-done' : ''}">${t.star ? '<i class="pt-star" title="今日の本命">★</i>' : ''}${esc(t.title)}</h2><div class="pd-meta">${meta}</div></div>
       </div>
       <label class="pd-goal"><span class="pd-k">說明</span><textarea data-keep="tnote" data-tnote="${k}" data-grow rows="1" maxlength="${PL.taskNote}"
@@ -635,7 +635,7 @@ export class ProjectView {
     const subs = t.subs || []
     const sd = subs.filter((x) => x.done).length
     const rows = subs.map((x) => `<li class="${x.done ? 'done' : ''}">
-        <button type="button" class="check" data-act="sub-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="${x.done ? '取消完成' : '完成'}「${esc(x.title)}」" style="--c:${color}">${ICON.check}</button>
+        <button type="button" class="check" data-act="sub-toggle" data-id="${k}" data-sid="${esc(x.id)}" aria-label="完成「${esc(x.title)}」" aria-pressed="${!!x.done}" style="--c:${color}">${ICON.check}</button>
         <span class="pm-st" role="button" tabindex="0" data-act="sub-rename" data-id="${k}" data-sid="${esc(x.id)}" title="點一下改名" aria-label="改名「${esc(x.title)}」">${esc(x.title)}</span>
         <button type="button" class="mini" data-act="sub-del" data-id="${k}" data-sid="${esc(x.id)}" title="刪除子任務">${ICON.del}</button></li>`).join('')
     const add = subs.length >= PL.subs

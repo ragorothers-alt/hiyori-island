@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { glowTexture, rng, tween, ease } from './util.js'
+import { glowTexture, rng, tween, ease, reducedMotion } from './util.js'
 import { SEASONS } from './season.js'
 
 // 飄落的櫻花瓣、夜晚螢火蟲、各種慶祝特效
@@ -96,8 +96,21 @@ export class Particles {
     this.scene.add(this.flies)
   }
 
+  // 場景被蓋住（App 模式、全螢幕編輯）時每幀的迴圈停了：這時放的特效不會動也不會收掉，
+  // 會一直堆到回小島才一口氣播完。看不到的就不放
+  get _unseen() {
+    return this.world.covered
+  }
+
   // 一團向外散開的光點
   burst(pos, { colors = ['#ffffff', '#ffd1dc', '#f7a9bf'], count = 46, speed = 2.6, up = 2.2, gravity = -4.2, life = 1.3, size = 0.22, spread = 1 } = {}) {
+    if (this._unseen) return
+    // 減少動態效果：光點少一點、飛得近一點
+    if (reducedMotion()) {
+      count = Math.ceil(count / 3)
+      speed *= 0.5
+      up *= 0.5
+    }
     const g = new THREE.BufferGeometry()
     const p = new Float32Array(count * 3)
     const col = new Float32Array(count * 3)
@@ -123,6 +136,7 @@ export class Particles {
 
   // 地面擴散的光圈
   ripple(pos, color = '#ffffff', radius = 1.6) {
+    if (this._unseen) return
     const m = new THREE.Mesh(
       new THREE.RingGeometry(0.85, 1, 48),
       new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }),
@@ -144,6 +158,9 @@ export class Particles {
 
   // 煙火：從島上升空再爆開
   fireworks(center, n = 5) {
+    if (this._unseen) return
+    // 減少動態效果：不放升空的煙火，原地亮一小團就好
+    if (reducedMotion()) return this.burst(center.clone().add(new THREE.Vector3(0, 2, 0)), { colors: ['#ffd1dc', '#fff1b8', '#ffffff'], count: 40 })
     const palettes = [
       ['#ffd1dc', '#f7a9bf', '#ffffff'],
       ['#bfe3ff', '#8ec5e8', '#ffffff'],
@@ -175,6 +192,7 @@ export class Particles {
 
   // 專注結束：放一盞天燈慢慢升空
   skyLantern(pos) {
+    if (this._unseen) return
     const g = new THREE.Group()
     const body = new THREE.Mesh(
       new THREE.CylinderGeometry(0.22, 0.16, 0.4, 10),

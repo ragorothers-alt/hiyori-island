@@ -272,6 +272,31 @@ describe('任務歸在專案', () => {
     expect(store.progress(p)).toBe(1)
   })
 
+  it('較早的里程碑取消又勾回來：以前做完的任務不會被搬過去；讀舊存檔時也補上固定的歸屬', () => {
+    const p = newProject(['一', '二'])
+    const [a, b] = p.milestones
+    store.toggleMilestone(p.id, a.id)
+    vi.advanceTimersByTime(60000)
+    const t = store.addTask({ title: '做第二段', project: p.id, date: TODAY })
+    store.toggleTask(t.id)
+    expect(t.msAuto).toBe(b.id)
+    expect(taskMilestone(p, t)).toBe(b)
+    // 一不小心取消了第一個里程碑，又馬上勾回去：它的完成時間變得比任務晚
+    vi.advanceTimersByTime(60000)
+    store.toggleMilestone(p.id, a.id)
+    store.toggleMilestone(p.id, a.id)
+    expect(taskMilestone(p, t)).toBe(b)
+    // 取消完成：不再固定
+    store.toggleTask(t.id)
+    expect(t.msAuto).toBeNull()
+    // 舊存檔沒有 msAuto：讀進來時照當時的里程碑補上
+    store.toggleTask(t.id)
+    const data = JSON.parse(store.exportJSON())
+    delete data.tasks.find((x) => x.id === t.id).msAuto
+    store.importJSON(JSON.stringify(data))
+    expect(store.state.tasks.find((x) => x.id === t.id).msAuto).toBe(b.id)
+  })
+
   it('自己選里程碑：要在同一個專案裡；換專案、刪掉里程碑都改回自動；拆成三小步也跟著', () => {
     const p = newProject(['一', '二'])
     const q = store.addProject({ name: '另一個', milestones: ['甲'] })

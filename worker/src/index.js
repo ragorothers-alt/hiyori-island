@@ -174,28 +174,28 @@ async function push(env, body, now) {
   if (typeof data !== 'string' || !BASE64.test(data)) throw new HttpError(400, 'bad data')
   if (data.length > MAX_DATA) throw new HttpError(413, 'too large')
   const auth = await authHash(body.auth)
-  // 資料庫的總量上限也管寫入：變大的寫入超過上限就擋（變小、一樣大的照常寫，才清得出空間）
-  const usage = await db
-    .prepare('SELECT size, (SELECT COALESCE(SUM(size), 0) FROM vaults) AS total FROM vaults WHERE hash = ?1')
-    .bind(hash)
-    .first()
-  if (usage && data.length > usage.size && usage.total - usage.size + data.length > cap(env.MAX_TOTAL, MAX_TOTAL)) throw new HttpError(507, 'full')
   // rev IS ?2：base 是 null 時也比得到（空的 vault）。auth：記下了就要對得上；
-  // 還沒記（舊的 vault）時，期限前記下這一把，期限後就不再收
+  // 還沒記（舊的 vault）時，期限前記下這一把，期限後就不再收。
+  // 資料庫的總量上限也管寫入：變大的寫入超過上限就擋（變小、一樣大的照常寫，才清得出空間）。
+  // 總量檢查放在同一句 UPDATE 裡：同時來好幾個寫入時，不會各自看到「還有空間」一起寫爆
   const legacy = now < cap(env.LEGACY_UNTIL, LEGACY_UNTIL) ? 1 : 0
+  const limit = cap(env.MAX_TOTAL, MAX_TOTAL)
   const r = await db
     .prepare(
       `UPDATE vaults SET rev = ?3, saved_at = ?4, data = ?5, size = ?6, updated_at = ?7, auth = COALESCE(auth, ?8)
-       WHERE hash = ?1 AND rev IS ?2 AND (auth = ?8 OR (auth IS NULL AND ?9 = 1))`,
+       WHERE hash = ?1 AND rev IS ?2 AND (auth = ?8 OR (auth IS NULL AND ?9 = 1))
+         AND (?6 <= size OR (SELECT COALESCE(SUM(size), 0) FROM vaults) - size + ?6 <= ?10)`,
     )
-    .bind(hash, base, rev, savedAt, data, data.length, now, auth, legacy)
+    .bind(hash, base, rev, savedAt, data, data.length, now, auth, legacy, limit)
     .run()
   if (r.meta.changes) return { rev }
   const row = await db.prepare('SELECT rev, auth FROM vaults WHERE hash = ?1').bind(hash).first()
   if (!row) throw new HttpError(404, 'unknown vault')
   if (row.auth && row.auth !== auth) throw new HttpError(403, 'forbidden')
   if (!row.auth && !legacy) throw new HttpError(403, 'legacy')
-  throw new HttpError(409, 'conflict', { rev: row.rev })
+  if ((row.rev ?? null) !== base) throw new HttpError(409, 'conflict', { rev: row.rev })
+  // 版本和驗證碼都對，還是沒寫進去：是總量滿了
+  throw new HttpError(507, 'full')
 }
 
 // 刪除一定要帶對的 auth。舊的 vault 還沒記下 auth：回 409 unclaimed（附上目前的版本），

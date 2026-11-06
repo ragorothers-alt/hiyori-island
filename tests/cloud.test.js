@@ -380,6 +380,23 @@ describe('線上同步', () => {
     expect(vaults()[0].data).toBe(cloud)
   })
 
+  it('存檔壞掉讀不進來、雲端也沒變：重新打開時整份拿雲端的回來', async () => {
+    const { a } = await pair()
+    a.mem.setItem('hiyori-daily-v1', '{壞掉的')
+    const prev = globalThis.localStorage
+    globalThis.localStorage = a.mem
+    try {
+      const store = new Store()
+      expect(store.loadFailed).toBeTruthy()
+      const sync = new CloudSync(store)
+      await sync.init()
+      expect(titles(store)).toContain('A 的任務')
+      expect(sync.state).toBe('linked')
+    } finally {
+      globalThis.localStorage = prev
+    }
+  })
+
   it('同一個瀏覽器的另一個分頁停止同步：這個分頁也停下來，不再往那組同步碼送資料', async () => {
     const { a, b } = await pair()
     // 同一台的第二個分頁：同一份 localStorage、同一組同步碼
@@ -530,6 +547,17 @@ describe('同步伺服器', () => {
     expect((await post('/v1/push', { id: ids[0], base: 'r1', rev: 'r2', savedAt: 6, data: 'A'.repeat(8) })).status).toBe(200)
     expect((await post('/v1/push', { id: ids[0], base: 'r2', rev: 'r3', savedAt: 7, data: 'A'.repeat(40) })).status).toBe(200)
     expect((await post('/v1/push', { id: ids[0], base: 'r3', rev: 'r4', savedAt: 8, data: 'A'.repeat(44) })).status).toBe(507)
+  })
+
+  it('同時來的好幾個寫入不會一起把總量撐過上限；版本不對照樣回衝突', async () => {
+    const ids = ['1', '2'].map((c) => c.repeat(64))
+    for (const i of ids) await post('/v1/create', { id: i })
+    env.MAX_TOTAL = 60
+    const res = await Promise.all(ids.map((i) => post('/v1/push', { id: i, base: null, rev: 'r1', savedAt: 5, data: 'A'.repeat(40) })))
+    expect(res.map((r) => r.status).sort()).toEqual([200, 507])
+    expect(vaults().reduce((a, v) => a + v.size, 0)).toBeLessThanOrEqual(60)
+    const stale = await post('/v1/push', { id: ids[0], base: 'nope1', rev: 'r9', savedAt: 9, data: 'A'.repeat(4) })
+    expect(stale.status).toBe(409)
   })
 
   it('還沒記下 auth 的舊 vault：只憑 id 刪不掉；期限過了也不能再搶先登記', async () => {

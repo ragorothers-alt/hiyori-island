@@ -416,7 +416,7 @@ export class TodayView {
       const meta = `<span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${on ? '<em class="td-focusing">專注中</em>' : sug ? '<em>還不是本命</em>' : ''}</small>`
       return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}${on ? ' on' : ''}">
         <b class="td-n">${i + 1}</b>
-        <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="${t.done ? '取消完成' : '完成'}「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
+        <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
         ${this._focusName(t, meta, 'td-tm', `fc-${k}`)}
         ${t.dur ? `<span class="td-dur">${IC.timer}${dur(t.dur)}</span>` : ''}
         ${sug ? `<button type="button" class="td-mini" data-act="star" data-id="${k}" data-fk="st-${k}" title="選為今天的本命（完成時雙倍 XP）" aria-label="把「${esc(t.title)}」選為本命">${IC.star}</button>` : ''}

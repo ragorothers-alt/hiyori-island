@@ -1,0 +1,27 @@
+# ひより日和 · 開 PR（或更新 PR）時：跑測試、確認建置得起來。不發布（發布在 pages.yml，推上 main 才跑）
+name: 測試與建置（PR）
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 測試
+        run: npm test
+      - name: 建置
+        run: npm run build
