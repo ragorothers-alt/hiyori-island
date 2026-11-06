@@ -29,6 +29,8 @@ jobs:
   # 瀏覽器端對端測試：離線、自動更新（e2e/，用 Playwright 開 Chromium）
   e2e:
     runs-on: ubuntu-latest
+    # apt 偶爾卡住：裝瀏覽器最多等 8 分鐘、整個工作 20 分鐘，失敗了重跑就好，不要卡到預設的 6 小時
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -37,6 +39,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps --only-shell chromium
+        timeout-minutes: 8
       - name: 端對端測試
         run: npm run test:e2e
       - uses: actions/upload-artifact@v4
