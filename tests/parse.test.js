@@ -270,6 +270,12 @@ describe('整天的日程', () => {
     expect(describeQuick(r, TODAY)).toEqual(['整天的日程', '11/17（二）'])
   })
 
+  it('整天的日程寫了「每天」也不顯示重複（不會真的重複）', () => {
+    const r = parseQuick('11/17 研習 整天 每天', { today: TODAY })
+    expect(r.allDay).toBe(true)
+    expect(describeQuick(r, TODAY).some((c) => c.includes('↻'))).toBe(false)
+  })
+
   it('沒寫日期也可以：加在上面選的那天', () => {
     const r = parseQuick('全天 研習', { today: TODAY })
     expect(r).toMatchObject({ kind: 'event', title: '研習', date: null, allDay: true })
@@ -285,6 +291,16 @@ describe('整天的日程', () => {
 
   it('跨年也接得上：12/30到1/2', () => {
     expect(parseQuick('12/30到1/2 回老家', { today: TODAY })).toMatchObject({ date: '2026-12-30', endDate: '2027-01-02', allDay: true })
+  })
+
+  it('一月時寫的「12/30到1/2」「12/28」是剛過去的那個年底，不是今年年底', () => {
+    const jan = '2027-01-03'
+    expect(parseQuick('12/30到1/2 回老家', { today: jan })).toMatchObject({ date: '2026-12-30', endDate: '2027-01-02', allDay: true })
+    expect(parseQuick('12/28 尾牙', { today: jan }).date).toBe('2026-12-28')
+    expect(parseQuick('1/2到1/4 旅行', { today: jan })).toMatchObject({ date: '2027-01-02', endDate: '2027-01-04' })
+    // 過了一個月以上還是明年
+    expect(parseQuick('11/20 研討會', { today: jan }).date).toBe('2027-11-20')
+    expect(parseQuick('2/29 某天', { today: '2026-10-25' }).title).toBe('2/29 某天')
   })
 
   it('寫了時間就是有時段的日程（「整天」只是順口）', () => {

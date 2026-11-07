@@ -142,18 +142,22 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
     }
   })
   // 好幾天：11/17到11/19、11/17-19（只寫日的話跟開始同一個月）→ 整天的日程
-  const md = (m, d) => {
-    const y = parseDate(today).getFullYear()
+  // 沒寫年份的月/日：from（預設 30 天前）以後最早的那一個。
+  // 過了一個月以上就當成明年；一月寫「12/30」是上個月底的（從 30 天前那天的年份開始找，不是今年）。
+  // 今年和明年都沒有這一天（2/29）就不是日期
+  const md = (m, d, from = addDays(today, -30)) => {
+    const y = parseDate(from).getFullYear()
     const on = (yy) => (realDay(yy, +m, +d) ? dateStr(new Date(yy, +m - 1, +d)) : null)
-    let ds = on(y)
-    // 已經過了一個月以上（或今年沒有這一天，例如 2/29），就當成明年
-    if (!ds || ds < addDays(today, -30)) ds = on(y + 1) || ds
-    return ds
+    for (const yy of [y, y + 1]) {
+      const ds = on(yy)
+      if (ds && ds >= from) return ds
+    }
+    return null
   }
   take(/(?<![\d:：])(\d{1,2})\s*(?:\/|月)\s*(\d{1,2})\s*(?:日|號|号)?\s*(?:-|~|〜|～|–|到|至)\s*(?:(\d{1,2})\s*(?:\/|月)\s*)?(\d{1,2})\s*(?:日|號|号)?(?![\d:：])/g, (_, m1, d1, m2, d2) => {
     const a = md(m1, d1)
-    // 跨年（12/30到1/2）：1/2 已經過去很久，md 會當成明年，自然接在後面
-    const b = a && md(m2 || m1, d2)
+    // 結束從開始那天往後找：跨年（12/30到1/2）的 1/2 自然接在後面
+    const b = a && md(m2 || m1, d2, a)
     if (!a || !b || b < a || b > addDays(a, 30)) return false
     out.date = a
     out.endDate = b
@@ -276,7 +280,8 @@ export function describeQuick(p, today) {
     chips.push(`${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`)
   } else if (p.date) chips.push('今天')
   if (p.start) chips.push(`${p.start}–${p.end}`)
-  if (p.repeat) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
+  // 整天的日程不會重複（例行公事只有有時段的）：不顯示「↻ 每天」免得以為會重複
+  if (p.repeat && !p.allDay) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
   if (p.priority && p.kind === 'task') chips.push(['', '低', '中', '高'][p.priority] + '優先')
   if (p.dur && p.kind === 'task') chips.push(`預估 ${p.dur >= 60 ? `${+(p.dur / 60).toFixed(1)} 小時` : `${p.dur} 分鐘`}`)
   if (p.star && p.kind === 'task') chips.push('★ 本命')

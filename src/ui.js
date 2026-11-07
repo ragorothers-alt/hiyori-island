@@ -816,7 +816,7 @@ export class UI {
         this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
         this._syncPickers()
         const until = p.endDate && p.endDate !== date ? `–${p.endDate.slice(5).replace('-', '/')}` : ''
-        this.toast({ icon: '環', title: '已加入整天的日程', sub: `${p.title}・${md}${until}` })
+        this.toast({ icon: '環', title: '已加入整天的日程', sub: `${p.title}・${md}${until}${repeat ? '（整天的日程不會重複）' : ''}` })
       } else if (p.kind === 'event') {
         const ev = { title: p.title, start: p.start, end: p.end, color: this.eventColor, date }
         if (repeat) s.addRoutine({ kind: 'event', ...ev, repeat })
