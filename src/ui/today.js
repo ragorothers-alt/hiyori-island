@@ -168,20 +168,22 @@ export class TodayView {
     }
   }
 
-  // 記下今日反思：天氣用剛選的、沒選就沿用已經記下的那個
+  // 記下今日反思：天氣用剛選的、沒選就沿用已經記下的那個。
+  // 記在框子畫出來的那一天：23:58 開始寫、過了午夜才按，記在昨天，不會跑到今天
   _saveRef() {
     const s = this.store
-    const mood = this._refMood() || s.state.journal[s.today]?.mood
     const ta = $('.td-ref-text', this.root)
+    const day = ta?.dataset.day || s.today
+    const mood = this._refMood(day) || s.state.journal[day]?.mood
     if (!mood || !ta) return
     this.refMood = null
     // 存完會重畫：框裡的字就是剛記下的，不用當成打到一半的接回去
     this._clean = true
-    s.saveReview(s.today, mood, ta.value)
+    s.saveReview(day, mood, ta.value)
   }
-  // 選了但還沒記下的天氣（換日了就作廢）
-  _refMood() {
-    return this.refDate === this.store.today ? this.refMood : null
+  // 選了但還沒記下的天氣（只算選的那一天）
+  _refMood(day = this.store.today) {
+    return this.refDate === day ? this.refMood : null
   }
   // 框裡的字跟記下的不一樣：標出「還沒記下」
   _syncRefBtn() {
@@ -205,11 +207,22 @@ export class TodayView {
     const scroll = ['.td-tl', '.td-hg'].map((sel) => [sel, $(sel, this.root)?.scrollTop, $(sel, this.root)?.scrollLeft])
     // 今日反思打到一半的字（跟記下的不一樣才算）和游標
     const ta = $('.td-ref-text', this.root)
-    const draft = !this._clean && ta && ta.value !== ta.defaultValue ? ta.value : null
+    let draft = !this._clean && ta && ta.value !== ta.defaultValue ? ta.value : null
     const caret = ta && ta === a ? [ta.selectionStart, ta.selectionEnd] : null
     this._clean = false
     const s = this.store
     const today = s.today
+    // 過了午夜：昨天打到一半的反思不搬進今天的框。那天選好了天氣（或早就記過）就幫它記在那天；
+    // 還沒選天氣的才留在今天的框裡（字不會不見）
+    const day = ta?.dataset.day
+    if (draft != null && day && day !== today) {
+      const mood = this._refMood(day) || s.state.journal[day]?.mood
+      if (mood) {
+        const text = draft
+        draft = null
+        queueMicrotask(() => s.saveReview(day, mood, text))
+      }
+    }
     const now = new Date()
     const nowMin = now.getHours() * 60 + now.getMinutes()
     const tasks = s.tasksOn(today)
@@ -496,7 +509,7 @@ export class TodayView {
     return `<section class="td-card td-ref${pending ? ' dirty' : ''}" aria-label="今日反思">
       <header class="td-h">${IC.pen}<h3>今日反思<small>きょうのふりかえり</small></h3>${stamp}</header>
       <div class="td-moods" role="group" aria-label="今天的天氣（心情）">${moods}</div>
-      <textarea class="td-ref-text" data-fk="ref-text" rows="3" maxlength="${REVIEW_TEXT}" aria-label="今日反思"
+      <textarea class="td-ref-text" data-fk="ref-text" data-day="${today}" rows="3" maxlength="${REVIEW_TEXT}" aria-label="今日反思"
         placeholder="今天過得怎麼樣？做得好的、想改進的、明天想試試的">${esc(saved?.text || '')}</textarea>
       <div class="td-ref-row"><small class="td-ref-hint">${hint}</small><em class="td-ref-dirty">還沒記下</em>
         <button type="button" class="btn-primary td-ref-save" data-act="refSave" data-fk="ref-save"${mood ? '' : ' disabled'}>${saved ? '更新' : '記下來'}</button></div>
