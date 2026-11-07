@@ -12,6 +12,14 @@ function at(hour, minute, second = 0) {
   return new Date(2026, 9, 25, hour, minute, second)
 }
 
+// 不是這個分頁剛加的（同步拉回來、另一個分頁存的、開機時就在）：在另一個 Store 加好，再整份換進來
+function boot(fn) {
+  const other = new Store()
+  const made = fn(other)
+  store.importJSON(other.exportJSON())
+  return made
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(at(8, 0))
@@ -269,7 +277,8 @@ describe('任務與就寢提醒', () => {
 
 describe('整天的日程', () => {
   it('前一天和第一天早上八點後各提醒一次；跨好幾天的中間不再提醒', () => {
-    const e = store.addEvent({ title: '朋友來玩', date: '2026-10-26', allDay: true, endDate: '2026-10-28' })
+    // 開機時就在的（這個分頁剛加的當下就記成提醒過，見下面）
+    const e = boot((s) => s.addEvent({ title: '朋友來玩', date: '2026-10-26', allDay: true, endDate: '2026-10-28' }))
     const allday = () => callback.mock.calls.filter((c) => c[2] === 'allday')
     reminders.check(at(7, 59))
     expect(allday()).toHaveLength(0)
@@ -311,14 +320,44 @@ describe('整天的日程', () => {
     new Reminders(store, fresh).check(at(9, 5))
     expect(fresh.mock.calls.filter((c) => c[2] === 'allday').map((c) => c[0].id)).toEqual([e.id, t.id])
   })
+
+  it('剛改成整天的也不馬上提醒', () => {
+    reminders.check(at(9, 0))
+    const e = store.addEvent({ title: '研習', date: TODAY, start: '13:00', end: '14:00' })
+    store.updateEvent(e.id, { allDay: true })
+    reminders.check(at(9, 1))
+    expect(callback.mock.calls.filter((c) => c[2] === 'allday')).toHaveLength(0)
+  })
+
+  it('App 一直開著過了午夜：後天的整天日程隔天早上照樣提醒「明天」', () => {
+    const e = store.addEvent({ title: '旅行', date: '2026-10-27', allDay: true })
+    const allday = () => callback.mock.calls.filter((c) => c[2] === 'allday')
+    reminders.check(at(9, 0))
+    reminders.check(at(23, 59))
+    expect(allday()).toHaveLength(0)
+    vi.setSystemTime(new Date(2026, 9, 26, 0, 0, 30))
+    store._refreshToday()
+    reminders.check(new Date(2026, 9, 26, 0, 0, 30))
+    expect(allday()).toHaveLength(0)
+    vi.setSystemTime(new Date(2026, 9, 26, 8, 0))
+    reminders.check(new Date(2026, 9, 26, 8, 0))
+    expect(allday().map((c) => [c[0].id, c[1]])).toEqual([[e.id, 1]])
+  })
+
+  it('開著 App 時從同步帶進來的整天日程照常提醒', () => {
+    reminders.check(at(9, 0))
+    boot((s) => s.addEvent({ title: '朋友來玩', date: '2026-10-26', allDay: true }))
+    reminders.check(at(9, 1))
+    expect(callback.mock.calls.filter((c) => c[2] === 'allday').map((c) => c[0].title)).toEqual(['朋友來玩'])
+  })
 })
 describe('訂閱扣款提醒', () => {
   const subCalls = () => callback.mock.calls.filter((c) => c[2] === 'sub')
   const day = (d, h = 9) => new Date(2026, 9, d, h, 0)
 
   it('照提前天數，早上 8 點後第一次打開時提醒一次；同一次扣款隔天打開不會再響', () => {
-    store.addSubscription({ name: 'Netflix', price: 390, start: '2026-10-28', remind: 3 })
-    // 開機時已經在的訂閱（這裡是新的 Reminders 第一次檢查）照常提醒
+    // 開機時已經在的訂閱（不是這個分頁開著時剛加的）照常提醒
+    boot((s) => s.addSubscription({ name: 'Netflix', price: 390, start: '2026-10-28', remind: 3 }))
     const fresh = new Reminders(store, callback)
     vi.setSystemTime(day(25, 7))
     fresh.check(day(25, 7))
@@ -354,5 +393,37 @@ describe('訂閱扣款提醒', () => {
     store.cancelSubscription(s.id)
     reminders.check(day(25, 12))
     expect(subCalls()).toHaveLength(0)
+  })
+
+  it('開著 App 時從同步、另一個分頁帶進來的訂閱照常提醒（不是這邊剛加的）', () => {
+    vi.setSystemTime(day(25))
+    reminders.check(day(25))
+    boot((s) => s.addSubscription({ name: 'Disney+', price: 270, start: '2026-10-27', remind: 3 }))
+    reminders.check(day(25, 10))
+    reminders.check(day(25, 11))
+    expect(subCalls().map((c) => c[0].sub.name)).toEqual(['Disney+'])
+  })
+
+  it('開著過了午夜才進到提醒天數內的照常提醒，剛加的那天不響', () => {
+    vi.setSystemTime(day(25))
+    reminders.check(day(25))
+    store.addSubscription({ name: 'YouTube', price: 199, start: '2026-10-27', remind: 1 })
+    reminders.check(day(25, 10))
+    expect(subCalls()).toHaveLength(0)
+    vi.setSystemTime(day(26))
+    reminders.check(day(26))
+    expect(subCalls()).toHaveLength(1)
+    expect(subCalls()[0][1]).toBe(1)
+  })
+
+  it('瀏覽器存不進去時：同一次扣款也只響一次，不會每秒響', () => {
+    boot((s) => s.addSubscription({ name: 'Netflix', price: 390, start: '2026-10-26', remind: 1 }))
+    const r = new Reminders(store, callback)
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+    vi.setSystemTime(day(25))
+    for (let i = 0; i < 5; i++) r.check(new Date(2026, 9, 25, 9, 0, i))
+    expect(subCalls()).toHaveLength(1)
   })
 })

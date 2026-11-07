@@ -25,6 +25,25 @@ export class Reminders {
     this.store = store
     this.onRemind = onRemind
     this.sent = load()
+    // 訂閱這次扣款提醒過了（存不進 localStorage 時也記得，不會每秒響一次）
+    this.subSent = {}
+    // 在這個分頁剛新增、剛改的整天日程和訂閱：畫面上就看得到，當下就記成提醒過（不等下一輪檢查，
+    // 另一個分頁讀到這筆之前就記好了）。同步、匯入、另一個分頁帶來的不算，照常提醒；
+    // 日子還沒到提醒範圍的也不算，之後進到範圍時照常提醒
+    store.on('eventAdded', (e) => this._quietAllDay(e))
+    store.on('eventChanged', (e) => this._quietAllDay(e))
+    store.on('subAdded', (s) => this._quietSub(s))
+    store.on('subChanged', (s) => this._quietSub(s))
+  }
+
+  _quietAllDay(e, now = new Date()) {
+    if (!e?.allDay || this.store.state.settings.remindLead < 0) return
+    const today = dateStr(now)
+    if (e.date === today || e.date === addDays(today, 1)) this._claim(today, `allday-${e.id}@${e.date}`)
+  }
+  _quietSub(s) {
+    const r = this.store.subReminders?.().find((x) => x.id === s?.id)
+    if (r) this._claimSub(r.id, r.date)
   }
 
   _save() {
@@ -65,11 +84,13 @@ export class Reminders {
   // 訂閱這一次的扣款（date）提醒過了沒：每個訂閱只記最近提醒的那次扣款日。
   // 每次都重讀存著的（另一個分頁可能剛提醒過），寫回去時拿掉已經刪掉的訂閱
   _claimSub(id, date) {
+    if (this.subSent[id] === date) return false
     let map = {}
     try {
       map = JSON.parse(localStorage.getItem(SUB_KEY) || '{}')
     } catch {}
     if (!map || typeof map !== 'object' || Array.isArray(map)) map = {}
+    this.subSent[id] = date
     if (map[id] === date) return false
     const ids = new Set(this.store.state.subscriptions?.map((s) => s.id) || [])
     for (const k of Object.keys(map)) if (!ids.has(k)) delete map[k]
@@ -130,30 +151,22 @@ export class Reminders {
       }
     }
     // 整天的日程：前一天和第一天，早上 8 點後提醒一次（跨好幾天的只在開始時提醒）。關掉日程提醒就不提醒。
-    // 上一輪檢查還沒有的（剛加上、剛改成整天）：才剛自己記下，記成提醒過就好；打開 App 時已經在的照常提醒
-    if (lead >= 0) {
-      const known = this.allDayKnown
-      this.allDayKnown = new Set()
+    // 這個分頁剛加上、剛改的在當下就記成提醒過了（_quietAllDay）；開著過了午夜才進到「明天」的照常提醒
+    if (lead >= 0 && mins >= 480) {
       for (const [date, days] of [[today, 0], [tomorrow, 1]]) {
         for (const e of this.store.allDayOn(date)) {
-          this.allDayKnown.add(e.id)
           const key = `allday-${e.id}@${e.date}`
           if (e.date !== date || sent.includes(key)) continue
-          if (known && !known.has(e.id)) this._claim(today, key)
-          else if (mins >= 480 && this._claim(today, key)) this.onRemind(e, days, 'allday')
+          if (this._claim(today, key)) this.onRemind(e, days, 'allday')
         }
       }
     }
     // 訂閱扣款：照每個訂閱設的提前天數（免費試用結束至少前 3 天），早上 8 點後第一次打開時提醒。
     // 同一次扣款只提醒一次：提前好幾天時，隔天再打開不會又響（記在 SUB_KEY，不跟著上面三天一輪的紀錄清掉）。
-    // 上一輪檢查時還沒有的訂閱（剛新增的）：新增時畫面上就看得到下次扣款，記成提醒過就好。
-    // 已經在的訂閱隔天才進到提醒天數內（開著過了午夜）照常提醒
-    {
-      const known = this.subKnown
-      this.subKnown = new Set(this.store.state.subscriptions?.map((s) => s.id) || [])
+    // 這個分頁剛新增、剛改的在當下就記成提醒過了（_quietSub）；同步帶來的、開著過了午夜才進到提醒天數內的照常提醒
+    if (mins >= 480) {
       for (const r of this.store.subReminders?.() || []) {
-        if (known && !known.has(r.id)) this._claimSub(r.id, r.date)
-        else if (mins >= 480 && this._claimSub(r.id, r.date)) this.onRemind(r, r.days, 'sub')
+        if (this._claimSub(r.id, r.date)) this.onRemind(r, r.days, 'sub')
       }
     }
     // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）

@@ -1876,7 +1876,7 @@ export class Store {
     } else e.endDate = ''
     // 結束要在開始之後（跟讀存檔時一樣：不然補成一小時）
     if (toMin(e.end) <= toMin(e.start)) e.end = minToHHMM(Math.min(toMin(e.start) + 60, 1439))
-    this._finish()
+    this._finish([['eventChanged', e]])
   }
   deleteEvent(id) {
     this.state.events = this.state.events.filter((e) => e.id !== id)

@@ -30,6 +30,7 @@ export const EVENTS = {
 
   // ── 日程、作息、排程 ──
   eventAdded: '新增日程',
+  eventChanged: '日程改了（時間、日期、改成整天）',
   eventDone: '日程完成',
   rhythmChanged: '作息設定改了',
   planApplied: '套用最佳化時程',
