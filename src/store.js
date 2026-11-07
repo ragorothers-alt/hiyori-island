@@ -41,6 +41,8 @@ export const DATA_VERSION = 2
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
+export const NEWER_TAB_MSG = '另一個分頁已經是新版 App，這邊先不換資料：重新整理頁面之後再試一次'
+export const NO_SAVE_MSG = '瀏覽器的儲存空間不夠，存不進去，所以先不換：現在的小島沒有動。請先清出一些空間再試一次'
 export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version) > DATA_VERSION
 // 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
 const SLOW_SAVE = 8
@@ -2883,13 +2885,26 @@ export class Store {
     }
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     if (newerData(obj)) throw new Error(NEWER_MSG)
+    if (this.newerApp) throw new Error(NEWER_TAB_MSG)
     if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error('瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份')
-    this.replaceState(obj)
+    if (!this.replaceOrUndo(obj)) throw new Error(NO_SAVE_MSG)
+  }
+  // 整份換掉（匯入、還原備份）並存好；存不進去就換回原本那一份（存檔裡還是原本的），回傳有沒有換成。
+  // 不然畫面上是新的那份、重新整理就不見了，還原備份時連那份備份都會先被刪掉
+  replaceOrUndo(obj) {
+    const cur = this.state
+    const failed = this.loadFailed
+    if (this.replaceState(obj)) return true
+    this.replaceState(cur, cur.updatedAt, { rev: cur.rev, peer: true })
+    // 原本是「存檔讀不進來」的範例島：換回去後也一樣不能蓋掉那份讀不懂的存檔
+    this.loadFailed = failed
+    return false
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
   // 同步拉回時帶著雲端那一版的 updatedAt 和 rev；匯入、還原備份則算一次新的變更
   // soft：同步拉回的新資料（畫面就地更新，不重蓋小鎮、不移動鏡頭）
   // peer：另一個分頁剛存的那一版。它已經在存檔裡了：不寫回去，也不算這邊改了資料（不觸發同步）
+  // 回傳有沒有寫進存檔（peer 本來就在存檔裡，算有）
   replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false } = {}) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     if (newerData(obj)) throw new Error(NEWER_MSG)
@@ -2913,14 +2928,16 @@ export class Store {
       this._applyCharms()
       this._quitMilestones(this._pending)
     }
+    let saved = true
     if (peer) this._diskRev = rev
-    else this.saveNow()
+    else saved = this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready
     if (!peer) this.emit('dirty')
     this.emit('change')
     this.emit('reload', { soft })
     this.flushPending()
+    return saved
   }
   // ── 範例資料（id 開頭是 ex-） ──
   samples() {

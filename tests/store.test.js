@@ -894,6 +894,33 @@ describe('存檔讀不進來、存不進去', () => {
     expect(store.exportJSON()).toBe(original)
   })
 
+  it('匯入、還原時主存檔寫不進去：換回原本的小島並說清楚；要還原的那份備份不刪', () => {
+    store.addTask({ title: '原本的任務' })
+    store.saveNow()
+    keepBackup(JSON.parse(store.exportJSON()), 'cloud', 1)
+    const disk = localStorage.getItem('hiyori-daily-v1')
+    const spy = failOn('hiyori-daily-v1')
+    expect(() => store.importJSON(JSON.stringify({ tasks: [{ id: 'imp', title: '匯入的' }], player: {} }))).toThrow('儲存空間不夠')
+    expect(titlesOf(store.state)).toContain('原本的任務')
+    expect(titlesOf(store.state)).not.toContain('匯入的')
+    const n = readBackups().length
+    const first = readBackup(0)
+    expect(() => restoreBackup(store, 0)).toThrow('儲存空間不夠')
+    expect(readBackups()).toHaveLength(n)
+    expect(readBackup(0)).toEqual(first)
+    expect(localStorage.getItem('hiyori-daily-v1')).toBe(disk)
+    spy.mockRestore()
+    // 空間清出來以後照常
+    expect(restoreBackup(store, 0)).toBe(true)
+  })
+
+  it('另一個分頁已經是新版 App：不匯入、不還原（換了也存不進去）', () => {
+    store.newerApp = true
+    expect(() => store.importJSON(JSON.stringify({ tasks: [], player: {} }))).toThrow('新版')
+    keepBackup(JSON.parse(store.exportJSON()), 'cloud', 1)
+    expect(() => restoreBackup(store, 0)).toThrow('新版')
+  })
+
   // 模擬瀏覽器的空間上限：主存檔加上備份的總長度超過 limit 就丟出 QuotaExceededError
   const quota = (limit) => {
     const real = localStorage.setItem.bind(localStorage)

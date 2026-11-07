@@ -4,17 +4,18 @@
 // 兩種管道共用這套判斷，各自記自己的 base，可以同時開：
 //   FileSync（這個檔案）：資料寫進使用者選的檔案，放在 OneDrive／Dropbox 的同步資料夾裡（不需後端，只有電腦版 Chrome／Edge）
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
-import { dropBackup, keepBackup, newRev, readBackup, readBackups, newerData, NEWER_MSG } from './store.js'
+import { dropBackup, keepBackup, newRev, readBackup, readBackups, newerData, NEWER_MSG, NEWER_TAB_MSG, NO_SAVE_MSG } from './store.js'
 
 // 被取代的資料（留最近幾份）由 store.js 管：兩個分頁同時改了資料時也會用到
 export { readBackup, readBackups }
 // 還原第 i 份備份：當成一次新的變更（會再同步出去）。還原前的小島也留一份，還原錯了可以再換回來。
-// 備份讀不進來（壞掉、或是新版 App 存的）時丟出錯誤，現在的小島和備份都不動
+// 備份讀不進來（壞掉、或是新版 App 存的）、另一個分頁已經是新版、存不進去時丟出錯誤，現在的小島和備份都不動
 export function restoreBackup(store, i = 0) {
   const b = readBackup(i)
   if (!b) return false
+  if (store.newerApp) throw new Error(NEWER_TAB_MSG)
   const cur = store.state
-  store.replaceState(b.state)
+  if (!store.replaceOrUndo(b.state)) throw new Error(NO_SAVE_MSG)
   dropBackup(i)
   keepBackup(cur, 'restore', cur.updatedAt)
   return true
