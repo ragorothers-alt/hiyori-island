@@ -665,6 +665,8 @@ export class UI {
     el.classList.remove('show')
     void el.offsetWidth
     el.classList.add('show')
+    const live = $('#chatLive')
+    if (live) live.textContent = `${fuji ? 'ふじ' : 'もち'}：${text}`
     clearTimeout(this._chatT)
     this._chatT = setTimeout(() => (el.hidden = true), Math.max(3000, ms || 0) + 600)
   }

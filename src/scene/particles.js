@@ -227,23 +227,26 @@ export class Particles {
   }
 
   update(dt, t) {
+    // 減少動態效果：花瓣、雪慢慢落、不打轉，螢火蟲幾乎不飄（MediaQueryList 留著，切換設定時馬上跟著變）
+    this._rm ??= typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+    const k = this._rm?.matches ? 0.25 : 1
     // 櫻花瓣
     const o = this._o
     const wind = (Math.sin(t * 0.13) * 0.4 + 0.5) * (this.pfx.kind === 'snow' ? 0.4 : 1)
     const pf = this.pfx
     for (let i = 0; i < this.petals.count; i++) {
       const d = this.petalData[i]
-      d.p.y -= d.fall * pf.fall * dt
-      d.p.x += (Math.sin(t * 0.9 + d.sway) * 0.35 + wind) * dt
-      d.p.z += Math.cos(t * 0.7 + d.sway) * 0.25 * dt
+      d.p.y -= d.fall * pf.fall * dt * k
+      d.p.x += (Math.sin(t * 0.9 + d.sway) * 0.35 + wind) * dt * k
+      d.p.z += Math.cos(t * 0.7 + d.sway) * 0.25 * dt * k
       if (d.p.y < -9 || d.p.x > 20) {
         d.p.y = 13 + Math.random() * 4
         d.p.x = -18 + Math.random() * 20
         d.p.z = (Math.random() - 0.5) * 34
       }
-      d.rot.x += d.spin.x * pf.spin * dt
-      d.rot.y += d.spin.y * pf.spin * dt
-      d.rot.z += d.spin.z * pf.spin * dt
+      d.rot.x += d.spin.x * pf.spin * dt * k
+      d.rot.y += d.spin.y * pf.spin * dt * k
+      d.rot.z += d.spin.z * pf.spin * dt * k
       o.position.copy(d.p)
       o.rotation.copy(d.rot)
       o.scale.setScalar(d.s * pf.size)
@@ -260,12 +263,13 @@ export class Particles {
       const arr = this.flies.geometry.attributes.position.array
       for (let i = 0; i < this.flyData.length; i++) {
         const f = this.flyData[i]
-        arr[i * 3] = f.x + Math.sin(t * f.sp + f.ph) * 0.8
-        arr[i * 3 + 1] = f.y + Math.sin(t * f.sp * 1.7 + f.ph * 2) * 0.4
-        arr[i * 3 + 2] = f.z + Math.cos(t * f.sp * 0.8 + f.ph) * 0.8
+        const a = k * k
+        arr[i * 3] = f.x + Math.sin(t * f.sp * k + f.ph) * 0.8 * a
+        arr[i * 3 + 1] = f.y + Math.sin(t * f.sp * 1.7 * k + f.ph * 2) * 0.4 * a
+        arr[i * 3 + 2] = f.z + Math.cos(t * f.sp * 0.8 * k + f.ph) * 0.8 * a
       }
       this.flies.geometry.attributes.position.needsUpdate = true
-      this.flyMat.size = 0.45 + Math.sin(t * 3) * 0.1
+      this.flyMat.size = 0.45 + (k < 1 ? 0 : Math.sin(t * 3) * 0.1)
     }
 
     // 爆花
