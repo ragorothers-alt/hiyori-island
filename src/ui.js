@@ -2347,10 +2347,14 @@ export class UI {
   // 畫面上有沒有打到一半的字（自動換新版、重新整理之前檢查）。
   // 跟畫出來時的值不一樣就算：寧可多問一次，也不要把使用者打的字刷掉
   hasDraft() {
-    return $$('input:not([type]), input[type="text"], input[type="search"], textarea, [contenteditable="true"]').some((el) => {
+    // 編輯到一半的表單（日程、任務的編輯面板，新增或編輯訂閱）：只改了時間、下拉選單也算
+    const open = (el) => !!el?.getClientRects().length
+    if (open($('#editSheet')) || open($('form.sb-form'))) return true
+    // 清掉原本的字也算改了（跟畫出來時的值不一樣，前後空白不算）
+    return $$('input:not([type]), input[type="text"], input[type="search"], input[type="url"], input[type="email"], textarea, [contenteditable="true"]').some((el) => {
       if (!el.getClientRects().length) return false
       if (el.isContentEditable) return document.activeElement === el && !!el.textContent.trim()
-      return !!el.value.trim() && el.value !== el.defaultValue
+      return el.value.trim() !== el.defaultValue.trim()
     })
   }
 
