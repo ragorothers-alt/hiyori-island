@@ -1,6 +1,6 @@
 // 番茄鐘的計時規則：倒數、往上數、暫停、多輪、放太久
 import { describe, expect, it } from 'vitest'
-import { FREE_MAX, LATE, breakStart, counting, due, elapsedMs, focusStart, isStale, leftMs, pauseToggle, stopMinutes } from '../src/focusClock.js'
+import { FREE_MAX, LATE, breakStart, counting, due, elapsedMs, focusStart, isStale, leftMs, pauseToggle, restoreState, stopMinutes } from '../src/focusClock.js'
 
 const MIN = 60000
 const T0 = 1_800_000_000_000
@@ -68,5 +68,19 @@ describe('番茄鐘的計時規則', () => {
     expect(isStale(up, T0 + FREE_MAX * MIN + LATE)).toBe(false)
     expect(isStale(up, T0 + FREE_MAX * MIN + LATE + 1)).toBe(true)
     expect(isStale(idle(), T0 * 2)).toBe(false)
+  })
+})
+
+describe('重新整理後接回計時', () => {
+  it('好好的存檔照原樣接回來', () => {
+    const saved = { mode: 'focus', endAt: 1_000_000, paused: null, taskId: 't1', projectId: 'p1', up: false, focusMin: 50, breakMin: 10, round: 2, rounds: 3, sid: 'abc-123' }
+    expect(restoreState(saved)).toEqual({ ...saved, projectId: null })
+  })
+
+  it('壞掉的欄位換成安全的值：長度用現在的、輪數夾在範圍裡、id 不是字串就不要', () => {
+    const r = restoreState({ mode: 'break', endAt: 'x', paused: -5, taskId: 5, projectId: 'p2', up: 'yes', focusMin: NaN, breakMin: 999, round: 9, rounds: 7, sid: '<script>' }, { focusMin: 30, breakMin: 5 })
+    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, focusMin: 30, breakMin: 60, round: 4, rounds: 4, sid: null })
+    expect(restoreState({ focusMin: 9999 }).focusMin).toBe(FREE_MAX)
+    expect(restoreState(null)).toMatchObject({ endAt: 0, paused: null, rounds: 1, round: 1, focusMin: 25, breakMin: 5 })
   })
 })

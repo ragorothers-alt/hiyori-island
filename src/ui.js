@@ -2485,18 +2485,7 @@ class FocusTimer {
 
   // 重新整理前的計時：每個欄位都檢查過才用（壞掉的數字會一路變成 NaN 分鐘）
   _restore(saved) {
-    const n = (v, lo, hi, dflt) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt)
-    this.mode = saved.mode
-    this.endAt = n(saved.endAt, 0, 8.64e15, 0)
-    this.paused = Number.isFinite(saved.paused) ? Math.max(0, saved.paused) : null
-    this.taskId = typeof saved.taskId === 'string' ? saved.taskId : null
-    this.projectId = !this.taskId && typeof saved.projectId === 'string' ? saved.projectId : null
-    this.up = saved.up === true
-    this.focusMin = n(saved.focusMin, 0.05, FREE_MAX, this.focusMin)
-    this.breakMin = n(saved.breakMin, 0.05, 60, this.breakMin)
-    this.rounds = Math.round(n(saved.rounds, 1, 4, 1))
-    this.round = Math.round(n(saved.round, 1, this.rounds, 1))
-    this.sid = typeof saved.sid === 'string' && /^[\w-]{1,40}$/.test(saved.sid) ? saved.sid : null
+    Object.assign(this, clock.restoreState(saved, this))
   }
   _restoreTarget(saved) {
     this.taskId = typeof saved?.taskId === 'string' ? saved.taskId : null

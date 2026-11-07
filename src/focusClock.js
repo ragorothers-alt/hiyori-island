@@ -55,3 +55,24 @@ export function stopMinutes(s, now) {
 export const focusStart = (s, now) => ({ mode: 'focus', paused: null, endAt: s.up ? now : now + s.focusMin * 60000 })
 // 專注結束、開始休息
 export const breakStart = (s, now) => ({ mode: 'break', paused: null, endAt: now + s.breakMin * 60000 })
+
+// 重新整理前存的計時（localStorage、另一個分頁）：每個欄位都檢查過才用，壞掉的數字不會一路變成 NaN 分鐘。
+// dflt 是現在的長度（存的長度壞掉時用）；回傳整理好的欄位，mode 由呼叫的一方先確認是 focus 或 break
+export function restoreState(saved, dflt = {}) {
+  const n = (v, lo, hi, d) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d)
+  const taskId = typeof saved?.taskId === 'string' ? saved.taskId : null
+  const rounds = Math.round(n(saved?.rounds, 1, 4, 1))
+  return {
+    mode: saved?.mode,
+    endAt: n(saved?.endAt, 0, 8.64e15, 0),
+    paused: Number.isFinite(saved?.paused) ? Math.max(0, saved.paused) : null,
+    taskId,
+    projectId: !taskId && typeof saved?.projectId === 'string' ? saved.projectId : null,
+    up: saved?.up === true,
+    focusMin: n(saved?.focusMin, 0.05, FREE_MAX, dflt.focusMin ?? 25),
+    breakMin: n(saved?.breakMin, 0.05, 60, dflt.breakMin ?? 5),
+    rounds,
+    round: Math.round(n(saved?.round, 1, rounds, 1)),
+    sid: typeof saved?.sid === 'string' && /^[\w-]{1,40}$/.test(saved.sid) ? saved.sid : null,
+  }
+}
