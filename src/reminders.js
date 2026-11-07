@@ -1,10 +1,13 @@
 // 提醒：日程與排進時段的任務開始前 N 分鐘提醒一次、就寢前 30 分鐘提醒準備睡覺（App 內 + 系統通知）。
 // 已提醒過的記錄在 localStorage，重新整理不會重複提醒；改了開始時間會再提醒一次。
 import { addDays, dateStr, toMin } from './store.js'
+import { activeMottos, awake } from './mottos.js'
 
 const KEY = 'hiyori-reminded'
 // 訂閱：每個訂閱最近提醒過的那次扣款日 { 訂閱 id: 'YYYY-MM-DD' }
 const SUB_KEY = 'hiyori-sub-reminded'
+// 警語：上次提醒的時間和輪到第幾句 { at, i }
+const MOTTO_KEY = 'hiyori-motto-at'
 // 兩次檢查隔了這麼久，代表電腦睡著、手機鎖著時錯過了：剛開始不久的（LATE 分鐘內）還是補提醒
 const GAP = 2 * 60000
 const LATE = 15
@@ -101,6 +104,32 @@ export class Reminders {
     return true
   }
 
+  // 警語：醒著的時候每隔 mottoEvery 分鐘提醒一句，一句一句輪流。上次提醒的時間記在 MOTTO_KEY，
+  // 重新整理、另一個分頁都接著算（記憶體也留一份：存不進去時不會每秒響）。
+  // 第一次（剛寫下第一句、剛打開提醒）從現在開始算，不馬上響；睡覺的時間不響，起床後第一次打開時接著提醒
+  _motto(now, mins) {
+    const every = this.store.state.settings.mottoEvery
+    const on = activeMottos(this.store.state.mottos)
+    if (!(every > 0) || !on.length || !awake(this.store.state.rhythm, mins)) return
+    let last = null
+    try {
+      last = JSON.parse(localStorage.getItem(MOTTO_KEY) || 'null')
+    } catch {}
+    if (this.mottoLast && !(last?.at >= this.mottoLast.at)) last = this.mottoLast
+    // 沒記過、或記的時間在未來（時鐘被往回調）：從現在開始算
+    if (!(last?.at > 0) || last.at > +now + 60000) return this._saveMotto({ at: +now, i: Number(last?.i) || 0 })
+    if (now - last.at < every * 60000) return
+    const i = (Number(last.i) || 0) % on.length
+    this._saveMotto({ at: +now, i: i + 1 })
+    this.onRemind(on[i], 0, 'motto')
+  }
+  _saveMotto(v) {
+    this.mottoLast = v
+    try {
+      localStorage.setItem(MOTTO_KEY, JSON.stringify(v))
+    } catch {}
+  }
+
   check(now = new Date()) {
     this._merge()
     const lead = this.store.state.settings.remindLead
@@ -169,6 +198,7 @@ export class Reminders {
         if (this._claimSub(r.id, r.date)) this.onRemind(r, r.days, 'sub')
       }
     }
+    this._motto(now, mins)
     // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）
     const yesterday = addDays(today, -1)
     for (const d of Object.keys(this.sent)) {

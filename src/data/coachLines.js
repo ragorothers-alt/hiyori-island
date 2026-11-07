@@ -1,5 +1,20 @@
 // 教練、番茄鐘輪數、重要日子、卡關提醒、週報用的台詞與詞庫（lines.js 會合併進 LINES／FUJI_LINES）
 export const COACH_FUJI = {
+  // 警語：自己寫給自己的話，{text} 是那一句
+  motto: [
+    '想起你寫給自己的話：「{text}」',
+    '「{text}」——這是你寫的，我幫你記著。',
+    '停一下，看看這句：「{text}」',
+    '你說過：「{text}」。現在也還是這樣想吧。',
+    '輕輕提醒：「{text}」',
+    '「{text}」，照自己的步調就好。',
+  ],
+  mottoAdded: [
+    '記下了：「{text}」。我會時不時提醒你。',
+    '好的，「{text}」，我替你收著。',
+    '「{text}」，這句話寫得真好。',
+    '收到。哪天忘了，我再念給你聽。',
+  ],
   coachHello: {
     morning: [
       '早安，從下面的標籤挑件事吧。',
@@ -288,6 +303,13 @@ export const COACH_FUJI = {
 }
 
 export const COACH_MOCHI = {
+  motto: [
+    '你寫的那句來了：「{text}」！',
+    '尾巴搖搖提醒你——「{text}」',
+    '「{text}」！我幫你大聲念出來了。',
+    '還記得嗎？「{text}」',
+    '一起記住：「{text}」',
+  ],
   coachApplied: [
     'ふじ排好 {count} 段，我陪你出發囉。',
     '{count} 段有位子了，尾巴搖搖加油。',

@@ -19,6 +19,7 @@ import { latestLog, msProgress, msSteps, msTasks, projectStats, PROJECT_LIMITS a
 import { CHANGELOG } from './data/changelog.js'
 import { DatesView } from './ui/dates.js'
 import { SubsView } from './ui/subs.js'
+import { MottosView, MottoBar } from './ui/mottos.js'
 import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
 import { TodayView } from './ui/today.js'
@@ -151,6 +152,8 @@ export class UI {
     this.habits = new HabitsView($('#habitsRoot'), store, viewHooks)
     this.life = new LifeView($('#lifeRoot'), store, viewHooks)
     this.subs = new SubsView($('#subsRoot'), store, viewHooks)
+    this.mottoBar = new MottoBar($('#mottoBar'), store)
+    this.mottos = new MottosView($('#mottoRoot'), store, { ...viewHooks, mottoBar: () => this.mottoBar.render() })
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
     this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)))
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
@@ -2090,6 +2093,7 @@ export class UI {
   }
 
   renderRecords() {
+    this.mottos.render()
     this.life.render()
     this.subs.render()
     const s = this.store
@@ -2211,6 +2215,7 @@ export class UI {
     this.applyGlass()
     // 番茄鐘的目標可能剛被做完、收藏或刪掉
     this.focus?.render()
+    this.mottoBar?.render()
     // 任務、日程、專案只畫正在看的那一頁；其他頁記著，切過去時再畫（藏著的頁面不必每次都重建）
     this._stale = new Set(['tasks', 'schedule', 'projects'])
     this._renderPage(this.tab)

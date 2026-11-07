@@ -40,6 +40,7 @@ export const EVENTS = {
   subAdded: '新增訂閱',
   subChanged: '訂閱改了（內容或重新訂閱）',
   subCancelled: '取消訂閱',
+  mottoAdded: '新增一句警語',
   sleepLogged: '記下睡眠',
 
   // ── 專注 ──

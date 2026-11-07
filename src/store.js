@@ -16,6 +16,7 @@ import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown
 import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched } from './projects.js'
 import { isEvent } from './events.js'
 import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, chargesBetween, looksLikeCardNumber, nextCharge, paidCount, subsSummary } from './subs.js'
+import { MOTTO_EVERY, MOTTO_LEN, MOTTO_MAX } from './mottos.js'
 
 // 各建築現在的階段（只列 1 階以上），存成「已經慶祝過」的比對基準
 const townStages = (stats) => {
@@ -36,8 +37,9 @@ export const RESCUE_KEY = 'hiyori-rescue'
 // 記住最近幾輪專注的 id（兩個分頁同一輪只記一次）
 const POMO_SIDS = 20
 // 存檔格式的版本。比這個新的資料是新版 App 寫的：這一版看不懂新的欄位，不能讀進來再用舊的格式寫回去
-// （舊的 PWA 分頁還開著、另一個分頁已經更新了的時候會遇到）
-export const DATA_VERSION = 2
+// （舊的 PWA 分頁還開著、另一個分頁已經更新了的時候會遇到）。加了新的欄位就往上加一：
+// 3：訂閱（subscriptions、subRates）和警語（mottos）
+export const DATA_VERSION = 3
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
@@ -188,9 +190,11 @@ export function repeatLabel(rep) {
 // focusUp：正向計時（不設長度、往上數）；focusMin：倒數時一輪幾分鐘；breakMin：休息幾分鐘；focusRounds：連續幾輪（1 = 一次做完）
 // fontScale：面板和對話框的字放大倍率；stuckNudge：任務卡住時ふじ提醒
 // glass：App 模式 Liquid Glass 的透明度（0 清透～100 著色）
+// mottoEvery：醒著的時候每隔幾分鐘提醒一句警語（0 = 不提醒）；mottoBar：面板上方輪流放一句
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
   focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true, glass: 50,
+  mottoEvery: 60, mottoBar: true,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 // 畫質：auto＝桌機高、觸控手機標準
@@ -300,6 +304,7 @@ function seed(samples = true) {
     coach: emptyCoach(),
     dates: [],
     subscriptions: [],
+    mottos: [],
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
     pomoSids: [],
@@ -430,6 +435,14 @@ function cleanSub(x, today) {
   }
 }
 const cleanSubs = (list, today) => cleanList(list, (x) => cleanSub(x, today)).slice(0, SUBS_MAX)
+// ── 警語（輪播、提醒怎麼排在 src/mottos.js）──
+const mottoText = (v) => str(v, MOTTO_LEN * 2).replace(/\s+/g, ' ').trim().slice(0, MOTTO_LEN)
+function cleanMotto(x) {
+  const text = mottoText(x.text)
+  if (!text) return null
+  return { id: str(x.id), text, on: x.on !== false, createdAt: ts(x.createdAt) || Date.now() }
+}
+const cleanMottos = (list) => cleanList(list, cleanMotto).slice(0, MOTTO_MAX)
 // 外幣匯率（1 單位外幣大約多少新台幣）：沒設或不合理的用預設
 function cleanRates(obj) {
   const out = {}
@@ -711,6 +724,7 @@ function migrate(s) {
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
+  if (!MOTTO_EVERY.includes(settings.mottoEvery)) settings.mottoEvery = DEFAULT_SETTINGS.mottoEvery
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 
@@ -788,7 +802,7 @@ function migrate(s) {
     lotsPlan: 1,
     version: newer ? Number(s.version) : DATA_VERSION, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
-    subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates),
+    subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
@@ -2767,6 +2781,40 @@ export class Store {
       if (days <= (trial ? Math.max(3, s.remind) : s.remind)) out.push({ id: s.id, sub: s, date, days, trial })
     }
     return out.sort((a, b) => a.date.localeCompare(b.date))
+  }
+
+  // ── 警語 ──
+  // 回傳新的那一句；空的、已經有一樣的、到上限了是 null
+  addMotto(text) {
+    const t = mottoText(text)
+    const list = this.state.mottos
+    if (!t || list.length >= MOTTO_MAX || list.some((m) => m.text === t)) return null
+    const m = { id: uid(), text: t, on: true, createdAt: Date.now() }
+    list.push(m)
+    this._finish([['mottoAdded', m]])
+    return m
+  }
+  updateMotto(id, text) {
+    const m = this._find('mottos', id)
+    const t = mottoText(text)
+    if (!m || !t) return false
+    if (m.text !== t) {
+      m.text = t
+      this._finish()
+    }
+    return true
+  }
+  // 先收著（不輪播、不提醒）／拿出來
+  toggleMotto(id) {
+    const m = this._find('mottos', id)
+    if (!m) return
+    m.on = !m.on
+    this._finish()
+  }
+  deleteMotto(id) {
+    const n = this.state.mottos.length
+    this.state.mottos = this.state.mottos.filter((m) => m.id !== id)
+    if (this.state.mottos.length !== n) this._finish()
   }
 
   // ── 重要日子 ──

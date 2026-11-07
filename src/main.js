@@ -420,6 +420,7 @@ async function boot() {
     setTimeout(() => talk('coachApplied', { count }, 4200, '', 'mochi'), 2400)
   })
   store.on('coachUndone', ({ count }) => talk('coachUndo', { count }, 4200, '撤銷了，想換個排法再告訴我。', 'fuji'))
+  store.on('mottoAdded', (m) => talk('mottoAdded', { text: short(m.text, 24) }, 4600, '記下了，我會時不時提醒你。', 'fuji'))
   store.on('dateAdded', (d) => talk('dateAdded', { title: short(d.title), n: d.days }, 4600, '記好了，我陪你留意。', 'fuji'))
   store.on('sleepLogged', ({ date, min, first }) => {
     if (date !== store.today || !first) return
@@ -556,6 +557,16 @@ async function boot() {
       const sub = e.trial ? `之後${cycleLabel(s)} ${price}・不想繼續的話記得先取消` : `${price}・${cycleLabel(s)}${s.pay ? `・${s.pay}` : ''}`
       ui.toast({ icon: SUB_CATS[s.cat]?.kanji || '訂', title, sub, ms: 9000 })
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, sub, `sub-${s.id}`)
+      return
+    }
+    // 警語：もち或ふじ念一句你寫給自己的話。專注中不打擾（下一輪再說）
+    if (kind === 'motto') {
+      if (ui.focus.mode === 'focus') return
+      sfx.chime()
+      // 頭上的泡泡放不下太長的句子：念前面一段，完整的在提示卡上
+      talk('motto', { text: short(e.text, 28) }, 7000, `「${short(e.text, 28)}」`, pick(['mochi', 'fuji']))
+      ui.toast({ icon: '戒', title: e.text, sub: '寫給自己的警語', ms: 9000 })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', e.text, 'motto')
       return
     }
     if (kind === 'bed') {

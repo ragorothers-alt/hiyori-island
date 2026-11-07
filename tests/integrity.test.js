@@ -1,6 +1,8 @@
 // 資料正確性的回歸測試：多分頁、拆任務、睡眠獎勵、教練的回答、跨日、提醒與壞掉的數字
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Store, addDays, dateStr, readBackup } from '../src/store.js'
+import { Store, addDays, dateStr, readBackup, DATA_VERSION } from '../src/store.js'
+// 比這一版新的存檔格式
+const NEXT = DATA_VERSION + 1
 import { Reminders } from '../src/reminders.js'
 import { planRules } from '../src/coach.js'
 import { FileSync } from '../src/sync.js'
@@ -125,7 +127,7 @@ describe('同一個瀏覽器開兩個分頁', () => {
 describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () => {
   // 假裝另一個分頁已經是第 3 版的 App：多了這一版看不懂的欄位
   const writeNewer = (extra = {}) => {
-    const v3 = { ...JSON.parse(store.exportJSON()), version: 3, rev: 'newer-rev', future: { keep: 'me' }, ...extra }
+    const v3 = { ...JSON.parse(store.exportJSON()), version: NEXT, rev: 'newer-rev', future: { keep: 'me' }, ...extra }
     localStorage.setItem(KEY, JSON.stringify(v3))
     localStorage.setItem('hiyori-daily-rev', 'newer-rev')
     return v3
@@ -141,7 +143,7 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     expect(store.newerApp).toBe(true)
     store.addTask({ title: '舊分頁加的' })
     expect(store.saveNow()).toBe(false)
-    expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: 3, future: v3.future })
+    expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: NEXT, future: v3.future })
   })
 
   it('這邊改了資料、存檔時才發現另一邊是新版：也不蓋掉', () => {
@@ -150,14 +152,14 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     store.addTask({ title: '同時改的' })
     expect(store.saveNow()).toBe(false)
     expect(store.newerApp).toBe(true)
-    expect(JSON.parse(localStorage.getItem(KEY)).version).toBe(3)
+    expect(JSON.parse(localStorage.getItem(KEY)).version).toBe(NEXT)
   })
 
   it('開機就讀到新版的存檔：照樣顯示，看不懂的欄位和版本號原樣留著，但不寫回去', () => {
     writeNewer()
     const old = new Store()
     expect(old.newerApp).toBe(true)
-    expect(old.state).toMatchObject({ version: 3, future: { keep: 'me' } })
+    expect(old.state).toMatchObject({ version: NEXT, future: { keep: 'me' } })
     old.addTask({ title: '舊程式加的' })
     expect(old.saveNow()).toBe(false)
     expect(JSON.parse(localStorage.getItem(KEY)).tasks.map((t) => t.title)).not.toContain('舊程式加的')
@@ -168,13 +170,13 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     writeNewer()
     store._otherTabSaved({ key: KEY })
     expect(() => store.reset()).toThrow('新版 App')
-    expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: 3, future: { keep: 'me' } })
+    expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: NEXT, future: { keep: 'me' } })
   })
 
   it('匯入新版匯出的檔案：先擋下來，現在的小島和備份都不動', () => {
     const before = store.exportJSON()
     const backup = localStorage.getItem('hiyori-backup')
-    const v3 = { ...JSON.parse(before), version: 3 }
+    const v3 = { ...JSON.parse(before), version: NEXT }
     expect(() => store.importJSON(JSON.stringify(v3))).toThrow('新版 App')
     expect(store.exportJSON()).toBe(before)
     expect(localStorage.getItem('hiyori-backup')).toBe(backup)
@@ -186,7 +188,7 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     globalThis.addEventListener ??= () => {}
     const sync = new FileSync(store)
     sync.state = 'linked'
-    const v3 = { ...JSON.parse(store.exportJSON()), version: 3, rev: 'cloud-v3' }
+    const v3 = { ...JSON.parse(store.exportJSON()), version: NEXT, rev: 'cloud-v3' }
     const pushed = vi.fn()
     sync._ready = () => true
     sync._pull = async () => ({ rev: 'cloud-v3', savedAt: Date.now(), state: v3 })

@@ -92,6 +92,8 @@
     <header class="app-head"><h2 id="ahTitle">任務</h2><small id="ahKana">きょう</small></header>
 
     <div class="panel-body">
+      <!-- 警語：面板最上面輪流放一句（src/ui/mottos.js） -->
+      <div class="motto-bar" id="mottoBar" role="note" aria-label="寫給自己的警語" hidden></div>
       <!-- 今日總覽（src/ui/today.js） -->
       <section class="tab-page" data-page="today"><div id="todayRoot"></div></section>
 
@@ -218,7 +220,7 @@
 
       <!-- 紀錄 -->
       <section class="tab-page" data-page="records">
-        <div class="pg-side"><div id="lifeRoot"></div><div id="subsRoot"></div></div>
+        <div class="pg-side"><div id="mottoRoot"></div><div id="lifeRoot"></div><div id="subsRoot"></div></div>
         <div class="pg-main">
         <div class="stats-grid" id="statsGrid"></div>
         <button class="btn-ghost wide" id="reviewBtn">寫下今天的回顧</button>
