@@ -1049,6 +1049,10 @@ export class UI {
     const a = document.activeElement
     if (editing($('#taskList')) || editing($('#overdueBox')) || (a?.matches('.sub-add input') && a.value)) return
     const fk = this._listFocus()
+    // 打到一半的子任務（焦點已經不在框裡，例如先去勾了別件）：重畫後填回同一件的框
+    const subDrafts = $$('#taskList .sub-add input, #overdueBox .sub-add input')
+      .filter((i) => i.value)
+      .map((i) => [i.closest('#overdueBox') ? '#overdueBox' : '#taskList', i.closest('.sub-add').dataset.id, i.value])
     const overdue = isToday ? s.overdue() : []
     $('#overdueBox').innerHTML = overdue.length
       ? `<div class="overdue"><h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><button data-act="allToday">全部移到今天</button></h4><ul class="list">${overdue.map((t) => this._taskItem(t, true)).join('')}</ul></div>`
@@ -1058,6 +1062,10 @@ export class UI {
       ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
       : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
           <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
+    for (const [box, id, v] of subDrafts) {
+      const input = $(`${box} .sub-add[data-id="${CSS.escape(id)}"] input`)
+      if (input) input.value = v
+    }
     this._restoreListFocus(fk)
   }
 
