@@ -1471,7 +1471,7 @@ export class Store {
   }
   placeItem(key, x, z, rot = 0) {
     const item = SHOP_ITEMS.find((i) => i.key === key)
-    if (!item) return null
+    if (!item || !Number.isFinite(x) || !Number.isFinite(z)) return null
     const st = this.shopStatus(item)
     if (st.hidden || st.lock) return null
     if (this.coins < st.price) {
@@ -1488,7 +1488,7 @@ export class Store {
   }
   moveItem(id, x, z, rot) {
     const p = this._find('placed', id)
-    if (!p) return
+    if (!p || !Number.isFinite(x) || !Number.isFinite(z)) return
     Object.assign(p, { x, z, rot })
     this._finish([['itemMoved', p]])
   }

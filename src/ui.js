@@ -341,7 +341,8 @@ export class UI {
   _topLayer() {
     const modal = $$('.modal').filter((m) => !m.hidden).pop()
     if (modal) return modal
-    return [$('#focusSet'), $('#focusPick'), $('#focusFull'), $('#shop')].find((el) => !el.hidden) || (this._calendar.view?.isOpen ? $('#calendar') : null)
+    // 擺放裝飾時：方向鍵是挪裝飾，不是換日期；Tab 在擺放列的按鈕裡轉
+    return [$('#placeBar'), $('#focusSet'), $('#focusPick'), $('#focusFull'), $('#shop')].find((el) => !el.hidden) || (this._calendar.view?.isOpen ? $('#calendar') : null)
   }
   // Esc 一次只關最上面那一層；什麼都沒開時才放開打字的欄位、離開全螢幕
   _escape(typing) {
@@ -357,6 +358,7 @@ export class UI {
         focusPick: () => this.focus.togglePicker(false),
         focusFull: () => this.focus.toggleBig(false),
         shop: () => this.toggleShop(false),
+        placeBar: () => $('#placeCancel').click(),
         calendar: () => this._calendar.view?.close(),
       }[top.id]
       return close?.()

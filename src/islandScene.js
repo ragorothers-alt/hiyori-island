@@ -222,7 +222,10 @@ export async function createIsland(ctx) {
     placed.endGhost()
     placed.hiddenId = null
     placing = null
+    // 焦點在擺放列上（用鍵盤擺的）：列藏起來前先還給商店按鈕，不要掉到看不到的地方
+    const back = placeBar.contains(document.activeElement)
     placeBar.hidden = true
+    if (back) document.getElementById('shopBtn')?.focus({ preventScroll: true })
     placed.sync(store.state.placed)
   }
   const startPlacing = (key, moveId = null) => {
@@ -239,43 +242,91 @@ export async function createIsland(ctx) {
       placed.hiddenId = moveId
       placed.sync(store.state.placed)
     }
-    document.getElementById('placeName').textContent = moveId ? `移動「${item.name}」：點島上的空地` : `擺放「${item.name}」：點島上的空地`
+    // 先放在附近的一塊空地上：用鍵盤（方向鍵挪、Enter 放下）或「放這裡」也擺得了，不一定要點島
+    aimXZ(...firstSpot(key, from))
+    document.getElementById('placeName').textContent = `${moveId ? '移動' : '擺放'}「${item.name}」：點島上的空地，或用方向鍵挪、Enter 放下`
     placeBar.hidden = false
+    document.getElementById('placeHere').focus({ preventScroll: true })
     if (!moveId) talk('shopBuy', { item: item.name }, undefined, `${item.name}，要放哪裡呢？`)
+  }
+  // 從要移動的那個原本的位置（新買的從島的前面）一圈一圈往外找第一塊空地
+  const firstSpot = (key, from) => {
+    const x0 = from?.x ?? 0
+    const z0 = from?.z ?? 1.6
+    for (let d = 0; d < 9; d += 0.25) {
+      const n = d ? 24 : 1
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2
+        const x = +(x0 + Math.cos(a) * d).toFixed(2)
+        const z = +(z0 + Math.sin(a) * d).toFixed(2)
+        if (spotFree(x, z, store.state.placed, placing.moveId, key, decor.footprints())) return [x, z]
+      }
+    }
+    return [x0, z0]
+  }
+  const aimXZ = (x, z) => {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return
+    placing.x = x
+    placing.z = z
+    placing.ok = spotFree(x, z, store.state.placed, placing.moveId, placing.key, decor.footprints())
+    placed.moveGhost(x, z, placing.ok)
   }
   const aimAt = (ray) => {
     const p = ray.intersectPlane(ground, new THREE.Vector3())
     if (!p) return null
-    const ok = spotFree(p.x, p.z, store.state.placed, placing.moveId, placing.key, decor.footprints())
-    placing.x = p.x
-    placing.z = p.z
-    placing.ok = ok
-    placed.moveGhost(p.x, p.z, ok)
+    aimXZ(p.x, p.z)
     return p
+  }
+  // 放在現在的位置；那裡放不下就不動，提示換個地方
+  const placeHere = () => {
+    if (!placing) return
+    if (placing.x == null || !placing.ok) {
+      sfx.undo()
+      document.getElementById('placeName').textContent = '這裡放不下（太靠近別的東西或島的邊緣），換個地方'
+      return
+    }
+    const { key, moveId, x, z, rot } = placing
+    stopPlacing()
+    if (moveId) store.moveItem(moveId, x, z, rot)
+    else store.placeItem(key, x, z, rot)
   }
   world.onPointerMove = (ray) => {
     if (placing) aimAt(ray)
   }
   world.onClick = (ray) => {
     if (!placing) return false
-    if (!aimAt(ray) || !placing.ok) {
-      sfx.undo()
-      return true
-    }
-    const { key, moveId, x, z, rot } = placing
-    stopPlacing()
-    if (moveId) store.moveItem(moveId, x, z, rot)
-    else store.placeItem(key, x, z, rot)
+    if (aimAt(ray)) placeHere()
+    else sfx.undo()
     return true
   }
+  document.getElementById('placeHere').onclick = () => placeHere()
   document.getElementById('placeRotate').onclick = () => {
     if (placing) placing.rot = placed.rotateGhost()
   }
   document.getElementById('placeCancel').onclick = () => stopPlacing()
+  // 方向鍵照鏡頭的方向挪（↑ 是離鏡頭遠的那邊），Shift 一次挪大步
+  const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }
   addEventListener('keydown', (e) => {
-    if (!placing || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return
+    if (!placing || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return
     if (e.key === 'Escape') stopPlacing()
-    if (e.key === 'r' || e.key === 'R') placing.rot = placed.rotateGhost()
+    else if (e.key === 'r' || e.key === 'R') placing.rot = placed.rotateGhost()
+    else if (e.key === 'Enter' && !e.target.closest?.('button')) {
+      e.preventDefault()
+      placeHere()
+    } else if (ARROWS[e.key]) {
+      e.preventDefault()
+      const [sx, sz] = ARROWS[e.key]
+      const fwd = world.camera.getWorldDirection(new THREE.Vector3()).setY(0)
+      // 正上方往下看、或鏡頭還沒算好（視窗縮到最小時是 NaN）：當成往 -z 看
+      if (!(fwd.lengthSq() > 1e-6)) fwd.set(0, 0, -1)
+      fwd.normalize()
+      const right = new THREE.Vector3(-fwd.z, 0, fwd.x)
+      const step = e.shiftKey ? 1 : 0.25
+      // ↑ 往鏡頭看的方向（-sz），→ 往鏡頭的右手邊
+      const dx = (right.x * sx - fwd.x * sz) * step
+      const dz = (right.z * sx - fwd.z * sz) * step
+      aimXZ(+(placing.x + dx).toFixed(2), +(placing.z + dz).toFixed(2))
+    }
   })
   const openItemMenu = (id) => {
     closeItemMenu()
