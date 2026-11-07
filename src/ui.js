@@ -1,5 +1,5 @@
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey } from './store.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -1575,6 +1575,8 @@ export class UI {
     this.cloud = cloud
     this.cloudView = new CloudView($('#cloudRow'), cloud, { toast: (o) => this.toast(o) })
     $('#backupList').addEventListener('click', (e) => {
+      const r = e.target.closest('[data-rescue]')
+      if (r) return this._rescueAction(r)
       const b = e.target.closest('[data-backup]')
       if (!b) return
       armConfirm(b, '再按一次還原', () => {
@@ -1616,14 +1618,52 @@ export class UI {
     this.renderSync()
   }
 
+  // 讀不進來的原始存檔：下載（之後請人幫忙修，或改好再匯入）、再試著讀一次（新版可能讀得懂了）、刪掉
+  _rescueAction(btn) {
+    const rescue = readRescue()
+    if (!rescue) return this.renderSync()
+    const how = btn.dataset.rescue
+    if (how === 'download') {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([rescue.raw], { type: 'application/json' }))
+      a.download = `hiyori-rescue-${dateStr(new Date(rescue.at || Date.now()))}.json`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+      return
+    }
+    if (how === 'retry') {
+      return armConfirm(btn, '再按一次換成它', () => {
+        try {
+          this.store.importJSON(rescue.raw)
+          dropRescue()
+          this.toast({ icon: '戻', title: '原本的存檔讀進來了', sub: '換掉之前的小島留成了備份，需要的話可以再換回去' })
+        } catch (err) {
+          this.toast({ icon: '！', title: '還是讀不進來', sub: `${err.message}。可以先下載下來保存` })
+        }
+        this.renderSync()
+      })
+    }
+    armConfirm(btn, '再按一次刪掉', () => {
+      dropRescue()
+      this.toast({ icon: '消', title: '刪掉了讀不進來的原始存檔' })
+      this.renderSync()
+    })
+  }
+
   renderSync() {
     this.cloudView?.render()
     const when = (t) => `${new Date(t).getMonth() + 1}/${new Date(t).getDate()} ${hhmm(t)}`
     // 被取代的資料（兩種同步、匯入、重置、還原共用，留最近幾份）：還在選邊時先不顯示
     const choosing = this.cloud?.state === 'conflict' || this.sync?.state === 'conflict'
     const list = choosing ? [] : readBackups()
-    $('#backupList').hidden = !list.length
-    setHTML($('#backupList'), list
+    const rescue = readRescue()
+    $('#backupList').hidden = !list.length && !rescue
+    const kb = (s) => `${Math.max(1, Math.round(s.length / 1024))} KB`
+    const rescueRow = rescue
+      ? `<div class="set-row rescue-row"><div><b>讀不進來的原始存檔</b><small>${rescue.at ? `${when(rescue.at)} ` : ''}打開時讀不進來，另外留著沒有刪（${kb(rescue.raw)}${rescue.error ? `・${esc(rescue.error.slice(0, 80))}` : ''}）。可以下載保存，或再試著讀一次</small></div>` +
+        `<div class="sync-btns"><button class="chip-toggle" data-rescue="download">下載</button><button class="chip-toggle" data-rescue="retry">再讀一次</button><button class="chip-toggle" data-rescue="drop">刪除</button></div></div>`
+      : ''
+    setHTML($('#backupList'), rescueRow + list
       .map((bk, i) => {
         // 匯入、重置、還原前留的：寫什麼時候換掉的；同步、兩個分頁留的：寫那一版是什麼時候的
         const before = { import: '匯入檔案', reset: '重置', restore: '還原備份' }[bk.from]

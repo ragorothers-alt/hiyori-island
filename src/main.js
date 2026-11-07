@@ -766,7 +766,7 @@ async function boot() {
   // 原本的存檔讀不進來，換成了範例島：原文另外留著（hiyori-rescue），有開同步的話會從雲端拉回來
   if (store.loadFailed) {
     const sub = store.loadFailed.rescued
-      ? '原本的檔案另外留了一份，沒有刪掉。有開同步的話，會自動從雲端拉回來'
+      ? '原本的檔案另外留了一份，沒有刪掉（紀錄頁的設定裡可以下載）。有開同步的話，會自動從雲端拉回來'
       : '有開同步的話，會自動從雲端拉回來；沒有的話先別在這台新增資料'
     ui.toast({ icon: '！', title: '原本的存檔讀不進來', sub, ms: 15000 })
   }

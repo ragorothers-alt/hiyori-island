@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY,
+  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
@@ -1041,6 +1041,21 @@ describe('存檔讀不進來、存不進去', () => {
     t.addTask({ title: '自己加的' })
     t.saveNow()
     expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('自己加的')
+  })
+
+  it('另外留的原始存檔拿得回來：讀出原文、再試著換成它、刪掉', () => {
+    localStorage.clear()
+    expect(readRescue()).toBeNull()
+    const good = JSON.parse(store.exportJSON())
+    good.tasks = [{ id: 'r1', title: '原本存檔裡的', date: TODAY }]
+    localStorage.setItem(RESCUE_KEY, JSON.stringify({ at: 5, error: 'boom', raw: JSON.stringify(good) }))
+    expect(readRescue()).toMatchObject({ at: 5, error: 'boom' })
+    store.importJSON(readRescue().raw)
+    expect(titlesOf(store.state)).toEqual(['原本存檔裡的'])
+    dropRescue()
+    expect(readRescue()).toBeNull()
+    localStorage.setItem(RESCUE_KEY, '壞掉的')
+    expect(readRescue()).toBeNull()
   })
 
   it('換進來的資料停在好幾天前：照樣做跨日結算，お守り保住連續天數', () => {

@@ -122,6 +122,20 @@ export function dropBackup(i = 0) {
     else localStorage.removeItem(BACKUP_KEY)
   } catch {}
 }
+// 開場時讀不進來的原始存檔（_load 另外留的）：{ at, error, raw }，沒有就是 null
+export function readRescue() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RESCUE_KEY) || 'null')
+    return v && typeof v.raw === 'string' ? { at: Number(v.at) || 0, error: String(v.error || ''), raw: v.raw } : null
+  } catch {
+    return null
+  }
+}
+export function dropRescue() {
+  try {
+    localStorage.removeItem(RESCUE_KEY)
+  } catch {}
+}
 
 export function dateStr(d = new Date()) {
   const m = String(d.getMonth() + 1).padStart(2, '0')
