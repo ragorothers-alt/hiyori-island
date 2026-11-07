@@ -401,8 +401,8 @@ export const DATES_MAX = 1000
 // 上限只防異常大的匯入；新增時到了就不再加
 export const SUBS_MAX = 300
 const money = (v) => (v !== '' && v != null && Number.isFinite(+v) && +v >= 0 ? Math.min(1e7, Math.round(+v * 100) / 100) : null)
-// 管理（取消）訂閱的網址：只收 http／https
-const httpUrl = (v) => {
+// 管理（取消）訂閱的網址：只收 http／https（訂閱表單也用這個先檢查）
+export const httpUrl = (v) => {
   const s = str(v, 300).trim()
   if (!s) return ''
   try {
@@ -436,7 +436,8 @@ function cleanRates(obj) {
   for (const k of Object.keys(CURRENCIES)) {
     if (k === 'TWD') continue
     const v = isObj(obj) ? +obj[k] : NaN
-    out[k] = Number.isFinite(v) && v > 0 && v <= 10000 ? Math.round(v * 10000) / 10000 : CURRENCIES[k].rate
+    // 小數第 4 位以下會四捨五入成 0（畫面寫 0、算的時候卻用預設匯率）：太小的當成沒填
+    out[k] = Number.isFinite(v) && v >= 0.0001 && v <= 10000 ? Math.round(v * 10000) / 10000 : CURRENCIES[k].rate
   }
   return out
 }

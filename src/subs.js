@@ -99,6 +99,8 @@ export function chargesBetween(sub, from, to) {
 // 到 today 為止扣過幾次（today 當天的也算）
 export function paidCount(sub, today) {
   const last = lastDay(sub)
+  // 取消了卻不知道哪天停的（只有匯入的舊檔會這樣）：跟 chargesBetween 一樣當成沒有扣款，不會每天多算一次
+  if (sub.status === 'cancelled' && !last) return 0
   const upto = last && last < today ? last : today
   if (upto < sub.start) return 0
   return indexFrom(sub, plusDays(upto, 1))
@@ -120,7 +122,8 @@ export const toTWD = (amount, cur, rates) => amount * rateOf(cur, rates)
 export function fmtMoney(amount, cur = 'TWD') {
   const c = CURRENCIES[cur] || CURRENCIES.TWD
   const whole = Math.abs(amount - Math.round(amount)) < 0.005
-  const digits = whole ? 0 : c.digits
+  // 新台幣、日圓平常不寫小數；真的有小數（99.5）時照寫兩位，不會被四捨五入成 100
+  const digits = whole ? 0 : c.digits || 2
   return `${c.sign} ${amount.toLocaleString('zh-TW', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 // 換算後的新台幣（整數，前面加「約」）

@@ -2,7 +2,7 @@ import './subs.css'
 import { $, $$, esc, armConfirm, pickOne, setHTML, WEEK_ZH } from './dom.js'
 import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, cycleLabel, fmtMoney, fmtTWD, looksLikeCardNumber, monthlyOf, nextCharge, paidCount, paidSoFar, toTWD } from '../subs.js'
 import { KNOWN_SUBS, guessCat } from '../data/subs.js'
-import { daysBetween, parseDate } from '../store.js'
+import { daysBetween, parseDate, httpUrl } from '../store.js'
 
 // 「紀錄」分頁的訂閱：每個月一共花多少、接下來要扣的款、每個訂閱的細節（付了多少、付款方式、管理網址）、
 // 新增和編輯、取消和重新訂閱、外幣匯率。扣款前的提醒在 reminders.js，日曆上的標記在 calendar.js
@@ -280,10 +280,11 @@ export class SubsView {
   }
 
   _input(e) {
-    // 打服務名稱時順便猜分類（還沒自己選過的話）
+    // 打服務名稱時順便猜分類（還沒自己選過的話）。猜不到就回到預設的影音：
+    // 不然打「Apple TV+」打到一半猜成音樂，打完了還停在音樂
     if (e.target.name !== 'name' || !this.form || this.form.catTouched) return
-    const cat = guessCat(e.target.value)
-    if (!cat || cat === this.form.cat) return
+    const cat = guessCat(e.target.value) || 'video'
+    if (cat === this.form.cat) return
     this.form.cat = cat
     pickOne($$('[data-act="cat"]', this.el.form), (b) => b.dataset.v === cat)
   }
@@ -301,7 +302,8 @@ export class SubsView {
     if (!Number.isInteger(every) || every < 1 || every > 36) return this._err('週期是 1～36 之間的整數', 'every')
     if (!v('start')) return this._err(this.form.trial ? '試用到哪一天要填' : '扣款日要填', 'start')
     if (looksLikeCardNumber(pay)) return this._err('付款方式寫「信用卡」「Apple ID」這樣就好，不用填卡號', 'pay')
-    if (url && !/^https?:\/\//i.test(url)) return this._err('網址要是 http:// 或 https:// 開頭', 'url')
+    // 跟存檔時同一套檢查：「https://」這種畫面上看起來存好、其實存成空白的，這裡就先說
+    if (url && !httpUrl(url)) return this._err('網址看起來不完整：要是 http:// 或 https:// 開頭的完整網址', 'url')
     const data = {
       name, price, cur: v('cur'), every, unit: this.form.unit, start: v('start'), trial: this.form.trial, cat: this.form.cat,
       remind: Number(v('remind')), pay, url, note: v('note').trim(),

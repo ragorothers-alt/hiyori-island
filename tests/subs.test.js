@@ -42,6 +42,9 @@ describe('扣款日', () => {
     // 取消了：end（不再扣款的那天）以後不算
     const off = sub({ status: 'cancelled', end: '2026-06-15' })
     expect(paidCount(off, '2026-11-06')).toBe(5)
+    // 取消了卻沒有停的那天（匯入的舊檔）：跟扣款日一樣當成沒扣過，不會一天天多算
+    expect(paidCount(sub({ status: 'cancelled', end: '' }), '2026-11-06')).toBe(0)
+    expect(paidCount(sub({ status: 'cancelled', end: '' }), '2027-11-06')).toBe(0)
     expect(chargesBetween(off, '2026-05-01', '2026-12-31')).toEqual(['2026-05-15'])
   })
 })
@@ -58,6 +61,8 @@ describe('金額', () => {
     expect(fmtMoney(9.99, 'USD')).toBe('US$ 9.99')
     expect(fmtMoney(20, 'USD')).toBe('US$ 20')
     expect(fmtMoney(1200, 'JPY')).toBe('¥ 1,200')
+    // 新台幣真的有小數時照寫，不會四捨五入
+    expect(fmtMoney(99.5)).toBe('NT$ 99.50')
     expect(fmtTWD(1234.6)).toBe('NT$ 1,235')
     expect(cycleLabel(sub())).toBe('每月')
     expect(cycleLabel(sub({ unit: 'week', every: 2 }))).toBe('每 2 週')
@@ -158,6 +163,9 @@ describe('store：訂閱', () => {
     expect(store.state.subRates.USD).toBe(32.5)
     store.setSubRate('USD', -1)
     expect(store.state.subRates.USD).toBe(31)
+    // 小到四捨五入會變成 0 的：用預設，畫面和計算對得上
+    store.setSubRate('JPY', 0.00004)
+    expect(store.state.subRates.JPY).toBe(0.21)
     store.importJSON(JSON.stringify({ tasks: [], player: {}, subscriptions: [null, 5, { name: 'ok', price: 1 }, { name: '', price: 1 }, { name: 'bad', price: 'x' }], subRates: { USD: 'x', JPY: 0.2 } }))
     expect(store.state.subscriptions.map((x) => x.name)).toEqual(['ok'])
     expect(store.state.subRates).toMatchObject({ USD: 31, JPY: 0.2 })
