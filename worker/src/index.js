@@ -46,11 +46,12 @@ export default {
       const now = Date.now()
       if (ai) {
         // 通行碼錯太多次時先整個停一陣子（擋猜通行碼）；通行碼不對就不讀內容
-        await aiGate(env, now)
+        const ip = req.headers.get('cf-connecting-ip')
+        await aiGate(env, now, ip)
         try {
           await checkAI(env, req.headers.get('Authorization'))
         } catch (e) {
-          if (e.status === 401) await aiFailed(env, now)
+          if (e.status === 401) await aiFailed(env, now, ip)
           throw e
         }
       }

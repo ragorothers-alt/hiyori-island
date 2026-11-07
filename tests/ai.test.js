@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 import worker from '../worker/src/index.js'
-import { AI_FAILS } from '../worker/src/ai.js'
+import { AI_FAILS, AI_FAILS_ALL, ipKey } from '../worker/src/ai.js'
 import { createD1 } from './helpers/d1.js'
 
 // Worker 的 /v1/ai：Claude 的用戶端換成假的（env.AI_CLIENT），只檢查送出去的參數和回應的處理
@@ -18,8 +18,9 @@ function fakeClient(reply = {}) {
   }
 }
 const envOf = (client, extra = {}) => ({ ANTHROPIC_API_KEY: 'sk-test', AI_PASS: PASS, AI_CLIENT: client, ...extra })
-async function call(env, body, pass = PASS) {
+async function call(env, body, pass = PASS, ip = null) {
   const headers = { 'Content-Type': 'application/json' }
+  if (ip) headers['cf-connecting-ip'] = ip
   if (pass != null) headers.Authorization = `Bearer ${encodeURIComponent(pass)}`
   const res = await worker.fetch(new Request('https://hiyori.test/v1/ai', { method: 'POST', headers, body: JSON.stringify(body) }), env)
   return { status: res.status, body: await res.json() }
@@ -156,6 +157,31 @@ describe('濫用防護（有資料庫時）', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('照 IP 分開算：別人一直猜錯，自己的 AI 照常用；同一段 IPv6 算同一個；全部加起來太多才整個停', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 4, 10))
+    try {
+      const env = envOf(fakeClient(), { DB: createD1() })
+      for (let i = 0; i < AI_FAILS; i++) await call(env, { task: 'ping' }, '猜' + i, '2001:db8:1:2::' + (i + 1))
+      expect((await call(env, { task: 'ping' }, PASS, '2001:db8:1:2:aaaa::9')).status).toBe(429)
+      expect((await call(env, { task: 'ping' }, PASS, '203.0.113.7')).status).toBe(200)
+      expect((await call(env, { task: 'ping' }, PASS, '2001:db8:1:3::1')).status).toBe(200)
+      // 換很多 IP 來猜：加起來到上限就整個停
+      for (let i = AI_FAILS; i < AI_FAILS_ALL; i++) await call(env, { task: 'ping' }, '猜' + i, '198.51.100.' + (i % 250))
+      expect((await call(env, { task: 'ping' }, PASS, '203.0.113.7')).status).toBe(429)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('IPv6 只看前 64 位元，縮寫和補零都算同一段', () => {
+    expect(ipKey('2001:db8:0:2::1')).toBe('2001:db8:0:2::/64')
+    expect(ipKey('2001:0db8:0000:0002:ffff::')).toBe('2001:db8:0:2::/64')
+    expect(ipKey('2001:db8::5')).toBe('2001:db8:0:0::/64')
+    expect(ipKey('203.0.113.7')).toBe('203.0.113.7')
+    expect(ipKey(null)).toBe('unknown')
   })
 
   it('一天呼叫 Claude 的次數有上限；測試連線不算', async () => {

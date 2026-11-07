@@ -6,8 +6,10 @@ import { HttpError, bump, count } from './http.js'
 
 // 請求內容上限（位元組；中文一個字 3 個位元組）
 export const AI_MAX = 120_000
-// 擋猜通行碼：一小時內錯了這麼多次（不分 IP），整個 AI 先停到那一小時過完（對的通行碼也一樣）
+// 擋猜通行碼：同一個 IP（IPv6 算同一個 /64）一小時內錯了這麼多次，那個 IP 先停到那一小時過完（對的通行碼也一樣）。
+// 以前不分 IP：別人故意錯 20 次，自己的 AI 也跟著停。換很多 IP 來猜的，全部加起來錯到 AI_FAILS_ALL 次才整個停
 export const AI_FAILS = 20
+export const AI_FAILS_ALL = 200
 // 一天最多呼叫幾次 Claude（測試連線不算；可以用 [vars] AI_DAILY 改）：通行碼外洩也燒不完額度
 export const AI_DAILY = 200
 const HOUR = 3_600_000
@@ -133,11 +135,27 @@ export async function checkAI(env, auth) {
   if (!(await passOk(auth, env.AI_PASS))) throw new HttpError(401, 'bad pass')
 }
 
-// 檢查通行碼之前：最近錯太多次就先停（計數器在 D1 的 counters；沒有資料庫時不算）
-export async function aiGate(env, now) {
-  if ((await count(env.DB, 'ai-fail', now)) >= AI_FAILS) throw new HttpError(429, 'locked')
+// 計數用的 IP：IPv6 只看前 64 位元（一般一個家、一台手機就分到一整段），IPv4 看整個位址
+export function ipKey(ip) {
+  const s = String(ip || 'unknown').trim().toLowerCase()
+  if (!s.includes(':')) return s
+  const [head, tail = ''] = s.split('::')
+  const left = head ? head.split(':') : []
+  const right = tail ? tail.split(':') : []
+  const full = s.includes('::') ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right] : left
+  return full.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, '')).join(':') + '::/64'
 }
-export const aiFailed = (env, now) => bump(env.DB, 'ai-fail', HOUR, now)
+// 檢查通行碼之前：最近錯太多次就先停（計數器在 D1 的 counters；沒有資料庫時不算）
+export async function aiGate(env, now, ip) {
+  if ((await count(env.DB, `ai-fail:${ipKey(ip)}`, now)) >= AI_FAILS) throw new HttpError(429, 'locked')
+  if ((await count(env.DB, 'ai-fail', now)) >= AI_FAILS_ALL) throw new HttpError(429, 'locked')
+}
+export async function aiFailed(env, now, ip) {
+  await bump(env.DB, `ai-fail:${ipKey(ip)}`, HOUR, now)
+  await bump(env.DB, 'ai-fail', HOUR, now)
+  // 每個 IP 一列：過期的順手清掉，不會越積越多
+  await env.DB?.prepare(`DELETE FROM counters WHERE key LIKE 'ai-fail:%' AND reset_at <= ?1`).bind(now).run()
+}
 // 通過通行碼之後、呼叫 Claude 之前：算進今天的次數，超過上限就不呼叫
 export async function aiCount(env, body, now) {
   if (body.task === 'ping') return
