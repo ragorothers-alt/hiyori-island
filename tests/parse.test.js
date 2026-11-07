@@ -248,6 +248,18 @@ describe('任務的預估時間', () => {
     const ev = parseQuick('下午3點 開會 2小時', { today: '2026-10-29' })
     expect([ev.kind, ev.start, ev.end, ev.dur]).toEqual(['event', '15:00', '17:00', undefined])
   })
+
+  it('小時和分鐘加起來算：1小時30分鐘、1小時30分、2個半小時、半小時', () => {
+    const at = (s) => parseQuick(s, { today: '2026-10-29' })
+    expect([at('下午3點 開會 1小時30分鐘').end, at('下午3點 開會 1小時30分鐘').title]).toEqual(['16:30', '開會'])
+    expect(at('下午3點 開會 1小時30分').end).toBe('16:30')
+    expect(at('下午3點 開會 1hr 15min').end).toBe('16:15')
+    expect(at('早上9點 讀書 2個半小時').end).toBe('11:30')
+    expect(at('寫報告 1小時30分鐘').dur).toBe(90)
+    expect([at('讀書半小時').dur, at('讀書半小時').title]).toEqual([30, '讀書'])
+    // 單獨的「分」是分數，不是時長
+    expect([at('考到 100分').dur, at('考到 100分').title]).toEqual([undefined, '考到 100分'])
+  })
 })
 
 describe('整天的日程', () => {

@@ -22,6 +22,8 @@ const PERIOD = '(上午|早上|早晨|中午|下午|傍晚|晚上|凌晨|夜裡)
 const HOUR = '(\\d{1,2}|十[一二]?|[一二兩两三四五六七八九十])'
 // 一個時間點：14:30、下午3點、3點半、3點15分、晚上8點、9am
 const TIME = `${PERIOD}\\s*(?:${HOUR}\\s*[:：]\\s*(\\d{2})|${HOUR}\\s*[點点時时](半|\\d{1,2}\\s*分?)?|(\\d{1,2})\\s*(am|pm|AM|PM))`
+// 幾小時（可以接著幾分）：1.5小時、2個半小時、半小時、1小時30分鐘、1小時30分、2h、1hr 15min
+const HOURS = /(?:(\d+(?:\.\d+)?)\s*(?:個)?\s*(半)?|(半)\s*(?:個)?)\s*(?:小時|hr|h)(?![a-z])(?:\s*(\d+)\s*(?:分鐘|分钟|分|min|m)(?![a-z]))?/gi
 
 function toMinutes(period, h, m, guessPm = false) {
   if (h > 24 || m > 59) return null
@@ -223,17 +225,25 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
       }
     }
   }
+  // 時長：「1小時30分鐘」「1小時30分」「1.5小時」「2個半小時」「半小時」「45分鐘」全部加起來
+  // （以前後面的會蓋掉前面的：「1小時30分鐘」變成 30 分鐘）。沒寫是 null
+  const takeDur = (mins) => {
+    let total = null
+    const add = (n) => (total = (total || 0) + n)
+    take(HOURS, (_, n, half, half2, m) => add((n ? parseFloat(n) * 60 : 0) + (half || half2 ? 30 : 0) + (m ? +m : 0)))
+    take(mins, (_, n) => add(+n))
+    return total == null ? null : Math.round(total)
+  }
   if (out.start != null && out.end == null) {
-    let dur = 60
-    take(/(\d+(?:\.\d+)?)\s*(?:個)?\s*(?:小時|hr|h)(?![a-z])/gi, (_, n) => (dur = Math.round(parseFloat(n) * 60)))
-    take(/(\d+)\s*(?:分鐘|分钟|min|m)(?![a-z])/gi, (_, n) => (dur = +n))
+    const dur = takeDur(/(\d+)\s*(?:分鐘|分钟|min|m)(?![a-z])/gi) ?? 60
     out.end = Math.min(out.start + Math.max(5, dur), 1439)
   }
 
-  // 沒有時間的任務：「寫報告 1.5小時」「回信 20分鐘」當作預估時間（排時段用）
+  // 沒有時間的任務：「寫報告 1.5小時」「回信 20分鐘」當作預估時間（排時段用）。
+  // 單獨的「分」不算（「考到 100分」是分數）；跟在小時後面的「1小時30分」才算
   if (out.start == null) {
-    take(/(\d+(?:\.\d+)?)\s*(?:個)?\s*(?:小時|hr|h)(?![a-z])/gi, (_, n) => (out.dur = Math.min(600, Math.round(parseFloat(n) * 60)) || null))
-    take(/(\d+)\s*(?:分鐘|分钟|min)(?![a-z])/gi, (_, n) => (out.dur = Math.min(600, +n) || null))
+    const dur = takeDur(/(\d+)\s*(?:分鐘|分钟|min)(?![a-z])/gi)
+    if (dur != null) out.dur = Math.min(600, dur) || null
   }
 
   if (out.start != null) {
