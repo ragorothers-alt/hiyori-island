@@ -1955,6 +1955,16 @@ describe('週報', () => {
     expect(store.weekReport('2026-10-19', '2026-10-20').total).toBe(1)
   })
 
+  it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
+    setDate('2026-10-21')
+    const s1 = store.addTask({ title: '本命一', date: '2026-10-21' })
+    store.toggleStar(s1.id)
+    store.toggleTask(s1.id)
+    expect(store.weekReport()).toMatchObject({ stars: 1, starTotal: 1 })
+    store.deleteTask(s1.id)
+    expect(store.weekReport()).toMatchObject({ stars: 0, starTotal: 0 })
+  })
+
   it('記憶圖鑑：往回幾週有在用的才收，新的在前；有用過的日子', () => {
     setDate('2026-10-07')
     completeTask('十月第一週')

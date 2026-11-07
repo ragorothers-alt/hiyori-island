@@ -1170,16 +1170,19 @@ export class Store {
     const set = new Set(days)
     const tasks = this.state.tasks.filter((t) => set.has(t.date))
     const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null }
+    // 本命：完成的和總數都從同一批任務算（以前完成數看每天的紀錄，刪掉或改日期的本命會算出「1 / 0」）
     for (const t of tasks) {
       if (t.done) r.done++
-      if (t.star) r.starTotal++
+      if (t.star) {
+        r.starTotal++
+        if (t.done) r.stars++
+      }
     }
     r.rate = r.total ? r.done / r.total : 0
     for (const d of days) {
       const h = this.peekDay(d)
       r.focus += h.focus
       r.pomodoros += h.pomodoros
-      r.stars += h.stars
       if (h.tasks || h.focus || h.habits) r.active++
     }
     // 習慣：那幾天該做的次數裡做到了幾次（今天還沒做的不算進去）
