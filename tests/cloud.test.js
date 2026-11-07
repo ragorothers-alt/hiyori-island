@@ -81,6 +81,19 @@ async function pair() {
 }
 
 describe('同步碼與加密', () => {
+  it('伺服器說的版本跟加密內容裡的不一樣（舊的一份冒充新版本）：不換進來', async () => {
+    const { a, b } = await pair()
+    await a.run((s, sync) => {
+      s.addTask({ title: 'A 後來加的' })
+      return sync.sync()
+    })
+    later()
+    env.DB.raw.prepare(`UPDATE vaults SET rev = 'forged-rev'`).run()
+    await b.run((_s, sync) => sync.sync())
+    expect(b.sync.state).toBe('error')
+    expect(titles(b.store)).not.toContain('A 後來加的')
+  })
+
   it('新的同步碼是 28 碼 Crockford Base32（140 bits），輸入時容錯；以前的 16 碼照樣認得', () => {
     const code = newCode()
     expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){6}$/)
@@ -314,7 +327,7 @@ describe('線上同步', () => {
 
   it('同步碼打錯或格式不對時不會連上', async () => {
     const a = device()
-    await expect(a.run((_s, sync) => sync.join('1234'))).rejects.toThrow('16 個')
+    await expect(a.run((_s, sync) => sync.join('1234'))).rejects.toThrow('28 個')
     await expect(a.run((_s, sync) => sync.join(newCode()))).rejects.toThrow('找不到這組同步碼')
     expect(a.sync.state).toBe('off')
     expect(a.mem.getItem('hiyori-cloud-code')).toBeNull()

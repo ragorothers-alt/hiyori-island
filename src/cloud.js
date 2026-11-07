@@ -221,7 +221,7 @@ export class CloudSync extends SyncEngine {
   // 輸入別台的同步碼：先確認雲端有這組，再開始同步（這台已經有資料的話會問要留哪一邊）
   async join(text) {
     const code = normalizeCode(text)
-    if (!code) throw new Error('同步碼是 16 個英文字母和數字')
+    if (!code) throw new Error(`同步碼是 ${CODE_LEN} 個英文字母和數字（以前建立的是 ${OLD_LEN} 個）`)
     if (code === this.code && this._canSync()) return this.sync()
     const { id } = await deriveKeys(code)
     try {
@@ -287,6 +287,8 @@ export class CloudSync extends SyncEngine {
       throw new Error(e instanceof SyntaxError ? '雲端的資料格式不對' : e.message)
     }
     if (data?.app !== 'hiyori' || !data.state) throw new Error('雲端的資料格式不對')
+    // 加密內容裡的版本要跟伺服器說的一樣：伺服器（被入侵時）拿舊的一份冒充新版本，這裡就擋下來
+    if (data.state.rev && data.state.rev !== r.rev) throw new Error('雲端的資料版本對不上，先不同步')
     return { rev: r.rev, savedAt: r.savedAt, state: data.state }
   }
 
