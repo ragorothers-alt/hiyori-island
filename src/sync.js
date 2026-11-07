@@ -152,8 +152,8 @@ export class SyncEngine {
     if (!remote) return this._write('') // 雲端還沒有資料（剛建立）
     // 同步過的裝置，這台卻沒有自己的小島可推：沒有版本（被清掉了），或存檔讀不進來換成了範例島
     // （之後就算在範例島上加了東西也一樣）。一律拿雲端的回來，這台後來加的留成備份；
-    // 不會把範例島蓋到雲端、再傳到每一台
-    if (this.base && (!local || this.store.loadFailed)) return this._load(remote)
+    // 不會把範例島蓋到雲端、再傳到每一台。範例島上已經加了東西的話，那份一定要先備份成功才換
+    if (this.base && (!local || this.store.loadFailed)) return this._load(remote, { strict: true })
     if (remote.rev === this.base) return local !== this.base ? this._write(this.base) : this._ok()
     // 同一個版本（例如解除後重新連結）
     if (local === remote.rev) return this._synced(local)

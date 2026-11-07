@@ -188,6 +188,25 @@ describe('雲端資料夾同步', () => {
     expect(titles(b.sync.backup)).toContain('範例島上加的')
   })
 
+  it('同上，但範例島上加的那份備份存不進去：先不換，不會無聲蓋掉', async () => {
+    const a = device()
+    await a.run((s) => s.addTask({ title: '真正的資料' }))
+    await link(a, file)
+    a.mem.setItem('hiyori-daily-v1', '{壞掉的')
+    later()
+    const b = reopen(a)
+    await b.run((s) => s.addTask({ title: '範例島上加的' }))
+    const real = b.mem.setItem.bind(b.mem)
+    b.mem.setItem = (k, v) => {
+      if (k === 'hiyori-backup') throw new Error('QuotaExceededError')
+      real(k, v)
+    }
+    await resume(b, file)
+    expect(b.sync.state).toBe('error')
+    expect(titles(b.store)).toContain('範例島上加的')
+    expect(titles(b.store)).not.toContain('真正的資料')
+  })
+
   it('寫出去之後這台存不進去：base 不往前推，重新打開會再拉一次，不會拿舊存檔蓋掉', async () => {
     const a = device()
     await link(a, file)
