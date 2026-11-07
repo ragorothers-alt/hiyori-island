@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide } from '../src/planner.js'
+import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf } from '../src/planner.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 0 }
 const MON = '2026-10-26'
@@ -152,5 +152,20 @@ describe('今日總覽的「現在」（nowGuide）', () => {
     expect(g.bed).toBe(60)
     expect(g.toBed).toBe(30)
     expect(nowGuide({ rhythm: r, date: MON, nowMin: m('23:00'), events: [], tasks: [] }).toBed).toBe(120)
+  })
+})
+
+describe('已佔用的時間', () => {
+  it('做完的日程和任務不佔時間（提早結束的會議、做完的任務）', () => {
+    const rhythm = { ...DEFAULT_RHYTHM, buffer: 0 }
+    const events = [
+      { id: 'e1', start: '14:00', end: '15:00', done: false },
+      { id: 'e2', start: '16:00', end: '17:00', done: true },
+    ]
+    const tasks = [{ id: 't1', at: '18:00', dur: 30, done: true }]
+    const busy = busyOf({ rhythm, date: '2026-10-28', events, tasks })
+    expect(busy).toContainEqual([840, 900])
+    expect(busy).not.toContainEqual([960, 1020])
+    expect(busy).not.toContainEqual([1080, 1110])
   })
 })

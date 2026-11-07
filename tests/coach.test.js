@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
-import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, planRules, askCoach, coachInput, fitAI } from '../src/coach.js'
+import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, planRules, askCoach, coachInput, fitAI, splitTotal } from '../src/coach.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 10 }
 // 2026-10-26 是星期一
@@ -282,5 +282,17 @@ describe('一行輸入', () => {
     expect(parseCoachText('', MON).focus).toEqual([])
     expect(guessTag('慢跑')).toBe('health')
     expect(guessTag('季報告')).toBe('work')
+  })
+})
+
+describe('總時數切段', () => {
+  it('每段至少 20 分鐘，加起來不超過寫的總時數（每次 15 分鐘時也一樣）', () => {
+    const sum = (a) => a.reduce((x, y) => x + y, 0)
+    for (const [total, len] of [[45, 15], [60, 15], [100, 15], [90, 50], [180, 50], [20, 50]]) {
+      const parts = splitTotal(total, len)
+      expect(parts.every((p) => p >= 20)).toBe(true)
+      expect(sum(parts)).toBe(total)
+    }
+    expect(parseCoachText('數學 0.25小時', '2026-11-02').total).toBe(20)
   })
 })

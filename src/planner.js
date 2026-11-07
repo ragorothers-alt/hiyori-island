@@ -151,13 +151,14 @@ function windowOf({ rhythm, date, today, nowMin }) {
   return [from, s]
 }
 
-// 已佔用的時間：三餐、日程、已排的任務；日程與任務前後各留緩衝
+// 已佔用的時間：三餐、日程、已排的任務；日程與任務前後各留緩衝。
+// 已經做完的不佔（提早結束的會議、做完的任務），跟時間軸上的衝突判斷一樣
 export function busyOf({ rhythm, date, events, tasks, skip }) {
   const buf = rhythm.buffer || 0
   const busy = []
   for (const b of rhythmBlocks(rhythm, date)) if (b.kind === 'meal') busy.push([b.start, b.end])
   for (const b of itemBlocks(events, tasks.filter((t) => !skip?.has(t.id)))) {
-    if (b.kind === 'task' && b.done) continue
+    if (b.done) continue
     busy.push([b.start - buf, b.end + buf])
   }
   return busy

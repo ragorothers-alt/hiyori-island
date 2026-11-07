@@ -138,7 +138,8 @@ export function parseCoachText(text, today) {
     out.scope ??= 'day'
     out.date ??= addDays(today, 2)
   })
-  take(/(\d+(?:\.\d+)?)\s*(?:個)?\s*(?:小時|鐘頭|hrs?|h)(?![a-z])/i, (m) => (out.total = clamp(Math.round(+m[1] * 60), 15, 3000)))
+  // 總時數至少一段的長度（MIN_SESSION）：「0.25小時」排不出比它短的一段
+  take(/(\d+(?:\.\d+)?)\s*(?:個)?\s*(?:小時|鐘頭|hrs?|h)(?![a-z])/i, (m) => (out.total = clamp(Math.round(+m[1] * 60), MIN_SESSION, 3000)))
   take(/(\d+)\s*(?:分鐘|分|mins?)(?![a-z])/i, (m) => (out.len = clamp(round5(+m[1]), 15, 120)))
   take(/[#＃](\S+)/, (m) => {
     const t = TAGS.find((x) => x.id === m[1].toLowerCase() || x.label === m[1])
@@ -225,9 +226,10 @@ function spread(cands, k, seed) {
   return [...picked].sort((a, b) => a - b).map((j) => cands[j])
 }
 
-// 總時數切成差不多長的幾段（每段接近 len，加起來剛好是總時數；以 5 分鐘為單位）
-function splitTotal(total, len) {
-  const n = Math.max(1, Math.round(total / len))
+// 總時數切成差不多長的幾段（每段接近 len，加起來剛好是總時數；以 5 分鐘為單位）。
+// 每段至少 MIN_SESSION：段數不超過「總時數 ÷ 最短一段」，每次 15 分鐘也不會排得比寫的總時數多
+export function splitTotal(total, len) {
+  const n = Math.max(1, Math.min(Math.round(total / len), Math.floor(total / MIN_SESSION)))
   const base = Math.max(MIN_SESSION, Math.floor(total / n / 5) * 5)
   let rest = Math.max(0, round5(total) - base * n)
   return Array.from({ length: n }, () => {
@@ -362,7 +364,7 @@ export function coachInput(req) {
     const free = d.wins.flatMap(([a, b]) => gaps(a, b, d.busy)).filter(([p, q]) => q - p >= 15)
     const name = (x) => String(x.title || '').slice(0, 30)
     const busy = [
-      ...ctx.events.filter((e) => e.date === date).map((e) => `${e.start}-${e.end} ${name(e)}`.trim()),
+      ...ctx.events.filter((e) => e.date === date && !e.done).map((e) => `${e.start}-${e.end} ${name(e)}`.trim()),
       ...ctx.tasks.filter((t) => t.date === date && t.at && !t.done).map((t) => `${t.at} ${name(t)}`.trim()),
     ]
     return { date, weekday: WEEK_ZH[weekday(date)], free: free.map(([p, q]) => `${toHHMM(p)}-${toHHMM(q)}`), busy: busy.slice(0, 12) }
