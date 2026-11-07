@@ -26,6 +26,44 @@ test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後�
   await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.filter((t) => t.coach).length)).toBe(before)
 })
 
+test('專案搜尋：按 / 跳到搜尋框，里程碑也找得到；Esc 清掉字，Enter 打開第一個', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const list = [['期末報告', ['找資料', '寫初稿']], ['搬家', ['打包紙箱']], ['日文檢定', ['單字', '模擬考 N2']], ['健身計畫', ['深蹲']], ['作品集網站', ['首頁版型']]]
+    for (const [name, milestones] of list) s.addProject({ name, milestones })
+  })
+  const q = page.locator('#projectQuery')
+  // 從總覽頁按 / ：切到專案、游標在搜尋框
+  await page.keyboard.press('/')
+  await expect(q).toBeFocused()
+  await q.fill('模擬考')
+  const cards = page.locator('#projectList .proj')
+  await expect(cards).toHaveCount(1)
+  await expect(cards.first().locator('.proj-name')).toHaveText('日文檢定')
+  await expect(cards.first().locator('.proj-hit mark')).toHaveText('模擬考')
+
+  // Esc：先清掉字，列表回到全部
+  await q.press('Escape')
+  await expect(q).toHaveValue('')
+  await expect.poll(() => cards.count()).toBeGreaterThanOrEqual(5)
+
+  // 找不到：可以直接用這個名字開新專案
+  await q.fill('不存在的東西')
+  await expect(page.locator('#projectList [data-act="new-from-q"]')).toBeVisible()
+
+  // Ctrl+K 也叫得出來；Enter 打開第一個結果的詳情
+  await q.evaluate((el) => el.blur())
+  await page.keyboard.press('Control+k')
+  await expect(q).toBeFocused()
+  await q.fill('搬家')
+  await q.press('Enter')
+  await expect(page.locator('#projectDetail')).toBeVisible()
+  await expect(page.locator('#projectDetail')).toContainText('搬家')
+})
+
 test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數；停掉後重新整理是待機', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)

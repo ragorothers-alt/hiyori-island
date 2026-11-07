@@ -207,6 +207,13 @@
             <button class="btn-primary" type="submit">開始建造</button>
           </div>
         </form>
+        <!-- 快捷搜尋：專案多了才出現；/ 或 Ctrl／⌘＋K 從哪一頁都能直接跳過來 -->
+        <div class="proj-search" id="projectSearch" role="search" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+          <input type="search" id="projectQuery" maxlength="40" placeholder="搜尋專案、里程碑、筆記" aria-label="搜尋專案（名稱、里程碑、筆記、進度都找）" autocomplete="off" enterkeyhint="search" data-nodraft />
+          <kbd aria-hidden="true">/</kbd>
+        </div>
+        <p class="sr-only" id="projectFound" role="status"></p>
         <div class="seg proj-filter" id="projectFilter" hidden></div>
         <div id="projectList"></div>
         <details class="archive" id="archiveBox" hidden>

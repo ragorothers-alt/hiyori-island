@@ -379,6 +379,24 @@ body.night .dl-edit input { color-scheme: dark; }
 .proj-actions button:hover { background: rgba(140, 170, 200, .16); color: var(--ink); }
 .archive summary { cursor: pointer; font-size: 12.5px; color: var(--ink-soft); padding: 6px 4px; }
 .archive .proj { opacity: .8; }
+/* 專案的快捷搜尋：放大鏡在左、`/` 提示在右（打字或有字時收起來；觸控裝置不顯示） */
+.proj-search { position: relative; display: flex; align-items: center; margin: 0 0 10px; }
+.proj-search svg { position: absolute; left: 12px; width: 15px; height: 15px; fill: none; stroke: var(--ink-faint); stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+.proj-search input { flex: 1; min-width: 0; outline: 0; border: 1px solid var(--glass-border); background: var(--field); border-radius: 14px; padding: 8px 36px 8px 34px; font-size: 13.5px; color: var(--ink); }
+.proj-search input::placeholder { color: var(--ink-faint); }
+.proj-search input:focus { box-shadow: 0 0 0 2px var(--focus); }
+:root .proj-search input:focus-visible { outline: none; }
+.proj-search kbd { position: absolute; right: 10px; font: 500 11px/18px var(--font-num); color: var(--ink-faint); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; pointer-events: none; }
+.proj-search input:focus ~ kbd, .proj-search input:not(:placeholder-shown) ~ kbd { display: none; }
+@media (hover: none), (pointer: coarse) { .proj-search kbd { display: none; } }
+body.night .proj-search input { color-scheme: dark; }
+.proj mark { background: color-mix(in srgb, var(--c) 32%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.proj-hit { font-size: 12px; line-height: 1.55; color: var(--ink-soft); margin: -4px 0 8px; overflow-wrap: anywhere; }
+.proj-hit b { font-weight: 500; font-size: 11px; color: var(--ink-faint); letter-spacing: .08em; margin-right: 6px; }
+/* 上下鍵選到的那個（搜尋框有焦點時才框起來） */
+.proj-search:focus-within ~ #projectList .proj.sel { box-shadow: 0 0 0 2px var(--c); }
+.proj-group { font-size: 12.5px; font-weight: 500; color: var(--ink-soft); margin: 14px 4px 8px; }
+#projectList .empty .btn-ghost { margin-top: 10px; }
 
 /* 紀錄 */
 .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 6px; }
@@ -939,7 +957,9 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 .panel.full [data-page="projects"] { max-width: 1100px; }
 .panel.full #projectForm { max-width: 640px; margin-left: auto; margin-right: auto; }
 .panel.full #projectList, .panel.full #archiveList { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; align-items: start; }
-.panel.full #projectList > .empty { grid-column: 1 / -1; }
+.panel.full #projectList > :is(.empty, .proj-group) { grid-column: 1 / -1; }
+.panel.full .proj-group { margin: 4px 4px -4px; }
+.panel.full .proj-search { max-width: 640px; margin-left: auto; margin-right: auto; }
 .panel.full .proj { margin-bottom: 0; }
 
 @media (min-width: 861px) {
@@ -1220,6 +1240,7 @@ body.app-mode :is(.hb-card.done:hover, .hb-card.done.open) { background: color-m
 /* 焦點和標記的外框照舊 */
 body.app-mode .add-form:focus-within { box-shadow: 0 0 0 2px var(--focus); }
 body.app-mode .proj.hl { box-shadow: 0 0 0 2px var(--c); }
+body.app-mode .proj-search input { background: var(--card-bg); border-color: transparent; }
 /* 教練的輸入框浮在內容上：實心底、留一點陰影 */
 body.app-mode .coach-say { background: var(--card-bg); border-color: transparent; border-radius: 22px; }
 /* 任務列表變成 iOS 的分組列表：一整張卡片，一列一列用細線隔開（線從標題開始）；本命在左邊一道金色 */
