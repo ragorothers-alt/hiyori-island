@@ -319,7 +319,7 @@ export class ScheduleView {
     const s = this.store
     const item = type === 'event' ? s.state.events.find((e) => e.id === id) : s.state.tasks.find((t) => t.id === id)
     if (!item) return
-    this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay }
+    this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay, ongoing: !!item.ongoing }
     this._sheet(item)
   }
   openCreate(minute) {
@@ -357,7 +357,8 @@ export class ScheduleView {
         ${routine ? '' : `<div class="form-row"><button type="button" class="chip-toggle${ad ? ' on' : ''}" data-allday aria-pressed="${ad}" title="沒有時段的日程，例如朋友來玩、旅行（可以好幾天）">整天</button></div>`}
         <div class="swatches ec-colors">${swatches}</div>
         <textarea name="note" maxlength="200" rows="2" placeholder="備註：地點、要帶的東西…" aria-label="備註">${esc(item.note || '')}</textarea>`
-      : `<div class="ec-grid">
+      : `<div class="form-row ec-long"${item.project ? '' : ' hidden'}><button type="button" class="chip-toggle${ed.ongoing ? ' on' : ''}" data-long aria-pressed="${ed.ongoing}" title="不排在哪一天：不會逾期、不出現在每天的任務裡，只待在專案；完成那天才開花">長期</button><small class="ec-long-tip">不排日期，只待在專案裡（例如一首練習曲）</small></div>
+        <div class="ec-grid"${ed.ongoing ? ' hidden' : ''}>
           <label>日期<input type="date" name="date" value="${item.date}" required></label>
           <label>開始<input type="time" name="at" value="${item.at || ''}"></label>
           <label>預估時間<select name="dur">${[...new Set([...DURS, taskDur(item)])].sort((a, b) => a - b).map((d) => `<option value="${d}" ${d === taskDur(item) ? 'selected' : ''}>${fmtDur(d)}</option>`).join('')}</select></label>
@@ -373,7 +374,7 @@ export class ScheduleView {
       <div class="ec-actions">
         ${ed.create ? '' : `<button type="button" class="btn-ghost danger" data-ec="delete">刪除</button>
           ${ev && ad ? '' : `<button type="button" class="btn-ghost" data-ec="done">${item.done ? '改回未完成' : '完成'}</button>`}`}
-        ${!ev && !item.done ? `<button type="button" class="btn-ghost" data-ec="slot">${item.at ? '移到最近空檔' : '排進最近空檔'}</button>` : ''}
+        ${!ev && !item.done && !item.ongoing ? `<button type="button" class="btn-ghost" data-ec="slot">${item.at ? '移到最近空檔' : '排進最近空檔'}</button>` : ''}
         ${!ev && item.at ? '<button type="button" class="btn-ghost" data-ec="unplan">移回未排時段</button>' : ''}
         <span class="sp"></span>
         <button type="button" class="btn-ghost" data-ec="cancel">取消</button>
@@ -383,6 +384,20 @@ export class ScheduleView {
     $('#editSheet').hidden = false
     const title = $('#editSheet [name="title"]')
     if (ed.create) title.focus()
+  }
+
+  // 編輯面板的「長期」：藏起日期、開始時間和預估時間；改回排在某一天時日期至少是今天（不會一改回來就逾期）
+  _setLong(on) {
+    const ed = this.editing
+    const sheet = $('#editSheet')
+    if (!ed) return
+    ed.ongoing = on
+    const btn = sheet.querySelector('[data-long]')
+    if (btn) setOn(btn, on)
+    const grid = sheet.querySelector('.ec-grid')
+    if (grid) grid.hidden = on
+    const date = sheet.querySelector('[name="date"]')
+    if (!on && date && date.value < this.store.today) date.value = this.store.today
   }
 
   // 任務歸在哪個專案、算在哪個里程碑（收藏起來的專案不列，除非這件本來就歸在那裡）
@@ -432,7 +447,9 @@ export class ScheduleView {
       const at = form.at.value || null
       const proj = form.elements.project
       const ms = proj ? { project: proj.value || null, ms: form.elements.ms?.value || null } : {}
-      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...ms })
+      // 長期只有歸在專案裡的任務可以設（store 也會再檢查一次）
+      const ongoing = !!ed.ongoing && !!(proj ? proj.value : s.state.tasks.find((t) => t.id === ed.id)?.project)
+      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...ms, ongoing })
     }
     this.closeEdit()
   }
@@ -618,10 +635,15 @@ export class ScheduleView {
       e.preventDefault()
       this._saveSheet(e.target)
     })
-    // 換專案：里程碑的選項跟著換成那個專案的
+    // 換專案：里程碑的選項跟著換成那個專案的；不歸任何專案就不能是長期任務
     sheet.addEventListener('change', (e) => {
       if (e.target.name !== 'project' || this.editing?.type !== 'task') return
       const item = s.state.tasks.find((t) => t.id === this.editing.id)
+      const long = sheet.querySelector('.ec-long')
+      if (long) {
+        long.hidden = !e.target.value
+        if (!e.target.value && this.editing.ongoing) this._setLong(false)
+      }
       const box = sheet.querySelector('.ec-ms')
       if (!item || !box) return
       const ms = this._msOptions(item, e.target.value)
@@ -647,6 +669,8 @@ export class ScheduleView {
         ed.tag = tag.dataset.tag
         pickOne(sheet.querySelectorAll('[data-tag]'), (x) => x === tag)
       }
+      // 長期／排在某一天：只換看得到的欄位
+      if (e.target.closest('[data-long]')) return this._setLong(!ed.ongoing)
       // 整天／有時段：只換看得到的欄位，打到一半的名稱和備註都留著
       const adBtn = e.target.closest('[data-allday]')
       if (adBtn) {

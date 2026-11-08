@@ -39,7 +39,8 @@ const POMO_SIDS = 20
 // 存檔格式的版本。比這個新的資料是新版 App 寫的：這一版看不懂新的欄位，不能讀進來再用舊的格式寫回去
 // （舊的 PWA 分頁還開著、另一個分頁已經更新了的時候會遇到）。加了新的欄位就往上加一：
 // 3：訂閱（subscriptions、subRates）和警語（mottos）
-export const DATA_VERSION = 3
+// 4：專案裡的長期任務（task.ongoing）：舊版讀進來會把它當成排在建立那天的任務，隔天就變逾期
+export const DATA_VERSION = 4
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
@@ -332,6 +333,9 @@ const DATE_RE = { test: (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.te
 const TIME_RE = strict(/^([01]\d|2[0-3]):[0-5]\d$/)
 const ID_RE = strict(/^[\w-]{1,40}$/)
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
+// 長期任務（專案裡慢慢推進、沒排在哪一天的事，例如一首練習曲）還沒完成時不屬於任何一天：
+// 不出現在每天的任務、花圃和排程裡，也不會逾期；完成的那天才記在那天
+export const floating = (t) => !!t?.ongoing && !t.done
 const str = (v, max = 120) => (typeof v === 'string' ? v.slice(0, max) : '')
 const num = (v, min, max, dflt) => (Number.isFinite(+v) ? Math.min(max, Math.max(min, Math.round(+v))) : dflt)
 const ts = (v) => (Number.isFinite(+v) && +v > 0 ? +v : null)
@@ -355,6 +359,7 @@ const TASK_PATCH = {
   project: (v) => (ID_RE.test(v) ? v : null),
   ms: (v) => (ID_RE.test(v) ? v : null),
   note: (v) => str(v, PL.taskNote).trim(),
+  ongoing: (v) => !!v,
 }
 const EVENT_PATCH = {
   title: (v, e) => str(v).trim() || e.title,
@@ -496,6 +501,8 @@ function migrate(s) {
       // project：歸在哪個專案；ms：自己選的里程碑，null＝自動（下面清完專案後，對不上的拿掉）
       project: ID_RE.test(t.project) ? t.project : null,
       ms: ID_RE.test(t.ms) ? t.ms : null,
+      // ongoing：長期任務（只有歸在專案裡的可以是；下面清完專案後再檢查一次）
+      ongoing: !!t.ongoing,
       // msAuto：沒自己選里程碑時，完成那一刻自動歸到的里程碑（之後里程碑取消又勾回來也不會換）
       msAuto: done && ID_RE.test(t.msAuto) ? t.msAuto : null,
       // 任務頁上的說明（要做到什麼程度、要注意的事）
@@ -603,6 +610,16 @@ function migrate(s) {
     if (t.msAuto && !msOf.get(t.project)?.has(t.msAuto)) t.msAuto = null
     // 以前做完、還沒記下自動歸屬的：照現在的里程碑補上，之後就固定在那裡
     if (t.done && t.project && !t.ms && !t.msAuto) t.msAuto = taskMilestone(projById.get(t.project), t)?.id || null
+    // 長期任務只能待在專案裡：專案不在了就變回一般任務，還沒做完的排在今天（建立那天很久以前也不會一下子變逾期）
+    if (t.ongoing && !t.project) {
+      t.ongoing = false
+      if (!t.done) t.date = today
+    }
+    // 還沒完成的長期任務不排在哪一天：沒有時段、不當本命
+    if (floating(t)) {
+      t.at = null
+      t.star = false
+    }
   }
   // 重新分配塔位：重複的換到空地，空地不夠就先不上島；進行中的專案超過上限的改為收藏
   const used = new Set()
@@ -1031,11 +1048,12 @@ export class Store {
   peekDay(date) {
     return this.state.history[date] || emptyDay()
   }
+  // 那天的任務（還沒完成的長期任務不屬於任何一天）
   tasksOn(date) {
-    return this.state.tasks.filter((t) => t.date === date)
+    return this.state.tasks.filter((t) => t.date === date && !floating(t))
   }
   overdue() {
-    return this.state.tasks.filter((t) => !t.done && t.date < this.today)
+    return this.state.tasks.filter((t) => !t.done && !t.ongoing && t.date < this.today)
   }
   // 花圃要種的任務：那天的任務；看今天時，再加上最近 7 天還沒完成的（花會垂下）與今天才補完成的逾期任務
   gardenTasks(date) {
@@ -1043,7 +1061,7 @@ export class Store {
     if (date !== this.today) return list
     const since = addDays(this.today, -7)
     const late = this.state.tasks.filter(
-      (t) => t.date < this.today && t.date >= since && (!t.done || (t.doneAt && dateStr(new Date(t.doneAt)) === this.today)),
+      (t) => t.date < this.today && t.date >= since && !floating(t) && (!t.done || (t.doneAt && dateStr(new Date(t.doneAt)) === this.today)),
     )
     return [...list, ...late]
   }
@@ -1183,7 +1201,7 @@ export class Store {
     const days = []
     for (let d = wk; d <= end; d = addDays(d, 1)) days.push(d)
     const set = new Set(days)
-    const tasks = this.state.tasks.filter((t) => set.has(t.date))
+    const tasks = this.state.tasks.filter((t) => set.has(t.date) && !floating(t))
     const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null }
     // 本命：完成的和總數都從同一批任務算（以前完成數看每天的紀錄，刪掉或改日期的本命會算出「1 / 0」）
     for (const t of tasks) {
@@ -1580,12 +1598,19 @@ export class Store {
   }
 
   // ── 任務 ──
-  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null }) {
+  // ongoing：長期任務（要歸在專案裡才算），日期記成今天、不排時段；subs：一起建好的子任務（標題）
+  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [] }) {
     const p = project ? this._find('projects', project) : null
+    const long = !!ongoing && !!p
     const t = {
-      id: uid(), title: title.trim(), date, priority, tag, done: false, rewarded: false, createdAt: Date.now(),
-      dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: TIME_RE.test(at) ? at : null,
-      project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null, subs: [],
+      id: uid(), title: String(title || '').trim(), date: long ? this.today : date, priority, tag, done: false, rewarded: false, createdAt: Date.now(),
+      dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: !long && TIME_RE.test(at) ? at : null,
+      project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null, ongoing: long,
+      subs: (Array.isArray(subs) ? subs : [])
+        .map((x) => String(x || '').trim().slice(0, PL.subTitle))
+        .filter(Boolean)
+        .slice(0, PL.subs)
+        .map((x) => ({ id: uid(), title: x, done: false })),
     }
     if (!t.title) return null
     this.state.tasks.push(t)
@@ -1610,7 +1635,8 @@ export class Store {
       this._finish()
       return
     }
-    if (t.date < this.today) return
+    // 本命是那一天的事：過去的日子、還沒排在哪一天的長期任務都不能選
+    if (t.date < this.today || floating(t)) return
     const n = this.starsOn(t.date).length
     if (n >= MAX_STARS) {
       this.emit('starFull', t)
@@ -1626,6 +1652,13 @@ export class Store {
     this._refreshToday()
     t.done = !t.done
     t.doneAt = t.done ? Date.now() : null
+    // 長期任務記在完成的那天：花開在今天的花圃、算進今天完成的件數（不算補做逾期的）
+    if (t.done && t.ongoing) t.date = this.today
+    // 取消完成又回到長期：不排在哪一天，以前排的時段和本命拿掉（跟改成長期、讀存檔時一樣）
+    if (floating(t)) {
+      t.at = null
+      t.star = false
+    }
     // 沒自己選里程碑的專案任務：記下完成這一刻歸到哪個里程碑
     t.msAuto = null
     if (t.done && t.project && !t.ms) t.msAuto = taskMilestone(this._find('projects', t.project) || { milestones: [] }, t)?.id || null
@@ -1714,12 +1747,19 @@ export class Store {
     const t = this._find('tasks', id)
     if (!t) return
     patch = cleanPatch(t, patch, TASK_PATCH)
-    // 還沒完成的任務往後挪：記一次（卡關提醒用）
-    if (patch.date && DATE_RE.test(t.date) && patch.date > t.date && !t.done) t.moved = (t.moved || 0) + 1
     // 歸到的專案要真的存在；null／空字串＝不歸任何專案
     if ('project' in patch && !(patch.project && this._find('projects', patch.project))) patch = { ...patch, project: null }
-    // 換了專案，里程碑就改回自動；選的里程碑要在（換過之後的）那個專案裡，null＝自動
     const pid = 'project' in patch ? patch.project : t.project
+    // 長期只有歸在專案裡的任務可以設：移出專案就變回一般任務。
+    // 長期改回一般任務時，還沒做完的至少排在今天（沒指定日期、或指定的日子已經過去），一變回來就不會是逾期
+    const long = !!pid && ('ongoing' in patch ? patch.ongoing : !!t.ongoing)
+    if ('ongoing' in patch || long !== !!t.ongoing) {
+      patch = { ...patch, ongoing: long }
+      if (!long && t.ongoing && !t.done && !(patch.date >= this.today)) patch.date = this.today
+    }
+    // 還沒完成的任務往後挪：記一次（卡關提醒用）。長期任務的日期不算數
+    if (patch.date && DATE_RE.test(t.date) && patch.date > t.date && !t.done && !t.ongoing && !long) t.moved = (t.moved || 0) + 1
+    // 換了專案，里程碑就改回自動；選的里程碑要在（換過之後的）那個專案裡，null＝自動
     if ('ms' in patch || pid !== t.project) {
       const ms = 'ms' in patch ? patch.ms : null
       patch = { ...patch, ms: this._find('projects', pid)?.milestones.some((m) => m.id === ms) ? ms : null }
@@ -1728,6 +1768,11 @@ export class Store {
     // 原本歸的專案和（換過去的）新專案都算動到了
     this._editedTask(t)
     Object.assign(t, patch)
+    // 還沒完成的長期任務不排在哪一天：沒有時段、不當本命
+    if (floating(t)) {
+      t.at = null
+      t.star = false
+    }
     // 換了專案或改了里程碑：做完的任務照新的歸屬重新記一次自動里程碑
     if ('ms' in patch) t.msAuto = t.done && t.project && !t.ms ? taskMilestone(this._find('projects', t.project), t)?.id || null : null
     this._editedTask(t)
@@ -1749,6 +1794,13 @@ export class Store {
     // 搬過來的紀錄一則都不丟（就算超過上限，讀檔時也只擋異常大的匯入）
     to.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
   }
+  // 任務不再歸在專案裡（專案刪掉、範例清掉）：長期任務變回一般任務，還沒做完的排在今天
+  _leaveProject(t) {
+    t.project = t.ms = null
+    if (!t.ongoing) return
+    t.ongoing = false
+    if (!t.done) t.date = this.today
+  }
   // 任務刪掉了：指著它的紀錄留在專案裡，只是不再算那件任務的
   _dropTaskRefs() {
     const ids = new Set(this.state.tasks.map((t) => t.id))
@@ -1759,10 +1811,14 @@ export class Store {
     const p = t?.project && this._find('projects', t.project)
     return p ? p.logs.filter((l) => l.task === t.id) : []
   }
-  // 歸在這個專案的任務：還沒完成的照日期，已完成的新的在前
+  // 歸在這個專案的任務：還沒完成的照日期，已完成的新的在前。
+  // 長期任務當成「現在正在做的」：排在逾期和今天的後面、之後日子的前面，彼此照建立的順序
   projectTasks(pid) {
     const list = this.state.tasks.filter((t) => t.project === pid)
-    const todo = list.filter((t) => !t.done).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
+    const key = (t) => (t.ongoing ? this.today : t.date)
+    const todo = list
+      .filter((t) => !t.done)
+      .sort((a, b) => key(a).localeCompare(key(b)) || !!a.ongoing - !!b.ongoing || a.createdAt - b.createdAt)
     const done = list.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0))
     return { todo, done }
   }
@@ -1787,7 +1843,7 @@ export class Store {
   stuckTasks(off = new Set()) {
     const list = []
     for (const t of this.state.tasks) {
-      if (t.done || t.routineId || off.has(t.id) || t.date > this.today) continue
+      if (t.done || t.ongoing || t.routineId || off.has(t.id) || t.date > this.today) continue
       const late = daysBetween(t.date, this.today)
       if ((t.moved || 0) >= 2 || late >= 3) list.push({ task: t, moved: t.moved || 0, late })
     }
@@ -1922,7 +1978,8 @@ export class Store {
   // 把任務排進時間軸（at 為 null 就收回未排區）；dur 是預估分鐘數
   scheduleTask(id, at, dur) {
     const t = this._find('tasks', id)
-    if (!t) return
+    // 還沒完成的長期任務不排在哪一天，也就沒有時段
+    if (!t || floating(t)) return
     t.at = TIME_RE.test(at) ? at : null
     if (dur !== undefined) t.dur = dur ? Math.max(5, Math.min(600, Math.round(dur))) : null
     this._finish([['taskScheduled', t]])
@@ -2336,7 +2393,7 @@ export class Store {
     // 跟刪掉一筆進度一樣：整個專案刪掉，它的進度也不算進累計筆數（不能建了寫、寫了刪來刷成就）
     this.stats.projectLogs = Math.max(0, this.stats.projectLogs - p.logs.length)
     this.state.projects = this.state.projects.filter((x) => x.id !== id)
-    for (const t of this.state.tasks) if (t.project === id) t.project = t.ms = null
+    for (const t of this.state.tasks) if (t.project === id) this._leaveProject(t)
     this._fillSlots()
     this._finish()
   }
@@ -2608,7 +2665,7 @@ export class Store {
     for (const date of dates) events.push(...this._routineEventsOn(date))
     return {
       today: this.today, nowMin: n.getHours() * 60 + n.getMinutes(), rhythm: this.state.rhythm,
-      events, tasks: this.state.tasks.filter((t) => set.has(t.date) && t.at && !t.done),
+      events, tasks: this.state.tasks.filter((t) => set.has(t.date) && t.at && !t.done && !t.ongoing),
     }
   }
   // 套用ふじ排的計畫：一次建好所有任務（有時段、有預估時間）。meta：{ title, answers（下次的預設）, custom（自己加的主攻項目） }
@@ -3027,7 +3084,7 @@ export class Store {
     this.state.projects = drop(this.state.projects, x.projects)
     // 自己加的任務歸在被清掉的範例專案：任務留著，只拿掉歸屬
     const gone = new Set(x.projects.map((p) => p.id))
-    for (const t of this.state.tasks) if (gone.has(t.project)) t.project = t.ms = null
+    for (const t of this.state.tasks) if (gone.has(t.project)) this._leaveProject(t)
     this._dropTaskRefs()
     const n = x.tasks.length + x.events.length + x.projects.length
     if (n) this._finish()

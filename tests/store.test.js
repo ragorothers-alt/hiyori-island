@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue,
+  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
@@ -2214,5 +2214,148 @@ describe('子任務', () => {
     expect(a.subs[0]).toMatchObject({ title: '留著', done: true })
     expect(a.subs[0].id).toMatch(/^[a-z0-9]+$/)
     expect(b.subs).toEqual([])
+  })
+})
+
+describe('專案裡的長期任務', () => {
+  const proj = () => store.addProject({ name: '練習鋼琴', milestones: ['基本功'] })
+
+  it('沒排在哪一天：不在每天的任務、花圃、排程和週報裡，過了幾天也不會逾期或卡關', () => {
+    const p = proj()
+    const t = store.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true, date: addDays(TODAY, -5), at: '20:00' })
+    expect(t).toMatchObject({ ongoing: true, date: TODAY, at: null })
+    expect(floating(t)).toBe(true)
+    expect(store.tasksOn(TODAY)).not.toContain(t)
+    expect(store.gardenTasks(TODAY)).not.toContain(t)
+    expect(store.planTasks(TODAY)).not.toContain(t)
+    expect(store.weekReport().total).toBe(0)
+    setDate(addDays(TODAY, 5))
+    store.tick()
+    expect(store.overdue()).not.toContain(t)
+    expect(store.gardenTasks(store.today)).not.toContain(t)
+    expect(store.stuckTasks()).toEqual([])
+    expect(store.projectTasks(p.id).todo).toEqual([t])
+  })
+
+  it('完成那天才記在那天：花開在今天、經驗值照常、不算補做逾期；取消完成又回到長期', () => {
+    const p = proj()
+    const t = store.addTask({ title: '布爾格繆勒 No.2', project: p.id, ongoing: true })
+    const revive = vi.fn()
+    store.on('revive', revive)
+    setDate(addDays(TODAY, 3))
+    store.tick()
+    const xp = store.state.player.xp
+    store.toggleTask(t.id)
+    expect(t).toMatchObject({ done: true, date: store.today })
+    expect(t.flower).toBeTruthy()
+    expect(store.state.player.xp).toBeGreaterThan(xp)
+    expect(revive).not.toHaveBeenCalled()
+    expect(store.tasksOn(store.today)).toContain(t)
+    expect(store.gardenTasks(store.today)).toContain(t)
+    expect(store.weekReport()).toMatchObject({ total: 1, done: 1 })
+    store.toggleTask(t.id)
+    expect(floating(t)).toBe(true)
+    expect(store.tasksOn(store.today)).not.toContain(t)
+    expect(store.overdue()).not.toContain(t)
+    expect(store.stats.tasksDone).toBe(1)
+  })
+
+  it('一定要歸在專案裡；新增時可以一起帶子任務（空白的不加、有長度和個數上限）', () => {
+    const plain = store.addTask({ title: '沒有專案', ongoing: true, date: addDays(TODAY, 2) })
+    expect(plain).toMatchObject({ ongoing: false, date: addDays(TODAY, 2) })
+    const p = proj()
+    const t = store.addTask({ title: '哈農', project: p.id, ongoing: true, subs: [' 讀譜 ', '', '分手練', 'x'.repeat(100), ...Array.from({ length: 40 }, (_, i) => `s${i}`)] })
+    expect(t.subs).toHaveLength(30)
+    expect(t.subs.slice(0, 3).map((x) => x.title)).toEqual(['讀譜', '分手練', 'x'.repeat(80)])
+    expect(new Set(t.subs.map((x) => x.id)).size).toBe(30)
+    expect(t.subs.every((x) => x.done === false)).toBe(true)
+  })
+
+  it('改成長期：時段和本命拿掉、改日期不算往後挪；改回一般任務或移出專案時排在今天', () => {
+    const p = proj()
+    const t = store.addTask({ title: '小奏鳴曲', project: p.id, date: TODAY, at: '19:00' })
+    store.toggleStar(t.id)
+    expect(t.star).toBe(true)
+    store.updateTask(t.id, { ongoing: true })
+    expect(t).toMatchObject({ ongoing: true, at: null, star: false })
+    store.updateTask(t.id, { date: addDays(TODAY, 4) })
+    expect(t.moved || 0).toBe(0)
+    store.toggleStar(t.id)
+    expect(t.star).toBe(false)
+    setDate(addDays(TODAY, 2))
+    store.tick()
+    // 改回一般任務、給的日期已經過去：排在今天
+    store.updateTask(t.id, { ongoing: false, date: TODAY })
+    expect(t).toMatchObject({ ongoing: false, date: store.today })
+    expect(store.tasksOn(store.today)).toContain(t)
+    // 指定之後的日子就照指定的
+    store.updateTask(t.id, { ongoing: true })
+    store.updateTask(t.id, { ongoing: false, date: addDays(store.today, 3) })
+    expect(t.date).toBe(addDays(store.today, 3))
+    // 移出專案：長期跟著拿掉
+    store.updateTask(t.id, { ongoing: true })
+    store.updateTask(t.id, { project: null })
+    expect(t).toMatchObject({ ongoing: false, project: null, date: store.today })
+    // 沒有專案的任務設不了長期
+    store.updateTask(t.id, { ongoing: true })
+    expect(t.ongoing).toBe(false)
+  })
+
+  it('做完後才改成長期、再取消完成：以前排的時段和本命拿掉，排程也不會把它當成占著時段', () => {
+    const p = proj()
+    const t = store.addTask({ title: '練習曲', project: p.id, date: TODAY, at: '20:00' })
+    store.toggleStar(t.id)
+    store.toggleTask(t.id)
+    store.updateTask(t.id, { ongoing: true })
+    expect(t).toMatchObject({ done: true, ongoing: true, at: '20:00', star: true })
+    store.toggleTask(t.id)
+    expect(t).toMatchObject({ done: false, ongoing: true, at: null, star: false })
+    expect(store.coachContext([TODAY]).tasks).not.toContain(t)
+    store.scheduleTask(t.id, '21:00', 30)
+    expect(t.at).toBeNull()
+  })
+
+  it('專案刪掉：長期任務留著，變回今天的一般任務；做完的留在完成那天', () => {
+    const p = proj()
+    const a = store.addTask({ title: 'a', project: p.id, ongoing: true })
+    const b = store.addTask({ title: 'b', project: p.id, ongoing: true })
+    setDate(addDays(TODAY, 1))
+    store.tick()
+    store.toggleTask(b.id)
+    setDate(addDays(TODAY, 3))
+    store.tick()
+    store.deleteProject(p.id)
+    expect(a).toMatchObject({ project: null, ongoing: false, date: store.today })
+    expect(b).toMatchObject({ project: null, ongoing: false, done: true, date: addDays(TODAY, 1) })
+    expect(store.tasksOn(store.today)).toContain(a)
+  })
+
+  it('專案的任務清單：逾期和今天的在前，長期接在後面，之後日子的最後', () => {
+    const p = proj()
+    store.addTask({ title: '報名發表會', project: p.id, date: addDays(TODAY, 5) })
+    store.addTask({ title: '練習曲一', project: p.id, ongoing: true })
+    store.addTask({ title: '今天的', project: p.id, date: TODAY })
+    store.addTask({ title: '逾期的', project: p.id, date: addDays(TODAY, -2) })
+    store.addTask({ title: '練習曲二', project: p.id, ongoing: true })
+    expect(store.projectTasks(p.id).todo.map((t) => t.title)).toEqual(['逾期的', '今天的', '練習曲一', '練習曲二', '報名發表會'])
+  })
+
+  it('匯出再匯入都還在；匯入的檔案對不上專案時變回今天的任務，沒做完的長期任務沒有時段和本命', () => {
+    const p = proj()
+    const t = store.addTask({ title: '練習曲', project: p.id, ongoing: true })
+    store.importJSON(store.exportJSON())
+    expect(store.state.tasks.find((x) => x.id === t.id)).toMatchObject({ ongoing: true, project: p.id })
+    const raw = JSON.parse(store.exportJSON())
+    raw.tasks = [
+      { id: 'lt1', title: '專案不見了', date: addDays(TODAY, -9), ongoing: true, project: 'gone' },
+      { id: 'lt2', title: '舊的長期任務', date: addDays(TODAY, -9), ongoing: 1, project: p.id, at: '08:00', star: true },
+      { id: 'lt3', title: '一般的', date: TODAY, ongoing: 'yes' },
+    ]
+    store.importJSON(JSON.stringify(raw))
+    const [a, b, c] = store.state.tasks
+    expect(a).toMatchObject({ ongoing: false, project: null, date: TODAY })
+    expect(b).toMatchObject({ ongoing: true, at: null, star: false, date: addDays(TODAY, -9) })
+    expect(store.overdue()).not.toContain(b)
+    expect(c.ongoing).toBe(false)
   })
 })

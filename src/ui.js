@@ -1,5 +1,5 @@
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue } from './store.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported } from './reminders.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -2665,12 +2665,15 @@ class FocusTimer {
   get info() {
     return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
   }
-  // 可以選的目標：今天還沒做完的任務、進行中的專案（暫停的也可以）
+  // 可以選的目標：今天還沒做完的任務、專案裡的長期任務（收藏起來的專案不列）、進行中的專案（暫停的也可以）
   _targets() {
     const s = this.ui.store
+    const projects = s.state.projects.filter((p) => !p.archived && !p.completedAt)
+    const open = new Set(s.state.projects.filter((p) => !p.archived).map((p) => p.id))
     return {
       tasks: s.tasksOn(s.today).filter((t) => !t.done),
-      projects: s.state.projects.filter((p) => !p.archived && !p.completedAt),
+      long: s.state.tasks.filter((t) => floating(t) && open.has(t.project)),
+      projects,
     }
   }
   _targetKey() {
@@ -2694,14 +2697,17 @@ class FocusTimer {
     $('#focusLabel').setAttribute('aria-expanded', open)
     if (!open) return
     this.toggleSet(false)
-    const { tasks, projects } = this._targets()
+    const { tasks, long, projects } = this._targets()
     const cur = this._targetKey()
     const item = (key, color, text, extra = '') => `<li><button data-target="${esc(key)}" class="${key === cur ? 'on' : ''}" aria-pressed="${key === cur}"><i style="--c:${color}"></i>${text}${extra}</button></li>`
+    const task = (t) => item(`t:${t.id}`, tagOf(t.tag).color, esc(t.title), t.pomos ? `<small>◷ ${t.pomos}</small>` : '')
     $('#focusPickList').innerHTML = [
       item('', '#d8dee8', '不指定'),
       '<li class="fp-h">今天的任務</li>',
-      ...tasks.map((t) => item(`t:${t.id}`, tagOf(t.tag).color, esc(t.title), t.pomos ? `<small>◷ ${t.pomos}</small>` : '')),
+      ...tasks.map(task),
       tasks.length ? '' : '<li class="empty">今天沒有待辦的任務</li>',
+      long.length ? '<li class="fp-h">長期任務<small>專案裡慢慢推進的事</small></li>' : '',
+      ...long.map(task),
       projects.length ? '<li class="fp-h">專案<small>專注的時間記進專案</small></li>' : '',
       ...projects.map((p) => item(`p:${p.id}`, PROJECT_COLORS[p.color % PROJECT_COLORS.length], esc(p.name), p.pausedAt ? '<small>暫停中</small>' : '')),
     ].join('')
@@ -2865,13 +2871,14 @@ class FocusTimer {
         : `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪，中間休息 ${st.breakMin} 分` : `，做完休息 ${st.breakMin} 分`}${target}`
     this._fillTargets($('#fsTarget'))
   }
-  // 目標的下拉：今天的任務和專案（手機上看不到任務標籤，從這裡選）
+  // 目標的下拉：今天的任務、長期任務和專案（手機上看不到任務標籤，從這裡選）
   _fillTargets(sel) {
-    const { tasks, projects } = this._targets()
+    const { tasks, long, projects } = this._targets()
     const opt = (key, text) => `<option value="${esc(key)}">${esc(text)}</option>`
     sel.innerHTML = [
       opt('', '不指定'),
       tasks.length ? `<optgroup label="今天的任務">${tasks.map((t) => opt(`t:${t.id}`, t.title)).join('')}</optgroup>` : '',
+      long.length ? `<optgroup label="長期任務">${long.map((t) => opt(`t:${t.id}`, t.title)).join('')}</optgroup>` : '',
       projects.length ? `<optgroup label="專案">${projects.map((p) => opt(`p:${p.id}`, p.name)).join('')}</optgroup>` : '',
     ].join('')
     sel.value = this._targetKey()

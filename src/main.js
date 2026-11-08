@@ -246,7 +246,7 @@ async function boot() {
   })
   store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
   store.on('taskAdded', (t) => {
-    if (t.date === store.selectedDate) sfx.plant()
+    if (inGarden(t)) sfx.plant()
   })
   store.on('taskDone', (t) => {
     if (!inGarden(t)) return
@@ -353,7 +353,14 @@ async function boot() {
     ui.toast({ icon: '茶', title: `今天已經完成 ${count} 件了`, sub: `超過 ${SOFT_CAP} 件後任務 XP 減半，記得休息一下`, ms: 5200 })
     setTimeout(() => talk('tired', {}, 4200, '今天開了好多花，剩下的慢慢來。'), 1600)
   })
-  store.on('taskUndone', () => sfx.undo())
+  store.on('taskUndone', (t) => {
+    sfx.undo()
+    // 長期任務取消完成：從那天的任務回到專案裡，說一聲它去哪了（在專案頁上看得到就不用說）
+    if (t?.ongoing && ui.tab !== 'projects') {
+      const p = store.state.projects.find((x) => x.id === t.project)
+      ui.toast({ icon: '長', title: `回到${p ? `「${p.name}」` : '專案'}的長期任務`, sub: t.title })
+    }
+  })
   store.on('routineAdded', (r) => {
     talk('routine', {}, undefined, '以後我會記得幫你準備好。')
     ui.toast({ icon: '↻', title: `已設為例行${r.kind === 'task' ? '任務' : '日程'}`, sub: `「${short(r.title, 12)}」・${repeatLabel(r.repeat)}` })

@@ -135,7 +135,8 @@ export function buildInsights({ tasks, history, habits, rhythm, today }) {
   }
 
   // 5. 常被往後挪的任務
-  const stuck = tasks.filter((t) => !t.done && (t.moved || 0) >= 2).sort((a, b) => b.moved - a.moved)
+  // 長期任務本來就沒排在哪一天，以前挪過的次數不算
+  const stuck = tasks.filter((t) => !t.done && !t.ongoing && (t.moved || 0) >= 2).sort((a, b) => b.moved - a.moved)
   if (stuck.length) {
     out.push({ id: 'moved', kanji: '挪', title: `有 ${stuck.length} 件任務常被往後挪`, text: `像「${stuck[0].title}」已經挪了 ${stuck[0].moved} 次。拆成小一點的步驟，會比較好開始。` })
   }

@@ -5,7 +5,8 @@
 .ff-catbtn { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; }
 .ff-catbtn[aria-pressed="false"] svg { opacity: .45; }
 
-.neko { position: absolute; left: 0; top: 0; width: 200px; height: 160px; overflow: visible; transform-origin: 100px 120px; pointer-events: none; --nk-o: var(--nk-ol); }
+/* 位置每一格由 JS 寫：不要轉場（減少動態效果時全站的 .01ms 轉場會讓剛放好的位置晚一格才生效） */
+.neko { position: absolute; left: 0; top: 0; width: 200px; height: 160px; overflow: visible; transform-origin: 100px 120px; pointer-events: none; transition: none; --nk-o: var(--nk-ol); }
 body.night .neko { --nk-o: var(--nk-oln); }
 /* 外框：每個部位先畫一圈粗的外框，再把毛色蓋上去，接縫的地方就沒有線 */
 .neko .o { fill: var(--nk-o); stroke: var(--nk-o); stroke-width: 3.4; stroke-linejoin: round; }

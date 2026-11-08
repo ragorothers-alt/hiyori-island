@@ -1,4 +1,4 @@
-// App 模式的主要流程：ふじ排的計畫套用、撤銷；番茄鐘計時重新整理後接著算；專注頁的貓咪
+// App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；番茄鐘計時重新整理後接著算；專注頁的貓咪
 import { bootReady, expect, test, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
@@ -94,6 +94,79 @@ test('專注頁的貓咪：從旁邊走進來；點腳印請牠離開（設定�
   const still = await x()
   await page.waitForTimeout(1500)
   expect(await x()).toBe(still)
+})
+
+test('平板：專案的任務有自己的一欄；長期任務不會排進今天；點任務左邊打開、右邊清單留著直接換件', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 1180, height: 820 })
+  await page.goto(site.url)
+  await bootReady(page)
+  const pid = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const p = s.addProject({ name: '練習鋼琴', milestones: ['基本功'] })
+    const subs = ['讀譜', '分手練', '合手慢練']
+    s.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true, subs })
+    s.addTask({ title: '布爾格繆勒 No.2', project: p.id, ongoing: true, subs })
+    return p.id
+  })
+  await page.evaluate((id) => window.hiyori.ui.openProject(id), pid)
+  const pd = page.locator('#projectDetail')
+  // 右欄切到任務（這個專案會記住）
+  await pd.locator('.pd-stabs [data-v="tasks"]').click()
+  const rows = pd.locator('.pd-side .pd-tasks .pt')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.first()).toContainText('長期')
+  await expect(rows.first()).toContainText('下一步：讀譜')
+
+  // 新增：跟著上一件是長期，沿用它的子任務
+  const add = pd.locator('.pd-side .pd-tasks form.pt-add')
+  await expect(add.locator('[data-act="add-long"]')).toHaveAttribute('aria-pressed', 'true')
+  await add.locator('[data-act="add-subs"]').click()
+  await add.locator('input[name="title"]').fill('哈農 1–5')
+  await add.locator('input[name="title"]').press('Enter')
+  await expect(rows).toHaveCount(3)
+  const made = await page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '哈農 1–5'))
+  expect(made.ongoing).toBe(true)
+  expect(made.subs.map((x) => x.title)).toEqual(['讀譜', '分手練', '合手慢練'])
+  // 長期任務不會出現在今天的任務裡
+  expect(await page.evaluate(() => window.hiyori.store.tasksOn(window.hiyori.store.today).some((t) => t.project))).toBe(false)
+
+  // 點一件：左邊打開任務頁，右邊清單留著、標出正在看的
+  await rows.nth(1).locator('.pt-main').click()
+  const detail = pd.locator('.pd-task')
+  await expect(detail.locator('.pd-name')).toHaveText('布爾格繆勒 No.2')
+  await expect(pd.locator('.pd-side')).toBeVisible()
+  await expect(rows.nth(1)).toHaveClass(/\bon\b/)
+  // 勾掉一個子任務：清單上的下一步跟著變
+  await detail.locator('[data-act="sub-toggle"]').first().click()
+  await expect(rows.nth(1)).toContainText('下一步：分手練')
+  // 說明和紀錄寫到一半，直接點另一件換過去：不會帶到那一件；換回來時寫到一半的紀錄還在
+  await detail.locator('textarea[data-tnote]').fill('慢速 60 開始')
+  await detail.locator('form[data-form="tlog"] textarea').fill('左手還不穩')
+  await rows.first().locator('.pt-main').click()
+  await expect(detail.locator('.pd-name')).toHaveText('車爾尼 No.12')
+  await expect(detail.locator('textarea[data-tnote]')).toHaveValue('')
+  await expect(detail.locator('form[data-form="tlog"] textarea')).toHaveValue('')
+  await rows.nth(1).locator('.pt-main').click()
+  await expect(detail.locator('form[data-form="tlog"] textarea')).toHaveValue('左手還不穩')
+  await rows.first().locator('.pt-main').click()
+  await expect(detail.locator('.pd-name')).toHaveText('車爾尼 No.12')
+  const notes = await page.evaluate(() => Object.fromEntries(window.hiyori.store.state.tasks.filter((t) => t.project).map((t) => [t.title, t.note || ''])))
+  expect(notes).toMatchObject({ '布爾格繆勒 No.2': '慢速 60 開始', '車爾尼 No.12': '' })
+
+  // 直放的平板也是左右兩欄；手機上任務頁疊在上面、清單收起來
+  await page.setViewportSize({ width: 820, height: 1180 })
+  await expect(pd.locator('.pd-side')).toBeVisible()
+  await page.setViewportSize({ width: 393, height: 852 })
+  await expect(pd.locator('.pd-side')).toBeHidden()
+  await expect(pd.locator('.pd-task')).toBeVisible()
+
+  // 重新整理後打開同一個專案：右欄還是任務
+  await page.setViewportSize({ width: 1180, height: 820 })
+  await page.reload()
+  await bootReady(page)
+  await page.evaluate((id) => window.hiyori.ui.openProject(id), pid)
+  await expect(pd.locator('.pd-stabs [data-v="tasks"]')).toHaveAttribute('aria-pressed', 'true')
 })
 
 test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數；停掉後重新整理是待機', async ({ page, context, site }) => {

@@ -309,7 +309,9 @@ export function projectMarkdown(p, tasks = []) {
     L.push('## 任務', '')
     for (const t of linked) {
       const m = taskMilestone(p, t)
-      L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${md(t.date)}${m ? `・${m.title}` : ''}）`)
+      // 還沒完成的長期任務沒有排在哪一天
+      const when = t.ongoing && !t.done ? '長期' : md(t.date)
+      L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${when}${m ? `・${m.title}` : ''}）`)
       for (const s of t.subs || []) L.push(`  - [${s.done ? 'x' : ' '}] ${s.title}`)
       if (t.note) L.push(...t.note.split('\n').map((x) => `  > ${x}`))
     }

@@ -53,6 +53,9 @@ describe('洞察', () => {
     expect(list.some((x) => x.guess)).toBe(false)
     // 已經是晚上就不再建議
     expect(buildInsights({ tasks, history, habits: [], rhythm: { ...R, peak: 'evening' }, today: TODAY })[0].action).toBeNull()
+    // 長期任務（專案裡沒排日期的）以前挪過幾次都不算卡住
+    tasks[tasks.length - 1].ongoing = true
+    expect(buildInsights({ tasks, history, habits: [], rhythm: R, today: TODAY }).some((x) => x.id === 'moved')).toBe(false)
   })
 
   it('習慣：最穩的和常漏掉的', () => {

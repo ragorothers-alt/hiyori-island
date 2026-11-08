@@ -59,10 +59,11 @@ body.night .pd-chip.done { color: #f3d28a; }
 .pd-heat .h3 { background: var(--c); }
 .pd-heat-box small { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
 
-/* 分頁：窄的時候四塊切換 */
+/* 分頁：窄的時候四塊切換（右欄的里程碑／任務切換只在寬的時候出現） */
 .pd-tabs { margin: 14px 0 10px; }
-.pd-tabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 4px; font-size: 12.5px; }
-.pd-tabs small { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-faint); }
+.pd-stabs { display: none; }
+:is(.pd-tabs, .pd-stabs) button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 4px; font-size: 12.5px; }
+:is(.pd-tabs, .pd-stabs) small { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-faint); }
 .pd-sec { display: none; }
 #projectDetail[data-sec="log"] .pd-log, #projectDetail[data-sec="notes"] .pd-notes,
 #projectDetail[data-sec="ms"] .pd-ms, #projectDetail[data-sec="tasks"] .pd-tasks { display: block; }
@@ -193,7 +194,7 @@ body.night .tl-mins { filter: none; }
 .pm-tk small { font-size: 10.5px; color: var(--ink-faint); }
 .pm-steps li.done .pm-tk { text-decoration: none; }
 .pm-steps li.done .pm-tk > span { text-decoration: line-through; }
-.pm-add, .pt-add { display: flex; gap: 6px; }
+.pm-add, .pt-add-row { display: flex; gap: 6px; }
 .pm-add input, .pt-add input { flex: 1; min-width: 0; border: 0; outline: 0; background: rgba(140, 170, 200, .12); border-radius: 10px; padding: 5px 9px; font-size: 12.5px; }
 .pt-add input[type=date] { flex: none; width: auto; }
 .pm-note { display: flex; gap: 8px; align-items: flex-start; }
@@ -207,18 +208,41 @@ body.night .tl-mins { filter: none; }
 .pd-ms .ms-add { margin-top: 0; }
 
 /* 歸在專案的任務 */
-.pt-add { margin-bottom: 8px; }
+.pt-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.pt-add-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pt-add-opts .chip-toggle { padding: 3px 10px; }
+.pt-add-hint { font-size: 11px; line-height: 1.5; color: var(--ink-soft); padding: 0 2px; }
 .pt-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.pt { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 12px; background: var(--field); }
-.pt .check { width: 20px; height: 20px; }
+.pt { display: flex; align-items: flex-start; gap: 8px; padding: 7px 6px 7px 8px; border-radius: 12px; background: var(--field); transition: background .2s, box-shadow .2s; }
+.pt .check { width: 20px; height: 20px; flex: none; margin-top: 1px; }
 .pt .check svg { width: 10px; height: 10px; }
-.pt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pt > .mini { margin-top: -1px; }
+.pt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .pt-t { font-size: 13px; line-height: 1.45; word-break: break-word; }
 .pt.done .pt-t { color: var(--ink-faint); text-decoration: line-through; }
 .pt-main small { font-size: 10.5px; color: var(--ink-soft); }
-.pt-main small.late { color: var(--warn-ink); }
-.pt-ms { margin-left: 6px; color: var(--ink-faint); }
+/* 一行小字：一段一段隔開，換行時不會把一段拆開 */
+.pt-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 9px; }
+.pt-m { white-space: nowrap; }
+.pt-m.late { color: var(--warn-ink); }
+.pt-m.long { color: var(--c); filter: saturate(1.3) brightness(.85); font-weight: 600; }
+body.night .pt-m.long { filter: none; }
+.pt-ms { color: var(--ink-faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pt-ms::before { content: "▸ "; }
+/* 子任務做到哪一步：一格一個子任務、做了幾個、下一步 */
+.pt-prog { display: flex; align-items: center; gap: 7px; min-width: 0; margin: 2px 0 1px; font-size: 11px; color: var(--ink-soft); }
+.pt-prog b { font-family: var(--font-num); font-weight: 600; color: var(--ink); flex: none; }
+.pt-prog em { font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-bar { display: flex; gap: 2px; flex: none; width: clamp(56px, 28%, 120px); }
+.pt-bar i { flex: 1; height: 5px; border-radius: 3px; background: rgba(140, 170, 200, .24); }
+.pt-bar i.on { background: var(--c); }
+/* 子任務太多（超過 12 個）：一整條，照做了幾成填色 */
+.pt-bar.cont { height: 5px; border-radius: 3px; background: rgba(140, 170, 200, .24); overflow: hidden; }
+.pt-bar.cont i { flex: none; border-radius: 0; }
+.pt.done .pt-bar i.on { opacity: .5; }
+/* 寬的時候正在看的那件（左邊打開的任務頁）。任務頁開著時右欄只用來換件：專注、編輯、移出都在任務頁上，清單上的小按鈕收起來 */
+.pt.on { background: color-mix(in srgb, var(--c) 15%, var(--field)); box-shadow: inset 3px 0 0 var(--c); }
+#projectDetail[data-task] .pd-side .pt > .mini { display: none; }
 .pt-star { font-style: normal; color: var(--gold); margin-right: 3px; }
 .pt .mini { width: 24px; height: 24px; opacity: 0; }
 .pt:hover .mini, .pt:focus-within .mini { opacity: 1; }
@@ -229,9 +253,11 @@ body.night .tl-mins { filter: none; }
 .pm-steps .pm-tk { cursor: pointer; text-align: left; padding: 0; }
 .pt-has { font-style: normal; font-family: var(--font-display); }
 
-/* ── 任務頁：疊在專案詳情上，專案那幾塊先藏起來 ── */
-#projectDetail[data-task] > :not(.pd-task) { display: none; }
+/* ── 任務頁：窄的時候疊在專案詳情上，專案那幾塊先藏起來（寬的時候見最下面：放在左欄，右欄留著任務清單）── */
+#projectDetail[data-task] > :not(.pd-body), #projectDetail[data-task] .pd-body > :not(.pd-task) { display: none; }
 .pd-task { animation: fadeUp .3s var(--ease) both; }
+.pk-long { background: color-mix(in srgb, var(--c) 22%, transparent); color: var(--ink); }
+.pk-subs .pk-bar { width: min(100%, 260px); margin: 6px 0 2px; }
 .pk-sum .pd-title { align-items: flex-start; }
 .pk-sum .pd-title > .check { margin-top: 2px; }
 .pk-done { color: var(--ink-faint); text-decoration: line-through; }
@@ -250,15 +276,37 @@ body.night .tl-mins { filter: none; }
 button.tl-task:hover { color: var(--ink); background: rgba(140, 170, 200, .28); }
 @media (hover: none) { .tl-acts, .pm-steps .mini, .pt .mini { opacity: .7; } }
 
-/* 寬的時候：里程碑和任務固定在右欄，左邊切換進度／筆記 */
+/* 平板直放（中等寬度）：平常照窄的分頁；任務頁開著時一樣左右分開，右邊是黏在畫面上的任務清單，點別件直接換過去 */
+@media (min-width: 740px) and (max-width: 979px) {
+  .panel.full #projectDetail[data-task] .pd-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(260px, 36%, 300px); column-gap: 16px; align-items: start; }
+  .panel.full #projectDetail[data-task] .pd-task { grid-column: 1; grid-row: 1; min-width: 0; }
+  .panel.full #projectDetail[data-task] .pd-body > .pd-side {
+    display: block; grid-column: 2; grid-row: 1; min-width: 0; position: sticky; top: 0; max-height: var(--pd-vh, 70vh); overflow-y: auto; overscroll-behavior: contain;
+    padding: 0 4px 8px; margin: 0 -4px; scrollbar-width: thin;
+  }
+  .panel.full #projectDetail[data-task] .pd-side .pd-ms { display: none; }
+  .panel.full #projectDetail[data-task] .pd-side .pd-tasks { display: block; }
+  .panel.full #projectDetail[data-task] .pd-side .sec-title { margin-top: 0; }
+}
+
+/* 寬的時候（平板橫放、電腦）：左邊切換進度／筆記，右欄切換里程碑／任務，各自佔一整欄 */
 @media (min-width: 980px) {
   .panel.full .pd-tabs :is(.pd-tab-ms, .pd-tab-tasks) { display: none; }
   .panel.full #projectDetail:is([data-sec="ms"], [data-sec="tasks"]) .pd-tab-log { background: var(--glass-strong); color: var(--ink); box-shadow: 0 1px 4px rgba(80, 120, 170, .14); }
-  .panel.full .pd-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; column-gap: 24px; align-items: start; }
-  .panel.full .pd-side .pd-sec { display: block; }
+  .panel.full .pd-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 34%, 380px); column-gap: 24px; align-items: start; }
+  .panel.full :is(.pd-main, .pd-task) { grid-column: 1; grid-row: 1; min-width: 0; }
+  .panel.full .pd-side { grid-column: 2; grid-row: 1; min-width: 0; padding-top: 14px; }
   .panel.full #projectDetail:is([data-sec="ms"], [data-sec="tasks"]) .pd-log { display: block; }
-  .panel.full .pd-side { padding-top: 14px; }
-  .panel.full .pd-side .pd-tasks { margin-top: 14px; }
+  /* 右欄：上面一排切換取代區塊標題，一次只看一個 */
+  .panel.full .pd-stabs { display: flex; margin: 0 0 12px; }
+  .panel.full .pd-side .sec-title { display: none; }
+  .panel.full #projectDetail .pd-side .pd-sec { display: none; }
+  .panel.full #projectDetail[data-side="ms"] .pd-side .pd-ms, .panel.full #projectDetail[data-side="tasks"] .pd-side .pd-tasks { display: block; }
+  /* 任務頁開著：左邊是任務頁，右欄的任務清單黏在畫面上、自己捲動，點別件直接換過去 */
+  .panel.full #projectDetail[data-task] .pd-body > .pd-side {
+    display: block; position: sticky; top: 0; max-height: var(--pd-vh, 70vh); overflow-y: auto; overscroll-behavior: contain;
+    padding: 0 4px 8px; margin: 0 -4px; scrollbar-width: thin;
+  }
 }
 
 /* ── ふじ（Claude）：拆細項、整理進度 ── */

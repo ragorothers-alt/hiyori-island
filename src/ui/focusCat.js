@@ -100,6 +100,8 @@ export class FocusCat {
     this._mq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
     this._mq?.addEventListener?.('change', () => {
       if (!this.on || !this.cat) return
+      // 已經照新的設定放好了（設定剛換、change 事件還沒到之前打開的）：不用再換一隻，不然會從一個角落跳到另一個
+      if (this.cat.still === !!this._mq.matches) return
       const { coat, leaving } = this.cat
       this.hide()
       this.cat = null

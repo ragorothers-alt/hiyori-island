@@ -10,14 +10,28 @@ import { aiReady, askAI } from '../ai.js'
 import { FUJI_LINES } from '../data/lines.js'
 
 // 專案詳情：目標與統計、進度日誌（自己寫的＋自動帶進來的里程碑、任務、專注）、筆記、里程碑的細項與備註、歸在專案的任務。
-// 窄的時候四塊用分頁切換；寬的時候里程碑和任務固定在右欄。
-// 點任務打開那件任務自己的頁面（說明、紀錄）：疊在專案詳情上面，專案那邊藏起來但不拆掉（打到一半的字、編輯中的筆記都還在）。
+// 窄的時候四塊用分頁切換；寬的時候（平板橫放、電腦）左邊切換進度／筆記，右欄切換里程碑／任務，各自佔一整欄
+// （每個專案上次看哪一個，這台裝置記得）。
+// 點任務打開那件任務自己的頁面（說明、子任務、紀錄）。窄的時候疊在專案詳情上面，專案那邊藏起來但不拆掉
+// （打到一半的字、編輯中的筆記都還在）；寬的時候放在左邊，右欄的任務清單留著、黏在畫面上，點別件直接換過去。
 // 任務的紀錄就是專案的進度日誌、多記一個 task，所以也會出現在專案的進度裡、算進專案的統計。
+// 長期任務（例如一首練習曲）沒排在哪一天，只待在專案裡；子任務當成它的階段，清單上看得到做到哪一步。
 // 任何資料變動都會重畫：輸入框標了 data-keep，重畫前後把打到一半的字和游標接回去；
 // 筆記編輯中的內容不跟著重畫（打開時拍一張快照當 HTML），打字時隔一下子自動存
 
 const SECS = [['log', '進度'], ['notes', '筆記'], ['ms', '里程碑'], ['tasks', '任務']]
 const HEAT_KEY = 'hiyori-pd-heat'
+// 寬的時候右欄看里程碑還是任務：{ 專案 id: 'ms' | 'tasks' }，只記最近的幾十個專案
+const SIDE_KEY = 'hiyori-pd-side'
+const SIDE_KEEP = 40
+const readSides = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(SIDE_KEY) || '{}')
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  } catch {
+    return {}
+  }
+}
 const MINS = [0, 15, 30, 45, 60, 90, 120, 180]
 const colorOf = (p) => PROJECT_COLORS[p.color % PROJECT_COLORS.length]
 const md = (date) => `${+date.slice(5, 7)}/${+date.slice(8)}`
@@ -36,10 +50,17 @@ function ago(date, today) {
   if (d < 7) return `${d} 天前`
   return md(date)
 }
-// 任務的日期：做完的寫什麼時候完成，還沒做的寫哪天（過了就標逾期）
+// 任務的日期：做完的寫什麼時候完成，長期的沒有日期，還沒做的寫哪天（過了就標逾期）
 function taskWhen(t, today) {
   if (t.done) return t.doneAt ? `${ago(dayOf(t.doneAt), today)}完成` : md(t.date)
+  if (t.ongoing) return '長期'
   return t.date === today ? '今天' : t.date < today ? `逾期・${md(t.date)}` : md(t.date)
+}
+// 子任務做到哪裡的小格子：一個子任務一格（太多時改成一整條）
+function subsBar(subs, cls = '') {
+  const n = subs.filter((x) => x.done).length
+  if (subs.length > 12) return `<span class="pt-bar cont ${cls}" aria-hidden="true"><i class="on" style="width:${Math.round((n / subs.length) * 100)}%"></i></span>`
+  return `<span class="pt-bar ${cls}" aria-hidden="true">${subs.map((x) => `<i class="${x.done ? 'on' : ''}"></i>`).join('')}</span>`
 }
 function dayTitle(date, today) {
   const d = daysBetween(date, today)
@@ -88,6 +109,10 @@ export class ProjectView {
     root.addEventListener('toggle', (e) => {
       if (e.target.classList?.contains('pt-done')) this.doneOpen = e.target.open
     }, true)
+    // 視窗大小變了（平板轉方向）：任務頁開著時，右欄黏在畫面上的高度跟著變
+    addEventListener('resize', () => {
+      if (this.taskId) this._fit()
+    })
     // 關掉分頁或重新整理：還沒存的字先存起來
     addEventListener('pagehide', () => {
       this._flushAll()
@@ -131,6 +156,11 @@ export class ProjectView {
     this.doneOpen = false
     this.taskId = null // 打開的任務頁
     this.tmins = 0 // 任務頁寫紀錄時選的「花了多久」
+    // 任務頁寫到一半的紀錄：換到別件或回到專案時先收著，再打開那件時接回去 { 任務 id: { text, date, mins } }
+    this.drafts = new Map()
+    this.side = 'ms' // 寬的時候右欄看哪一個（open 時換成這個專案記住的）
+    this.addLong = null // 新增任務時選了「長期」；null＝跟著這個專案最近一件任務
+    this.addSubs = false // 新增任務時沿用最近那件的子任務
     // ふじ（Claude）正在做或做好的事：{ kind: 'steps', mid, … } 拆細項、{ kind: 'summary', … } 整理進度
     // 換專案或關掉時清掉；回來的結果對不上這個物件就丟掉
     this.ai = null
@@ -150,26 +180,64 @@ export class ProjectView {
     this.id = id
     this._reset()
     if (SECS.some(([k]) => k === sec)) this.sec = sec
+    this.side = sec === 'ms' || sec === 'tasks' ? sec : this._sideOf(id)
     this.taskId = taskId
     this.root.replaceChildren()
   }
 
-  // 任務頁：記下專案這邊捲到哪裡，回來時接回去
+  // 寬的時候右欄先看哪一個：這台裝置記得這個專案上次看的；沒記過的，沒有里程碑、只有任務的先看任務
+  _sideOf(id) {
+    const v = readSides()[id]
+    if (v === 'ms' || v === 'tasks') return v
+    const p = this.store.state.projects.find((x) => x.id === id)
+    return p && !p.milestones.length && this.store.state.tasks.some((t) => t.project === id) ? 'tasks' : 'ms'
+  }
+  _saveSide() {
+    const all = readSides()
+    delete all[this.id]
+    all[this.id] = this.side
+    const keys = Object.keys(all)
+    for (const k of keys.slice(0, Math.max(0, keys.length - SIDE_KEEP))) delete all[k]
+    try {
+      localStorage.setItem(SIDE_KEY, JSON.stringify(all))
+    } catch {}
+  }
+
+  // 任務頁：記下專案這邊捲到哪裡，回來時接回去（寬的時候從右欄換到別件，記的還是專案那邊的位置）
   openTask(tid) {
     if (!this.store.state.tasks.some((t) => t.id === tid && t.project === this.id)) return
     this._flushAll()
+    this._keepDraft()
     if (!this.taskId) this._scrollY = this._scroller()?.scrollTop ?? 0
     this.taskId = tid
-    this.tmins = 0
+    this.tmins = this.drafts.get(tid)?.mins || 0
     this.editLog = null
     this.render()
     this._scroller()?.scrollTo({ top: 0 })
+    this._showPicked()
     this.focusBack()
+  }
+  // 寬的時候右欄的任務清單自己捲動：打開的那件不在看得到的地方就捲過去
+  _showPicked() {
+    const side = $('.pd-side', this.root)
+    const row = side && $('.pt.on', side)
+    if (!row || getComputedStyle(side).position !== 'sticky' || side.scrollHeight <= side.clientHeight) return
+    const top = row.getBoundingClientRect().top - side.getBoundingClientRect().top + side.scrollTop
+    if (top < side.scrollTop || top + row.offsetHeight > side.scrollTop + side.clientHeight) side.scrollTop = Math.max(0, top - side.clientHeight / 3)
+  }
+  // 右欄黏在畫面上時最高多高：面板看得到的高度（扣掉上下留白，底下有番茄鐘）
+  _fit() {
+    const sc = this._scroller()
+    if (!sc) return
+    const cs = getComputedStyle(sc)
+    const h = sc.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+    if (h > 0) this.root.style.setProperty('--pd-vh', `${Math.max(240, Math.round(h))}px`)
   }
   closeTask() {
     const tid = this.taskId
     if (!tid) return false
     this._flushAll()
+    this._keepDraft()
     this.taskId = null
     this.editLog = null
     this.render()
@@ -179,6 +247,15 @@ export class ProjectView {
     const open = $$(`[data-act="task-open"][data-id="${CSS.escape(tid)}"]`, this.root).find((b) => b.offsetParent)
     ;(open || $('.pd-back', this.root))?.focus({ preventScroll: true })
     return true
+  }
+  // 離開任務頁（換到別件、回到專案）前：寫到一半的紀錄、選的時間和日期記在那件任務名下
+  _keepDraft() {
+    const f = this.taskId && $('.pd-task form[data-form="tlog"]', this.root)
+    if (!f) return
+    const text = f.elements.text.value
+    const date = f.elements.date.value
+    if (text.trim() || this.tmins || (date && date !== this.store.today)) this.drafts.set(this.taskId, { text, date, mins: this.tmins })
+    else this.drafts.delete(this.taskId)
   }
   // 看得到的那顆「返回」
   focusBack() {
@@ -215,6 +292,8 @@ export class ProjectView {
     if (this.taskId && !task) this.taskId = null
     this.root.style.setProperty('--c', colorOf(p))
     this.root.dataset.sec = this.sec
+    // 任務頁開著時右欄一定是任務清單
+    this.root.dataset.side = task ? 'tasks' : this.side
     this.root.toggleAttribute('data-task', !!task)
     const st = projectStats(p, tasks)
     const note = this.noteId && p.notes.find((n) => n.id === this.noteId)
@@ -239,7 +318,7 @@ export class ProjectView {
               {
                 k: 'log', cls: 'pd-sec pd-log', kids: [
                   { k: 'compose', cls: 'pd-compose-box', html: this._composeHTML(p, today) },
-                  { k: 'tl', cls: 'pd-tl', html: this._timelineHTML(p, tasks, today) },
+                  { k: 'tl', cls: 'pd-timeline', html: this._timelineHTML(p, tasks, today) },
                 ],
               },
               {
@@ -254,23 +333,26 @@ export class ProjectView {
           },
           {
             k: 'side', cls: 'pd-side', kids: [
+              // 寬的時候才看得到：里程碑／任務切換
+              { k: 'stabs', cls: 'seg pd-stabs', html: this._sideTabsHTML(p) },
               { k: 'ms', cls: 'pd-sec pd-ms', html: this._msHTML(p, today) },
               { k: 'tasks', cls: 'pd-sec pd-tasks', html: this._tasksHTML(p, today) },
             ],
           },
+          // 任務頁放在最後：專案那幾塊不用搬動位置（搬動會讓焦點掉出去）。
+          // 寬的時候用格線放到左欄（右欄的任務清單留著）；窄的時候其他都藏起來，只剩任務頁
+          ...(task
+            ? [{
+              k: `task-${task.id}`, cls: 'pd-task', kids: [
+                { k: 'ttop', cls: 'pd-top', html: this._taskTopHTML(p, task, today) },
+                { k: 'tsum', cls: 'pd-sum pk-sum', html: this._taskHeadHTML(p, task, today) },
+                { k: 'tcompose', cls: 'pd-compose-box', html: this._taskComposeHTML(task, today) },
+                { k: 'ttl', cls: 'pk-tl', html: this._taskTimelineHTML(p, task, today) },
+              ],
+            }]
+            : []),
         ],
       },
-      // 任務頁放在最後：專案那幾塊不用搬動位置（搬動會讓焦點掉出去）
-      ...(task
-        ? [{
-          k: `task-${task.id}`, cls: 'pd-task', kids: [
-            { k: 'ttop', cls: 'pd-top', html: this._taskTopHTML(p, task, today) },
-            { k: 'tsum', cls: 'pd-sum pk-sum', html: this._taskHeadHTML(p, task, today) },
-            { k: 'tcompose', cls: 'pd-compose-box', html: this._taskComposeHTML(today) },
-            { k: 'ttl', cls: 'pk-tl', html: this._taskTimelineHTML(p, task, today) },
-          ],
-        }]
-        : []),
     ]
     const kept = this._capture()
     patch(this.root, items)
@@ -279,6 +361,7 @@ export class ProjectView {
     const q = $('[data-noteq]', this.root)
     if (q && q !== document.activeElement && q.value !== this.noteQuery) q.value = this.noteQuery
     this._grow()
+    if (task) this._fit()
     return true
   }
 
@@ -363,6 +446,18 @@ export class ProjectView {
     const todo = this.store.state.tasks.filter((t) => t.project === p.id && !t.done).length
     const n = { log: p.logs.length, notes: p.notes.length, ms: p.milestones.filter((m) => !m.done).length, tasks: todo }
     return SECS.map(([k, label]) => `<button type="button" class="pd-tab-${k} ${this.sec === k ? 'on' : ''}" data-act="sec" data-v="${k}" aria-pressed="${this.sec === k}">${label}${n[k] ? `<small>${n[k]}</small>` : ''}</button>`).join('')
+  }
+
+  // 寬的時候右欄上面的切換：里程碑／任務（數字是還沒完成的）。任務頁開著時停在任務
+  _sideTabsHTML(p) {
+    const on = this.taskId ? 'tasks' : this.side
+    const n = {
+      ms: p.milestones.filter((m) => !m.done).length,
+      tasks: this.store.state.tasks.filter((t) => t.project === p.id && !t.done).length,
+    }
+    return [['ms', '里程碑'], ['tasks', '任務']]
+      .map(([k, label]) => `<button type="button" class="${on === k ? 'on' : ''}" data-act="side" data-v="${k}" aria-pressed="${on === k}">${label}${n[k] ? `<small>${n[k]}</small>` : ''}</button>`)
+      .join('')
   }
 
   _composeHTML(p, today) {
@@ -554,35 +649,83 @@ export class ProjectView {
     return `<div class="pm-tasks"><span class="pc-k">任務</span><ul class="pm-steps">${[...todo, ...done].map(row).join('')}</ul></div>`
   }
 
+  // 這個專案最近建立的任務（新增時的預設跟著它）；有子任務的那件（「沿用子任務」從它複製）
+  _lastTask(p, withSubs = false) {
+    let best = null
+    for (const t of this.store.state.tasks) {
+      if (t.project !== p.id || (withSubs && !t.subs?.length)) continue
+      if (!best || t.createdAt > best.createdAt) best = t
+    }
+    return best
+  }
+  _addLong(p) {
+    return this.addLong ?? !!this._lastTask(p)?.ongoing
+  }
+
   _tasksHTML(p, today) {
     const { todo, done } = this.store.projectTasks(p.id)
-    // 每件任務寫了幾則紀錄
+    // 每件任務的紀錄：幾則、記了多少時間、最近一則在哪天
     const logs = new Map()
-    for (const l of p.logs) if (l.task) logs.set(l.task, (logs.get(l.task) || 0) + 1)
+    for (const l of p.logs) {
+      if (!l.task) continue
+      const x = logs.get(l.task) || { n: 0, mins: 0, last: '' }
+      x.n++
+      x.mins += l.mins || 0
+      if (l.date > x.last) x.last = l.date
+      logs.set(l.task, x)
+    }
     const row = (t) => {
       const k = esc(t.id)
-      const late = !t.done && t.date < today
+      const on = t.id === this.taskId
+      const late = !t.done && !t.ongoing && t.date < today
       const m = taskMilestone(p, t)
-      const n = logs.get(t.id)
+      const lg = logs.get(t.id)
       const subs = t.subs || []
-      const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
-      return `<li class="pt ${t.done ? 'done' : ''}">
+      const next = !t.done && subs.find((x) => !x.done)
+      // 子任務當成階段：格子＋做到第幾個＋下一步
+      const prog = subs.length
+        ? `<span class="pt-prog">${subsBar(subs)}<b>${subs.filter((x) => x.done).length}/${subs.length}</b>${next ? `<em>下一步：${esc(next.title)}</em>` : ''}</span>`
+        : ''
+      const meta = [
+        `<span class="pt-m ${late ? 'late' : ''} ${t.ongoing && !t.done ? 'long' : ''}">${taskWhen(t, today)}</span>`,
+        t.pomos ? `<span class="pt-m" title="專注了幾輪">◷ ${t.pomos}</span>` : '',
+        lg?.mins ? `<span class="pt-m" title="寫紀錄時記下的時間，共 ${lg.n} 則紀錄">投入 ${dur(lg.mins)}</span>` : '',
+        lg && !t.done ? `<span class="pt-m">最近紀錄 ${ago(lg.last, today)}</span>` : '',
+        t.note ? '<span class="pt-m"><i class="pt-has">註</i></span>' : '',
+      ].join('')
+      const focus = !t.done && (t.ongoing || t.date === today)
+      return `<li class="pt ${t.done ? 'done' : ''} ${on ? 'on' : ''}">
         <button type="button" class="check" data-act="task-toggle" data-id="${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}" style="--c:${tagOf(t.tag).color}">${ICON.check}</button>
-        <button type="button" class="pt-main" data-act="task-open" data-id="${k}" title="打開這件任務的頁面：說明和紀錄"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span><small class="${late ? 'late' : ''}">${taskWhen(t, today)}${t.pomos ? `・◷ ${t.pomos}` : ''}${sub}${n ? `・紀錄 ${n}` : ''}${t.note ? '・<i class="pt-has">註</i>' : ''}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></button>
-        ${!t.done && t.date === today ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
+        <button type="button" class="pt-main" data-act="task-open" data-id="${k}" ${on ? 'aria-current="true"' : ''} title="打開這件任務的頁面：說明、子任務和紀錄"><span class="pt-t">${t.star ? '<i class="pt-star">★</i>' : ''}${esc(t.title)}</span>${prog}<small class="pt-meta">${meta}${m ? `<span class="pt-ms" title="完成時推進這個里程碑">${esc(m.title)}</span>` : ''}</small></button>
+        ${focus ? `<button type="button" class="mini" data-act="task-focus" data-id="${k}" title="專注在這件事上">${ICON.play}</button>` : ''}
         <button type="button" class="mini" data-act="task-edit" data-id="${k}" title="編輯日期、時間和優先度">${ICON.edit}</button>
         <button type="button" class="mini" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在）">${ICON.minus}</button>
       </li>`
     }
     const name = p.name.replace(/\s+/g, '').slice(0, 6)
+    const long = this._addLong(p)
+    // 沿用子任務：從最近一件有子任務的複製（例如每首練習曲都是讀譜、分手練、合手…）
+    const src = this._lastTask(p, true)
+    const names = src ? src.subs.map((x) => x.title).join('、') : ''
+    const copy = src
+      ? `<button type="button" class="chip-toggle ${this.addSubs ? 'on' : ''}" data-act="add-subs" aria-pressed="${this.addSubs}" title="新的任務也帶著這 ${src.subs.length} 個子任務：${esc(names)}">沿用 ${src.subs.length} 個子任務</button>`
+      : ''
     return `<h3 class="sec-title">任務<small>タスク</small><span class="count">${todo.length ? `還有 ${todo.length} 件` : done.length ? '都完成了' : ''}</span></h3>
       <form class="pt-add" data-form="task" autocomplete="off">
-        <input name="title" data-keep="task-new" maxlength="80" placeholder="新增一件這個專案的任務" aria-label="新增任務">
-        <input type="date" name="date" data-keep="task-date" value="${today}" aria-label="日期">
-        <button class="mini" type="submit" title="新增">${ICON.plus}</button></form>
+        <div class="pt-add-row">
+          <input name="title" data-keep="task-new" maxlength="80" placeholder="${long ? '新增長期任務，例如一首練習曲' : '新增一件這個專案的任務'}" aria-label="新增任務">
+          <button class="mini" type="submit" title="新增">${ICON.plus}</button>
+        </div>
+        <div class="pt-add-opts">
+          <input type="date" name="date" data-keep="task-date" value="${today}" aria-label="日期" ${long ? 'hidden' : ''}>
+          <button type="button" class="chip-toggle ${long ? 'on' : ''}" data-act="add-long" aria-pressed="${long}" title="不排在哪一天：不會逾期、不出現在每天的任務裡，只待在專案；完成那天才開花。適合練習曲、要慢慢推進的事">長期</button>
+          ${copy}
+        </div>
+        ${src && this.addSubs ? `<small class="pt-add-hint">子任務：${esc(names)}</small>` : ''}
+      </form>
       ${todo.length ? `<ul class="pt-list">${todo.map(row).join('')}</ul>` : ''}
-      ${done.length ? `<details class="pt-done" ${this.doneOpen ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
-      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。做完的任務會推進里程碑，專注在這些任務上的時間會記進這個專案。點一件任務可以打開它自己的頁面，寫說明和紀錄。</p>`}`
+      ${done.length ? `<details class="pt-done" ${this.doneOpen || done.some((t) => t.id === this.taskId) ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
+      ${todo.length || done.length ? '' : `<p class="pd-hint">任務頁的輸入框打「@${esc(name)}」，或編輯任務時選專案，也會歸到這裡。做完的任務會推進里程碑，專注在這些任務上的時間會記進這個專案。點一件任務可以打開它自己的頁面，寫說明和紀錄。<br>要慢慢推進、沒有固定哪天做的事（例如一首練習曲），新增時按「長期」：不會逾期，子任務當成它的階段。</p>`}`
   }
 
   // ── 任務頁 ──
@@ -590,7 +733,7 @@ export class ProjectView {
     const k = esc(t.id)
     return `<button type="button" class="pd-back" data-act="task-back">${ICON.prev}<span>${esc(p.name)}</span></button>
       <span class="sp"></span>
-      ${!t.done && t.date === today ? `<button type="button" class="pd-tbtn" data-act="task-focus" data-id="${k}" title="用番茄鐘專注在這件事上">◷ 專注</button>` : ''}
+      ${!t.done && (t.ongoing || t.date === today) ? `<button type="button" class="pd-tbtn" data-act="task-focus" data-id="${k}" title="用番茄鐘專注在這件事上">◷ 專注</button>` : ''}
       <button type="button" class="pd-tbtn" data-act="task-edit" data-id="${k}" title="改名稱、日期、時間、優先度、里程碑">編輯</button>
       <button type="button" class="pd-tbtn" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在；寫過的紀錄留在專案的進度裡）">移出專案</button>`
   }
@@ -599,9 +742,11 @@ export class ProjectView {
     const k = esc(t.id)
     const tag = tagOf(t.tag)
     const m = taskMilestone(p, t)
-    const late = !t.done && t.date < today
+    const late = !t.done && !t.ongoing && t.date < today
     const meta = [
-      `<span class="${late ? 'warn' : ''}">${taskWhen(t, today)}</span>`,
+      t.ongoing && !t.done
+        ? '<span class="pd-chip pk-long" title="沒排在哪一天：不會逾期，只待在專案裡；完成那天才開花">長期</span>'
+        : `<span class="${late ? 'warn' : ''}">${taskWhen(t, today)}</span>`,
       t.at ? `<span>${t.at} 開始</span>` : '',
       t.dur ? `<span>預估 ${dur(t.dur)}</span>` : '',
       `<span class="pd-chip pk-tag" style="--tc:${tag.color}">${tag.label}</span>`,
@@ -623,7 +768,7 @@ export class ProjectView {
         <button type="button" class="check ${t.done ? 'on' : ''}" data-act="task-toggle" data-id="${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}" style="--c:${tag.color}">${ICON.check}</button>
         <div class="pd-tl"><h2 class="pd-name ${t.done ? 'pk-done' : ''}">${t.star ? '<i class="pt-star" title="今日の本命">★</i>' : ''}${esc(t.title)}</h2><div class="pd-meta">${meta}</div></div>
       </div>
-      <label class="pd-goal"><span class="pd-k">說明</span><textarea data-keep="tnote" data-tnote="${k}" data-grow rows="1" maxlength="${PL.taskNote}"
+      <label class="pd-goal"><span class="pd-k">說明</span><textarea data-keep="tnote-${k}" data-tnote="${k}" data-grow rows="1" maxlength="${PL.taskNote}"
         placeholder="要做到什麼程度？需要的資料、要注意的事">${esc(t.note || '')}</textarea></label>
       ${this._taskSubsHTML(t, tag.color)}
       <div class="pd-nums">${nums}</div>`
@@ -641,16 +786,21 @@ export class ProjectView {
     const add = subs.length >= PL.subs
       ? ''
       : `<form class="pm-add" data-form="tsub" data-id="${k}"><input data-keep="tsub-${k}" maxlength="${PL.subTitle}" placeholder="${subs.length ? '再加一個子任務' : '拆成子任務：全部勾完，這件任務就完成'}" aria-label="新增子任務"><button class="mini" type="submit" title="新增子任務">${ICON.plus}</button></form>`
-    return `<div class="pk-subs"><span class="pd-k">子任務${subs.length ? `<b>${sd}/${subs.length}</b>` : ''}</span><div>${rows ? `<ul class="pm-steps">${rows}</ul>` : ''}${add}</div></div>`
+    // 兩個以上的子任務：上面一排格子，一眼看出做到哪一步
+    const bar = subs.length > 1 ? subsBar(subs, 'pk-bar') : ''
+    return `<div class="pk-subs"><span class="pd-k">子任務${subs.length ? `<b>${sd}/${subs.length}</b>` : ''}</span><div>${bar}${rows ? `<ul class="pm-steps">${rows}</ul>` : ''}${add}</div></div>`
   }
 
-  _taskComposeHTML(today) {
+  // 欄位的 data-keep 帶著任務 id：寬的時候從右欄直接換件，上一件打到一半的字不會被接到這一件上
+  _taskComposeHTML(t, today) {
+    const k = esc(t.id)
+    const d = this.drafts.get(t.id)
     return `<form class="pd-compose" data-form="tlog" autocomplete="off">
-      <textarea name="text" data-keep="tlog-text" data-grow rows="2" maxlength="1000" aria-label="寫下這件任務的紀錄"
-        placeholder="這次做了什麼？卡在哪裡、下一步是什麼"></textarea>
+      <textarea name="text" data-keep="tlog-text-${k}" data-grow rows="2" maxlength="1000" aria-label="寫下這件任務的紀錄"
+        placeholder="這次做了什麼？卡在哪裡、下一步是什麼">${esc(d?.text || '')}</textarea>
       <div class="pc-row pc-mins" role="group" aria-label="花了多久"><span class="pc-k">花了</span>${MINS.map((m) => `<button type="button" data-act="tmins" data-v="${m}" class="${this.tmins === m ? 'on' : ''}" aria-pressed="${this.tmins === m}">${m ? dur(m) : '不記'}</button>`).join('')}</div>
       <div class="pc-row">
-        <label class="pc-sel"><span class="pc-k">哪天</span><input type="date" name="date" data-keep="tlog-date" value="${today}" max="${today}"></label>
+        <label class="pc-sel"><span class="pc-k">哪天</span><input type="date" name="date" data-keep="tlog-date-${k}" value="${d?.date && d.date <= today ? d.date : today}" max="${today}"></label>
         <span class="sp"></span>
         <button class="btn-primary" type="submit" title="Ctrl＋Enter 也可以送出">記下來</button>
       </div>
@@ -854,8 +1004,25 @@ export class ProjectView {
       case 'delete': return armConfirm(b, '確定刪除？', () => s.deleteProject(p.id))
       case 'sec':
         this.sec = b.dataset.v
+        // 窄的時候看了里程碑或任務：轉成橫的（寬的）時右欄也停在那裡
+        if (this.sec === 'ms' || this.sec === 'tasks') {
+          this.side = this.sec
+          this._saveSide()
+        }
         this.render()
         return this.root.querySelector('.pd-tabs')?.scrollIntoView({ block: 'nearest' })
+      case 'side':
+        this.side = b.dataset.v === 'tasks' ? 'tasks' : 'ms'
+        this._saveSide()
+        // 任務頁開著時按「里程碑」：回到專案、右欄換成里程碑
+        if (this.taskId && this.side === 'ms') return this.closeTask()
+        return this.render()
+      case 'add-long':
+        this.addLong = !this._addLong(p)
+        return this.render()
+      case 'add-subs':
+        this.addSubs = !this.addSubs
+        return this.render()
       case 'mins': {
         this.mins = +b.dataset.v
         for (const x of $$('[data-act="mins"]', this.root)) {
@@ -1002,6 +1169,7 @@ export class ProjectView {
         el.text.value = ''
         el.date.value = s.today
         this.tmins = 0
+        this.drafts.delete(t.id)
         const box = $('[data-k="tcompose"]', this.root)
         if (box) box._html = null
         if (!s.addProjectLog(p.id, entry)) this._logFull(el, text)
@@ -1046,9 +1214,13 @@ export class ProjectView {
         const title = el.title.value.trim()
         if (!title) return el.title.focus()
         const date = el.date.value || s.today
+        const ongoing = this._addLong(p)
+        const src = this.addSubs ? this._lastTask(p, true) : null
+        // 分類跟著這個專案最近的那件（第一件是「工作」）
+        const tag = this._lastTask(p)?.tag || 'work'
         el.title.value = ''
-        s.addTask({ title, date, tag: 'work', project: p.id })
-        if (date !== s.today) this.hooks.toast({ icon: '種', title: `已種在 ${md(date)}`, sub: title })
+        s.addTask({ title, date, tag, project: p.id, ongoing, subs: src ? src.subs.map((x) => x.title) : [] })
+        if (!ongoing && date !== s.today) this.hooks.toast({ icon: '種', title: `已種在 ${md(date)}`, sub: title })
       }
     }
   }
@@ -1254,6 +1426,8 @@ export class ProjectView {
       const t = a.dataset.act || a.dataset.keep ? a : a.closest('[data-act]')
       if (a.dataset.keep) focus = { keep: a.dataset.keep, start: a.selectionStart, end: a.selectionEnd }
       else if (t) focus = { act: t.dataset.act, id: t.dataset.id, sid: t.dataset.sid, v: t.dataset.v }
+      // 同一顆按鈕可能同時在任務頁和右欄的清單裡（例如完成那件任務的勾）：記下是哪一邊
+      if (focus) focus.inTask = !!a.closest('.pd-task')
     }
     return { keep, focus }
   }
@@ -1270,8 +1444,10 @@ export class ProjectView {
       sel = `[data-act="${CSS.escape(focus.act)}"]`
       for (const k of ['id', 'sid', 'v']) if (focus[k]) sel += `[data-${k}="${CSS.escape(focus[k])}"]`
     }
-    // 任務頁開著時專案那邊藏起來了：先找任務頁裡的
-    const el = (this.taskId && $(sel, $('.pd-task', this.root) || this.root)) || $(sel, this.root)
+    // 焦點本來在任務頁裡就找任務頁裡的，在外面就找外面的；先挑看得到的（窄的時候藏起來的那幾塊也有同一顆按鈕）
+    const page = $('.pd-task', this.root)
+    const all = $$(sel, focus.inTask && page ? page : this.root).filter((x) => focus.inTask || !page?.contains(x))
+    const el = all.find((x) => x.offsetParent) || all[0] || $(sel, this.root)
     if (!el) return
     el.focus({ preventScroll: true })
     if (focus.keep && focus.start != null) {
