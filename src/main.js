@@ -117,6 +117,8 @@ async function boot() {
     appModeChanged: (on, opts) => scene?.appModeChanged(on, opts),
     // App 模式全螢幕計時上的「到小木屋」：切回小島，兩人會走進屋裡（已經在屋裡就直接進屋）
     goCabin: () => ui.setAppMode(false),
+    // 專注頁的貓咪被摸了
+    catPoke: () => sfx.squish(),
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => scene?.modalClosed(),
     setSound: (on) => sfx.setEnabled(on),

@@ -1,0 +1,60 @@
+/* 專注頁散步的貓咪（src/ui/focusCat.js、src/catWalk.js）：在背景上、計時卡片底下，不擋按鈕 */
+.ff-cat { position: absolute; left: 0; right: 0; top: 0; bottom: env(safe-area-inset-bottom, 0px); overflow: hidden; pointer-events: none; z-index: 0; }
+.focus-full > .ff-card { position: relative; z-index: 1; }
+.focus-full > .icon-btn { z-index: 2; }
+.ff-catbtn { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 12px; }
+.ff-catbtn[aria-pressed="false"] svg { opacity: .45; }
+
+.neko { position: absolute; left: 0; top: 0; width: 200px; height: 160px; overflow: visible; transform-origin: 100px 120px; pointer-events: none; --nk-o: var(--nk-ol); }
+body.night .neko { --nk-o: var(--nk-oln); }
+/* 外框：每個部位先畫一圈粗的外框，再把毛色蓋上去，接縫的地方就沒有線 */
+.neko .o { fill: var(--nk-o); stroke: var(--nk-o); stroke-width: 3.4; stroke-linejoin: round; }
+.neko .lo { fill: none; stroke: var(--nk-o); stroke-linecap: round; }
+.neko .fu { fill: var(--nk-fur); }
+.neko .lf { fill: none; stroke: var(--nk-fur); stroke-linecap: round; }
+.neko .nk-far .lf { stroke: var(--nk-shade); }
+.neko .tf { fill: none; stroke: var(--nk-tail); stroke-linecap: round; }
+.neko .tb { fill: none; stroke: var(--nk-mark); stroke-dasharray: 3.4 4.6; }
+.neko .tp { fill: none; stroke: var(--nk-tip); stroke-linecap: round; }
+.neko .sk { fill: none; stroke: var(--nk-sock); stroke-linecap: round; }
+.neko .st { fill: none; stroke: var(--nk-mark); stroke-width: 3.2; stroke-linecap: round; }
+.neko .st.thin { stroke-width: 1.8; }
+.neko .in { fill: var(--nk-inner); }
+.neko .bib { fill: var(--nk-bib); }
+.neko .iris { fill: var(--nk-eye); }
+.neko .pupil { fill: #2a2330; }
+.neko .hl { fill: #fff; }
+.neko .lid { fill: none; stroke: var(--nk-lid); stroke-width: 1.4; stroke-linecap: round; }
+.neko .ln { fill: none; stroke: var(--nk-line); stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
+.neko .wk { fill: none; stroke: var(--nk-whisk); stroke-width: .7; stroke-linecap: round; opacity: .85; }
+.neko .ns { fill: var(--nk-nose); }
+.neko .yw { fill: #c95c71; }
+.neko .bl { fill: #ff9db1; opacity: .42; transition: opacity .3s; }
+.neko.happy .bl { opacity: .75; }
+.neko .sh { fill: rgba(62, 74, 92, .13); }
+body.night .neko .sh { fill: rgba(0, 0, 0, .32); }
+.neko .hit { fill: transparent; pointer-events: all; cursor: pointer; }
+
+/* 牠說的話、睡覺冒出的 z、愛心 */
+.nk-say, .nk-z, .nk-heart { position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap; }
+.nk-say { padding: 3px 10px 4px; border-radius: 12px; font: 600 12.5px/1.3 var(--font-display); letter-spacing: .06em; color: var(--ink); background: var(--card-bg, #fff); box-shadow: 0 4px 14px rgba(80, 100, 140, .18); animation: nkSay 1.9s var(--ease) forwards; }
+@keyframes nkSay {
+  0% { opacity: 0; transform: translate(-50%, -70%) scale(.6); }
+  14% { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+  78% { opacity: 1; transform: translate(-50%, -118%); }
+  100% { opacity: 0; transform: translate(-50%, -140%); }
+}
+.nk-z { font: 700 13px var(--font-num); color: var(--ink-deco); animation: nkZ 2.8s linear forwards; }
+@keyframes nkZ {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.7); }
+  20% { opacity: .85; }
+  100% { opacity: 0; transform: translate(calc(-50% + 16px), calc(-50% - 36px)) scale(1.3); }
+}
+.nk-heart { color: #f19bb2; font-size: 15px; animation: nkHeart 1.7s var(--ease) forwards; }
+@keyframes nkHeart {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); }
+  25% { opacity: 1; transform: translate(-50%, -90%) scale(1.1); }
+  100% { opacity: 0; transform: translate(-50%, -190%) scale(1); }
+}
+/* 減少動態效果：不飄，原地出現一下就收（全站的設定會把動畫縮成一瞬間，這裡改用計時器收掉） */
+.nk-say.nk-still, .nk-z.nk-still, .nk-heart.nk-still { animation: none !important; transform: translate(-50%, -110%); }

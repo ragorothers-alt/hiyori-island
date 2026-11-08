@@ -28,6 +28,8 @@ import { readBackup, readBackups, restoreBackup } from './sync.js'
 import { doneOn } from './habits.js'
 import * as clock from './focusClock.js'
 import { FREE_MIN, FREE_MAX } from './focusClock.js'
+import { FocusCat } from './ui/focusCat.js'
+import { coatOfDay } from './catWalk.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 不常用的畫面（月曆、教練、專案詳情）：開場不載，第一次用到才下載。開完閒下來時也會先在背景載好（preloadViews），
@@ -2554,6 +2556,12 @@ class FocusTimer {
     $('#ffStop').onclick = () => this.stop()
     $('#ffMin').onclick = () => this.toggleBig(false)
     $('#ffCabin').onclick = () => this.hooks.goCabin?.()
+    // 專注頁上散步的貓咪：右上角的腳印請牠離開、再請牠回來（設定會記住）
+    this.cat = new FocusCat($('#ffCat'), { card: $('#focusFull .ff-card'), onPoke: () => this.hooks.catPoke?.() })
+    $('#ffCatBtn').onclick = () => {
+      this.ui.store.setSetting('focusCat', this.ui.store.state.settings.focusCat === false)
+      this._catSync()
+    }
     $('#focusPickList').addEventListener('click', (e) => {
       const b = e.target.closest('[data-target]')
       if (!b) return
@@ -2942,9 +2950,25 @@ class FocusTimer {
   toggleBig(force) {
     const open = (force ?? $('#focusFull').hidden) && this.mode !== 'idle'
     $('#focusFull').hidden = !open
-    if (!open) return
+    if (!open) return this._catSync()
     this._fillTargets($('#ffTarget'))
     this.render()
+  }
+
+  // 專注頁的貓咪：專注頁開著、設定沒關才出來。每秒帶最新的狀態過去（暫停、休息、這一輪專注了多久）
+  _catSync() {
+    const open = !$('#focusFull').hidden && this.mode !== 'idle'
+    const on = this.ui.store.state.settings.focusCat !== false
+    if (on !== this._catOn) {
+      this._catOn = on
+      const btn = $('#ffCatBtn')
+      btn.setAttribute('aria-pressed', String(on))
+      btn.title = on ? '散步的貓咪：點一下請牠先離開' : '散步的貓咪：點一下請牠回來'
+    }
+    if (!open) return this.cat.hide()
+    if (!on) return this.cat.leave()
+    const focusMs = this.mode === 'focus' ? (this.counting ? this.elapsed : this.total - this.left) : 0
+    this.cat.show({ mode: this.mode, paused: this.paused != null, focusMs }, coatOfDay(this.ui.store.today))
   }
 
   // 一輪專注結束：記下分鐘數，接著休息
@@ -3041,10 +3065,8 @@ class FocusTimer {
 
   _renderBig(time, frac, label) {
     const el = $('#focusFull')
-    if (this.mode === 'idle') {
-      el.hidden = true
-      return
-    }
+    if (this.mode === 'idle') el.hidden = true
+    this._catSync()
     if (el.hidden) return
     el.classList.toggle('break', this.mode === 'break')
     $('#ffKicker').textContent = this.paused != null ? '暫停中' : label

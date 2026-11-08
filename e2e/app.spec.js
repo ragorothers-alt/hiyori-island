@@ -1,4 +1,4 @@
-// App 模式的主要流程：ふじ排的計畫套用、撤銷；番茄鐘計時重新整理後接著算
+// App 模式的主要流程：ふじ排的計畫套用、撤銷；番茄鐘計時重新整理後接著算；專注頁的貓咪
 import { bootReady, expect, test, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
@@ -62,6 +62,38 @@ test('專案搜尋：按 / 跳到搜尋框，里程碑也找得到；Esc 清掉�
   await q.press('Enter')
   await expect(page.locator('#projectDetail')).toBeVisible()
   await expect(page.locator('#projectDetail')).toContainText('搬家')
+})
+
+test('專注頁的貓咪：從旁邊走進來；點腳印請牠離開（設定記住），減少動態效果時在原地睡著', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  const set = page.locator('#focusSet')
+  if (await set.isVisible()) await set.locator('button.btn-primary').last().click()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  const cat = page.locator('#ffCat .neko')
+  const x = () => cat.evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).m41)
+  // 一開始在畫面外，接著一路走進來
+  await expect(cat).toBeVisible({ timeout: 10000 })
+  const x0 = await x()
+  await expect.poll(x).not.toBe(x0)
+
+  // 右上角的腳印：小跑步離開畫面後收起來，設定記住
+  const btn = page.locator('#ffCatBtn')
+  await btn.click()
+  await expect(btn).toHaveAttribute('aria-pressed', 'false')
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.focusCat)).toBe(false)
+  await expect(page.locator('#ffCat')).toBeHidden({ timeout: 20000 })
+
+  // 系統開了減少動態效果，再請牠回來：在原地睡著、不走動
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await btn.click()
+  await expect(btn).toHaveAttribute('aria-pressed', 'true')
+  await expect(cat).toBeVisible()
+  const still = await x()
+  await page.waitForTimeout(1500)
+  expect(await x()).toBe(still)
 })
 
 test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數；停掉後重新整理是待機', async ({ page, context, site }) => {

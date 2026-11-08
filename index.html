@@ -399,7 +399,10 @@
 
   <!-- App 模式專注時的全螢幕計時 -->
   <div class="focus-full" id="focusFull" role="dialog" aria-modal="true" aria-label="專注計時" hidden>
+    <!-- 在計時卡片下面散步的貓咪（src/ui/focusCat.js） -->
+    <div class="ff-cat" id="ffCat" aria-hidden="true" hidden></div>
     <button class="icon-btn ff-min" id="ffMin" title="縮小（計時繼續）"><svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></svg></button>
+    <button class="icon-btn ff-catbtn" id="ffCatBtn" aria-pressed="true" title="散步的貓咪：點一下請牠先離開" aria-label="散步的貓咪"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="15.6" rx="4.3" ry="3.6"/><circle cx="6.3" cy="10.4" r="1.9"/><circle cx="9.7" cy="6.6" r="1.9"/><circle cx="14.3" cy="6.6" r="1.9"/><circle cx="17.7" cy="10.4" r="1.9"/></svg></button>
     <div class="ff-card">
       <div class="ff-kicker" id="ffKicker">專注中</div>
       <div class="ff-ring"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="88"/><circle cx="100" cy="100" r="88" class="fg" id="ffArc"/></svg><div class="ff-time" id="ffTime">25:00</div></div>
