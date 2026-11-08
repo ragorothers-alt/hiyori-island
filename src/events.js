@@ -27,6 +27,7 @@ export const EVENTS = {
   revive: '逾期垂下的花補完成又開了',
   flower: '開了一朵花（圖鑑）',
   routineAdded: '設成例行任務／日程',
+  tempoReached: '練習曲第一次練到目標速度',
 
   // ── 日程、作息、排程 ──
   eventAdded: '新增日程',

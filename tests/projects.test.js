@@ -6,6 +6,7 @@ import { XP } from '../src/theme.js'
 import {
   activity, msProgress, msSteps, msTasks, noteHTML, noteSnippet, noteTitle, noteTodos, projectMarkdown, projectProgress, projectStats, projectTimeline,
   taskMilestone, taskTimeline, textHTML, toggleNoteLine, latestLog, lastTouched,
+  bpmOf, tempoNow, tempoStep, tempoStart, tempoMet, tempoLabel, tempoEventText,
 } from '../src/projects.js'
 
 const TODAY = '2026-11-02'
@@ -575,6 +576,57 @@ describe('任務頁：每件任務的說明和紀錄', () => {
     const parts = store.splitTask(t.id)
     expect(parts[0].note).toBe('說明')
     expect(p.logs[0].task).toBe(parts[0].id)
+  })
+})
+
+describe('練習曲的速度（節拍器）', () => {
+  it('＋／− 照節拍器的刻度跳；比 40 慢一次 2、比 208 快一次 8，有上下限；不在刻度上的數字跳到旁邊那格', () => {
+    expect([58, 60, 63, 69, 72, 116, 120, 126, 200].map((v) => tempoStep(v, 1))).toEqual([60, 63, 66, 72, 76, 120, 126, 132, 208])
+    expect([60, 63, 66, 72, 126, 208].map((v) => tempoStep(v, -1))).toEqual([58, 60, 63, 69, 120, 200])
+    expect([61, 65, 121].map((v) => tempoStep(v, 1))).toEqual([63, 66, 126])
+    expect([61, 65, 121].map((v) => tempoStep(v, -1))).toEqual([60, 63, 120])
+    expect([30, 39, 208, 212, 216].map((v) => tempoStep(v, 1))).toEqual([32, 40, 216, 220, 224])
+    expect([40, 30, 212, 216].map((v) => tempoStep(v, -1))).toEqual([38, 28, 208, 208])
+    expect(tempoStep(400, 1)).toBe(400)
+    expect(tempoStep(10, -1)).toBe(10)
+  })
+
+  it('還沒記過時從目標的一半開始（沒有目標從 60）；看得懂的速度才收', () => {
+    expect([null, 120, 132, 100, 60].map(tempoStart)).toEqual([60, 60, 66, 50, 30])
+    expect(['66', 65.6, ' 72 ', 10, 400].map(bpmOf)).toEqual([66, 66, 72, 10, 400])
+    expect(['', null, undefined, true, 'abc', 0, 9, 401, NaN, '1e9'].map(bpmOf).every((v) => v === null)).toBe(true)
+  })
+
+  it('清單和匯出的一小段、時間軸上的一筆；任務頁和專案的時間軸、熱度格、最近推進都算得到', () => {
+    const p = newProject(['一'])
+    const t = store.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true })
+    expect(tempoLabel(t)).toBe('')
+    store.setTempoGoal(t.id, 120)
+    expect(tempoLabel(t)).toBe('目標 ♩120')
+    store.setTempo(t.id, 60)
+    expect([tempoNow(t), tempoLabel(t), tempoMet(t)]).toEqual([60, '♩60／120', false])
+    vi.setSystemTime(new Date(2026, 10, 4, 20))
+    store.tick()
+    store.setTempo(t.id, 120)
+    expect([tempoLabel(t), tempoMet(t)]).toEqual(['♩120 達標', true])
+    store.setTempoGoal(t.id, '')
+    expect(tempoLabel(t)).toBe('♩120')
+
+    store.setTempoGoal(t.id, 120)
+    const items = taskTimeline(p, t).flatMap((d) => d.items).filter((it) => it.kind === 'tempo')
+    expect(items.map((it) => [it.bpm, it.from])).toEqual([[120, 60], [60, null]])
+    expect(items.map(tempoEventText)).toEqual(['練到目標速度 ♩120', '開始記速度 ♩60'])
+    expect(tempoEventText({ bpm: 66, from: 63, goal: 120 })).toBe('速度 ♩63 → 66')
+    expect(tempoEventText({ bpm: 126, from: 120, goal: 120 })).toBe('速度 ♩120 → 126')
+    const day = projectTimeline(p, store.state.tasks).find((d) => d.date === '2026-11-04')
+    expect(day.items.map((it) => it.kind)).toEqual(['tempo'])
+    expect(activity(p, store.state.tasks, '2026-11-04', 3).at(-1).level).toBe(1)
+    expect(projectStats(p, store.state.tasks).last).toBe(t.tempo.log.at(-1).at)
+
+    const md = projectMarkdown(p, store.state.tasks)
+    expect(md).toContain('- [ ] 車爾尼 No.12（長期・♩120 達標・一）')
+    expect(md).toContain('### 2026-11-04')
+    expect(md).toContain('- 任務「車爾尼 No.12」練到目標速度 ♩120')
   })
 })
 

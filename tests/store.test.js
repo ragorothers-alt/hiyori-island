@@ -2359,3 +2359,163 @@ describe('專案裡的長期任務', () => {
     expect(c.ongoing).toBe(false)
   })
 })
+
+describe('練習曲的速度', () => {
+  const etude = (o = {}) => {
+    const p = store.addProject({ name: '練習鋼琴', milestones: ['基本功'] })
+    return store.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true, ...o })
+  }
+  const bpms = (t) => t.tempo.log.map((e) => [e.date, e.bpm])
+
+  it('一天一筆：同一天再改就蓋過去，隔天另記一筆；改回上一筆的速度、或清空，今天的就拿掉', () => {
+    const t = etude()
+    expect(t.tempo).toBeNull()
+    store.tempoOn(t.id)
+    expect(t.tempo).toEqual({ goal: null, log: [], met: null })
+    store.setTempo(t.id, 60)
+    store.setTempo(t.id, 63)
+    expect(bpms(t)).toEqual([[TODAY, 63]])
+    setDate(addDays(TODAY, 2))
+    store.tick()
+    store.setTempo(t.id, 66)
+    store.setTempo(t.id, 69)
+    expect(bpms(t)).toEqual([[TODAY, 63], [store.today, 69]])
+    // 改回上一筆：今天等於沒變
+    store.setTempo(t.id, 63)
+    expect(bpms(t)).toEqual([[TODAY, 63]])
+    store.setTempo(t.id, 66)
+    store.setTempo(t.id, '')
+    expect(bpms(t)).toEqual([[TODAY, 63]])
+    // 今天沒記過時清空：什麼都不動
+    store.setTempo(t.id, null)
+    expect(bpms(t)).toEqual([[TODAY, 63]])
+    // 看不懂的數字不收
+    store.setTempo(t.id, 'abc')
+    store.setTempo(t.id, 5)
+    store.setTempo(t.id, 999)
+    expect(bpms(t)).toEqual([[TODAY, 63]])
+  })
+
+  it('目標可以先設、可以改、可以清掉；不記了就整個拿掉', () => {
+    const t = etude()
+    store.setTempoGoal(t.id, '120')
+    expect(t.tempo).toEqual({ goal: 120, log: [], met: null })
+    store.setTempo(t.id, 60)
+    store.setTempoGoal(t.id, 112.4)
+    expect(t.tempo.goal).toBe(112)
+    store.setTempoGoal(t.id, '')
+    expect(t.tempo).toMatchObject({ goal: null, log: [{ bpm: 60 }] })
+    store.tempoOn(t.id, false)
+    expect(t.tempo).toBeNull()
+  })
+
+  it('第一次練到目標速度時說一聲；以前到過的、改目標或拿掉今天那筆都不再說', () => {
+    const t = etude()
+    const hit = vi.fn()
+    store.on('tempoReached', hit)
+    store.setTempoGoal(t.id, 120)
+    store.setTempo(t.id, 116)
+    expect(hit).not.toHaveBeenCalled()
+    store.setTempo(t.id, 120)
+    expect(hit).toHaveBeenCalledTimes(1)
+    expect(hit.mock.calls[0][0]).toMatchObject({ task: t, bpm: 120 })
+    // 已經到了又往上、隔天再練到：都不再說
+    store.setTempo(t.id, 126)
+    setDate(addDays(TODAY, 1))
+    store.tick()
+    store.setTempo(t.id, 112)
+    store.setTempo(t.id, 120)
+    expect(hit).toHaveBeenCalledTimes(1)
+    // 把目標降到現在的速度不算練到
+    const u = store.addTask({ title: '哈農', project: t.project, ongoing: true })
+    store.setTempo(u.id, 80)
+    store.setTempoGoal(u.id, 80)
+    expect(hit).toHaveBeenCalledTimes(1)
+  })
+
+  it('同一天在目標上下來回改只說一次（說過的目標記住、匯出匯入還在）；換了新目標練到再說', () => {
+    const t = etude()
+    const hit = vi.fn()
+    store.on('tempoReached', hit)
+    store.setTempoGoal(t.id, 120)
+    for (const v of [116, 120, 116, 120, 116, 120]) store.setTempo(t.id, v)
+    expect(hit).toHaveBeenCalledTimes(1)
+    expect(t.tempo).toMatchObject({ met: 120, log: [{ bpm: 120 }] })
+    store.importJSON(store.exportJSON())
+    const again = store.state.tasks.find((x) => x.id === t.id)
+    expect(again.tempo.met).toBe(120)
+    store.setTempo(t.id, 116)
+    store.setTempo(t.id, 120)
+    expect(hit).toHaveBeenCalledTimes(1)
+    store.setTempoGoal(t.id, 132)
+    expect(again.tempo.met).toBe(120)
+    store.setTempo(t.id, 132)
+    expect(hit).toHaveBeenCalledTimes(2)
+  })
+
+  it('時鐘往回調（有比今天晚的紀錄）：只動今天那一筆，晚的照留，照日期排好、一天一筆', () => {
+    const t = etude()
+    for (const [d, v] of [[0, 60], [1, 63], [2, 66]]) {
+      setDate(addDays(TODAY, d))
+      store.tick()
+      store.setTempo(t.id, v)
+    }
+    setDate(addDays(TODAY, 1))
+    store.tick()
+    store.setTempo(t.id, 69)
+    expect(bpms(t)).toEqual([[TODAY, 60], [addDays(TODAY, 1), 69], [addDays(TODAY, 2), 66]])
+    // 改回前一天的速度、清空：只拿掉今天那筆
+    store.setTempo(t.id, 60)
+    expect(bpms(t)).toEqual([[TODAY, 60], [addDays(TODAY, 2), 66]])
+    store.setTempo(t.id, 72)
+    store.setTempo(t.id, '')
+    expect(bpms(t)).toEqual([[TODAY, 60], [addDays(TODAY, 2), 66]])
+    // 今天沒有紀錄時清空：晚的那筆不會被拿掉
+    store.setTempo(t.id, null)
+    expect(bpms(t)).toEqual([[TODAY, 60], [addDays(TODAY, 2), 66]])
+    store.importJSON(store.exportJSON())
+    expect(bpms(store.state.tasks.find((x) => x.id === t.id))).toEqual([[TODAY, 60], [addDays(TODAY, 2), 66]])
+  })
+
+  it('沒有經驗值；新增時可以先開好速度；拆成三小步時速度留在第一步', () => {
+    const t = etude({ tempo: true })
+    expect(t.tempo).toEqual({ goal: null, log: [], met: null })
+    const xp = store.state.player.xp
+    for (const v of [60, 63, 66, 63, 66]) store.setTempo(t.id, v)
+    expect(store.state.player.xp).toBe(xp)
+    const plain = store.addTask({ title: '一般的', project: t.project, date: addDays(TODAY, -4) })
+    store.setTempo(plain.id, 72)
+    const [first, second] = store.splitTask(plain.id)
+    expect(first.tempo).toMatchObject({ log: [{ bpm: 72 }] })
+    expect(second.tempo).toBeNull()
+  })
+
+  it('匯出再匯入都還在；讀檔時清掉看不懂的速度，同一天好幾筆留最後那筆，照日期排好', () => {
+    const t = etude()
+    store.setTempoGoal(t.id, 132)
+    store.setTempo(t.id, 66)
+    store.importJSON(store.exportJSON())
+    expect(store.state.tasks.find((x) => x.id === t.id).tempo).toMatchObject({ goal: 132, log: [{ date: TODAY, bpm: 66 }] })
+    const raw = JSON.parse(store.exportJSON())
+    raw.tasks[0].tempo = {
+      goal: 'fast',
+      log: [
+        { date: '2026-10-20', bpm: 63, at: 1 },
+        { date: '2026-10-18', bpm: '60.4' },
+        { date: '2026-10-20', bpm: 69 },
+        { date: '2026-02-30', bpm: 72 },
+        { date: '2026-10-21', bpm: 0 },
+        { date: '2026-10-22', bpm: 9999 },
+        'x',
+        null,
+      ],
+    }
+    raw.tasks.push({ id: 'tp2', title: '速度壞掉的', date: TODAY, tempo: [60] })
+    store.importJSON(JSON.stringify(raw))
+    const [a, b] = store.state.tasks
+    expect(a.tempo.goal).toBeNull()
+    expect(a.tempo.log.map((e) => [e.date, e.bpm])).toEqual([['2026-10-18', 60], ['2026-10-20', 69]])
+    expect(a.tempo.log.every((e) => e.at > 0)).toBe(true)
+    expect(b.tempo).toBeNull()
+  })
+})

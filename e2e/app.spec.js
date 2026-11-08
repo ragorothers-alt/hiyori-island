@@ -1,4 +1,4 @@
-// App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；番茄鐘計時重新整理後接著算；專注頁的貓咪
+// App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
 import { bootReady, expect, test, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
@@ -167,6 +167,61 @@ test('平板：專案的任務有自己的一欄；長期任務不會排進今�
   await bootReady(page)
   await page.evaluate((id) => window.hiyori.ui.openProject(id), pid)
   await expect(pd.locator('.pd-stabs [data-v="tasks"]')).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('練習曲的速度：任務頁記目標和今天練到多快（＋ 從目標的一半開始、照節拍器刻度跳），清單上直接看到；練到目標時說一聲', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 1180, height: 820 })
+  await page.goto(site.url)
+  await bootReady(page)
+  const ids = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const p = s.addProject({ name: '練習鋼琴', milestones: ['基本功'] })
+    const t = s.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true })
+    return { pid: p.id, tid: t.id }
+  })
+  await page.evaluate(({ pid, tid }) => window.hiyori.ui.openProject(pid, undefined, tid), ids)
+  const pd = page.locator('#projectDetail')
+  const tempo = pd.locator('.pd-task .pk-tempo')
+  await expect(tempo).toHaveCount(0)
+  // 長期任務才有「♩ 速度」：按了打開速度，游標在目標
+  await pd.locator('.pd-task [data-act="tempo-on"]').click()
+  const goal = tempo.locator('[data-bpm="goal"]')
+  const now = tempo.locator('[data-bpm="now"]')
+  await expect(goal).toBeFocused()
+  await goal.fill('120')
+  // ＋：還沒記過，從目標的一半開始；再按跳到節拍器上的下一格
+  await tempo.locator('[data-act="bpm-step"][data-v="1"]').click()
+  await expect(now).toHaveValue('60')
+  await tempo.locator('[data-act="bpm-step"][data-v="1"]').click()
+  await expect(now).toHaveValue('63')
+  const row = pd.locator('.pd-side .pt.on')
+  await expect(row.locator('.pt-m.tp')).toHaveText('♩63／120')
+  await expect(tempo.locator('.pk-tp-pct')).toHaveText('53%')
+  // 直接打數字、按 Enter：練到目標了
+  await now.fill('120')
+  await now.press('Enter')
+  await expect(row.locator('.pt-m.tp')).toHaveText('♩120 達標')
+  await expect(page.locator('.toast', { hasText: '練到目標速度了' })).toBeVisible()
+  // 一天一筆：今天改了好幾次只留最後那筆，任務頁的紀錄看得到
+  const log = await page.evaluate((tid) => window.hiyori.store.state.tasks.find((t) => t.id === tid).tempo, ids.tid)
+  expect(log.goal).toBe(120)
+  expect(log.log.map((e) => e.bpm)).toEqual([120])
+  await expect(pd.locator('.pd-task .tl-tempo')).toContainText('練到目標速度 ♩120')
+  // 打到一半、看不懂的「1e」遇到重畫，再直接點右欄另一件：不能當成清空，今天記的速度還在
+  const other = await page.evaluate((pid) => window.hiyori.store.addTask({ title: '哈農 1–5', project: pid, ongoing: true }).id, ids.pid)
+  await now.click()
+  await now.press('Control+a')
+  await now.pressSequentially('1e')
+  await page.evaluate((tid) => window.hiyori.store.updateTask(tid, { note: '先慢後快' }), ids.tid)
+  await pd.locator(`.pd-side [data-act="task-open"][data-id="${other}"]`).click()
+  await expect(pd.locator('.pd-task .pd-name')).toHaveText('哈農 1–5')
+  expect(await page.evaluate((tid) => window.hiyori.store.state.tasks.find((t) => t.id === tid).tempo.log.map((e) => e.bpm), ids.tid)).toEqual([120])
+  // 重新整理後還在
+  await page.reload()
+  await bootReady(page)
+  await page.evaluate(({ pid, tid }) => window.hiyori.ui.openProject(pid, undefined, tid), ids)
+  await expect(now).toHaveValue('120')
 })
 
 test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數；停掉後重新整理是待機', async ({ page, context, site }) => {

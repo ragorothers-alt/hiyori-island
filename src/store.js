@@ -13,7 +13,7 @@ import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
-import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched } from './projects.js'
+import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched, bpmOf } from './projects.js'
 import { isEvent } from './events.js'
 import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, chargesBetween, looksLikeCardNumber, nextCharge, paidCount, subsSummary } from './subs.js'
 import { MOTTO_EVERY, MOTTO_LEN, MOTTO_MAX } from './mottos.js'
@@ -40,7 +40,8 @@ const POMO_SIDS = 20
 // （舊的 PWA 分頁還開著、另一個分頁已經更新了的時候會遇到）。加了新的欄位就往上加一：
 // 3：訂閱（subscriptions、subRates）和警語（mottos）
 // 4：專案裡的長期任務（task.ongoing）：舊版讀進來會把它當成排在建立那天的任務，隔天就變逾期
-export const DATA_VERSION = 4
+// 5：練習曲的速度（task.tempo）：舊版讀進來會把它拿掉
+export const DATA_VERSION = 5
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
@@ -340,6 +341,8 @@ const str = (v, max = 120) => (typeof v === 'string' ? v.slice(0, max) : '')
 const num = (v, min, max, dflt) => (Number.isFinite(+v) ? Math.min(max, Math.max(min, Math.round(+v))) : dflt)
 const ts = (v) => (Number.isFinite(+v) && +v > 0 ? +v : null)
 const ymd = (v, dflt) => (DATE_RE.test(v) ? v : dflt)
+// 欄位清空了（不是打了看不懂的東西）
+const blank = (v) => v == null || (typeof v === 'string' && !v.trim())
 
 // update 類的動作只收認得的欄位，值照讀存檔時的規則清洗。完成狀態、經驗值、花這些只能透過各自的動作改
 // （不然傳錯一個欄位就能跳過給經驗的邏輯，或把 id 改掉）
@@ -476,6 +479,19 @@ function cleanList(list, fn) {
   return out
 }
 
+// 速度（練習曲的節拍器速度）：目標，和每天練到多快（一天一筆，舊的在前；同一天有好幾筆的留最後那筆），
+// met 是說過「練到了」的那個目標。沒在記是 null；開了還沒填的是 { goal: null, log: [], met: null }
+function cleanTempo(v) {
+  if (!isObj(v)) return null
+  const by = new Map()
+  for (const e of Array.isArray(v.log) ? v.log : []) {
+    const bpm = isObj(e) && DATE_RE.test(e.date) ? bpmOf(e.bpm) : null
+    if (bpm) by.set(e.date, { date: e.date, bpm, at: ts(e.at) || parseDate(e.date).getTime() + 12 * 3600e3 })
+  }
+  const log = [...by.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-PL.tempoLog)
+  return { goal: bpmOf(v.goal), log, met: bpmOf(v.met) }
+}
+
 function migrate(s) {
   if (!isObj(s)) throw new Error('不是有效的ひより存檔')
   const today = dateStr()
@@ -512,6 +528,8 @@ function migrate(s) {
         const title = str(x.title, PL.subTitle).trim()
         return title ? { id: str(x.id), title, done: !!x.done } : null
       }).slice(0, PL.subs),
+      // 速度（練習曲）：目標和每天練到多快
+      tempo: cleanTempo(t.tempo),
     }
   })
   const taskIds = new Set(tasks.map((t) => t.id))
@@ -1598,8 +1616,9 @@ export class Store {
   }
 
   // ── 任務 ──
-  // ongoing：長期任務（要歸在專案裡才算），日期記成今天、不排時段；subs：一起建好的子任務（標題）
-  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [] }) {
+  // ongoing：長期任務（要歸在專案裡才算），日期記成今天、不排時段；subs：一起建好的子任務（標題）；
+  // tempo：要記速度（練習曲），先開好、還沒填
+  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [], tempo = false }) {
     const p = project ? this._find('projects', project) : null
     const long = !!ongoing && !!p
     const t = {
@@ -1611,6 +1630,7 @@ export class Store {
         .filter(Boolean)
         .slice(0, PL.subs)
         .map((x) => ({ id: uid(), title: x, done: false })),
+      tempo: tempo ? { goal: null, log: [], met: null } : null,
     }
     if (!t.title) return null
     this.state.tasks.push(t)
@@ -1863,6 +1883,7 @@ export class Store {
         id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: !!t.rewarded, createdAt: Date.now() + i,
         dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0, pomos: i === 0 ? t.pomos || 0 : 0,
         project: t.project || null, ms: t.ms || null, note: i === 0 ? t.note || '' : '', subs: i === 0 ? t.subs || [] : [],
+        tempo: i === 0 ? t.tempo || null : null,
       }
       fx.push(['taskAdded', p])
       return p
@@ -1921,6 +1942,63 @@ export class Store {
     // 剩下的都做完了：任務也算完成
     if (!t.done && t.subs.length && t.subs.every((y) => y.done)) return this.toggleTask(id)
     this._finish()
+  }
+
+  // ── 速度（練習曲的節拍器速度）：tempo = { goal 目標, log: [{ date, bpm, at }] 每天練到多快, met 說過「練到了」的目標 }，
+  // 沒在記是 null。一天一筆：同一天再改就蓋過去，改回上一筆的速度＝今天沒變（那天的拿掉）。
+  // 沒有經驗值（按 ＋／− 刷不到東西）──
+  _tempoOf(t) {
+    return (t.tempo ??= { goal: null, log: [], met: null })
+  }
+  // on：開始記（先空著）；false：不記了，記過的速度一起拿掉
+  tempoOn(id, on = true) {
+    const t = this._find('tasks', id)
+    if (!t || !!t.tempo === !!on) return
+    t.tempo = on ? { goal: null, log: [], met: null } : null
+    this._editedTask(t)
+    this._finish()
+  }
+  // 目標速度；空白（或 null）＝不設，看不懂的數字不收
+  setTempoGoal(id, bpm) {
+    const t = this._find('tasks', id)
+    const goal = bpmOf(bpm)
+    if (!t || (goal === null && !blank(bpm)) || (t.tempo && t.tempo.goal === goal)) return
+    this._tempoOf(t).goal = goal
+    this._editedTask(t)
+    this._finish()
+  }
+  // 今天練到多快；空白（或 null）＝今天這筆不算（回到前一筆），看不懂的數字不收。
+  // 只動今天那一筆：日期比今天晚的（時鐘往回調、換了時區）原樣留著，照日期排好
+  setTempo(id, bpm) {
+    const t = this._find('tasks', id)
+    const v = bpmOf(bpm)
+    if (!t || (v === null && !blank(bpm))) return
+    this._refreshToday()
+    const today = this.today
+    const tp = this._tempoOf(t)
+    const log = tp.log
+    // i：今天（或之後第一筆）的位置；cur：今天那筆；prev：今天以前最後一筆的速度
+    let i = log.findIndex((e) => e.date >= today)
+    if (i < 0) i = log.length
+    const cur = log[i]?.date === today ? log[i] : null
+    const prev = log[i - 1]?.bpm ?? null
+    const was = cur ? cur.bpm : null
+    if (v === null ? !cur : v === (cur ? was : prev)) return
+    // up：記下了新的速度（不是拿掉今天那筆）
+    const up = !(v === null || (cur && v === prev))
+    if (!up) log.splice(i, 1)
+    else if (cur) Object.assign(cur, { bpm: v, at: Date.now() })
+    else log.splice(i, 0, { date: today, bpm: v, at: Date.now() })
+    this._editedTask(t)
+    // 第一次練到這個目標才說：說過的目標記在 met（同一天降下來又按上去不再說）；
+    // 剛才就已經到了、以前的日子到過的也不算
+    const goal = tp.goal
+    const fx = []
+    if (up && goal && v >= goal && tp.met !== goal && !(was >= goal) && !log.some((e) => e.date !== today && e.bpm >= goal)) {
+      tp.met = goal
+      fx.push(['tempoReached', { task: t, bpm: v }])
+    }
+    this._finish(fx)
   }
 
   // ── 日程 ──

@@ -3,7 +3,10 @@
 #projectDetail ::placeholder { color: var(--ink-faint); }
 .pd-top { display: flex; align-items: center; gap: 2px; margin: -4px -4px 8px; }
 .pd-top .sp, .pc-row .sp, .pm-tools .sp, .pn-bar .sp, .pd-ai-head .sp { flex: 1; }
-.pd-back { display: flex; align-items: center; gap: 2px; padding: 5px 10px 5px 4px; border-radius: 10px; font-size: 13px; color: var(--ink-soft); }
+.pd-back { display: flex; align-items: center; gap: 2px; padding: 5px 10px 5px 4px; border-radius: 10px; font-size: 13px; color: var(--ink-soft); min-width: 0; }
+/* 專案名稱很長、右邊按鈕又多（手機上的任務頁）：一行放不下就截短，不擠成兩行 */
+.pd-back span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-back svg { flex: none; }
 .pd-back svg, .pn-back svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .pd-tbtn { font-size: 12px; color: var(--ink-soft); padding: 5px 9px; border-radius: 9px; white-space: nowrap; }
 .pd-back:hover, .pd-tbtn:hover, .pd-tbtn.on { background: rgba(140, 170, 200, .16); color: var(--ink); }
@@ -97,7 +100,8 @@ body.night #projectDetail input[type=date] { color-scheme: dark; }
 .tl-day li { position: relative; margin-left: 12px; }
 .tl-dot { position: absolute; left: -18px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: var(--c); display: grid; place-content: center; font-style: normal; color: #fff; }
 .tl-ev .tl-dot { width: 8px; height: 8px; left: -17px; top: 7px; background: color-mix(in srgb, var(--c) 45%, var(--glass-solid)); }
-.tl-ev.tl-msdone .tl-dot, .tl-ev.tl-built .tl-dot, .tl-ev.tl-focus .tl-dot { width: 16px; height: 16px; left: -21px; top: 2px; background: var(--c); font-size: 10px; }
+.tl-ev.tl-msdone .tl-dot, .tl-ev.tl-built .tl-dot, .tl-ev.tl-focus .tl-dot, .tl-ev.tl-tempo .tl-dot { width: 16px; height: 16px; left: -21px; top: 2px; background: var(--c); font-size: 10px; }
+.tl-ev.tl-tempo.ok .tl-dot { background: var(--mint); }
 .tl-dot svg { width: 10px; height: 10px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .tl-log { display: flex; align-items: flex-start; gap: 4px; padding: 8px 6px 7px 12px; border-radius: 14px; background: var(--field); }
 .tl-main { flex: 1; min-width: 0; }
@@ -270,6 +274,33 @@ body.night .pt-m.long { filter: none; }
 .pk-subs > .pd-k b { font-family: var(--font-num); font-weight: 600; color: var(--ink-soft); margin-left: 5px; letter-spacing: 0; }
 .pk-subs > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .pk-subs .pm-steps li { min-height: 26px; }
+/* 速度：跟子任務對齊；＋／− 是給手指按的大小，數字欄位不要瀏覽器的上下箭頭 */
+.pk-tempo { display: flex; gap: 10px; align-items: flex-start; padding: 2px 10px; }
+.pk-tempo > .pd-k { padding-top: 8px; }
+.pk-tp { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.pk-tp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.pk-tp-row .sp { flex: 1; }
+.pk-tp-now, .pk-tp-goal { display: inline-flex; align-items: center; gap: 4px; }
+.pk-tp label, .pk-tp-goal { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--ink-soft); }
+.pk-tp i { font-style: normal; color: var(--ink-soft); }
+.pk-tp input { width: 3.4em; border: 0; outline: 0; border-radius: 9px; padding: 4px 4px; background: rgba(140, 170, 200, .14); font-family: var(--font-num); font-size: 15px; font-weight: 700; color: var(--ink); text-align: center; -moz-appearance: textfield; appearance: textfield; }
+.pk-tp input::-webkit-inner-spin-button, .pk-tp input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.pk-tp input:focus-visible { box-shadow: 0 0 0 2px var(--focus); }
+.pk-tp-goal input { font-size: 13.5px; font-weight: 600; }
+.pk-step { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-content: center; font-size: 17px; line-height: 1; color: var(--ink); background: rgba(140, 170, 200, .16); }
+.pk-step:hover { background: color-mix(in srgb, var(--c) 30%, transparent); }
+.pk-step:active { transform: scale(.94); }
+.pk-tp-pct { font-family: var(--font-num); font-size: 13px; font-weight: 700; color: var(--ink-soft); }
+.pk-tp-pct.ok, .pt-m.tp.ok, .tl-tempo.ok span { color: #2f7a5f; }
+body.night :is(.pk-tp-pct.ok, .pt-m.tp.ok, .tl-tempo.ok span) { color: #9fe0c5; }
+.pk-tp-bar { display: block; width: min(100%, 260px); height: 5px; border-radius: 3px; background: rgba(140, 170, 200, .24); overflow: hidden; }
+.pk-tp-bar i { display: block; height: 100%; border-radius: inherit; background: var(--c); }
+.pk-tp-bar.ok i { background: var(--mint); }
+.pk-tp-sub { font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
+.pk-tempo .mini { width: 26px; height: 26px; opacity: .6; }
+.pk-tempo .mini:hover, .pk-tempo .mini:focus-visible { opacity: 1; }
+/* 清單上的速度：一眼看出練到多快 */
+.pt-m.tp { font-family: var(--font-num); font-weight: 600; color: var(--ink); }
 .pd-task .pd-compose { margin: 14px 0 16px; }
 .tl-task { font-size: 11px; color: var(--ink-soft); padding: 0 6px; border-radius: 7px; background: rgba(140, 170, 200, .16); }
 .tl-task::before { content: "任務・"; color: var(--ink-faint); }

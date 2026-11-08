@@ -361,6 +361,11 @@ async function boot() {
       ui.toast({ icon: '長', title: `回到${p ? `「${p.name}」` : '專案'}的長期任務`, sub: t.title })
     }
   })
+  // 練習曲第一次練到目標速度
+  store.on('tempoReached', ({ task, bpm }) => {
+    sfx.chime()
+    ui.toast({ icon: '速', title: '練到目標速度了', sub: `${short(task.title, 16)}・♩${bpm}` })
+  })
   store.on('routineAdded', (r) => {
     talk('routine', {}, undefined, '以後我會記得幫你準備好。')
     ui.toast({ icon: '↻', title: `已設為例行${r.kind === 'task' ? '任務' : '日程'}`, sub: `「${short(r.title, 12)}」・${repeatLabel(r.repeat)}` })

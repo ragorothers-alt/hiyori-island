@@ -6,6 +6,8 @@
 export const PROJECT_LIMITS = {
   goal: 300, logText: 1000, logs: 20000, logMins: 1440, noteTitle: 60, noteBody: 10000, notes: 100, msNote: 500, steps: 30, stepTitle: 80, focusDays: 20000,
   taskNote: 500, subs: 30, subTitle: 80,
+  // 速度紀錄一天一筆：留最近十年份
+  tempoLog: 3650,
 }
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -71,25 +73,34 @@ export function msTasks(p, tasks = []) {
   return by
 }
 
-// 時間軸：自己寫的進度、完成的里程碑、綁在專案上的任務、專注的分鐘、開工和落成，依日期分組（新的在前）。
-// 回傳 [{ date, items: [{ kind: 'log'|'ms'|'task'|'done'|'start', at, ... }], logMins, focus }]
+// 時間軸：自己寫的進度、完成的里程碑、綁在專案上的任務（完成、速度變快）、專注的分鐘、開工和落成，依日期分組（新的在前）。
+// 回傳 [{ date, items: [{ kind: 'log'|'ms'|'task'|'tempo'|'done'|'start', at, ... }], logMins, focus }]
 export function projectTimeline(p, tasks = []) {
   const { day, addLog, list } = timeline()
   for (const log of p.logs || []) addLog(log)
   for (const m of p.milestones) if (m.done && m.doneAt) day(dayOf(m.doneAt)).items.push({ kind: 'ms', at: m.doneAt, milestone: m })
-  for (const t of linkedTo(p, tasks)) if (t.done && t.doneAt) day(dayOf(t.doneAt)).items.push({ kind: 'task', at: t.doneAt, task: t })
+  for (const t of linkedTo(p, tasks)) {
+    if (t.done && t.doneAt) day(dayOf(t.doneAt)).items.push({ kind: 'task', at: t.doneAt, task: t })
+    addTempo(day, t)
+  }
   for (const [date, min] of Object.entries(p.focus || {})) if (min > 0) day(date).focus += min
   if (p.completedAt) day(dayOf(p.completedAt)).items.push({ kind: 'done', at: p.completedAt })
   if (p.createdAt) day(dayOf(p.createdAt)).items.push({ kind: 'start', at: p.createdAt })
   return list()
 }
-// 任務頁的時間軸：在任務頁寫的紀錄、完成和建立這件任務，格式同 projectTimeline（'start' 是建立任務）
+// 任務頁的時間軸：在任務頁寫的紀錄、每天練到的速度、完成和建立這件任務，格式同 projectTimeline（'start' 是建立任務）
 export function taskTimeline(p, t) {
   const { day, addLog, list } = timeline()
   for (const log of p.logs || []) if (log.task === t.id) addLog(log)
+  addTempo(day, t)
   if (t.done && t.doneAt) day(dayOf(t.doneAt)).items.push({ kind: 'task', at: t.doneAt, task: t })
   if (t.createdAt) day(dayOf(t.createdAt)).items.push({ kind: 'start', at: t.createdAt })
   return list()
+}
+// 速度的紀錄（一天一筆）放進那一天：from 是上一筆的速度（第一筆是 null），goal 是現在的目標
+function addTempo(day, t) {
+  const log = t.tempo?.log || []
+  log.forEach((e, i) => day(e.date).items.push({ kind: 'tempo', at: e.at, bpm: e.bpm, from: i ? log[i - 1].bpm : null, goal: t.tempo.goal, task: t }))
 }
 // 依日期分組的時間軸：新的日子在前；同一天裡新的在上面，開頭（開工、建立）永遠在那天最下面，落成排在同一刻完成的里程碑上面
 function timeline() {
@@ -138,7 +149,10 @@ export function projectStats(p, tasks = []) {
   let last = 0
   for (const l of p.logs || []) last = Math.max(last, l.at)
   for (const m of p.milestones) if (m.doneAt) last = Math.max(last, m.doneAt)
-  for (const t of linked) if (t.done && t.doneAt) last = Math.max(last, t.doneAt)
+  for (const t of linked) {
+    if (t.done && t.doneAt) last = Math.max(last, t.doneAt)
+    for (const e of t.tempo?.log || []) last = Math.max(last, e.at || 0)
+  }
   return {
     msDone: p.milestones.filter((m) => m.done).length, msTotal: p.milestones.length,
     stepsDone: steps.filter((s) => s.done).length, stepsTotal: steps.length,
@@ -156,7 +170,10 @@ export function activity(p, tasks, today, days = 84) {
   const bump = (date, n) => (score[date] = (score[date] || 0) + n)
   for (const l of p.logs || []) bump(l.date, 1 + Math.min(2, (l.mins || 0) / 60))
   for (const m of p.milestones) if (m.doneAt) bump(dayOf(m.doneAt), 2)
-  for (const t of linkedTo(p, tasks)) if (t.done && t.doneAt) bump(dayOf(t.doneAt), 1)
+  for (const t of linkedTo(p, tasks)) {
+    if (t.done && t.doneAt) bump(dayOf(t.doneAt), 1)
+    for (const e of t.tempo?.log || []) bump(e.date, 0.5)
+  }
   for (const [date, min] of Object.entries(p.focus || {})) bump(date, min / 30)
   const out = []
   for (let i = days - 1; i >= 0; i--) {
@@ -173,6 +190,51 @@ export function fmtMins(min) {
   if (m < 60) return `${m} 分`
   const h = Math.floor(m / 60)
   return m % 60 ? `${h} 小時 ${m % 60} 分` : `${h} 小時`
+}
+
+// ── 速度（練習曲的節拍器速度，♩＝每分鐘幾拍）──
+// 任務的 tempo：{ goal 目標, log: [{ date, bpm, at }] 每天練到多快（一天一筆，舊的在前）, met 說過「練到了」的目標 }，
+// 沒在記是 null
+// 節拍器上的刻度：＋／− 照這個跳（比 40 慢一次 2、比 208 快一次 8）；自己打的數字不必在刻度上
+export const METRONOME = [40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 63, 66, 69, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 126, 132, 138, 144, 152, 160, 168, 176, 184, 192, 200, 208]
+export const BPM = { min: 10, max: 400 }
+// 看得懂的速度才收（四捨五入成整數、在範圍裡）；空白、0、亂打的都當成沒填
+export function bpmOf(v) {
+  if (v == null || v === '' || typeof v === 'boolean') return null
+  const n = Math.round(+v)
+  return Number.isFinite(n) && n >= BPM.min && n <= BPM.max ? n : null
+}
+// 現在練到多快：最近一筆
+export const tempoNow = (t) => t?.tempo?.log?.at(-1)?.bpm ?? null
+// 按一下 ＋／−：跳到節拍器上的下一格
+export function tempoStep(v, dir) {
+  const lo = METRONOME[0]
+  const hi = METRONOME.at(-1)
+  if (dir > 0) return Math.min(BPM.max, v < lo ? Math.min(lo, v + 2) : METRONOME.find((m) => m > v) ?? v + 8)
+  return Math.max(BPM.min, v > hi ? Math.max(hi, v - 8) : METRONOME.findLast((m) => m < v) ?? v - 2)
+}
+// 還沒記過就按 ＋／−：從目標的一半開始（慢練常見的起點），沒有目標就從 ♩60
+export function tempoStart(goal) {
+  if (!goal) return 60
+  const h = goal / 2
+  if (h < METRONOME[0]) return Math.max(BPM.min, Math.round(h))
+  return METRONOME.reduce((a, m) => (Math.abs(m - h) < Math.abs(a - h) ? m : a))
+}
+// 練到目標了沒（沒有目標或還沒記過都算沒有）
+export const tempoMet = (t) => !!t?.tempo?.goal && tempoNow(t) >= t.tempo.goal
+// 清單和匯出用的一小段：「♩66／120」「♩66」「目標 ♩120」，練到目標了是「♩120 達標」
+export function tempoLabel(t) {
+  const now = tempoNow(t)
+  const goal = t?.tempo?.goal
+  if (now && goal) return tempoMet(t) ? `♩${now} 達標` : `♩${now}／${goal}`
+  if (now) return `♩${now}`
+  return goal ? `目標 ♩${goal}` : ''
+}
+// 時間軸上的一筆速度（projectTimeline 的 'tempo'）：第一次練到目標、開始記、從多快變多快
+export function tempoEventText(it) {
+  if (it.goal && it.bpm >= it.goal && !(it.from >= it.goal)) return `練到目標速度 ♩${it.bpm}`
+  if (it.from == null) return `開始記速度 ♩${it.bpm}`
+  return `速度 ♩${it.from} → ${it.bpm}`
 }
 
 // ── 筆記 ──
@@ -310,8 +372,8 @@ export function projectMarkdown(p, tasks = []) {
     for (const t of linked) {
       const m = taskMilestone(p, t)
       // 還沒完成的長期任務沒有排在哪一天
-      const when = t.ongoing && !t.done ? '長期' : md(t.date)
-      L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${when}${m ? `・${m.title}` : ''}）`)
+      const extra = [t.ongoing && !t.done ? '長期' : md(t.date), tempoLabel(t), m?.title].filter(Boolean)
+      L.push(`- [${t.done ? 'x' : ' '}] ${t.title}（${extra.join('・')}）`)
       for (const s of t.subs || []) L.push(`  - [${s.done ? 'x' : ' '}] ${s.title}`)
       if (t.note) L.push(...t.note.split('\n').map((x) => `  > ${x}`))
     }
@@ -322,12 +384,13 @@ export function projectMarkdown(p, tasks = []) {
     L.push('## 筆記', '')
     for (const n of notes) L.push(`### ${noteTitle(n)}`, '', n.body.trim(), '')
   }
-  const days = projectTimeline(p, tasks).filter((d) => d.items.some((it) => it.kind === 'log'))
+  const days = projectTimeline(p, tasks).filter((d) => d.items.some((it) => it.kind === 'log' || it.kind === 'tempo'))
   if (days.length) {
     L.push('## 進度日誌', '')
     for (const d of days) {
       L.push(`### ${d.date}`, '')
       for (const it of d.items) {
+        if (it.kind === 'tempo') L.push(`- 任務「${it.task.title}」${tempoEventText(it)}`)
         if (it.kind !== 'log') continue
         const l = it.log
         const ms = l.ms && p.milestones.find((m) => m.id === l.ms)
