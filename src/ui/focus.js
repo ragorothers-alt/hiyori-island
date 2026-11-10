@@ -79,6 +79,8 @@ export class FocusTimer {
     setInterval(() => this.tick(), 250)
     this.render()
     if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
+    // 重新整理前就在計時：到點的通知再排一次（已經排著的話伺服器那邊只是換成同一個時間）
+    hooks.focusPlan?.(this.boundary)
   }
 
   // 這一段（專注、休息）本來該結束的時間過了太久：例如晚上開始專注後關掉，兩天後才打開
@@ -122,6 +124,16 @@ export class FocusTimer {
     try {
       localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid }))
     } catch {}
+    // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排
+    this.hooks.focusPlan?.(this.boundary)
+  }
+
+  // 下一次自己到點的時間和那時的狀況（排通知用）：沒在計時、暫停中是 null
+  get boundary() {
+    const at = clock.nextEnd(this)
+    if (at == null) return null
+    const { mode, focusMin, breakMin, round, rounds } = this
+    return { at, mode, up: this.counting, focusMin, breakMin, round, rounds, target: this.task?.title || this.project?.name || '' }
   }
 
   // 另一個分頁存了計時狀態：換成那一份，小島上的兩人也跟著進出小木屋（不放台詞、不記專注）
@@ -481,9 +493,9 @@ export class FocusTimer {
     this.cat.show({ mode: this.mode, paused: this.paused != null, focusMs }, coatOfDay(this.ui.store.today))
   }
 
-  // 一輪專注結束：記下分鐘數，接著休息
-  _finishFocus(minutes) {
-    const info = { ...this.info, last: this.round >= this.rounds }
+  // 一輪專注結束：記下分鐘數，接著休息。at：本來排好到點的時間（自己按「做完了」的沒有）
+  _finishFocus(minutes, at = null) {
+    const info = { ...this.info, last: this.round >= this.rounds, at, target: this.task?.title || this.project?.name || '' }
     this.toggleSet(false)
     Object.assign(this, clock.breakStart(this, Date.now()))
     this._save()
@@ -509,18 +521,20 @@ export class FocusTimer {
     if (this.mode === 'idle' || this.paused != null) return
     const step = clock.due(this, Date.now())
     if (step?.do === 'expire') return this._expire()
-    if (step?.do === 'finishFocus') this._finishFocus(step.minutes)
+    // 這一段本來排好到點的時間：通知用它認「同一次到點」
+    const at = step ? clock.nextEnd(this) : null
+    if (step?.do === 'finishFocus') this._finishFocus(step.minutes, at)
     else if (step?.do === 'nextRound') {
       // 還有下一輪：休息完自動接著開始
       this.round++
-      this.hooks.breakFinished({ next: this.round, rounds: this.rounds })
+      this.hooks.breakFinished({ next: this.round, rounds: this.rounds }, at)
       this._startFocus()
     } else if (step?.do === 'done') {
       this.toggleSet(false)
       this.mode = 'idle'
       this._loadLengths()
       this._save()
-      this.hooks.breakFinished(null)
+      this.hooks.breakFinished(null, at)
     }
     // 每 0.25 秒檢查一次是為了準時結束；畫面上的數字一秒才變一次，沒變就不重寫
     const sec = this.mode === 'idle' ? -1 : Math.floor((this.counting ? this.elapsed : this.left) / 1000)

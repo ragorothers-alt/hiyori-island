@@ -2,6 +2,7 @@ import { FocusTimer } from './ui/focus.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported } from './reminders.js'
+import { needsHomeScreen, pushSupported } from './push.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
@@ -1308,13 +1309,36 @@ export class UI {
     })
     $('#notifyBtn').addEventListener('click', async () => {
       const st = this.store.state.settings
+      const push = this.hooks.push
       if (st.notify && Notification.permission === 'granted') {
         this.store.setSetting('notify', false)
+        // 排著的到點通知取消、推播退訂
+        push?.off()
       } else {
         const perm = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
         this.store.setSetting('notify', perm === 'granted')
-        if (perm === 'granted') this.toast({ icon: '鐘', title: '系統通知已開啟', sub: '切到別的視窗時也會提醒你' })
+        if (perm === 'granted') {
+          // 順便訂閱推播：專注到點時，鎖著螢幕、切到別的 App 也收得到
+          const ok = await push?.setup()
+          this.toast({ icon: '鐘', title: '系統通知已開啟', sub: ok ? '提醒和專注到點都會通知，鎖著螢幕也收得到' : '切到別的視窗時也會提醒你' })
+          // 已經在計時：這一輪到點的通知現在排上
+          this.hooks.focusPlan?.(this.focus.boundary)
+        }
       }
+      this.renderRemind()
+    })
+    $('#notifyTest').addEventListener('click', async () => {
+      const btn = $('#notifyTest')
+      btn.disabled = true
+      const r = await this.hooks.pushTest?.()
+      btn.disabled = false
+      this.toast(
+        r === 'ready'
+          ? { icon: '鐘', title: '10 秒後傳一則通知', sub: '現在可以鎖上螢幕、或切到別的 App 等它' }
+          : r === 'busy'
+            ? { icon: '鐘', title: '計時中先不試', sub: '這一輪到點時就會通知你' }
+            : { icon: '鐘', title: '這次沒排上', sub: r === 'unsupported' ? '這個瀏覽器只有頁面開著時才能通知' : '連不上通知伺服器，等一下再試' },
+      )
       this.renderRemind()
     })
   }
@@ -1323,14 +1347,31 @@ export class UI {
     const st = this.store.state.settings
     $('#remindLead').value = String(st.remindLead)
     const btn = $('#notifyBtn')
+    const test = $('#notifyTest')
+    const hint = $('#notifyHint')
     if (!notifySupported()) {
-      btn.hidden = true
+      btn.hidden = test.hidden = true
+      // iPhone／iPad 的 Safari 分頁裡沒有通知功能：加入主畫面、從主畫面打開才有
+      hint.hidden = !needsHomeScreen()
+      hint.textContent = 'iPhone／iPad 要收通知：先在 Safari 按「分享」→「加入主畫面」，從主畫面打開後再回來這裡開啟'
       return
     }
     const perm = Notification.permission
-    btn.disabled = perm === 'denied' || st.remindLead < 0
-    setOn(btn, st.notify && perm === 'granted')
-    btn.textContent = perm === 'denied' ? '通知已被瀏覽器封鎖' : st.notify && perm === 'granted' ? '系統通知：開' : '開啟系統通知'
+    const on = st.notify && perm === 'granted'
+    // 不提醒日程時也能開：就寢、重要日子、專注到點的通知都用這個開關
+    btn.disabled = perm === 'denied'
+    setOn(btn, on)
+    btn.textContent = perm === 'denied' ? '通知已被瀏覽器封鎖' : on ? '系統通知：開' : '開啟系統通知'
+    // 專注到點的通知：鎖著螢幕也收得到的（推播）才有「試一則」
+    const state = this.hooks.push?.state
+    test.hidden = !on || !pushSupported() || state === 'unsupported'
+    hint.hidden = !on
+    hint.textContent =
+      !pushSupported() || state === 'unsupported'
+        ? '專注到點、休息結束也會通知（這個瀏覽器要頁面開著才收得到）'
+        : state === 'error'
+          ? '專注到點、休息結束也會通知。現在連不上通知伺服器：頁面開著時照常通知，鎖著螢幕時可能收不到'
+          : '專注到點、休息結束也會通知，鎖著螢幕、切到別的 App 也收得到（鎖著時專注到點，休息要等你回到 App 才開始算）'
   }
 
   renderSchedule(force = true) {

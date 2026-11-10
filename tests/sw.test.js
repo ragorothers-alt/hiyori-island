@@ -1,6 +1,6 @@
 // Service Worker（public/sw.js）：用假的 caches 跑它的事件，檢查更新時的快取搬移和離線首頁
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 const SCOPE = 'https://hiyori.test/app/'
 
@@ -54,14 +54,14 @@ class FakeCaches {
 }
 
 // 跟建置時一樣把版本和檔案清單填進去，再跑一次 sw.js，拿到它註冊的事件
-function loadSW({ version = 'hiyori-new', build = [], caches, fetch = async () => new Response('ok'), clients = {} }) {
+function loadSW({ version = 'hiyori-new', build = [], caches, fetch = async () => new Response('ok'), clients = {}, registration = {} }) {
   const src = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
     .replace("const VERSION = 'hiyori-v1'", `const VERSION = '${version}'`)
     .replace('const BUILD = []', `const BUILD = ${JSON.stringify(build)}`)
   const on = {}
   const self = {
     addEventListener: (type, fn) => (on[type] = fn),
-    registration: { scope: SCOPE },
+    registration: { scope: SCOPE, ...registration },
     location: new URL('sw.js', SCOPE),
     clients: { claim: async () => {}, ...clients },
     skipWaiting() {},
@@ -145,4 +145,119 @@ describe('Service Worker', () => {
     await run(on.notificationclick, event)
     expect(opened).toEqual([SCOPE])
   })
+})
+
+// 番茄鐘到點的推播：推播本身沒有內容，要顯示的字是頁面先留在快取裡的（最近幾則）
+describe('Service Worker：計時器到點的推播', () => {
+  const NOW = Date.UTC(2026, 10, 10, 4)
+  const MIN = 60000
+  // 假的通知中心：同一個 tag 的新通知換掉舊的。broken：getNotifications 壞掉的瀏覽器
+  function setup({ plans, windows = () => [], before = [], broken = null } = {}) {
+    const caches = new FakeCaches()
+    let list = before.map((tag) => ({ tag, title: 'old' }))
+    const alerts = []
+    const registration = {
+      getNotifications: async ({ tag } = {}) => list.filter((n) => !tag || n.tag === tag).map((n) => ({ ...n, close: () => (list = list.filter((x) => x !== n)) })),
+      showNotification: async (title, opts) => {
+        list = [...list.filter((n) => n.tag !== opts.tag), { title, ...opts }]
+        if (opts.renotify) alerts.push(title)
+      },
+    }
+    if (broken === 'missing') delete registration.getNotifications
+    if (broken === 'throws') registration.getNotifications = () => { throw new Error('nope') } // prettier-ignore
+    const on = loadSW({ caches, registration, clients: { matchAll: async () => windows() } })
+    const ready = plans === undefined ? Promise.resolve() : caches.open('hiyoripush').then((c) => c.put(SCOPE + '__timer-plan', new Response(JSON.stringify(plans))))
+    const marker = async () => (await (await caches.open('hiyoripush')).match(SCOPE + '__timer-shown'))?.json()
+    return { on, ready, shown: () => list, alerts, marker, caches }
+  }
+  const withClock = async (fn) => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'] })
+    vi.setSystemTime(NOW)
+    try {
+      return await fn()
+    } finally {
+      vi.useRealTimers()
+    }
+  }
+  const focus = { at: NOW - 800, title: 'ひより · 專注結束', body: '「練習曲」25 分鐘完成，休息一下吧' }
+
+  it('顯示剛到點那一則的字，tag 帶著到點的時間，並記下「這一次通知過了」', () =>
+    withClock(async () => {
+      const s = setup({ plans: [focus] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      expect(s.shown()).toEqual([expect.objectContaining({ title: focus.title, body: focus.body, tag: `hiyori-focus-${focus.at}`, renotify: true, icon: SCOPE + 'icons/icon-192.png' })])
+      expect(s.alerts).toEqual([focus.title])
+      expect(await s.marker()).toEqual({ at: focus.at })
+    }))
+
+  it('頁面醒著、已經排好下一段：晚幾秒到的推播還是顯示剛到點的那一則，不是還沒到的那一則', () =>
+    withClock(async () => {
+      const rest = { at: NOW + 5 * MIN, title: 'ひより · 休息結束', body: '' }
+      const earlier = { at: NOW - 12 * MIN, title: 'ひより · 休息結束', body: '更早的一次' }
+      const s = setup({ plans: [earlier, focus, rest] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.title)).toEqual([focus.title])
+      // 休息結束那一則到的時候換它（假的快取回的是同一個 Response，讀過一次就空了：再放一次）
+      await (await s.caches.open('hiyoripush')).put(SCOPE + '__timer-plan', new Response(JSON.stringify([earlier, focus, rest])))
+      vi.setSystemTime(rest.at + 1500)
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => `${n.title}|${n.tag}`)).toEqual([`ひより · 休息結束|hiyori-focus-${rest.at}`])
+      expect(await s.marker()).toEqual({ at: rest.at })
+    }))
+
+  it('找不到對得上的字（沒留、只有還沒到的、太久以前的、內容壞掉）：還是一定顯示一則通知', () =>
+    withClock(async () => {
+      for (const plans of [undefined, [], [{ at: NOW + 5 * MIN, title: '還沒到', body: '' }], [{ at: NOW - 40 * MIN, title: '舊的', body: '' }], [{ at: 'x', title: 5 }, null], 'oops', { at: NOW, title: '不是清單' }]) {
+        const s = setup({ plans })
+        await s.ready
+        await run(s.on.push, { data: null })
+        expect(s.shown(), JSON.stringify(plans)).toEqual([expect.objectContaining({ title: 'ひより · 計時到了', body: '', tag: 'hiyori-focus' })])
+        expect(await s.marker()).toBeUndefined()
+      }
+    }))
+
+  it('上一次到點的通知還留著就收掉，別的通知不動；查不到通知清單的瀏覽器照樣顯示', () =>
+    withClock(async () => {
+      const s = setup({ plans: [focus], before: [`hiyori-focus-${NOW - 30 * MIN}`, 'event-1'] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.tag).sort()).toEqual(['event-1', `hiyori-focus-${focus.at}`])
+
+      for (const broken of ['missing', 'throws']) {
+        const b = setup({ plans: [focus], broken, windows: () => [{ visibilityState: 'visible', focused: true }] })
+        await b.ready
+        const done = run(b.on.push, { data: null })
+        await vi.advanceTimersByTimeAsync(5000)
+        await done
+        expect(b.alerts, broken).toEqual([focus.title])
+      }
+    }))
+
+  it('正看著 App：通知幾秒後自己收掉（畫面上已經有提示）；沒在看、或這幾秒內切走了就留著', () =>
+    withClock(async () => {
+      let looking = true
+      const s = setup({ plans: [focus], windows: () => [{ visibilityState: looking ? 'visible' : 'hidden', focused: looking }] })
+      await s.ready
+      let done = run(s.on.push, { data: null })
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(s.shown()).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1500)
+      await done
+      expect(s.shown()).toEqual([])
+
+      // 出來之後 2 秒切到別的 App：留著
+      done = run(s.on.push, { data: null })
+      await vi.advanceTimersByTimeAsync(2000)
+      looking = false
+      await vi.advanceTimersByTimeAsync(3000)
+      await done
+      expect(s.shown()).toHaveLength(1)
+
+      const bg = setup({ plans: [focus], windows: () => [{ visibilityState: 'hidden', focused: false }] })
+      await bg.ready
+      await run(bg.on.push, { data: null })
+      expect(bg.shown()).toHaveLength(1)
+    }))
 })

@@ -5,6 +5,11 @@ const VERSION = 'hiyori-v1'
 const BUILD = []
 const SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './icons/icon-192.png', './icons/icon-512.png']
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com']
+// 計時器到點的推播：頁面把要顯示的字放在這個快取裡（src/push.js 也寫了一份，要一起改）。
+// 名字不能是 hiyori- 開頭：更新時會被當成舊快取清掉
+const PLAN_CACHE = 'hiyoripush'
+const PLAN_FILE = '__timer-plan'
+const SHOWN_FILE = '__timer-shown'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -126,6 +131,51 @@ self.addEventListener('message', (event) => {
           if (res.ok) await cache.put(url, res)
         } catch {}
       }
+    })(),
+  )
+})
+
+// 番茄鐘到點（專注結束、休息結束）：伺服器到點推一則沒有內容的推播過來，手機鎖著、App 被系統暫停時也收得到。
+// 要顯示的字是頁面排的時候留在快取裡的（最近幾則）。這一則是哪一次到點的：已經到點的裡面最近的那一筆——
+// 還沒到點的是下一段的（頁面醒著時，推播還沒到就已經排好下一則了）。找不到（取消沒送到伺服器）就顯示一般的字。
+// 每一則推播都一定要顯示通知：不顯示的話瀏覽器會自己補一則「網站在背景更新」，iPhone 還會取消這台的訂閱。
+// 所以顯示以外的事（讀快取、收掉舊通知、記下顯示過了）各自包起來，哪一步出錯都不擋顯示
+self.addEventListener('push', (event) => {
+  event.waitUntil(
+    (async () => {
+      const reg = self.registration
+      const now = Date.now()
+      let cache = null
+      let plan = null
+      try {
+        cache = await caches.open(PLAN_CACHE)
+        const hit = await cache.match(new URL(PLAN_FILE, reg.scope).href)
+        const list = hit ? await hit.json() : null
+        for (const p of Array.isArray(list) ? list : []) {
+          const due = p && Number.isFinite(p.at) && typeof p.title === 'string' && p.at <= now + 5000 && now - p.at < 15 * 60000
+          if (due && (!plan || p.at > plan.at)) plan = p
+        }
+      } catch {}
+      // 同一次到點，頁面自己發的通知也用這個 tag
+      const tag = plan ? `hiyori-focus-${plan.at}` : 'hiyori-focus'
+      // 上一次到點的通知還留著就收掉，只留最新的
+      try {
+        for (const n of await reg.getNotifications()) if (n.tag !== tag && String(n.tag).startsWith('hiyori-focus')) n.close()
+      } catch {}
+      const icon = new URL('icons/icon-192.png', reg.scope).href
+      await reg.showNotification(plan ? plan.title : 'ひより · 計時到了', { body: plan && typeof plan.body === 'string' ? plan.body : '', tag, icon, badge: icon, renotify: true })
+      // 記下這一次通知過了：頁面醒著的話，看了就不用自己再發一次
+      try {
+        if (plan) await cache.put(new URL(SHOWN_FILE, reg.scope).href, new Response(JSON.stringify({ at: plan.at })))
+      } catch {}
+      // 正看著 App：畫面上已經有提示卡和音效，這一則幾秒後自己收掉（那時已經沒在看就留著；有的瀏覽器不讓剛出來的通知馬上收，那就留著）
+      try {
+        const looking = async () => (await self.clients.matchAll({ type: 'window' })).some((c) => c.visibilityState === 'visible' && c.focused)
+        if (await looking()) {
+          await new Promise((r) => setTimeout(r, 4000))
+          if (await looking()) for (const n of await reg.getNotifications({ tag })) n.close()
+        }
+      } catch {}
     })(),
   )
 })

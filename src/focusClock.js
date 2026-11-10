@@ -16,6 +16,9 @@ export const leftMs = (s, now) => (s.mode === 'idle' ? s.focusMin * 60000 : s.pa
 // 往上數已經過了幾毫秒
 export const elapsedMs = (s, now) => s.paused ?? Math.max(0, now - s.endAt)
 
+// 下一次自己到點的時間（專注倒數完、正向計時滿 3 小時、休息結束）：沒在計時、暫停中是 null。到點的通知照這個排
+export const nextEnd = (s) => (s.mode === 'idle' || s.paused != null ? null : counting(s) ? s.endAt + FREE_MAX * 60000 : s.endAt)
+
 // 這一段本來該結束的時間過了太久（例如晚上開始專注後關掉，兩天後才打開）
 export function isStale(s, now) {
   if (s.mode === 'idle' || s.paused != null) return false

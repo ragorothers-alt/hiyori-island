@@ -1,5 +1,5 @@
 // App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
-import { bootReady, expect, test, useAppMode } from './fixtures.js'
+import { bootReady, expect, swReady, test, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -378,4 +378,63 @@ test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數�
   await page.reload()
   await bootReady(page)
   expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('idle')
+})
+
+// 收到推播後顯示什麼在 tests/sw.test.js 測（無頭瀏覽器不給通知權限，這裡顯示不了）
+test('番茄鐘到點的通知：開始時把「幾毫秒後」交給伺服器、字留在裝置上；暫停、停掉就取消', async ({ page, context, site }) => {
+  await useAppMode(context)
+  // 測試用的瀏覽器不給通知權限、也連不到推播服務：權限當成允許、訂閱換成假的，送給伺服器的請求攔下來看
+  await context.addInitScript(() => {
+    Object.defineProperty(Notification, 'permission', { get: () => 'granted' })
+    let cur = null
+    PushManager.prototype.getSubscription = async () => cur
+    PushManager.prototype.subscribe = async () => (cur = { endpoint: 'https://fcm.googleapis.com/fcm/send/e2e', options: {}, unsubscribe: async () => true })
+  })
+  const calls = []
+  await context.route('**/v1/push/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    calls.push({ path, body: route.request().postDataJSON() })
+    route.fulfill({ json: path.endsWith('/key') ? { key: 'BAAA' } : { ok: true }, headers: { 'Access-Control-Allow-Origin': '*' } })
+  })
+  await page.goto(site.url)
+  await bootReady(page)
+  await swReady(page)
+
+  // 沒開通知：開始計時不會連到伺服器
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  expect(calls).toEqual([])
+
+  await page.evaluate(() => window.hiyori.store.setSetting('notify', true))
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect.poll(() => calls.map((c) => c.path)).toEqual(['/v1/push/key', '/v1/push/timer'])
+  const { endpoint, after } = calls[1].body
+  expect(endpoint).toBe('https://fcm.googleapis.com/fcm/send/e2e')
+  expect(after).toBeGreaterThan(24.5 * 60000)
+  expect(after).toBeLessThanOrEqual(25 * 60000)
+  // 送出去的只有網址和時間；要顯示的字在這台的快取裡
+  expect(Object.keys(calls[1].body).sort()).toEqual(['after', 'endpoint'])
+  const plan = () =>
+    page.evaluate(async () => {
+      const hit = await (await caches.open('hiyoripush')).match(new URL('__timer-plan', (await navigator.serviceWorker.ready).scope).href)
+      return hit ? hit.json() : null
+    })
+  const endAt = await page.evaluate(() => window.hiyori.ui.focus.endAt)
+  expect(await plan()).toEqual([{ at: endAt, title: 'ひより · 專注結束', body: '25 分鐘完成，休息一下吧' }])
+
+  // 設定裡看得到說明和「試一則」
+  await page.evaluate(() => window.hiyori.ui.setTab('schedule'))
+  await expect(page.locator('#notifyHint')).toContainText('鎖著螢幕、切到別的 App 也收得到')
+  await expect(page.locator('#notifyTest')).toBeVisible()
+
+  // 暫停：取消排著的那一則；繼續：照新的結束時間再排
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect.poll(() => calls.at(-1).body).toEqual({ endpoint, after: null })
+  expect(await plan()).toEqual([])
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect.poll(() => calls.at(-1).body.after).toBeGreaterThan(24 * 60000)
+  // 停掉：取消
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  await expect.poll(() => calls.at(-1).body).toEqual({ endpoint, after: null })
 })

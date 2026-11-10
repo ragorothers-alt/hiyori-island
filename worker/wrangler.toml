@@ -21,6 +21,22 @@ name = "CREATE_LIMIT"
 namespace_id = "2002"
 simple = { limit = 5, period = 60 }
 
+# 番茄鐘到點的推播（/v1/push/*，見 src/push.js）：Durable Object 用 alarm 到點送出，也保管自己產生的 VAPID 金鑰。
+# 不用設 secret。推播服務要一個聯絡網址，預設用這個 Worker 自己的網址；要換的話加 [vars] PUSH_CONTACT = "https://…"
+# 每個 IP 每分鐘 40 次（開始、暫停、繼續、停掉各一次）；整個伺服器一天最多排 5000 則（[vars] PUSH_DAILY 可改，取消不算）
+[[durable_objects.bindings]]
+name = "PUSH"
+class_name = "PushHub"
+
+[[ratelimits]]
+name = "PUSH_LIMIT"
+namespace_id = "2004"
+simple = { limit = 40, period = 60 }
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushHub"]
+
 # ふじ的 AI（/v1/ai）：Claude API 金鑰和通行碼都是 secret，要自己在這個資料夾設定：
 #   npx wrangler@4 secret put ANTHROPIC_API_KEY
 #   npx wrangler@4 secret put AI_PASS
