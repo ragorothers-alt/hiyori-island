@@ -62,6 +62,10 @@ const THEME_INFO = {
 const NEWS_KEY = 'hiyori-news'
 const STUCK_OFF_KEY = 'hiyori-stuck-off'
 const STUCK_SAID_KEY = 'hiyori-stuck-said'
+// 好久沒碰的長期任務：按了「過一週再提醒」的 { 任務 id: 到哪一天 }、ふじ今天說過了沒
+const IDLE_OFF_KEY = 'hiyori-idle-off'
+const IDLE_SAID_KEY = 'hiyori-idle-said'
+const IDLE_DAYS = 7
 const newsVersion = () => `${CHANGELOG[0].id}:${CHANGELOG[0].items.length}`
 const readLocal = (k, dflt) => {
   try {
@@ -170,6 +174,9 @@ export class UI {
       },
       startFocus: (id) => this.focus.ask(id),
       focusTaskId: () => (this.focus.mode === 'focus' ? this.focus.taskId : null),
+      idleTasks: () => this.idleTasks(),
+      snoozeIdle: (id) => this.snoozeIdle(id),
+      openTask: (pid, tid) => this.openProject(pid, undefined, tid),
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
     this._project = lazy(() =>
@@ -945,6 +952,13 @@ export class UI {
       const t = s.state.tasks.find((x) => x.id === id)
       if (!t) return
       const act = b.dataset.act
+      // 好久沒碰的長期任務
+      if (act === 'idle-open') return this.openProject(t.project, undefined, id)
+      if (act === 'idle-focus') return this.focus.ask(id)
+      if (act === 'idle-snooze') {
+        this.snoozeIdle(id)
+        return this.renderTasks()
+      }
       if (act === 'split') s.splitTask(id)
       else if (act === 'later') s.updateTask(id, { date: addDays(s.today, 1), at: null })
       else if (act === 'drop') return armConfirm(b, '確定放下', () => {
@@ -1115,10 +1129,7 @@ export class UI {
     const s = this.store
     const box = $('#stuckBox')
     const st = isToday && s.state.settings.stuckNudge ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
-    if (!st) {
-      box.innerHTML = ''
-      return
-    }
+    if (!st) return this._renderIdle(box, isToday)
     const t = st.task
     const why = st.moved >= 2 ? `已經往後挪了 ${st.moved} 次` : `已經逾期 ${st.late} 天`
     box.innerHTML = `<div class="stuck-card"><span class="stamp-k coach-k">藤</span><div>
@@ -1132,6 +1143,42 @@ export class UI {
     if (readLocal(STUCK_SAID_KEY, '') !== s.today) {
       writeLocal(STUCK_SAID_KEY, s.today)
       this.hooks.stuck?.('nudge', t, st.moved || st.late)
+    }
+  }
+
+  // 好久沒碰的長期任務：長期任務不會逾期、也不在每天的任務裡，放久了沒人提醒。沒有卡關的任務時，同一個位置提一件（最久的那件），
+  // ふじ每天開口一次。跟卡關提醒共用設定裡的開關
+  idleTasks() {
+    const s = this.store
+    if (!s.state.settings.stuckNudge) return []
+    const off = readLocal(IDLE_OFF_KEY, {})
+    return s.idleLongTasks(IDLE_DAYS, new Set(Object.keys(off).filter((id) => off[id] > s.today)))
+  }
+  // 過一週再提醒這件（到期的順手清掉）
+  snoozeIdle(id) {
+    const today = this.store.today
+    const off = Object.fromEntries(Object.entries(readLocal(IDLE_OFF_KEY, {})).filter(([, d]) => d > today).slice(-200))
+    off[id] = addDays(today, 7)
+    writeLocal(IDLE_OFF_KEY, off)
+  }
+  _renderIdle(box, isToday) {
+    const it = isToday ? this.idleTasks()[0] : null
+    if (!it) {
+      box.innerHTML = ''
+      return
+    }
+    const t = it.task
+    const k = esc(t.id)
+    box.innerHTML = `<div class="stuck-card idle-card"><span class="stamp-k coach-k">藤</span><div>
+      <b>「${esc(t.title)}」${it.idle} 天沒碰了</b><p>在「${esc(it.project.name)}」裡。長期的事不會逾期，放久了卻容易忘：今天碰一下就好。</p>
+      <div class="stuck-btns">
+        <button class="btn-primary" data-act="idle-open" data-id="${k}">打開它</button>
+        <button class="btn-ghost" data-act="idle-focus" data-id="${k}">專注一輪</button>
+        <button class="cm-link" data-act="idle-snooze" data-id="${k}">過一週再提醒</button>
+      </div></div></div>`
+    if (readLocal(IDLE_SAID_KEY, '') !== this.store.today) {
+      writeLocal(IDLE_SAID_KEY, this.store.today)
+      this.hooks.idle?.(t, it.idle)
     }
   }
 
@@ -1526,14 +1573,22 @@ export class UI {
 
   // ── 專案詳情 ──
   // taskId：直接打開那件任務在專案裡的頁面
-  openProject(id, sec, taskId = null) {
-    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId))
+  // taskId：直接打開那件任務的頁面；write：游標放在「寫紀錄」的框裡
+  openProject(id, sec, taskId = null, write = false) {
+    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId, write))
     this._project.view.open(id, sec, taskId)
     this._stale?.add('projects')
     if (this.tab === 'projects') this._renderPage('projects')
     else this.setTab('projects')
     $('#panel .panel-body')?.scrollTo({ top: 0 })
-    requestAnimationFrame(() => this._project.view.focusBack())
+    requestAnimationFrame(() => (write ? this._project.view.focusLog() : this._project.view.focusBack()))
+  }
+  // 專注完一輪：打開那件任務的頁面寫紀錄（大計時器開著的話先收起來）
+  openTaskLog(tid) {
+    const t = this.store.state.tasks.find((x) => x.id === tid)
+    if (!t?.project) return
+    this.focus.toggleBig(false)
+    this.openProject(t.project, undefined, tid, true)
   }
   closeProject() {
     const pv = this._project.view

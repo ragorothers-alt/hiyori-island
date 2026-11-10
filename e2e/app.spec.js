@@ -121,7 +121,7 @@ test('平板：專案的任務有自己的一欄；長期任務不會排進今�
   // 新增：跟著上一件是長期，沿用它的子任務
   const add = pd.locator('.pd-side .pd-tasks form.pt-add')
   await expect(add.locator('[data-act="add-long"]')).toHaveAttribute('aria-pressed', 'true')
-  await add.locator('[data-act="add-subs"]').click()
+  await add.locator('[data-act="add-src"][data-v="last"]').click()
   await add.locator('input[name="title"]').fill('哈農 1–5')
   await add.locator('input[name="title"]').press('Enter')
   await expect(rows).toHaveCount(3)
@@ -222,6 +222,100 @@ test('練習曲的速度：任務頁記目標和今天練到多快（＋ 從目�
   await bootReady(page)
   await page.evaluate(({ pid, tid }) => window.hiyori.ui.openProject(pid, undefined, tid), ids)
   await expect(now).toHaveValue('120')
+})
+
+test('練習曲的範本、節拍器、別的單位；好久沒碰的長期任務在今日總覽提醒，可以晚點再說', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 1180, height: 820 })
+  // 數一下節拍器排了幾拍（測試的瀏覽器沒有喇叭，看有沒有真的排進去）
+  await page.addInitScript(() => {
+    window.__beats = 0
+    const AC = window.AudioContext
+    const make = AC.prototype.createOscillator
+    AC.prototype.createOscillator = function (...a) {
+      window.__beats++
+      return make.apply(this, a)
+    }
+  })
+  await page.goto(site.url)
+  await bootReady(page)
+  const ids = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const p = s.addProject({ name: '練習鋼琴', milestones: ['基本功'] })
+    const a = s.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true, tag: 'study', subs: ['讀譜', '分手練'], tempo: true })
+    const b = s.addTask({ title: '樂理書', project: p.id, ongoing: true })
+    s.setTempoGoal(a.id, 120)
+    s.setTempo(a.id, 120)
+    // 樂理書放了 12 天沒碰
+    b.createdAt = Date.now() - 12 * 86400000
+    s.save()
+    return { pid: p.id, a: a.id, b: b.id }
+  })
+  await page.evaluate(({ pid, a }) => window.hiyori.ui.openProject(pid, 'tasks', a), ids)
+  const pd = page.locator('#projectDetail')
+  const detail = pd.locator('.pd-task')
+  // 清單上標出幾天沒碰
+  await expect(pd.locator('.pd-side .pt', { hasText: '樂理書' })).toContainText('12 天沒碰')
+
+  // 節拍器：按了開始排拍點，＋ 之後還在響，再按一次停
+  const metro = detail.locator('.pk-metro')
+  await metro.click()
+  await expect(metro).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => page.evaluate(() => window.__beats)).toBeGreaterThan(1)
+  await detail.locator('[data-act="bpm-step"][data-v="1"]').click()
+  await expect(detail.locator('[data-bpm="now"]')).toHaveValue('126')
+  await expect(metro).toHaveAttribute('aria-pressed', 'true')
+  await metro.click()
+  await expect(metro).toHaveAttribute('aria-pressed', 'false')
+  const n = await page.evaluate(() => window.__beats)
+  await page.waitForTimeout(700)
+  expect(await page.evaluate(() => window.__beats)).toBe(n)
+
+  // 存成範本，新增時點它：長期、分類、子任務、記速度都帶上
+  await detail.locator('[data-act="tpl-save"]').click()
+  await detail.locator('form[data-form="tpl"] input').fill('練習曲')
+  await detail.locator('form[data-form="tpl"] input').press('Enter')
+  const add = pd.locator('.pd-side .pd-tasks form.pt-add')
+  await add.locator('[data-act="add-src"]', { hasText: '練習曲' }).click()
+  await expect(add.locator('.pt-add-hint')).toContainText('子任務：讀譜、分手練')
+  await add.locator('input[name="title"]').fill('小奏鳴曲')
+  await add.locator('input[name="title"]').press('Enter')
+  const made = await page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '小奏鳴曲'))
+  expect(made).toMatchObject({ ongoing: true, tag: 'study', tempo: { unit: '', goal: null, log: [] } })
+  expect(made.subs.map((x) => x.title)).toEqual(['讀譜', '分手練'])
+
+  // 別的單位：樂理書記頁數
+  await pd.locator(`.pd-side [data-act="task-open"][data-id="${ids.b}"]`).click()
+  await detail.locator('[data-act="tempo-on"]').click()
+  await detail.locator('select[data-tunit]').selectOption('頁')
+  await detail.locator('[data-bpm="goal"]').fill('200')
+  await detail.locator('[data-bpm="now"]').fill('32.5')
+  await detail.locator('[data-bpm="now"]').press('Enter')
+  await expect(pd.locator('.pd-side .pt.on .pt-m.tp')).toHaveText('32.5／200 頁')
+  await expect(detail.locator('.pk-metro')).toHaveCount(0)
+  // 記了數字就算碰過了
+  await expect(pd.locator('.pd-side .pt.on')).not.toContainText('天沒碰')
+
+  // 今日總覽：好久沒碰的長期事；「晚點」過一週再提醒
+  await page.evaluate((id) => {
+    const s = window.hiyori.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    t.touched = t.createdAt = Date.now() - 9 * 86400000
+    s.save()
+    window.hiyori.ui.setTab('today')
+  }, made.id)
+  const idle = page.locator('#todayRoot .td-idle')
+  await expect(idle).toContainText('小奏鳴曲')
+  await expect(idle).toContainText('9 天沒碰')
+  await idle.locator('[data-act="idle-snooze"]').click()
+  await expect(idle).toHaveCount(0)
+  // 點名稱打開它的任務頁（先把剛剛的晚點拿掉）
+  await page.evaluate(() => {
+    localStorage.removeItem('hiyori-idle-off')
+    window.hiyori.ui.render()
+  })
+  await idle.locator('[data-act="idle-open"]').click()
+  await expect(detail.locator('.pd-name')).toHaveText('小奏鳴曲')
 })
 
 test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數；停掉後重新整理是待機', async ({ page, context, site }) => {

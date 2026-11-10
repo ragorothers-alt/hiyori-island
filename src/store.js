@@ -13,7 +13,7 @@ import { LIFE_KINDS } from './data/life.js'
 import { THEMES } from './daylight.js'
 import { BUILDINGS, MAX_STAGE, buildingStage, townOf, townChanges } from './data/town.js'
 import { PLAN, inLot, lotsAt, townLevel, islandRadius } from './data/projectTown.js'
-import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched, bpmOf } from './projects.js'
+import { PROJECT_LIMITS as PL, projectProgress, progressAll, taskMilestone, lastTouched, bpmOf, unitOf } from './projects.js'
 import { isEvent } from './events.js'
 import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, chargesBetween, looksLikeCardNumber, nextCharge, paidCount, subsSummary } from './subs.js'
 import { MOTTO_EVERY, MOTTO_LEN, MOTTO_MAX } from './mottos.js'
@@ -41,7 +41,10 @@ const POMO_SIDS = 20
 // 3：訂閱（subscriptions、subRates）和警語（mottos）
 // 4：專案裡的長期任務（task.ongoing）：舊版讀進來會把它當成排在建立那天的任務，隔天就變逾期
 // 5：練習曲的速度（task.tempo）：舊版讀進來會把它拿掉
-export const DATA_VERSION = 5
+// 6：數字進度可以換單位（task.tempo.unit）、任務範本（templates）：5 版會把單位拿掉、把速度範圍外的數字洗掉。
+//    從這一版開始，不認得的欄位讀進來原樣留著（keepExtra）：之後單純多一個欄位、舊版不看也不會出錯的，不必再往上加；
+//    舊版照舊的意思去用會出錯的（像 4 的長期任務）才加
+export const DATA_VERSION = 6
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
@@ -270,7 +273,7 @@ function markLegacySamples({ tasks, events, projects }, createdAt) {
 // samples：要不要放範例（重置小島時不放）
 function seed(samples = true) {
   const today = dateStr()
-  const task = ([title, priority, tag]) => ({ id: sampleId(), title, date: today, priority, tag, done: false, rewarded: false, createdAt: Date.now() })
+  const task = ([title, priority, tag]) => blankTask({ id: sampleId(), title, date: today, priority, tag })
   const ev = ([title, start, end, color]) => ({ id: sampleId(), title, date: today, start, end, color, done: false, rewarded: false })
   // 範例專案也放一點目標、進度和筆記，打開就知道這裡可以記什麼
   const folio = [ms('整理作品清單', true), ms('設計首頁版型', true), ms('撰寫案例文案'), ms('前端切版'), ms('上線發佈')]
@@ -308,6 +311,7 @@ function seed(samples = true) {
     dates: [],
     subscriptions: [],
     mottos: [],
+    templates: [],
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
     pomoSids: [],
@@ -464,7 +468,30 @@ function cleanRates(obj) {
   return out
 }
 
-function cleanList(list, fn) {
+// 不認得的欄位原樣留著：之後的版本多加一個欄位時，還沒更新的裝置（舊的 PWA 分頁、另一台）讀進來再存回去也不會把它洗掉，
+// 所以單純「多一個欄位」不必再升 DATA_VERSION、叫每台裝置重新整理。只留能存成 JSON 而且不大的（擋匯入的檔案塞垃圾）；
+// 這一版認得的欄位照常清洗，不受影響
+const EXTRA_MAX = 256 * 1024
+const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+function keepExtra(raw, out) {
+  if (!isObj(raw) || !isObj(out)) return out
+  for (const k of Object.keys(raw)) {
+    if (k in out || BAD_KEYS.has(k) || k.length > 40) continue
+    const v = raw[k]
+    if (v === undefined || typeof v === 'function') continue
+    let size = 0
+    try {
+      size = JSON.stringify(v)?.length ?? Infinity
+    } catch {
+      size = Infinity
+    }
+    if (size <= EXTRA_MAX) out[k] = v
+  }
+  return out
+}
+
+// 每一筆紀錄不認得的欄位也留著（見 keepExtra）
+function cleanList(list, fn, keep = true) {
   if (!Array.isArray(list)) return []
   const seen = new Set()
   const out = []
@@ -472,6 +499,7 @@ function cleanList(list, fn) {
     if (!isObj(raw)) continue
     const item = fn(raw)
     if (!item) continue
+    if (keep) keepExtra(raw, item)
     if (!ID_RE.test(item.id) || seen.has(item.id)) item.id = uid()
     seen.add(item.id)
     out.push(item)
@@ -481,15 +509,44 @@ function cleanList(list, fn) {
 
 // 速度（練習曲的節拍器速度）：目標，和每天練到多快（一天一筆，舊的在前；同一天有好幾筆的留最後那筆），
 // met 是說過「練到了」的那個目標。沒在記是 null；開了還沒填的是 { goal: null, log: [], met: null }
+// unit：空字串＝節拍器速度，不然是自己取的單位（頁、公里…），數字的範圍跟著單位走
 function cleanTempo(v) {
   if (!isObj(v)) return null
+  const unit = unitOf(v.unit)
   const by = new Map()
   for (const e of Array.isArray(v.log) ? v.log : []) {
-    const bpm = isObj(e) && DATE_RE.test(e.date) ? bpmOf(e.bpm) : null
-    if (bpm) by.set(e.date, { date: e.date, bpm, at: ts(e.at) || parseDate(e.date).getTime() + 12 * 3600e3 })
+    const bpm = isObj(e) && DATE_RE.test(e.date) ? bpmOf(e.bpm, unit) : null
+    if (bpm) by.set(e.date, keepExtra(e, { date: e.date, bpm, at: ts(e.at) || parseDate(e.date).getTime() + 12 * 3600e3 }))
   }
   const log = [...by.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-PL.tempoLog)
-  return { goal: bpmOf(v.goal), log, met: bpmOf(v.met) }
+  return keepExtra(v, { unit, goal: bpmOf(v.goal, unit), log, met: bpmOf(v.met, unit) })
+}
+const newTempo = (unit = '') => ({ unit: unitOf(unit), goal: null, log: [], met: null })
+
+// 一件任務的所有欄位和預設值。新增任務的地方（自己加、例行公事、ふじ排的、拆成三小步、範例）都從這裡出發，
+// 讀存檔時（migrate）每個欄位也都要清洗到：加了新欄位只改這裡和 migrate，tests/store.test.js 會對兩邊的欄位是不是一樣
+export const blankTask = (o = {}) => ({
+  id: uid(), title: '', date: dateStr(), priority: 2, tag: 'life', done: false, rewarded: false, createdAt: Date.now(), doneAt: null,
+  routineId: null, pomos: 0, star: false, flower: null, dur: null, at: null, coach: null, moved: 0,
+  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null,
+  ...o,
+})
+
+// 任務範本：常用的一組設定（長期、分類、子任務、要不要記數字），新增任務時選了就照著建。例如「練習曲」
+const TEMPLATES_MAX = 20
+function cleanTemplates(list) {
+  const tags = new Set(TAGS.map((t) => t.id))
+  return cleanList(list, (x) => {
+    const name = str(x.name, 20).trim()
+    if (!name) return null
+    return {
+      id: str(x.id), name, tag: tags.has(x.tag) ? x.tag : 'work', ongoing: !!x.ongoing,
+      subs: (Array.isArray(x.subs) ? x.subs : []).map((s) => str(s, PL.subTitle).trim()).filter(Boolean).slice(0, PL.subs),
+      // tempo：null 不記數字；{ unit } 要記（空字串是節拍器速度）
+      tempo: isObj(x.tempo) ? { unit: unitOf(x.tempo.unit) } : null,
+      createdAt: ts(x.createdAt) || Date.now(),
+    }
+  }).slice(0, TEMPLATES_MAX)
 }
 
 function migrate(s) {
@@ -528,8 +585,10 @@ function migrate(s) {
         const title = str(x.title, PL.subTitle).trim()
         return title ? { id: str(x.id), title, done: !!x.done } : null
       }).slice(0, PL.subs),
-      // 速度（練習曲）：目標和每天練到多快
+      // 數字進度（練習曲的速度、頁數…）：目標和每天做到多少
       tempo: cleanTempo(t.tempo),
+      // touched：最後一次推進這件事的時間（勾子任務、寫紀錄、記數字、專注）；長期任務太久沒碰時提醒用
+      touched: ts(t.touched),
     }
   })
   const taskIds = new Set(tasks.map((t) => t.id))
@@ -830,19 +889,21 @@ function migrate(s) {
   const createdAt = ts(s.createdAt) || Date.now()
   if (!(s.version >= 2)) markLegacySamples({ tasks, events, projects }, createdAt)
   const newer = newerData(s)
-  return {
-    // 新版 App 寫的資料（只會在開機時讀到，而且讀到了就不再寫回去，見 newerApp）：
-    // 看不懂的頂層欄位原樣留著、版本號也不往回改，萬一寫出去也不會把新版的欄位洗掉
-    ...(newer ? Object.fromEntries(Object.entries(s).filter(([k]) => !['__proto__', 'constructor', 'prototype'].includes(k))) : {}),
+  const out = {
     // lotsPlan：專案町的地塊編號版本。舊的塔位（散在島上的 16 個點）對不上新的地，全部先收回，讀進來後再依序排進去
     lotsPlan: 1,
     version: newer ? Number(s.version) : DATA_VERSION, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
+    templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
   }
+  // 新版 App 寫的資料（只會在開機時讀到，而且讀到了就不再寫回去，見 newerApp）：
+  // 看不懂的頂層欄位原樣留著、版本號也不往回改，萬一寫出去也不會把新版的欄位洗掉。
+  // 版本一樣、只是多了不認得的頂層欄位（之後的版本加的）也留著，見 keepExtra
+  return newer ? { ...Object.fromEntries(Object.entries(s).filter(([k]) => !BAD_KEYS.has(k))), ...out } : keepExtra(s, out)
 }
 
 const weekdays = (v) => (Array.isArray(v) ? [...new Set(v.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort() : [])
@@ -1573,7 +1634,7 @@ export class Store {
       have ??= new Set([...this.state.tasks, ...this.state.events].map((x) => x.id))
       if (have.has(instanceId(r, date))) continue
       if (r.kind === 'task') {
-        const t = { id: instanceId(r, date), title: r.title, date, priority: r.priority, tag: r.tag, done: false, rewarded: false, createdAt: Date.now(), routineId: r.id }
+        const t = blankTask({ id: instanceId(r, date), title: r.title, date, priority: r.priority, tag: r.tag, routineId: r.id })
         this.state.tasks.push(t)
         created.push(t)
       } else {
@@ -1617,12 +1678,12 @@ export class Store {
 
   // ── 任務 ──
   // ongoing：長期任務（要歸在專案裡才算），日期記成今天、不排時段；subs：一起建好的子任務（標題）；
-  // tempo：要記速度（練習曲），先開好、還沒填
+  // tempo：要記數字進度，先開好、還沒填。true＝節拍器速度（練習曲），{ unit } 是別的單位
   addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [], tempo = false }) {
     const p = project ? this._find('projects', project) : null
     const long = !!ongoing && !!p
-    const t = {
-      id: uid(), title: String(title || '').trim(), date: long ? this.today : date, priority, tag, done: false, rewarded: false, createdAt: Date.now(),
+    const t = blankTask({
+      title: String(title || '').trim(), date: long ? this.today : date, priority, tag,
       dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: !long && TIME_RE.test(at) ? at : null,
       project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null, ongoing: long,
       subs: (Array.isArray(subs) ? subs : [])
@@ -1630,8 +1691,8 @@ export class Store {
         .filter(Boolean)
         .slice(0, PL.subs)
         .map((x) => ({ id: uid(), title: x, done: false })),
-      tempo: tempo ? { goal: null, log: [], met: null } : null,
-    }
+      tempo: tempo ? newTempo(isObj(tempo) ? tempo.unit : '') : null,
+    })
     if (!t.title) return null
     this.state.tasks.push(t)
     this._editedTask(t)
@@ -1869,6 +1930,46 @@ export class Store {
     }
     return list.sort((a, b) => b.moved - a.moved || b.late - a.late)
   }
+  // 好久沒碰的長期任務：長期任務不會逾期、也不在每天的任務裡，放著就沒人提醒。
+  // 進行中的專案（沒暫停、沒收藏、沒落成）裡，超過 days 天沒推進的列出來，最久的在前。
+  // 推進＝勾子任務、寫紀錄、記數字、專注在它上面；都沒有就從建立那天算。off：不再提醒的 id
+  idleLongTasks(days = 7, off = new Set()) {
+    const live = new Map(this.state.projects.filter((p) => !p.archived && !p.pausedAt && !p.completedAt).map((p) => [p.id, p]))
+    const lastLog = new Map()
+    for (const p of live.values()) for (const l of p.logs) if (l.task && l.date > (lastLog.get(l.task) || '')) lastLog.set(l.task, l.date)
+    const list = []
+    for (const t of this.state.tasks) {
+      const p = live.get(t.project)
+      if (!p || !floating(t) || off.has(t.id)) continue
+      const last = [dateStr(new Date(t.touched || t.createdAt)), lastLog.get(t.id) || '', t.tempo?.log.at(-1)?.date || ''].sort().at(-1)
+      const idle = daysBetween(last > this.today ? this.today : last, this.today)
+      if (idle >= days) list.push({ task: t, project: p, idle })
+    }
+    return list.sort((a, b) => b.idle - a.idle)
+  }
+
+  // ── 任務範本：常用的一組設定（長期、分類、子任務、要不要記數字），新增任務時選了就照著建 ──
+  // 從一件現成的任務存：名稱自己取（例如「練習曲」），同名的蓋過去
+  saveTemplate(name, taskId) {
+    const t = this._find('tasks', taskId)
+    name = str(name, 20).trim()
+    if (!t || !name) return null
+    const list = this.state.templates
+    const old = list.find((x) => x.name === name)
+    if (!old && list.length >= TEMPLATES_MAX) return null
+    const tpl = {
+      id: old?.id || uid(), name, tag: t.tag, ongoing: !!t.ongoing,
+      subs: (t.subs || []).map((x) => x.title), tempo: t.tempo ? { unit: t.tempo.unit || '' } : null, createdAt: old?.createdAt || Date.now(),
+    }
+    this.state.templates = old ? list.map((x) => (x === old ? tpl : x)) : [...list, tpl]
+    this._finish()
+    return tpl
+  }
+  deleteTemplate(id) {
+    const n = this.state.templates.length
+    this.state.templates = this.state.templates.filter((x) => x.id !== id)
+    if (this.state.templates.length !== n) this._finish()
+  }
   // 拆成三小步：先開個頭、推進一半、收尾，時間照原本的預估分配；本命和專注過的輪數留在第一步。原本那件換掉（不給 XP）
   // 原本那件已經領過獎勵（完成後又取消）的話，三小步也算領過，免得拆開再領一次
   splitTask(id) {
@@ -1879,12 +1980,12 @@ export class Store {
     const date = t.date < this.today ? this.today : t.date
     const fx = []
     const parts = steps.map(([name, share], i) => {
-      const p = {
-        id: uid(), title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, done: false, rewarded: !!t.rewarded, createdAt: Date.now() + i,
-        dur: Math.max(10, Math.round((total * share) / 5) * 5), at: null, star: i === 0 && !!t.star, coach: t.coach, moved: 0, pomos: i === 0 ? t.pomos || 0 : 0,
-        project: t.project || null, ms: t.ms || null, note: i === 0 ? t.note || '' : '', subs: i === 0 ? t.subs || [] : [],
-        tempo: i === 0 ? t.tempo || null : null,
-      }
+      // 第一步接手原本那件身上的東西（本命、專注過的輪數、說明、子任務、數字進度）
+      const p = blankTask({
+        title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, rewarded: !!t.rewarded, createdAt: Date.now() + i,
+        dur: Math.max(10, Math.round((total * share) / 5) * 5), coach: t.coach || null, project: t.project || null, ms: t.ms || null,
+        ...(i === 0 ? { star: !!t.star, pomos: t.pomos || 0, note: t.note || '', subs: t.subs || [], tempo: t.tempo || null } : {}),
+      })
       fx.push(['taskAdded', p])
       return p
     })
@@ -1914,7 +2015,7 @@ export class Store {
     if (t.subs.length >= PL.subs) return null
     const x = { id: uid(), title, done: false }
     t.subs.push(x)
-    this._editedTask(t)
+    this._touch(t)
     this._finish()
     return x
   }
@@ -1922,7 +2023,7 @@ export class Store {
     const { t, x } = this._sub(id, sid)
     if (!x) return
     x.done = !x.done
-    this._editedTask(t)
+    this._touch(t)
     if (x.done ? !t.done && t.subs.every((y) => y.done) : t.done) return this.toggleTask(id)
     this._finish()
   }
@@ -1944,24 +2045,33 @@ export class Store {
     this._finish()
   }
 
-  // ── 速度（練習曲的節拍器速度）：tempo = { goal 目標, log: [{ date, bpm, at }] 每天練到多快, met 說過「練到了」的目標 }，
-  // 沒在記是 null。一天一筆：同一天再改就蓋過去，改回上一筆的速度＝今天沒變（那天的拿掉）。
-  // 沒有經驗值（按 ＋／− 刷不到東西）──
+  // ── 數字進度（練習曲的節拍器速度，或頁數、公里這類自己取單位的數字）：
+  // tempo = { unit, goal 目標, log: [{ date, bpm, at }] 每天做到多少, met 說過「到了」的目標 }，沒在記是 null。
+  // 一天一筆：同一天再改就蓋過去，改回上一筆的數字＝今天沒變（那天的拿掉）。沒有經驗值（按 ＋／− 刷不到東西）──
   _tempoOf(t) {
-    return (t.tempo ??= { goal: null, log: [], met: null })
+    return (t.tempo ??= newTempo())
   }
-  // on：開始記（先空著）；false：不記了，記過的速度一起拿掉
-  tempoOn(id, on = true) {
+  // on：開始記（先空著），unit 是單位（空字串＝節拍器速度）；false：不記了，記過的一起拿掉
+  tempoOn(id, on = true, unit = '') {
     const t = this._find('tasks', id)
     if (!t || !!t.tempo === !!on) return
-    t.tempo = on ? { goal: null, log: [], met: null } : null
+    t.tempo = on ? newTempo(unit) : null
     this._editedTask(t)
     this._finish()
   }
-  // 目標速度；空白（或 null）＝不設，看不懂的數字不收
+  // 換單位：還沒記過才能換（記過的數字換了單位就不是同一件事了）；目標在新單位的範圍外就清掉
+  setTempoUnit(id, unit) {
+    const t = this._find('tasks', id)
+    const u = unitOf(unit)
+    if (!t?.tempo || t.tempo.log.length || t.tempo.unit === u) return
+    Object.assign(t.tempo, { unit: u, goal: bpmOf(t.tempo.goal, u), met: null })
+    this._editedTask(t)
+    this._finish()
+  }
+  // 目標；空白（或 null）＝不設，看不懂的數字不收
   setTempoGoal(id, bpm) {
     const t = this._find('tasks', id)
-    const goal = bpmOf(bpm)
+    const goal = bpmOf(bpm, t?.tempo?.unit)
     if (!t || (goal === null && !blank(bpm)) || (t.tempo && t.tempo.goal === goal)) return
     this._tempoOf(t).goal = goal
     this._editedTask(t)
@@ -1971,7 +2081,7 @@ export class Store {
   // 只動今天那一筆：日期比今天晚的（時鐘往回調、換了時區）原樣留著，照日期排好
   setTempo(id, bpm) {
     const t = this._find('tasks', id)
-    const v = bpmOf(bpm)
+    const v = bpmOf(bpm, t?.tempo?.unit)
     if (!t || (v === null && !blank(bpm))) return
     this._refreshToday()
     const today = this.today
@@ -1989,7 +2099,7 @@ export class Store {
     if (!up) log.splice(i, 1)
     else if (cur) Object.assign(cur, { bpm: v, at: Date.now() })
     else log.splice(i, 0, { date: today, bpm: v, at: Date.now() })
-    this._editedTask(t)
+    this._touch(t)
     // 第一次練到這個目標才說：說過的目標記在 met（同一天降下來又按上去不再說）；
     // 剛才就已經到了、以前的日子到過的也不算
     const goal = tp.goal
@@ -2455,6 +2565,12 @@ export class Store {
   _editedTask(t) {
     if (t?.project) this._edited(this._find('projects', t.project))
   }
+  // 推進了這件任務（勾子任務、寫紀錄、記數字、專注在它上面）：記下時間（長期任務太久沒碰時提醒用），專案也算動到
+  _touch(t) {
+    if (!t) return
+    t.touched = Date.now()
+    this._editedTask(t)
+  }
   // 改截止日；空字串 = 不設截止日
   setDeadline(id, date) {
     const p = this._find('projects', id)
@@ -2650,6 +2766,7 @@ export class Store {
     p.logs.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
     this.stats.projectLogs++
     this._edited(p)
+    if (t) t.touched = Date.now()
     const fx = []
     const first = p.logDay !== this.today
     if (first) {
@@ -2780,10 +2897,7 @@ export class Store {
             continue
           }
         }
-        const t = {
-          id: uid(), title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', done: false, rewarded: false,
-          createdAt: Date.now(), dur, at, coach: id, moved: 0,
-        }
+        const t = blankTask({ title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', dur, at, coach: id })
         this.state.tasks.push(t)
         fx.push(['taskAdded', t])
         if (!dates.includes(d.date)) dates.push(d.date)
@@ -3011,7 +3125,10 @@ export class Store {
     if (ID_RE.test(sid)) this.state.pomoSids = [...this.state.pomoSids, sid].slice(-POMO_SIDS)
     this._refreshToday()
     const task = taskId ? this._find('tasks', taskId) : null
-    if (task) task.pomos = (task.pomos || 0) + 1
+    if (task) {
+      task.pomos = (task.pomos || 0) + 1
+      task.touched = Date.now()
+    }
     // 任務歸在某個專案、或目標就是專案：專注的分鐘記到專案上（專案的時間軸和統計用）
     const proj = this._find('projects', task ? task.project : projectId) || null
     if (proj && minutes) {

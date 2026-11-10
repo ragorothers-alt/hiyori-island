@@ -100,7 +100,7 @@ export function taskTimeline(p, t) {
 // 速度的紀錄（一天一筆）放進那一天：from 是上一筆的速度（第一筆是 null），goal 是現在的目標
 function addTempo(day, t) {
   const log = t.tempo?.log || []
-  log.forEach((e, i) => day(e.date).items.push({ kind: 'tempo', at: e.at, bpm: e.bpm, from: i ? log[i - 1].bpm : null, goal: t.tempo.goal, task: t }))
+  log.forEach((e, i) => day(e.date).items.push({ kind: 'tempo', at: e.at, bpm: e.bpm, from: i ? log[i - 1].bpm : null, goal: t.tempo.goal, unit: t.tempo.unit || '', task: t }))
 }
 // 依日期分組的時間軸：新的日子在前；同一天裡新的在上面，開頭（開工、建立）永遠在那天最下面，落成排在同一刻完成的里程碑上面
 function timeline() {
@@ -184,6 +184,30 @@ export function activity(p, tasks, today, days = 84) {
   return out
 }
 
+// 這一段時間（from～to，含頭尾）每個專案推進了什麼：週報用。只列有動靜的、沒收藏的專案，動得多的在前。
+// tempo：這段時間記過數字的任務從多少變多少；untouched：還沒做完、這段時間完全沒碰的長期任務
+export function weekProjects(projects, tasks, from, to) {
+  const inside = (d) => !!d && d >= from && d <= to
+  const out = []
+  for (const p of projects) {
+    if (p.archived) continue
+    const linked = linkedTo(p, tasks)
+    const logs = (p.logs || []).filter((l) => inside(l.date))
+    const focus = Object.entries(p.focus || {}).reduce((a, [d, m]) => a + (inside(d) ? m : 0), 0)
+    const tasksDone = linked.filter((t) => t.done && t.doneAt && inside(dayOf(t.doneAt))).length
+    const msDone = p.milestones.filter((m) => m.done && m.doneAt && inside(dayOf(m.doneAt))).length
+    const tempo = linked.map((t) => ({ task: t, ...tempoSpan(t, from, to) })).filter((x) => x.to != null)
+    const logged = new Set(logs.map((l) => l.task).filter(Boolean))
+    const untouched = linked.filter(
+      (t) => t.ongoing && !t.done && !logged.has(t.id) && !(t.tempo?.log || []).some((e) => inside(e.date)) && !inside(dayOf(t.touched || t.createdAt)),
+    )
+    const mins = logs.reduce((a, l) => a + (l.mins || 0), 0)
+    if (!logs.length && !focus && !tasksDone && !msDone && !tempo.length) continue
+    out.push({ project: p, logs: logs.length, mins, focus, tasksDone, msDone, tempo, untouched })
+  }
+  return out.sort((a, b) => b.mins + b.focus + b.logs * 10 - (a.mins + a.focus + a.logs * 10))
+}
+
 // 分鐘 → 「1 小時 20 分」「45 分」
 export function fmtMins(min) {
   const m = Math.round(min)
@@ -192,49 +216,74 @@ export function fmtMins(min) {
   return m % 60 ? `${h} 小時 ${m % 60} 分` : `${h} 小時`
 }
 
-// ── 速度（練習曲的節拍器速度，♩＝每分鐘幾拍）──
-// 任務的 tempo：{ goal 目標, log: [{ date, bpm, at }] 每天練到多快（一天一筆，舊的在前）, met 說過「練到了」的目標 }，
-// 沒在記是 null
+// ── 數字進度：練習曲的速度（節拍器，♩＝每分鐘幾拍），或別的會慢慢往上的數字（讀到第幾頁、跑了幾公里）──
+// 任務的 tempo：{ unit, goal 目標, log: [{ date, bpm, at }] 每天做到多少（一天一筆，舊的在前）, met 說過「到了」的目標 }，
+// 沒在記是 null。unit 是空字串＝節拍器速度；不是空的就是自己取的單位（頁、公里…）。
+// 欄位叫 tempo、bpm 是因為一開始只記速度：單位不是速度時，bpm 就是那個數字
 // 節拍器上的刻度：＋／− 照這個跳（比 40 慢一次 2、比 208 快一次 8）；自己打的數字不必在刻度上
 export const METRONOME = [40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 63, 66, 69, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 126, 132, 138, 144, 152, 160, 168, 176, 184, 192, 200, 208]
 export const BPM = { min: 10, max: 400 }
-// 看得懂的速度才收（四捨五入成整數、在範圍裡）；空白、0、亂打的都當成沒填
-export function bpmOf(v) {
+// 別的單位：0.1～99999，最多一位小數（5.5 公里）
+export const NUM = { min: 0.1, max: 99999 }
+// 常用的單位（也可以自己打，最多 4 個字）
+export const UNITS = ['頁', '章', '公里', '次', '分鐘', '％']
+export const unitOf = (v) => (typeof v === 'string' ? [...v.trim()].slice(0, 4).join('') : '')
+export const tempoUnit = (t) => t?.tempo?.unit || ''
+// 看得懂的數字才收；空白、0、亂打的都當成沒填。速度是範圍裡的整數，別的單位留一位小數
+export function bpmOf(v, unit = '') {
   if (v == null || v === '' || typeof v === 'boolean') return null
+  if (unit) {
+    const n = Math.round(+v * 10) / 10
+    return Number.isFinite(n) && n >= NUM.min && n <= NUM.max ? n : null
+  }
   const n = Math.round(+v)
   return Number.isFinite(n) && n >= BPM.min && n <= BPM.max ? n : null
 }
-// 現在練到多快：最近一筆
+// 現在做到多少：最近一筆
 export const tempoNow = (t) => t?.tempo?.log?.at(-1)?.bpm ?? null
-// 按一下 ＋／−：跳到節拍器上的下一格
-export function tempoStep(v, dir) {
+// 按一下 ＋／−：速度跳到節拍器上的下一格；別的單位一次 1
+export function tempoStep(v, dir, unit = '') {
+  if (unit) return Math.min(NUM.max, Math.max(v <= 1 ? v : NUM.min, Math.round((v + (dir > 0 ? 1 : -1)) * 10) / 10))
   const lo = METRONOME[0]
   const hi = METRONOME.at(-1)
   if (dir > 0) return Math.min(BPM.max, v < lo ? Math.min(lo, v + 2) : METRONOME.find((m) => m > v) ?? v + 8)
   return Math.max(BPM.min, v > hi ? Math.max(hi, v - 8) : METRONOME.findLast((m) => m < v) ?? v - 2)
 }
-// 還沒記過就按 ＋／−：從目標的一半開始（慢練常見的起點），沒有目標就從 ♩60
-export function tempoStart(goal) {
+// 還沒記過就按 ＋／−：速度從目標的一半開始（慢練常見的起點），沒有目標就從 ♩60；別的單位從 1
+export function tempoStart(goal, unit = '') {
+  if (unit) return 1
   if (!goal) return 60
   const h = goal / 2
   if (h < METRONOME[0]) return Math.max(BPM.min, Math.round(h))
   return METRONOME.reduce((a, m) => (Math.abs(m - h) < Math.abs(a - h) ? m : a))
 }
-// 練到目標了沒（沒有目標或還沒記過都算沒有）
+// 到目標了沒（沒有目標或還沒記過都算沒有）
 export const tempoMet = (t) => !!t?.tempo?.goal && tempoNow(t) >= t.tempo.goal
-// 清單和匯出用的一小段：「♩66／120」「♩66」「目標 ♩120」，練到目標了是「♩120 達標」
+// 一個數字怎麼寫：速度是「♩66」，別的單位是「66 頁」
+export const tempoVal = (v, unit = '') => (unit ? `${v} ${unit}` : `♩${v}`)
+// 清單和匯出用的一小段：「♩66／120」「♩66」「目標 ♩120」，到目標了是「♩120 達標」；別的單位是「32／200 頁」
 export function tempoLabel(t) {
   const now = tempoNow(t)
   const goal = t?.tempo?.goal
-  if (now && goal) return tempoMet(t) ? `♩${now} 達標` : `♩${now}／${goal}`
-  if (now) return `♩${now}`
-  return goal ? `目標 ♩${goal}` : ''
+  const u = tempoUnit(t)
+  if (now && goal) return tempoMet(t) ? `${tempoVal(now, u)} 達標` : u ? `${now}／${goal} ${u}` : `♩${now}／${goal}`
+  if (now) return tempoVal(now, u)
+  return goal ? `目標 ${tempoVal(goal, u)}` : ''
 }
-// 時間軸上的一筆速度（projectTimeline 的 'tempo'）：第一次練到目標、開始記、從多快變多快
+// 時間軸上的一筆（projectTimeline 的 'tempo'）：第一次到目標、開始記、從多少變多少
 export function tempoEventText(it) {
-  if (it.goal && it.bpm >= it.goal && !(it.from >= it.goal)) return `練到目標速度 ♩${it.bpm}`
-  if (it.from == null) return `開始記速度 ♩${it.bpm}`
-  return `速度 ♩${it.from} → ${it.bpm}`
+  const u = it.unit || ''
+  if (it.goal && it.bpm >= it.goal && !(it.from >= it.goal)) return u ? `到目標了：${tempoVal(it.bpm, u)}` : `練到目標速度 ♩${it.bpm}`
+  if (it.from == null) return u ? `開始記：${tempoVal(it.bpm, u)}` : `開始記速度 ♩${it.bpm}`
+  return u ? `${it.from} → ${tempoVal(it.bpm, u)}` : `速度 ♩${it.from} → ${it.bpm}`
+}
+// 這週（from～to，含頭尾）這件任務的數字從多少變成多少；這段時間沒記過就是 null
+export function tempoSpan(t, from, to) {
+  const log = t?.tempo?.log || []
+  const inside = log.filter((e) => e.date >= from && e.date <= to)
+  if (!inside.length) return null
+  const before = log.findLast((e) => e.date < from)
+  return { from: before?.bpm ?? null, to: inside.at(-1).bpm, unit: tempoUnit(t), days: inside.length }
 }
 
 // ── 筆記 ──

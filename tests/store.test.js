@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating,
+  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating, blankTask, DATA_VERSION,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
@@ -935,9 +935,9 @@ describe('存檔讀不進來、存不進去', () => {
     for (const from of ['local', 'tab', 'cloud']) keepBackup(JSON.parse(store.exportJSON()), from, 1)
     const used = localStorage.getItem('hiyori-daily-v1').length + localStorage.getItem('hiyori-backup').length
     quota(used + 200)
-    for (let i = 0; i < 12; i++) store.addTask({ title: `很長的任務名稱很長的任務名稱 ${i}` })
+    for (let i = 0; i < 4; i++) store.addTask({ title: `很長的任務名稱很長的任務名稱 ${i}` })
     expect(store.saveNow()).toBe(true)
-    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('很長的任務名稱很長的任務名稱 11')
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('很長的任務名稱很長的任務名稱 3')
     // 丟的是最舊的，新的留著
     const left = readBackups().map((b) => b.from)
     expect(left.length).toBeLessThan(3)
@@ -2371,7 +2371,7 @@ describe('練習曲的速度', () => {
     const t = etude()
     expect(t.tempo).toBeNull()
     store.tempoOn(t.id)
-    expect(t.tempo).toEqual({ goal: null, log: [], met: null })
+    expect(t.tempo).toEqual({ unit: '', goal: null, log: [], met: null })
     store.setTempo(t.id, 60)
     store.setTempo(t.id, 63)
     expect(bpms(t)).toEqual([[TODAY, 63]])
@@ -2399,7 +2399,7 @@ describe('練習曲的速度', () => {
   it('目標可以先設、可以改、可以清掉；不記了就整個拿掉', () => {
     const t = etude()
     store.setTempoGoal(t.id, '120')
-    expect(t.tempo).toEqual({ goal: 120, log: [], met: null })
+    expect(t.tempo).toEqual({ unit: '', goal: 120, log: [], met: null })
     store.setTempo(t.id, 60)
     store.setTempoGoal(t.id, 112.4)
     expect(t.tempo.goal).toBe(112)
@@ -2479,7 +2479,7 @@ describe('練習曲的速度', () => {
 
   it('沒有經驗值；新增時可以先開好速度；拆成三小步時速度留在第一步', () => {
     const t = etude({ tempo: true })
-    expect(t.tempo).toEqual({ goal: null, log: [], met: null })
+    expect(t.tempo).toEqual({ unit: '', goal: null, log: [], met: null })
     const xp = store.state.player.xp
     for (const v of [60, 63, 66, 63, 66]) store.setTempo(t.id, v)
     expect(store.state.player.xp).toBe(xp)
@@ -2517,5 +2517,138 @@ describe('練習曲的速度', () => {
     expect(a.tempo.log.map((e) => [e.date, e.bpm])).toEqual([['2026-10-18', 60], ['2026-10-20', 69]])
     expect(a.tempo.log.every((e) => e.at > 0)).toBe(true)
     expect(b.tempo).toBeNull()
+  })
+})
+
+describe('存檔的欄位：不認得的留著、任務欄位只有一份定義', () => {
+  it('讀檔清洗出來的任務欄位，跟 blankTask 的一模一樣（加了新欄位兩邊都要有）', () => {
+    const t = store.addTask({ title: '一件事' })
+    expect(Object.keys(t).sort()).toEqual(Object.keys(blankTask()).sort())
+    store.importJSON(store.exportJSON())
+    expect(Object.keys(store.state.tasks[0]).sort()).toEqual(Object.keys(blankTask()).sort())
+    // 例行公事、ふじ排的、拆成三小步生出來的也是同一組欄位
+    const late = store.addTask({ title: '拖很久的', date: addDays(TODAY, -5) })
+    for (const part of store.splitTask(late.id)) expect(Object.keys(part).sort()).toEqual(Object.keys(blankTask()).sort())
+  })
+
+  it('之後的版本多加的欄位（這一版不認得）讀進來再存回去還在：任務、專案、里程碑、進度、數字進度和最上層', () => {
+    const p = store.addProject({ name: '專案', milestones: ['一'] })
+    const t = store.addTask({ title: '任務', project: p.id, ongoing: true })
+    store.setTempo(t.id, 60)
+    store.addProjectLog(p.id, { text: '進度' })
+    const raw = JSON.parse(store.exportJSON())
+    raw.futureTop = { a: [1, 2] }
+    raw.tasks[0].futureField = 'x'
+    raw.tasks[0].tempo.futureMode = 2
+    raw.tasks[0].tempo.log[0].feel = 'good'
+    raw.projects[0].futureFlag = true
+    raw.projects[0].milestones[0].weight = 3
+    raw.projects[0].logs[0].mood = 'ok'
+    store.importJSON(JSON.stringify(raw))
+    const back = JSON.parse(store.exportJSON())
+    expect(back.version).toBe(DATA_VERSION)
+    expect(back.futureTop).toEqual({ a: [1, 2] })
+    expect(back.tasks[0]).toMatchObject({ futureField: 'x', tempo: { futureMode: 2, log: [{ bpm: 60, feel: 'good' }] } })
+    expect(back.projects[0]).toMatchObject({ futureFlag: true, milestones: [{ weight: 3 }], logs: [{ mood: 'ok' }] })
+  })
+
+  it('不認得的欄位太大、或名字會出事的不留；這一版認得的欄位照常清洗', () => {
+    const raw = JSON.parse(store.exportJSON())
+    raw.tasks = [{ id: 'k1', title: '任務', date: TODAY, priority: 99, huge: 'x'.repeat(300 * 1024), ok: 1 }]
+    const text = JSON.stringify(raw).replace('"ok":1', '"ok":1,"__proto__":{"polluted":true},"constructor":1')
+    store.importJSON(text)
+    const t = store.state.tasks[0]
+    expect(t.priority).toBe(3)
+    expect(t.ok).toBe(1)
+    expect('huge' in t).toBe(false)
+    expect(Object.hasOwn(t, '__proto__')).toBe(false)
+    expect(Object.hasOwn(t, 'constructor')).toBe(false)
+    expect({}.polluted).toBeUndefined()
+  })
+})
+
+describe('數字進度的單位、任務範本、好久沒碰的長期任務', () => {
+  const proj = (name = '讀書') => store.addProject({ name, milestones: ['一'] })
+
+  it('別的單位（頁、公里）：數字可以有一位小數、範圍不一樣，＋／− 以外的規則跟速度一樣；記過就不能換單位', () => {
+    const p = proj()
+    const t = store.addTask({ title: '原子習慣', project: p.id, ongoing: true })
+    store.tempoOn(t.id, true, '頁')
+    expect(t.tempo).toEqual({ unit: '頁', goal: null, log: [], met: null })
+    store.setTempoGoal(t.id, 320)
+    store.setTempoUnit(t.id, '公里')
+    expect(t.tempo).toMatchObject({ unit: '公里', goal: 320 })
+    // 換成速度：目標 320 在節拍器的範圍裡，留著；5.5 不是速度
+    store.setTempoGoal(t.id, 5.5)
+    store.setTempoUnit(t.id, '')
+    expect(t.tempo).toMatchObject({ unit: '', goal: null })
+    store.setTempoUnit(t.id, '公里')
+    store.setTempoGoal(t.id, 10)
+    const hit = vi.fn()
+    store.on('tempoReached', hit)
+    store.setTempo(t.id, 5.54)
+    expect(t.tempo.log).toMatchObject([{ date: TODAY, bpm: 5.5 }])
+    store.setTempoUnit(t.id, '頁')
+    expect(t.tempo.unit).toBe('公里')
+    store.setTempo(t.id, 0)
+    store.setTempo(t.id, 100000)
+    expect(t.tempo.log).toMatchObject([{ bpm: 5.5 }])
+    store.setTempo(t.id, 10)
+    expect(hit).toHaveBeenCalledTimes(1)
+    store.importJSON(store.exportJSON())
+    expect(store.state.tasks[0].tempo).toMatchObject({ unit: '公里', goal: 10, met: 10, log: [{ bpm: 10 }] })
+    // 單位最多 4 個字
+    const u = store.addTask({ title: '別的', project: p.id, ongoing: true, tempo: { unit: ' 很長的單位名稱 ' } })
+    expect(u.tempo.unit).toBe('很長的單')
+  })
+
+  it('任務範本：從一件任務存下來（長期、分類、子任務、數字的單位），同名的蓋過去，可以刪；匯出匯入還在、會清洗', () => {
+    const p = proj('練習鋼琴')
+    const t = store.addTask({ title: '車爾尼 No.12', project: p.id, ongoing: true, tag: 'study', subs: ['讀譜', '分手練'], tempo: true })
+    store.setTempoGoal(t.id, 120)
+    const a = store.saveTemplate(' 練習曲 ', t.id)
+    expect(a).toMatchObject({ name: '練習曲', ongoing: true, tag: 'study', subs: ['讀譜', '分手練'], tempo: { unit: '' } })
+    store.addSub(t.id, '合手')
+    const b = store.saveTemplate('練習曲', t.id)
+    expect(b.id).toBe(a.id)
+    expect(store.state.templates).toHaveLength(1)
+    expect(store.state.templates[0].subs).toEqual(['讀譜', '分手練', '合手'])
+    expect(store.saveTemplate('', t.id)).toBeNull()
+    expect(store.saveTemplate('沒有這件', 'nope')).toBeNull()
+    store.importJSON(store.exportJSON())
+    expect(store.state.templates).toMatchObject([{ name: '練習曲', subs: ['讀譜', '分手練', '合手'] }])
+    const raw = JSON.parse(store.exportJSON())
+    raw.templates = [{ id: 'a', name: '', subs: [] }, { id: 'b', name: 'x'.repeat(50), tag: 'zzz', subs: ['', ' 一 ', 5], tempo: { unit: '公里公里公里' } }, 'bad']
+    store.importJSON(JSON.stringify(raw))
+    expect(store.state.templates).toMatchObject([{ name: 'x'.repeat(20), tag: 'work', ongoing: false, subs: ['一'], tempo: { unit: '公里公里' } }])
+    store.deleteTemplate(store.state.templates[0].id)
+    expect(store.state.templates).toEqual([])
+  })
+
+  it('好久沒碰的長期任務：超過 7 天沒推進的列出來（最久的在前）；勾子任務、寫紀錄、記數字、專注都算推進', () => {
+    const p = proj('練習鋼琴')
+    const mk = (title) => store.addTask({ title, project: p.id, ongoing: true, subs: ['一', '二'] })
+    const [a, b, c, d, e] = ['子任務', '紀錄', '數字', '專注', '都沒碰'].map(mk)
+    const dated = store.addTask({ title: '有日期的', project: p.id, date: TODAY })
+    expect(store.idleLongTasks()).toEqual([])
+    setDate(addDays(TODAY, 5))
+    store.tick()
+    store.toggleSub(a.id, a.subs[0].id)
+    store.addProjectLog(p.id, { text: '練了', task: b.id })
+    store.setTempo(c.id, 60)
+    store.completePomodoro(25, d.id)
+    setDate(addDays(TODAY, 9))
+    store.tick()
+    expect(store.idleLongTasks().map((x) => [x.task.title, x.idle])).toEqual([['都沒碰', 9]])
+    setDate(addDays(TODAY, 12))
+    store.tick()
+    expect(store.idleLongTasks().map((x) => x.task.title)).toEqual(['都沒碰', '子任務', '紀錄', '數字', '專注'])
+    expect(store.idleLongTasks(7, new Set([e.id])).map((x) => x.task.title)).not.toContain('都沒碰')
+    expect(store.idleLongTasks().map((x) => x.task)).not.toContain(dated)
+    // 做完的、暫停或收藏的專案裡的不提醒
+    store.toggleTask(e.id)
+    expect(store.idleLongTasks().map((x) => x.task.title)).not.toContain('都沒碰')
+    store.pauseProject(p.id, true)
+    expect(store.idleLongTasks()).toEqual([])
   })
 })

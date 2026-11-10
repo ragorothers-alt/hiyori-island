@@ -165,6 +165,10 @@ export class TodayView {
         this.refDate = s.today
         return this.render()
       case 'refSave': return this._saveRef()
+      case 'idle-open': return this.hooks.openTask?.(b.dataset.pid, id)
+      case 'idle-snooze':
+        this.hooks.snoozeIdle?.(id)
+        return this.render()
     }
   }
 
@@ -416,7 +420,7 @@ export class TodayView {
     const list = [...stars, ...rest.slice(0, Math.max(0, 3 - stars.length))].slice(0, 3)
     const head = `<header class="td-h">${IC.target}<h3>今日前三要務<small>きょうのトップ3</small></h3><button type="button" class="td-more" data-act="tab" data-v="tasks" data-fk="to-tasks">查看全部任務<i>›</i></button></header>`
     if (!list.length) {
-      return `<section class="td-card td-top">${head}<div class="td-empty"><p>${tasks.length ? '今天的任務都完成了，辛苦了' : '今天還沒有任務'}</p>${tasks.length ? '' : '<button type="button" class="btn-ghost" data-act="add" data-fk="add2">種下一件</button>'}</div></section>`
+      return `<section class="td-card td-top">${head}<div class="td-empty"><p>${tasks.length ? '今天的任務都完成了，辛苦了' : '今天還沒有任務'}</p>${tasks.length ? '' : '<button type="button" class="btn-ghost" data-act="add" data-fk="add2">種下一件</button>'}</div>${this._idleHTML()}</section>`
     }
     const focusId = this.hooks.focusTaskId?.()
     const row = (t, i) => {
@@ -437,7 +441,22 @@ export class TodayView {
       </li>`
     }
     const hint = stars.length < 3 && list.some((t) => !t.star) ? '<p class="td-hint">按 ☆ 把它選成本命：今天最重要的三件，完成時雙倍 XP</p>' : ''
-    return `<section class="td-card td-top">${head}<ol class="td-tops">${list.map(row).join('')}</ol>${hint}${this._moreHTML(tasks, list, focusId)}</section>`
+    return `<section class="td-card td-top">${head}<ol class="td-tops">${list.map(row).join('')}</ol>${hint}${this._moreHTML(tasks, list, focusId)}${this._idleHTML()}</section>`
+  }
+
+  // 好久沒碰的長期任務（專案裡沒排日期的事，例如一首練習曲）：不會逾期、也不在今天的任務裡，放久了在這裡提一下。
+  // 點名稱打開它的任務頁；▶ 專注一輪；「晚點」過一週再提醒
+  _idleHTML() {
+    const list = (this.hooks.idleTasks?.() || []).slice(0, 3)
+    if (!list.length) return ''
+    const row = ({ task: t, project: p, idle }) => {
+      const k = esc(t.id)
+      return `<li>
+        <button type="button" class="td-mo td-go" data-act="idle-open" data-id="${k}" data-pid="${esc(p.id)}" data-fk="io-${k}" title="打開這件任務的頁面"><i style="--c:${tagOf(t.tag).color}"></i><span>${esc(t.title)}</span><small>${esc(p.name)}</small><small class="td-idle-n">${idle} 天沒碰</small></button>
+        <button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="if-${k}" title="專注在這件事上" aria-label="專注在「${esc(t.title)}」">${IC.play}</button>
+        <button type="button" class="td-idle-x" data-act="idle-snooze" data-id="${k}" data-fk="is-${k}" title="過一週再提醒這件">晚點</button></li>`
+    }
+    return `<div class="td-idle"><p class="td-idle-h">好久沒碰的長期事</p><ul class="td-mos">${list.map(row).join('')}</ul></div>`
   }
 
   // 任務名稱：還沒做完的是一顆按鈕，點了就開始專注（旁邊的 ▶ 只是給滑鼠的捷徑，鍵盤走名稱這顆）

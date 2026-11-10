@@ -299,6 +299,20 @@ body.night :is(.pk-tp-pct.ok, .pt-m.tp.ok, .tl-tempo.ok span) { color: #9fe0c5; 
 .pk-tp-sub { font-size: 11px; line-height: 1.5; color: var(--ink-soft); }
 .pk-tempo .mini { width: 26px; height: 26px; opacity: .6; }
 .pk-tempo .mini:hover, .pk-tempo .mini:focus-visible { opacity: 1; }
+/* 單位（還沒記過才換得了）、節拍器、存成範本 */
+.pk-tp .pk-tp-unit { width: auto; max-width: 7.5em; padding: 4px 6px; font-family: inherit; font-size: 12px; font-weight: 400; text-align: left; color: var(--ink-soft); -moz-appearance: auto; appearance: auto; }
+.pk-tp input.pk-tp-unit { width: 5.5em; -moz-appearance: none; appearance: none; }
+body.night .pk-tp select option { color: #222; }
+.pk-metro { background: rgba(140, 170, 200, .12); }
+.pk-metro.on { background: var(--c); color: #fff; }
+.pk-metro.beat { animation: pkBeat .14s ease-out; }
+@keyframes pkBeat { from { transform: scale(1.12); filter: brightness(1.25); } to { transform: none; filter: none; } }
+.pk-tpl { display: flex; align-items: center; gap: 6px; padding: 0 6px; }
+.pk-tpl .pd-tbtn { padding: 3px 8px; font-size: 11.5px; color: var(--ink-faint); }
+.pk-tpl .btn-primary { margin-left: 0; padding: 5px 14px; }
+.pk-tpl .btn-ghost { padding: 4px 10px; font-size: 12px; }
+.pt-tpl-del { margin-left: 8px; font-size: 11px; color: var(--ink-faint); text-decoration: underline; padding: 0 2px; border-radius: 6px; }
+.pt-tpl-del:hover, .pt-tpl-del.armed { color: var(--warn-ink); }
 /* 清單上的速度：一眼看出練到多快 */
 .pt-m.tp { font-family: var(--font-num); font-weight: 600; color: var(--ink); }
 .pd-task .pd-compose { margin: 14px 0 16px; }

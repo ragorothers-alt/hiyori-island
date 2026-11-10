@@ -4,10 +4,11 @@ import { PROJECT_COLORS, tagOf } from '../theme.js'
 import { addDays, daysBetween, parseDate } from '../store.js'
 import {
   projectTimeline, taskTimeline, projectStats, activity, msProgress, msSteps, msTasks, taskMilestone, noteHTML, noteTitle, noteSnippet, noteTodos, toggleNoteLine, textHTML,
-  projectMarkdown, NOTE_TEMPLATES, dayOf, PROJECT_LIMITS as PL, BPM, bpmOf, tempoNow, tempoStep, tempoStart, tempoMet, tempoLabel, tempoEventText,
+  projectMarkdown, NOTE_TEMPLATES, dayOf, PROJECT_LIMITS as PL, BPM, NUM, UNITS, unitOf, bpmOf, tempoNow, tempoUnit, tempoVal, tempoStep, tempoStart, tempoMet, tempoLabel, tempoEventText,
 } from '../projects.js'
 import { aiReady, askAI } from '../ai.js'
 import { FUJI_LINES } from '../data/lines.js'
+import { metronome } from '../metronome.js'
 
 // 專案詳情：目標與統計、進度日誌（自己寫的＋自動帶進來的里程碑、任務、專注）、筆記、里程碑的細項與備註、歸在專案的任務。
 // 窄的時候四塊用分頁切換；寬的時候（平板橫放、電腦）左邊切換進度／筆記，右欄切換里程碑／任務，各自佔一整欄
@@ -160,7 +161,10 @@ export class ProjectView {
     this.drafts = new Map()
     this.side = 'ms' // 寬的時候右欄看哪一個（open 時換成這個專案記住的）
     this.addLong = null // 新增任務時選了「長期」；null＝跟著這個專案最近一件任務
-    this.addSubs = false // 新增任務時沿用最近那件的子任務
+    this.addSrc = null // 新增任務時照什麼建：'last' 沿用最近那件的子任務、範本的 id，null＝都不用
+    this.unitEdit = null // 正在自己打單位的那件任務
+    this.tplEdit = null // 正在取範本名稱的那件任務
+    this._stopMetro()
     // ふじ（Claude）正在做或做好的事：{ kind: 'steps', mid, … } 拆細項、{ kind: 'summary', … } 整理進度
     // 換專案或關掉時清掉；回來的結果對不上這個物件就丟掉
     this.ai = null
@@ -208,6 +212,8 @@ export class ProjectView {
     if (!this.store.state.tasks.some((t) => t.id === tid && t.project === this.id)) return
     this._flushAll()
     this._keepDraft()
+    this._stopMetro()
+    this.unitEdit = this.tplEdit = null
     if (!this.taskId) this._scrollY = this._scroller()?.scrollTop ?? 0
     this.taskId = tid
     this.tmins = this.drafts.get(tid)?.mins || 0
@@ -238,6 +244,8 @@ export class ProjectView {
     if (!tid) return false
     this._flushAll()
     this._keepDraft()
+    this._stopMetro()
+    this.unitEdit = this.tplEdit = null
     this.taskId = null
     this.editLog = null
     this.render()
@@ -256,6 +264,13 @@ export class ProjectView {
     const date = f.elements.date.value
     if (text.trim() || this.tmins || (date && date !== this.store.today)) this.drafts.set(this.taskId, { text, date, mins: this.tmins })
     else this.drafts.delete(this.taskId)
+  }
+  // 游標放進任務頁「寫紀錄」的框（專注完一輪接著記）
+  focusLog() {
+    const el = $('.pd-task form[data-form="tlog"] textarea', this.root)
+    if (!el) return this.focusBack()
+    el.focus({ preventScroll: true })
+    el.scrollIntoView({ block: 'center' })
   }
   // 看得到的那顆「返回」
   focusBack() {
@@ -503,7 +518,7 @@ export class ProjectView {
   // 一筆速度（那天練到多快）。inTask：畫在任務頁上，不標任務名
   _tempoEvHTML(p, it, inTask) {
     const ok = it.goal && it.bpm >= it.goal && !(it.from >= it.goal)
-    return `<li class="tl-ev tl-tempo ${ok ? 'ok' : ''}"><i class="tl-dot">♩</i><span>${inTask ? '' : `${this._taskTagHTML(p, it.task)} `}${esc(tempoEventText(it))}</span><small>${hhmm(it.at)}</small></li>`
+    return `<li class="tl-ev tl-tempo ${ok ? 'ok' : ''}"><i class="tl-dot">${it.unit ? '＃' : '♩'}</i><span>${inTask ? '' : `${this._taskTagHTML(p, it.task)} `}${esc(tempoEventText(it))}</span><small>${hhmm(it.at)}</small></li>`
   }
 
   _timelineHTML(p, tasks, today) {
@@ -669,8 +684,31 @@ export class ProjectView {
     }
     return best
   }
-  _addLong(p) {
-    return this.addLong ?? !!this._lastTask(p)?.ongoing
+  // 這個專案裡在記數字進度的任務最常用哪個單位（一樣多就看最近建的那件）：新開的先跟它一樣。
+  // 回傳 { tempo: { unit } }，沒有任何一件在記是 null
+  _tempoPeer(p) {
+    const n = new Map()
+    let best = null
+    for (const t of this.store.state.tasks) {
+      if (t.project !== p.id || !t.tempo) continue
+      const u = t.tempo.unit || ''
+      const x = n.get(u) || { unit: u, count: 0, at: 0 }
+      x.count++
+      x.at = Math.max(x.at, t.createdAt || 0)
+      n.set(u, x)
+    }
+    for (const x of n.values()) if (!best || x.count > best.count || (x.count === best.count && x.at > best.at)) best = x
+    return best && { tempo: { unit: best.unit } }
+  }
+  // 新增任務時會照什麼建：選了範本就照範本；不然跟著這個專案最近那件（是不是長期、分類、有沒有在記數字），
+  // 按了「沿用子任務」再帶上最近那件有子任務的那一組
+  _addPlan(p) {
+    const tpl = this.store.state.templates.find((x) => x.id === this.addSrc)
+    if (tpl) return { tpl, long: tpl.ongoing, subs: tpl.subs, tempo: tpl.tempo, tag: tpl.tag }
+    const last = this._lastTask(p)
+    const long = this.addLong ?? !!last?.ongoing
+    const src = this.addSrc === 'last' ? this._lastTask(p, true) : null
+    return { tpl: null, long, subs: src ? src.subs.map((x) => x.title) : [], tempo: long && last?.tempo ? { unit: last.tempo.unit || '' } : null, tag: last?.tag || 'work' }
   }
 
   _tasksHTML(p, today) {
@@ -685,6 +723,8 @@ export class ProjectView {
       if (l.date > x.last) x.last = l.date
       logs.set(l.task, x)
     }
+    // 好久沒碰的長期任務（不會逾期，放著沒人提醒）：標出幾天了
+    const idle = new Map(this.store.idleLongTasks().map((x) => [x.task.id, x.idle]))
     const row = (t) => {
       const k = esc(t.id)
       const on = t.id === this.taskId
@@ -700,10 +740,11 @@ export class ProjectView {
       const tp = tempoLabel(t)
       const meta = [
         `<span class="pt-m ${late ? 'late' : ''} ${t.ongoing && !t.done ? 'long' : ''}">${taskWhen(t, today)}</span>`,
-        tp ? `<span class="pt-m tp ${tempoMet(t) ? 'ok' : ''}" title="速度：現在練到多快／目標">${tp}</span>` : '',
+        tp ? `<span class="pt-m tp ${tempoMet(t) ? 'ok' : ''}" title="${tempoUnit(t) ? '進度：現在做到多少／目標' : '速度：現在練到多快／目標'}">${esc(tp)}</span>` : '',
+        idle.has(t.id) ? `<span class="pt-m late" title="好久沒推進了（勾子任務、寫紀錄、記數字、專注都算）">${idle.get(t.id)} 天沒碰</span>` : '',
         t.pomos ? `<span class="pt-m" title="專注了幾輪">◷ ${t.pomos}</span>` : '',
         lg?.mins ? `<span class="pt-m" title="寫紀錄時記下的時間，共 ${lg.n} 則紀錄">投入 ${dur(lg.mins)}</span>` : '',
-        lg && !t.done ? `<span class="pt-m">最近紀錄 ${ago(lg.last, today)}</span>` : '',
+        lg && !t.done && !idle.has(t.id) ? `<span class="pt-m">最近紀錄 ${ago(lg.last, today)}</span>` : '',
         t.note ? '<span class="pt-m"><i class="pt-has">註</i></span>' : '',
       ].join('')
       const focus = !t.done && (t.ongoing || t.date === today)
@@ -716,13 +757,26 @@ export class ProjectView {
       </li>`
     }
     const name = p.name.replace(/\s+/g, '').slice(0, 6)
-    const long = this._addLong(p)
+    const plan = this._addPlan(p)
+    const long = plan.long
     // 沿用子任務：從最近一件有子任務的複製（例如每首練習曲都是讀譜、分手練、合手…）
     const src = this._lastTask(p, true)
-    const names = src ? src.subs.map((x) => x.title).join('、') : ''
+    const lastOn = this.addSrc === 'last'
     const copy = src
-      ? `<button type="button" class="chip-toggle ${this.addSubs ? 'on' : ''}" data-act="add-subs" aria-pressed="${this.addSubs}" title="新的任務也帶著這 ${src.subs.length} 個子任務：${esc(names)}">沿用 ${src.subs.length} 個子任務</button>`
+      ? `<button type="button" class="chip-toggle ${lastOn ? 'on' : ''}" data-act="add-src" data-v="last" aria-pressed="${lastOn}" title="新的任務也帶著這 ${src.subs.length} 個子任務：${esc(src.subs.map((x) => x.title).join('、'))}">沿用 ${src.subs.length} 個子任務</button>`
       : ''
+    // 範本：存好的一組設定（長期、分類、子任務、要不要記數字）
+    const tpls = this.store.state.templates
+      .map((x) => `<button type="button" class="chip-toggle ${plan.tpl === x ? 'on' : ''}" data-act="add-src" data-v="${esc(x.id)}" aria-pressed="${plan.tpl === x}" title="照範本「${esc(x.name)}」建">${esc(x.name)}</button>`)
+      .join('')
+    const what = [
+      plan.tpl ? (plan.long ? '長期' : '排日期') : '',
+      plan.subs.length ? `子任務：${plan.subs.join('、')}` : '',
+      plan.tpl && plan.tempo ? `記${plan.tempo.unit ? ` ${plan.tempo.unit}` : ' ♩ 速度'}` : '',
+    ].filter(Boolean).join('・')
+    const hint = !what
+      ? ''
+      : `<small class="pt-add-hint">${plan.tpl ? `範本「${esc(plan.tpl.name)}」　` : ''}${esc(what)}${plan.tpl ? `<button type="button" class="pt-tpl-del" data-act="tpl-del" data-id="${esc(plan.tpl.id)}" title="刪掉這個範本（已經建好的任務不受影響）">刪除範本</button>` : ''}</small>`
     return `<h3 class="sec-title">任務<small>タスク</small><span class="count">${todo.length ? `還有 ${todo.length} 件` : done.length ? '都完成了' : ''}</span></h3>
       <form class="pt-add" data-form="task" autocomplete="off">
         <div class="pt-add-row">
@@ -732,9 +786,9 @@ export class ProjectView {
         <div class="pt-add-opts">
           <input type="date" name="date" data-keep="task-date" value="${today}" aria-label="日期" ${long ? 'hidden' : ''}>
           <button type="button" class="chip-toggle ${long ? 'on' : ''}" data-act="add-long" aria-pressed="${long}" title="不排在哪一天：不會逾期、不出現在每天的任務裡，只待在專案；完成那天才開花。適合練習曲、要慢慢推進的事">長期</button>
-          ${copy}
+          ${copy}${tpls}
         </div>
-        ${src && this.addSubs ? `<small class="pt-add-hint">子任務：${esc(names)}</small>` : ''}
+        ${hint}
       </form>
       ${todo.length ? `<ul class="pt-list">${todo.map(row).join('')}</ul>` : ''}
       ${done.length ? `<details class="pt-done" ${this.doneOpen || done.some((t) => t.id === this.taskId) ? 'open' : ''}><summary>已完成 ${done.length}</summary><ul class="pt-list">${done.map(row).join('')}</ul></details>` : ''}
@@ -744,11 +798,13 @@ export class ProjectView {
   // ── 任務頁 ──
   _taskTopHTML(p, t, today) {
     const k = esc(t.id)
-    // 記速度：長期任務（練習曲），或這個專案已經有別件在記速度
-    const tempo = !t.tempo && (t.ongoing || this.store.state.tasks.some((x) => x.project === p.id && x.tempo))
+    // 記數字進度：長期任務（練習曲的速度、讀到第幾頁…），或這個專案已經有別件在記。單位先跟著專案裡最近在記的那件
+    const peer = this._tempoPeer(p)
+    const tempo = !t.tempo && (t.ongoing || peer)
+    const u = peer?.tempo.unit || ''
     return `<button type="button" class="pd-back" data-act="task-back" title="回到「${esc(p.name)}」">${ICON.prev}<span>${esc(p.name)}</span></button>
       <span class="sp"></span>
-      ${tempo ? `<button type="button" class="pd-tbtn" data-act="tempo-on" data-id="${k}" title="記這件練到多快（節拍器 ♩＝每分鐘幾拍）和目標速度">♩ 速度</button>` : ''}
+      ${tempo ? `<button type="button" class="pd-tbtn" data-act="tempo-on" data-id="${k}" title="記一個會慢慢往上的數字和目標：練習曲的速度（節拍器 ♩）、讀到第幾頁、跑了幾公里…（開了以後可以換單位）">${u ? `＋ ${esc(u)}` : peer ? '♩ 速度' : '♩ 速度／數字'}</button>` : ''}
       ${!t.done && (t.ongoing || t.date === today) ? `<button type="button" class="pd-tbtn" data-act="task-focus" data-id="${k}" title="用番茄鐘專注在這件事上">◷ 專注</button>` : ''}
       <button type="button" class="pd-tbtn" data-act="task-edit" data-id="${k}" title="改名稱、日期、時間、優先度、里程碑">編輯</button>
       <button type="button" class="pd-tbtn" data-act="task-unlink" data-id="${k}" title="移出這個專案（任務本身還在；寫過的紀錄留在專案的進度裡）">移出專案</button>`
@@ -788,47 +844,81 @@ export class ProjectView {
         placeholder="要做到什麼程度？需要的資料、要注意的事">${esc(t.note || '')}</textarea></label>
       ${this._taskSubsHTML(t, tag.color)}
       ${t.tempo ? this._taskTempoHTML(t, today) : ''}
-      <div class="pd-nums">${nums}</div>`
+      <div class="pd-nums">${nums}</div>
+      ${this._taskTplHTML(t)}`
   }
 
-  // 速度：現在練到多快（＋／− 照節拍器的刻度跳，也可以直接打）、目標多快、是目標的幾成。
-  // 一天記一筆，每天的變化出現在下面的紀錄裡
+  // 數字進度：現在做到多少（＋／−，也可以直接打）、目標、是目標的幾成。一天記一筆，每天的變化出現在下面的紀錄裡。
+  // 單位是節拍器速度（♩）時 ＋／− 照節拍器的刻度跳，可以開節拍器照現在的速度打拍子；
+  // 還沒記過時可以換單位（頁、公里…或自己打）
   _taskTempoHTML(t, today) {
     const k = esc(t.id)
     const { goal, log } = t.tempo
+    const u = tempoUnit(t)
     const now = tempoNow(t)
     const last = log.at(-1)
     const met = tempoMet(t)
     const pct = now && goal ? Math.round((now / goal) * 100) : null
     const prev = last?.date === today ? log.at(-2) : null
-    const diff = prev ? now - prev.bpm : 0
+    const diff = prev ? Math.round((now - prev.bpm) * 10) / 10 : 0
+    const [up, down] = u ? ['多了', '少了'] : ['快了', '慢了']
     const sub = !last
-      ? `按 ＋／− 照節拍器的刻度調${goal ? '（從目標的一半開始）' : ''}，也可以直接打數字。一天記一筆，下面的紀錄看得到一路變快`
+      ? u
+        ? '按 ＋／− 一次加減 1，也可以直接打數字。一天記一筆，下面的紀錄看得到一路往前'
+        : `按 ＋／− 照節拍器的刻度調${goal ? '（從目標的一半開始）' : ''}，也可以直接打數字。一天記一筆，下面的紀錄看得到一路變快`
       : last.date !== today
         ? `${ago(last.date, today)}記的`
         : prev
-          ? `${diff > 0 ? `今天快了 ${diff}` : diff < 0 ? `今天慢了 ${-diff}` : '跟上次一樣'}（上次 ♩${prev.bpm}・${ago(prev.date, today)}）`
+          ? `${diff > 0 ? `今天${up} ${diff}` : diff < 0 ? `今天${down} ${-diff}` : '跟上次一樣'}（上次 ${tempoVal(prev.bpm, u)}・${ago(prev.date, today)}）`
           : '今天開始記'
+    const lim = u ? NUM : BPM
     const field = (key, v, label) =>
-      `<input type="number" inputmode="numeric" min="${BPM.min}" max="${BPM.max}" step="1" data-bpm="${key}" data-id="${k}" data-keep="bpm-${key}-${k}" value="${v ?? ''}" placeholder="—" aria-label="${label}">`
+      `<input type="number" inputmode="${u ? 'decimal' : 'numeric'}" min="${lim.min}" max="${lim.max}" step="${u ? 'any' : 1}" data-bpm="${key}" data-id="${k}" data-keep="bpm-${key}-${k}" value="${v ?? ''}" placeholder="—" aria-label="${label}">`
+    const pre = u ? '' : '<i>♩=</i>'
+    const post = u ? `<i>${esc(u)}</i>` : ''
+    // 單位：還沒記過才能換
+    const custom = this.unitEdit === t.id
+    const opts = [['', '♩ 速度'], ...[...new Set([...UNITS, ...(u ? [u] : [])])].map((x) => [x, x])]
+    const unit = log.length
+      ? ''
+      : custom
+        ? `<input class="pk-tp-unit" data-tunit="${k}" maxlength="4" placeholder="單位" value="${esc(u)}" aria-label="自己取的單位（最多 4 個字）">`
+        : `<select class="pk-tp-unit" data-tunit="${k}" aria-label="記什麼數字">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === u ? 'selected' : ''}>${esc(l)}</option>`).join('')}<option value="…">自己打…</option></select>`
+    const metro = this.metro === t.id
+    const tick = u
+      ? ''
+      : `<button type="button" class="pd-tbtn pk-metro ${metro ? 'on' : ''}" data-act="metro" data-id="${k}" aria-pressed="${metro}" title="照現在的速度打拍子（${metro ? '再按一次停' : '按 ＋／− 會跟著變'}）">${metro ? '■ 停' : '♪ 節拍器'}</button>`
+    const name = u ? '進度' : '速度'
     return `<div class="pk-tempo">
-        <span class="pd-k">速度</span>
+        <span class="pd-k">${name}</span>
         <div class="pk-tp">
           <div class="pk-tp-row">
-            <span class="pk-tp-now" role="group" aria-label="現在練到多快">
-              <button type="button" class="pk-step" data-act="bpm-step" data-id="${k}" data-v="-1" aria-label="慢一格">−</button>
-              <label><i>♩=</i>${field('now', now, '現在練到多快（每分鐘幾拍）')}</label>
-              <button type="button" class="pk-step" data-act="bpm-step" data-id="${k}" data-v="1" aria-label="快一格">＋</button>
+            <span class="pk-tp-now" role="group" aria-label="現在做到多少">
+              <button type="button" class="pk-step" data-act="bpm-step" data-id="${k}" data-v="-1" aria-label="${u ? '減 1' : '慢一格'}">−</button>
+              <label>${pre}${field('now', now, u ? `現在做到多少（${u}）` : '現在練到多快（每分鐘幾拍）')}${post}</label>
+              <button type="button" class="pk-step" data-act="bpm-step" data-id="${k}" data-v="1" aria-label="${u ? '加 1' : '快一格'}">＋</button>
             </span>
-            <label class="pk-tp-goal"><span>目標</span><i>♩=</i>${field('goal', goal, '目標速度（每分鐘幾拍）')}</label>
+            <label class="pk-tp-goal"><span>目標</span>${pre}${field('goal', goal, u ? `目標（${u}）` : '目標速度（每分鐘幾拍）')}${post}</label>
             ${pct == null ? '' : `<b class="pk-tp-pct ${met ? 'ok' : ''}">${met ? '達標' : `${pct}%`}</b>`}
+            ${unit}${tick}
             <span class="sp"></span>
-            <button type="button" class="mini" data-act="tempo-off" data-id="${k}" title="不記這件的速度${log.length ? '（記過的速度會一起刪掉）' : ''}">${ICON.del}</button>
+            <button type="button" class="mini" data-act="tempo-off" data-id="${k}" title="不記這件的${name}${log.length ? '（記過的會一起刪掉）' : ''}">${ICON.del}</button>
           </div>
           ${pct == null ? '' : `<span class="pk-tp-bar ${met ? 'ok' : ''}" aria-hidden="true"><i style="width:${Math.min(100, pct)}%"></i></span>`}
           <small class="pk-tp-sub">${sub}</small>
         </div>
       </div>`
+  }
+  // 存成範本：這件有子任務或在記數字時，把這組設定（長期、分類、子任務、記什麼數字）取個名字存起來
+  _taskTplHTML(t) {
+    if (!t.subs?.length && !t.tempo) return ''
+    const k = esc(t.id)
+    if (this.tplEdit !== t.id) return `<div class="pk-tpl"><button type="button" class="pd-tbtn" data-act="tpl-save" data-id="${k}" title="把這件的設定（${t.ongoing ? '長期、' : ''}分類、子任務${t.tempo ? '、記的數字' : ''}）存成範本：之後新增任務點一下就照著建">存成範本</button></div>`
+    const names = this.store.state.templates.map((x) => `<option value="${esc(x.name)}">`).join('')
+    return `<form class="pm-add pk-tpl" data-form="tpl" data-id="${k}" autocomplete="off">
+      <input data-keep="tpl-name-${k}" maxlength="20" list="tpl-names-${k}" placeholder="範本名稱，例如：練習曲（同名的會蓋過去）" aria-label="範本名稱">
+      <datalist id="tpl-names-${k}">${names}</datalist>
+      <button class="btn-primary" type="submit">存</button><button type="button" class="btn-ghost" data-act="tpl-cancel">取消</button></form>`
   }
 
   // 子任務：跟里程碑的細項一樣，全部勾完這件任務就完成
@@ -1076,11 +1166,41 @@ export class ProjectView {
         if (this.taskId && this.side === 'ms') return this.closeTask()
         return this.render()
       case 'add-long':
-        this.addLong = !this._addLong(p)
+        // 選著範本時按：不照範本了，從範本的設定反過來
+        this.addLong = !this._addPlan(p).long
+        if (this._addPlan(p).tpl) this.addSrc = null
         return this.render()
-      case 'add-subs':
-        this.addSubs = !this.addSubs
+      case 'add-src':
+        this.addSrc = this.addSrc === b.dataset.v ? null : b.dataset.v
         return this.render()
+      case 'tpl-del':
+        return armConfirm(b, '確定刪除？', () => {
+          if (this.addSrc === id) this.addSrc = null
+          s.deleteTemplate(id)
+        })
+      case 'tpl-save':
+        this.tplEdit = id
+        this.render()
+        return $(`[data-keep="tpl-name-${CSS.escape(id)}"]`, this.root)?.focus()
+      case 'tpl-cancel':
+        this.tplEdit = null
+        return this.render()
+      case 'metro': {
+        if (this.metro === id) return this._stopMetro(true)
+        const t = s.state.tasks.find((x) => x.id === id)
+        const v = t && (tempoNow(t) ?? tempoStart(t.tempo?.goal))
+        if (!v) return
+        this._stopMetro()
+        metronome.onStop = () => {
+          // 分頁放到背景時自己停了：按鈕換回來
+          if (!this.metro) return
+          this.metro = null
+          this._redraw('tsum')
+        }
+        if (!metronome.start(v, () => this._metroBeat())) return this.hooks.toast({ icon: '拍', title: '這個瀏覽器開不了節拍器', sub: '沒有聲音的功能，或被系統擋下來了' })
+        this.metro = id
+        return this._redraw('tsum')
+      }
       case 'mins': {
         this.mins = +b.dataset.v
         for (const x of $$('[data-act="mins"]', this.root)) {
@@ -1178,20 +1298,24 @@ export class ProjectView {
       case 'task-open': return this.openTask(id)
       case 'task-back': return this.closeTask()
       case 'tempo-on':
-        s.tempoOn(id, true)
+        // 單位先跟著這個專案最近在記的那件（沒有就是節拍器速度）
+        s.tempoOn(id, true, this._tempoPeer(p)?.tempo.unit || '')
         // 重畫完游標放在目標速度（譜上寫的那個）：填了目標，按 ＋ 就從一半開始
         return queueMicrotask(() => $(`[data-keep="bpm-goal-${CSS.escape(id)}"]`, this.root)?.focus())
       case 'tempo-off':
         // 記過速度的要按兩下（記過的一起刪掉）
-        if (s.state.tasks.find((x) => x.id === id)?.tempo?.log.length) return armConfirm(b, ICON.check, () => s.tempoOn(id, false))
+        if (s.state.tasks.find((x) => x.id === id)?.tempo?.log.length) return armConfirm(b, ICON.check, () => (this._stopMetro(), s.tempoOn(id, false)))
+        this._stopMetro()
         return s.tempoOn(id, false)
       case 'bpm-step': {
         const t = s.state.tasks.find((x) => x.id === id)
         if (!t) return
         // 欄位裡打了還沒存的數字（手機上按按鈕不一定會先離開欄位）：從那個數字開始跳
         const input = $(`[data-keep="bpm-now-${CSS.escape(id)}"]`, this.root)
-        const now = (input && dirty(input) && bpmOf(input.value)) || tempoNow(t)
-        const v = now == null ? tempoStart(t.tempo?.goal) : tempoStep(now, +b.dataset.v)
+        const u = tempoUnit(t)
+        const now = (input && dirty(input) && bpmOf(input.value, u)) || tempoNow(t)
+        const v = now == null ? tempoStart(t.tempo?.goal, u) : tempoStep(now, +b.dataset.v, u)
+        if (this.metro === id) metronome.set(v)
         if (input) input.value = input.defaultValue = String(v)
         return s.setTempo(id, v)
       }
@@ -1278,6 +1402,19 @@ export class ProjectView {
         if (!s.addStep(p.id, f.dataset.id, v)) this.hooks.toast({ icon: '細', title: '細項已經滿了', sub: '試著把這個里程碑拆成兩個' })
         return
       }
+      case 'tpl': {
+        const input = f.querySelector('input')
+        const name = input.value.trim()
+        if (!name) return input.focus()
+        input.value = ''
+        this.tplEdit = null
+        const tpl = s.saveTemplate(name, f.dataset.id)
+        if (!tpl) {
+          this.render()
+          return this.hooks.toast({ icon: '範', title: '範本已經滿了', sub: '新增任務的地方選一個舊的範本，按「刪除範本」再存' })
+        }
+        return this.hooks.toast({ icon: '範', title: `已存成範本「${tpl.name}」`, sub: '新增任務時點它，就照這組設定建' })
+      }
       case 'tsub': {
         const input = f.querySelector('input')
         const v = input.value.trim()
@@ -1290,13 +1427,11 @@ export class ProjectView {
         const title = el.title.value.trim()
         if (!title) return el.title.focus()
         const date = el.date.value || s.today
-        const ongoing = this._addLong(p)
-        const src = this.addSubs ? this._lastTask(p, true) : null
-        // 分類跟著這個專案最近的那件（第一件是「工作」）；最近那件在記速度的話，新的長期任務也先開好速度
-        const last = this._lastTask(p)
-        const tag = last?.tag || 'work'
+        // 照範本，或跟著這個專案最近那件（是不是長期、分類、有沒有在記數字；第一件的分類是「工作」）
+        const plan = this._addPlan(p)
+        const ongoing = plan.long
         el.title.value = ''
-        s.addTask({ title, date, tag, project: p.id, ongoing, subs: src ? src.subs.map((x) => x.title) : [], tempo: ongoing && !!last?.tempo })
+        s.addTask({ title, date, tag: plan.tag, project: p.id, ongoing, subs: plan.subs, tempo: plan.tempo || false })
         if (!ongoing && date !== s.today) this.hooks.toast({ icon: '種', title: `已種在 ${md(date)}`, sub: title })
       }
     }
@@ -1322,6 +1457,7 @@ export class ProjectView {
     if (el.matches('[data-goal]')) return this.store.setProjectGoal(p.id, el.value)
     if (el.dataset.tnote) return this.store.updateTask(el.dataset.tnote, { note: el.value })
     if (el.dataset.bpm) return this._bpmSave(el)
+    if (el.dataset.tunit) return this._unitSave(el)
     if (el.dataset.msnote) return this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })
     if (el.dataset.msdue) return this.store.updateMilestone(p.id, el.dataset.msdue, { due: el.value })
     // 拆細項的勾選：只改按鈕上的數字，不整塊重畫（焦點留在勾選框上）
@@ -1353,13 +1489,15 @@ export class ProjectView {
       return el.click()
     }
     // 目標只是一兩句話：Enter 就存（Shift＋Enter 換行）；速度打完數字按 Enter 也是
-    if (e.key === 'Enter' && !e.shiftKey && el.matches('[data-goal], [data-bpm]')) {
+    if (e.key === 'Enter' && !e.shiftKey && el.matches('[data-goal], [data-bpm], input[data-tunit]')) {
       e.preventDefault()
       return el.blur()
     }
     if (e.key !== 'Escape') return
     // Esc 先收掉正在編輯的那一塊（處理了就不再往外傳，面板不會跟著關）
     if (el.closest('[data-form="log-edit"]')) this.editLog = null
+    else if (el.closest('[data-form="tpl"]')) this.tplEdit = null
+    else if (el.matches('input[data-tunit]')) this.unitEdit = null
     else if (el.closest('[data-form="deadline"]')) this.dlEdit = false
     else if (this.noteEdit && el.closest('.pd-note')) return (e.preventDefault(), this._viewNote())
     else return
@@ -1480,7 +1618,7 @@ export class ProjectView {
     const s = this.store
     const id = el.dataset.id
     const raw = el.value.trim()
-    const v = bpmOf(raw)
+    const v = bpmOf(raw, tempoUnit(s.state.tasks.find((x) => x.id === id)))
     if (flush && v == null) return
     if (!el.validity?.badInput && (v != null || !raw)) {
       if (el.dataset.bpm === 'goal') s.setTempoGoal(id, v)
@@ -1489,6 +1627,36 @@ export class ProjectView {
     const t = s.state.tasks.find((x) => x.id === id)
     const now = el.dataset.bpm === 'goal' ? t?.tempo?.goal : tempoNow(t)
     el.value = el.defaultValue = now ?? ''
+    // 節拍器開著：跟著現在的速度
+    if (this.metro === id && el.dataset.bpm === 'now' && now) metronome.set(now)
+  }
+  // 換單位（還沒記過才換得了）。選「自己打…」換成輸入框；自己打的空白＝節拍器速度
+  _unitSave(el) {
+    const id = el.dataset.tunit
+    if (el.tagName === 'SELECT' && el.value === '…') {
+      this.unitEdit = id
+      this._redraw('tsum')
+      return $('input[data-tunit]', this.root)?.focus()
+    }
+    this.unitEdit = null
+    this._stopMetro()
+    this.store.setTempoUnit(id, unitOf(el.value))
+    this._redraw('tsum')
+  }
+  // 節拍器：一次只有一個在響；換件、關掉、不記了都停。redraw：停了以後把按鈕換回來
+  _stopMetro(redraw = false) {
+    const was = this.metro
+    this.metro = null
+    if (was) metronome.stop()
+    if (was && redraw) this._redraw('tsum')
+  }
+  // 每一拍：按鈕閃一下（減少動態效果時不閃）
+  _metroBeat() {
+    const b = $('.pk-metro', this.root)
+    if (!b || matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    b.classList.remove('beat')
+    void b.offsetWidth
+    b.classList.add('beat')
   }
 
   _export() {

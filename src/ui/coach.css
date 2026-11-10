@@ -165,6 +165,22 @@ body.night .dt-chip.soon small { color: #ffb0c4; }
 .wr-ins p { margin: 3px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
 .wr-ins .btn-ghost { margin-top: 7px; padding: 5px 10px; font-size: 12px; }
 .wr-tip { margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
+/* 專案這週：每個專案一張小卡（左邊一條專案的顏色） */
+.wr-pjs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.wr-pj { padding: 9px 12px 10px 14px; border-radius: 14px; background: var(--field); box-shadow: inset 3px 0 0 var(--c); }
+.wr-pj-name { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; font-weight: 600; border-radius: 8px; padding: 0 2px; margin: 0 -2px; }
+.wr-pj-name i { font-style: normal; color: var(--ink-faint); }
+.wr-pj-name:hover { color: var(--sky-deep); }
+.wr-pj-nums { margin: 2px 0 0; font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
+.wr-pj-tp { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+.wr-pj-tp li { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.wr-pj-tp span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wr-pj-tp b { flex: none; font-family: var(--font-num); font-weight: 600; }
+.wr-pj-tp em { flex: none; min-width: 2.4em; text-align: right; font-style: normal; font-family: var(--font-num); font-size: 11.5px; font-weight: 700; }
+.wr-pj-tp em.up { color: #2f7a5f; }
+.wr-pj-tp em.down { color: var(--warn-ink); }
+body.night .wr-pj-tp em.up { color: #9fe0c5; }
+.wr-pj-idle { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
 .wr-album { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; scroll-snap-type: x proximity; }
 .wr-album::-webkit-scrollbar { display: none; }
 .wr-album-card {

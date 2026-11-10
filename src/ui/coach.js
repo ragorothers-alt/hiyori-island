@@ -7,6 +7,7 @@ import { buildInsights } from '../insights.js'
 import { aiReady, askAI } from '../ai.js'
 import { PEAKS } from '../planner.js'
 import { daypart } from '../daylight.js'
+import { weekProjects, tempoVal, fmtMins } from '../projects.js'
 
 // 「教練 · ふじ」分頁，分成兩頁：
 // 排程：ふじ打招呼 → 問卷（全部點選標籤）→ 你的回答 → ふじ排好的預覽 → 套用／換個排法／改答案。
@@ -348,6 +349,7 @@ export class CoachView {
       this.history = false
       this.root.closest('.panel-body')?.scrollTo({ top: 0 })
     } else if (act === 'week') return this.hooks.openWeekCard?.(b.dataset.wk)
+    else if (act === 'wproj') return this.hooks.openProject?.(b.dataset.id)
     else if (act === 'aiWeek') return this._aiWeek()
     else if (act === 'peak') {
       this.store.setRhythm({ peak: b.dataset.v })
@@ -633,6 +635,7 @@ export class CoachView {
       </div>
     </section>`)
 
+    parts.push(this._weekProjectsHTML(w.week, w.end))
     parts.push(this._aiWeekHTML(w.week))
 
     // 習慣洞察
@@ -667,6 +670,40 @@ export class CoachView {
       <div class="wr-album">${cards}</div>
     </section>`)
     return parts.join('')
+  }
+
+  // 專案這週：每個有動靜的專案投入多少、完成幾件，記數字的任務（練習曲的速度、頁數）從多少到多少，
+  // 還有這週完全沒碰的長期任務。點專案名稱打開它
+  _weekProjectsHTML(from, to) {
+    const s = this.store
+    const list = weekProjects(s.state.projects, s.state.tasks, from, to)
+    if (!list.length) return ''
+    const card = (x) => {
+      const p = x.project
+      const nums = [
+        x.mins ? `投入 ${fmtMins(x.mins)}` : '',
+        x.focus ? `專注 ${fmtMins(x.focus)}` : '',
+        x.logs ? `${x.logs} 則進度` : '',
+        x.tasksDone ? `完成 ${x.tasksDone} 件任務` : '',
+        x.msDone ? `${x.msDone} 個里程碑` : '',
+      ].filter(Boolean).join('・')
+      const tempo = x.tempo
+        .map((r) => {
+          const d = r.from == null ? null : Math.round((r.to - r.from) * 10) / 10
+          const how = r.from == null ? `開始記 ${tempoVal(r.to, r.unit)}` : d ? r.unit ? `${r.from} → ${tempoVal(r.to, r.unit)}` : `♩${r.from} → ${r.to}` : `停在 ${tempoVal(r.to, r.unit)}`
+          return `<li><span>${esc(r.task.title)}</span><b>${esc(how)}</b>${d ? `<em class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : ''}${d}</em>` : ''}</li>`
+        })
+        .join('')
+      const idle = x.untouched.length ? `<p class="wr-pj-idle">這週還沒碰：${esc(x.untouched.slice(0, 4).map((t) => t.title).join('、'))}${x.untouched.length > 4 ? ` 等 ${x.untouched.length} 件` : ''}</p>` : ''
+      return `<li class="wr-pj" style="--c:${PROJECT_COLORS[p.color % PROJECT_COLORS.length]}">
+        <button type="button" class="wr-pj-name" data-act="wproj" data-id="${esc(p.id)}" title="打開這個專案">${esc(p.name)}<i>›</i></button>
+        <p class="wr-pj-nums">${nums || '記了數字'}</p>
+        ${tempo ? `<ul class="wr-pj-tp">${tempo}</ul>` : ''}${idle}</li>`
+    }
+    return `<section class="wr-card">
+      <h5>專案這週<small>投入、完成，和一路往前的數字</small></h5>
+      <ul class="wr-pjs">${list.slice(0, 6).map(card).join('')}</ul>
+    </section>`
   }
 
   // ふじ的週報洞察（Claude）：設了通行碼才出現；每週存一份在這台裝置，想更新再按

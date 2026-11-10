@@ -138,6 +138,8 @@ async function boot() {
       } else if (kind === 'later') talk('stuckLater', { task }, 4600, '明天再看，現在先歇歇吧。', 'fuji')
       else if (kind === 'drop') talk('stuckDrop', { task }, 4600, '先放下了，鬆一口氣吧。', 'fuji')
     },
+    // 好久沒碰的長期任務：第一次看到那張小卡時ふじ說一句（一天一次）
+    idle: (t, n) => talk('idleLong', { task: short(t.title), n }, 6000, `「${short(t.title)}」${n} 天沒碰了，今天碰一下就好。`, 'fuji'),
     // 專注以番茄鐘為準：小島只負責兩人進出小木屋、花圃標記；獎勵和台詞在這裡，沒有小島也照常
     // info：{ round, rounds, free, projectId }，連續幾輪的第幾輪、是不是正向計時、目標是不是直接選了專案
     focusStarted: (resumed, taskId, info = {}) => {
@@ -172,7 +174,9 @@ async function boot() {
       const rest = multi && !info.last ? `休息 ${info.breakMin} 分鐘後接著第 ${info.round + 1} 輪` : '接著休息一下吧'
       const title = multi ? (info.last ? `${info.rounds} 輪都完成了，放一盞天燈` : `第 ${info.round}/${info.rounds} 輪完成`) : '專注完成，放一盞天燈'
       const sub = t ? `「${short(t.title, 10)}」長大了一點` : p ? `「${short(p.name, 10)}」+${minutes} 分鐘` : `+${minutes} 分鐘`
-      ui.toast({ icon: '灯', title, sub: `${sub}・${rest}` })
+      // 專注的是專案裡的任務（例如一首練習曲）：趁還記得，直接接到那件的紀錄（練到哪、卡在哪、速度）
+      const log = !!t?.project && store.state.projects.some((x) => x.id === t.project)
+      ui.toast({ icon: '灯', title, sub: `${sub}・${rest}`, ...(log ? { ms: 9000, action: { label: '寫紀錄', run: () => ui.openTaskLog(t.id) } } : {}) })
     },
     // next：還有下一輪時是 { next, rounds }，計時器接著會自己開始下一輪（台詞交給 focusStarted）
     breakFinished: (next) => {

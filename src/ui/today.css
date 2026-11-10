@@ -61,6 +61,13 @@ body.night .td-link { color: #ffb3c8; }
 .td-empty p { margin: 0; font-size: 13px; color: var(--ink-faint); }
 .td-empty .btn-ghost { padding: 6px 14px; font-size: 12.5px; }
 .td-hint { margin: 10px 0 0; font-size: 11.5px; color: var(--ink-faint); }
+/* 好久沒碰的長期任務：接在前三要務下面 */
+.td-idle { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.td-idle-h { margin: 0; font-size: 12px; letter-spacing: .08em; color: var(--ink-soft); }
+.td-mo > small.td-idle-n { color: var(--warn-ink); font-family: inherit; }
+.td-mo > small { max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-idle-x { flex: none; font-size: 11.5px; color: var(--ink-faint); padding: 4px 8px; border-radius: 9px; }
+.td-idle-x:hover { background: rgba(140, 170, 200, .16); color: var(--ink); }
 .td svg { overflow: visible; }
 
 /* 今日進度：漸層圓環＋三個數字 */
