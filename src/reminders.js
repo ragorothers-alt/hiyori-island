@@ -2,6 +2,7 @@
 // 已提醒過的記錄在 localStorage，重新整理不會重複提醒；改了開始時間會再提醒一次。
 import { addDays, dateStr, toMin } from './store.js'
 import { activeMottos, awake } from './mottos.js'
+import { native, nativeAskNotify, nativeCanNotify } from './native.js'
 
 const KEY = 'hiyori-reminded'
 // 訂閱：每個訂閱最近提醒過的那次扣款日 { 訂閱 id: 'YYYY-MM-DD' }
@@ -21,7 +22,11 @@ function load() {
   }
 }
 
-export const notifySupported = () => 'Notification' in window
+// 系統通知：瀏覽器的 Notification，Android 殼裡是原生通知（native.js）
+export const notifySupported = () => !!native || 'Notification' in window
+// 'granted'／'denied'／'default'（還沒問過）
+export const notifyPermission = () => (native ? (nativeCanNotify() ? 'granted' : 'default') : notifySupported() ? Notification.permission : 'denied')
+export const requestNotify = () => (native ? nativeAskNotify() : Notification.requestPermission())
 
 export class Reminders {
   constructor(store, onRemind) {
@@ -213,7 +218,15 @@ export class Reminders {
 
 // 系統通知：有 Service Worker 時用 showNotification（手機必需），否則用 Notification
 export async function systemNotify(title, body, tag) {
-  if (!notifySupported() || Notification.permission !== 'granted') return false
+  if (notifyPermission() !== 'granted') return false
+  if (native) {
+    try {
+      native.notify(String(title), String(body || ''), String(tag || ''))
+      return true
+    } catch {
+      return false
+    }
+  }
   const icon = new URL('icons/icon-192.png', document.baseURI).href
   const opts = { body, tag, icon, badge: icon, renotify: true }
   try {

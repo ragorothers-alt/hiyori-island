@@ -4,8 +4,9 @@ import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
-import { Reminders, systemNotify } from './reminders.js'
+import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, timerNotice, timerTag } from './push.js'
+import { native, showLiveTimer } from './native.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
@@ -100,10 +101,11 @@ async function boot() {
   // ── 計時器到點的通知 ──
   // 頁面睡著時（手機鎖著、切到別的 App）靠伺服器到點推一則（push.js）；頁面醒著但沒在看時自己發。
   // 同一次到點只響一次：伺服器排上了就交給它，等幾秒還沒來（伺服器或網路出狀況）頁面才自己發
-  const notifyOn = () => store.state.settings.notify && typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  const notifyOn = () => store.state.settings.notify && notifyPermission() === 'granted'
   const timerPush = new TimerPush({ enabled: notifyOn, onState: () => setTimeout(() => ui.renderRemind()) })
   const timerNotify = (b) => {
-    if (!b.at || !notifyOn()) return
+    // Android 殼：到點由手機的鬧鐘發（native.js），這邊不用再發一次
+    if (native || !b.at || !notifyOn()) return
     const n = timerNotice(b)
     const show = () => {
       if (notifyOn() && (document.hidden || !document.hasFocus())) systemNotify(n.title, n.body, timerTag(b.at))
@@ -123,6 +125,8 @@ async function boot() {
   const hooks = {
     // 計時的狀態變了：b 是下一次到點的時間和狀況（沒在計時、暫停中是 null），到點的推播跟著重排
     focusPlan: (b) => timerPush.plan(b && timerNotice(b)),
+    // Android 殼：專注、休息中在狀態列和鎖定畫面顯示即時倒數，到點由手機自己通知
+    focusLive: (l, b) => showLiveTimer(l, b && timerNotice(b)),
     push: timerPush,
     // 設定裡的「試一則」：10 秒後由伺服器推過來。計時中不試（一台裝置同時只排一則，會把這一輪的蓋掉）
     pushTest: async () => {

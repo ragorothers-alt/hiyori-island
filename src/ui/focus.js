@@ -81,6 +81,7 @@ export class FocusTimer {
     if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
     // 重新整理前就在計時：到點的通知再排一次（已經排著的話伺服器那邊只是換成同一個時間）
     hooks.focusPlan?.(this.boundary)
+    hooks.focusLive?.(this.live, this.boundary)
   }
 
   // 這一段（專注、休息）本來該結束的時間過了太久：例如晚上開始專注後關掉，兩天後才打開
@@ -124,8 +125,19 @@ export class FocusTimer {
     try {
       localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid }))
     } catch {}
-    // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排
+    // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排，Android 殼裡的即時倒數跟著換
     this.hooks.focusPlan?.(this.boundary)
+    this.hooks.focusLive?.(this.live, this.boundary)
+  }
+
+  // 現在計時的樣子（Android 殼的即時倒數通知用）：沒在計時是 null。
+  // at：自己到點的時間（暫停中沒有）；since：正向計時從幾點開始數；leftMs：暫停時還剩（正向計時是已經過了）多久
+  get live() {
+    if (this.mode === 'idle') return null
+    const { mode, round, rounds } = this
+    const paused = this.paused != null
+    const counting = this.counting
+    return { mode, paused, counting, at: clock.nextEnd(this), since: counting && !paused ? this.endAt : null, leftMs: counting ? this.elapsed : this.left, round, rounds, target: this.task?.title || this.project?.name || '' }
   }
 
   // 下一次自己到點的時間和那時的狀況（排通知用）：沒在計時、暫停中是 null

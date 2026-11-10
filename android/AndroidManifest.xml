@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ひより日和的 Android 殼：畫面就是線上的網站（WebView），多出來的是原生通知——
+     專注時的即時倒數（Android 16 的 Live Updates，三星手機上是 Now Bar）和到點的鬧鐘。建置：android/build.ps1 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.hiyori.daily">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 即時倒數顯示在狀態列、鎖定畫面最上面（Live Updates） -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- 到點準時通知（計時器類的 App 可以直接用，不用另外開權限） -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:allowBackup="true"
+        android:usesCleartextTraffic="false">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".TimerAlarm" android:exported="false" />
+    </application>
+</manifest>

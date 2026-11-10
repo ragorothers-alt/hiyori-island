@@ -4,3 +4,4 @@ dist
 art
 .wrangler
 e2e/.out
+android/build

@@ -199,6 +199,26 @@ npx wrangler@4 d1 migrations apply hiyori-sync --remote   # 套用 migrations/ �
 
 開發時可以用 `VITE_SYNC_API=http://localhost:8787 npm run dev` 指到本機的 `npx wrangler@4 dev`。
 
+## Android 殼（android/）
+
+Android 手機上想要「專注時在狀態列、鎖定畫面即時倒數」（Android 16 的 Live Updates，三星手機上是 Now Bar），網頁做不到，所以有一個很薄的原生 App：畫面就是線上的網站（WebView，網站更新它就是新版），多出來的只有通知。
+
+- **即時倒數**：專注、休息中是一則常駐通知，請系統升級成即時通知。倒數由系統自己跑（告訴它幾點結束），App 被收掉也照樣在走，沒有背景服務。暫停時寫還剩多久
+- **到點**：用手機的鬧鐘準時發「專注結束／休息結束」，鎖著、沒網路都一樣（不經過 Worker 的推播）
+- **提醒**：日程、就寢、重要日子這些，網頁開著時改用原生通知發
+- 網頁透過 `window.HiyoriNative` 叫原生（`src/native.js`）；不在殼裡時這段什麼都不做
+- 資料存在 App 自己的空間，跟瀏覽器裡的分開：用線上同步輸入同步碼帶過來
+- 要不要顯示在 Now Bar 由系統決定：設定 → 通知 → 即時通知裡要允許這個 App；沒顯示的話到開發人員選項找「所有 App 的即時通知」
+
+建置不用 Android Studio、不用 Gradle（JDK 17 以上、Android SDK 的 `platforms;android-36.1` 和 `build-tools;37.0.0`）：
+
+```bash
+pwsh android/build.ps1            # → android/build/hiyori.apk
+pwsh android/build.ps1 -Install   # 建好後裝到 adb 連著的手機
+```
+
+需要 Android 16 以上。簽章用這台電腦的 debug keystore：同一台電腦建的可以直接蓋過去更新。
+
 ## 瀏覽器端對端測試（e2e/）
 
 Service Worker 只在正式版註冊，所以這組測試用正式建置跑：開始前先建兩個版本，`e2e/.out/a` 是跟部署一樣的建置（使用者手上的舊版），`e2e/.out/b` 是每個檔名多一段 `-b` 的建置（之後部署上去的新版，`HIYORI_BUILD_TAG=b`）。每個測試開自己的小伺服器（`e2e/server.js`，App 放在 `/hiyori-island/` 子目錄，跟 GitHub Pages 一樣），途中可以換成新版、讓某個檔案回 404，或整台斷線；瀏覽器 context 也是全新的。
@@ -241,6 +261,7 @@ src/
   projectSearch.js 專案的快捷搜尋：比對、排序、截出找到的那一段、標記關鍵字（純函式）
   ui.js            面板、表單、列表、商店、回顧、設定；組合番茄鐘介面
   ui/focus.js      番茄鐘 FocusTimer、計時顯示與專注頁互動
+  native.js        Android 殼的橋接：計時的狀態 → 即時倒數通知的樣子、通知權限（不在殼裡時什麼都不做）
   push.js          番茄鐘到點的推播：什麼時候排、什麼時候取消、通知上寫什麼（手機鎖著時由 worker/ 到點推過來，public/sw.js 顯示）
   focusClock.js    番茄鐘的計時規則：倒數、往上數、暫停、多輪、放太久作廢（純函式，ui.js 的計時器照這裡走）
   catWalk.js       專注頁的貓咪：接下來做什麼（走、坐、理毛、伸懶腰、睡）、每一格的姿勢、身體和尾巴的路徑、每天的毛色（純函式，ui/focusCat.js 照這裡畫）
@@ -289,6 +310,7 @@ src/
 public/
   sw.js            Service Worker（離線快取、通知點擊、番茄鐘到點的推播；小島載入後由頁面請它收好小島的檔案）
   manifest.webmanifest
+android/           Android 殼：WebView 開線上的網站，加上原生通知（即時倒數、到點的鬧鐘）；build.ps1 建 APK
 worker/            線上同步後端（Cloudflare Worker + D1）、ふじ的 AI（/v1/ai，呼叫 Claude）、番茄鐘到點的推播（/v1/push，Durable Object）
 tests/             Vitest 單元測試
 e2e/               Playwright 瀏覽器端對端測試（離線、自動更新、教練、專案搜尋、平板的專案任務欄、練習曲的速度、番茄鐘和專注頁的貓），playwright.config.js 是設定

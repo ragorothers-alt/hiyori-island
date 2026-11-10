@@ -1,7 +1,8 @@
 import { FocusTimer } from './ui/focus.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
-import { notifySupported } from './reminders.js'
+import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
+import { native } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
 import { parseQuick, describeQuick } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -1310,12 +1311,12 @@ export class UI {
     $('#notifyBtn').addEventListener('click', async () => {
       const st = this.store.state.settings
       const push = this.hooks.push
-      if (st.notify && Notification.permission === 'granted') {
+      if (st.notify && notifyPermission() === 'granted') {
         this.store.setSetting('notify', false)
         // 排著的到點通知取消、推播退訂
         push?.off()
       } else {
-        const perm = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
+        const perm = notifyPermission() === 'default' ? await requestNotify() : notifyPermission()
         this.store.setSetting('notify', perm === 'granted')
         if (perm === 'granted') {
           // 順便訂閱推播：專注到點時，鎖著螢幕、切到別的 App 也收得到
@@ -1356,7 +1357,7 @@ export class UI {
       hint.textContent = 'iPhone／iPad 要收通知：先在 Safari 按「分享」→「加入主畫面」，從主畫面打開後再回來這裡開啟'
       return
     }
-    const perm = Notification.permission
+    const perm = notifyPermission()
     const on = st.notify && perm === 'granted'
     // 不提醒日程時也能開：就寢、重要日子、專注到點的通知都用這個開關
     btn.disabled = perm === 'denied'
@@ -1365,9 +1366,11 @@ export class UI {
     // 專注到點的通知：鎖著螢幕也收得到的（推播）才有「試一則」
     const state = this.hooks.push?.state
     test.hidden = !on || !pushSupported() || state === 'unsupported'
-    hint.hidden = !on
-    hint.textContent =
-      !pushSupported() || state === 'unsupported'
+    // Android 殼：即時倒數和到點都由手機自己發，不看這個開關（這個開關管日程、就寢這些提醒）
+    hint.hidden = !on && !native
+    hint.textContent = native
+      ? '專注時狀態列和鎖定畫面會有即時倒數，到點由手機通知（鎖著、沒網路也準時）。這個開關管日程、就寢這些提醒'
+      : !pushSupported() || state === 'unsupported'
         ? '專注到點、休息結束也會通知（這個瀏覽器要頁面開著才收得到）'
         : state === 'error'
           ? '專注到點、休息結束也會通知。現在連不上通知伺服器：頁面開著時照常通知，鎖著螢幕時可能收不到'
