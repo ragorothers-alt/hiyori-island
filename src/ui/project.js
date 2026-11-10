@@ -304,7 +304,12 @@ export class ProjectView {
     for (const id of this.openMs) if (!p.milestones.some((m) => m.id === id)) this.openMs.delete(id)
     // 任務頁的任務不在了（刪掉、移出專案）：回到專案
     const task = this.task
-    if (this.taskId && !task) this.taskId = null
+    if (this.taskId && !task) {
+      this.taskId = null
+      this.unitEdit = this.tplEdit = null
+    }
+    // 節拍器只跟著打開的那件、還在記速度的任務響：任務不在了、移出專案、不記了、換了單位（同步拉回的資料也算）就停
+    if (this.metro && (this.metro !== task?.id || !task.tempo || task.tempo.unit)) this._stopMetro()
     this.root.style.setProperty('--c', colorOf(p))
     this.root.dataset.sec = this.sec
     // 任務頁開著時右欄一定是任務清單
@@ -370,7 +375,13 @@ export class ProjectView {
       },
     ]
     const kept = this._capture()
-    patch(this.root, items)
+    // 換掉舊的元素時，游標所在的欄位會被當成「離開欄位」：這不是使用者改完了，不要拿去存（見 _change）
+    this._drawing = true
+    try {
+      patch(this.root, items)
+    } finally {
+      this._drawing = false
+    }
     this._restore(kept)
     // 搜尋框不放值（打字時才不會被重畫打斷）：從筆記回到列表時，把還在用的關鍵字填回去
     const q = $('[data-noteq]', this.root)
@@ -873,7 +884,7 @@ export class ProjectView {
           : '今天開始記'
     const lim = u ? NUM : BPM
     const field = (key, v, label) =>
-      `<input type="number" inputmode="${u ? 'decimal' : 'numeric'}" min="${lim.min}" max="${lim.max}" step="${u ? 'any' : 1}" data-bpm="${key}" data-id="${k}" data-keep="bpm-${key}-${k}" value="${v ?? ''}" placeholder="—" aria-label="${label}">`
+      `<input type="number" inputmode="${u ? 'decimal' : 'numeric'}" min="${lim.min}" max="${lim.max}" step="${u ? 'any' : 1}" data-bpm="${key}" data-id="${k}" data-keep="bpm-${key}-${k}" value="${v ?? ''}" placeholder="—" aria-label="${esc(label)}">`
     const pre = u ? '' : '<i>♩=</i>'
     const post = u ? `<i>${esc(u)}</i>` : ''
     // 單位：還沒記過才能換
@@ -882,7 +893,7 @@ export class ProjectView {
     const unit = log.length
       ? ''
       : custom
-        ? `<input class="pk-tp-unit" data-tunit="${k}" maxlength="4" placeholder="單位" value="${esc(u)}" aria-label="自己取的單位（最多 4 個字）">`
+        ? `<input class="pk-tp-unit" data-tunit="${k}" data-keep="tunit-${k}" maxlength="4" placeholder="單位" value="${esc(u)}" aria-label="自己取的單位（最多 4 個字）">`
         : `<select class="pk-tp-unit" data-tunit="${k}" aria-label="記什麼數字">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === u ? 'selected' : ''}>${esc(l)}</option>`).join('')}<option value="…">自己打…</option></select>`
     const metro = this.metro === t.id
     const tick = u
@@ -905,7 +916,7 @@ export class ProjectView {
             <button type="button" class="mini" data-act="tempo-off" data-id="${k}" title="不記這件的${name}${log.length ? '（記過的會一起刪掉）' : ''}">${ICON.del}</button>
           </div>
           ${pct == null ? '' : `<span class="pk-tp-bar ${met ? 'ok' : ''}" aria-hidden="true"><i style="width:${Math.min(100, pct)}%"></i></span>`}
-          <small class="pk-tp-sub">${sub}</small>
+          <small class="pk-tp-sub">${esc(sub)}</small>
         </div>
       </div>`
   }
@@ -1456,6 +1467,8 @@ export class ProjectView {
     if (!p) return
     if (el.matches('[data-goal]')) return this.store.setProjectGoal(p.id, el.value)
     if (el.dataset.tnote) return this.store.updateTask(el.dataset.tnote, { note: el.value })
+    // 重畫途中舊欄位被換掉而冒出來的 change：打到一半的數字、單位不算改完（新的欄位會把字接回去）
+    if (this._drawing && (el.dataset.bpm || el.dataset.tunit)) return
     if (el.dataset.bpm) return this._bpmSave(el)
     if (el.dataset.tunit) return this._unitSave(el)
     if (el.dataset.msnote) return this.store.updateMilestone(p.id, el.dataset.msnote, { note: el.value })

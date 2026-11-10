@@ -368,7 +368,9 @@ async function boot() {
   // 練習曲第一次練到目標速度
   store.on('tempoReached', ({ task, bpm }) => {
     sfx.chime()
-    ui.toast({ icon: '速', title: '練到目標速度了', sub: `${short(task.title, 16)}・♩${bpm}` })
+    // 單位不是節拍器速度（頁、公里…）時換個說法
+    const u = task.tempo?.unit || ''
+    ui.toast({ icon: u ? '達' : '速', title: u ? '到目標了' : '練到目標速度了', sub: `${short(task.title, 16)}・${u ? `${bpm} ${u}` : `♩${bpm}`}` })
   })
   store.on('routineAdded', (r) => {
     talk('routine', {}, undefined, '以後我會記得幫你準備好。')

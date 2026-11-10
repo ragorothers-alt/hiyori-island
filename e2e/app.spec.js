@@ -233,8 +233,10 @@ test('練習曲的範本、節拍器、別的單位；好久沒碰的長期任�
     const AC = window.AudioContext
     const make = AC.prototype.createOscillator
     AC.prototype.createOscillator = function (...a) {
-      window.__beats++
-      return make.apply(this, a)
+      const osc = make.apply(this, a)
+      // 只數節拍器的（1100 Hz）：別的提示音不算
+      setTimeout(() => osc.frequency.value === 1100 && window.__beats++)
+      return osc
     }
   })
   await page.goto(site.url)
@@ -316,6 +318,41 @@ test('練習曲的範本、節拍器、別的單位；好久沒碰的長期任�
   })
   await idle.locator('[data-act="idle-open"]').click()
   await expect(detail.locator('.pd-name')).toHaveText('小奏鳴曲')
+
+  // 自己打單位打到一半，背景剛好重畫（這件的專注結束了）：半個字不會被存成單位，游標和字都還在
+  await detail.locator('select[data-tunit]').selectOption('…')
+  const unit = detail.locator('input[data-tunit]')
+  await unit.pressSequentially('公')
+  await page.evaluate((id) => window.hiyori.store.completePomodoro(25, id), made.id)
+  await expect(unit).toBeFocused()
+  await expect(unit).toHaveValue('公')
+  const unitOf = () => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).tempo.unit, made.id)
+  expect(await unitOf()).toBe('')
+  // 單位取成奇怪的符號也只是字：下面的統計和「存成範本」都還在
+  await unit.fill('<!--')
+  await unit.press('Enter')
+  expect(await unitOf()).toBe('<!--')
+  await page.evaluate((id) => {
+    const s = window.hiyori.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    t.tempo.log.unshift({ date: '2020-01-01', bpm: 3, at: 1 })
+    s.setTempo(id, 5)
+  }, made.id)
+  await expect(detail.locator('.pk-tp-sub')).toContainText('<!--')
+  await expect(detail.locator('.pd-nums')).toBeVisible()
+  await expect(detail.locator('[data-act="tpl-save"]')).toBeVisible()
+
+  // 節拍器響著時把任務移出專案（任務頁關掉了）：拍子要停
+  await pd.locator(`.pd-side [data-act="task-open"][data-id="${ids.a}"]`).click()
+  await detail.locator('.pk-metro').click()
+  await expect(detail.locator('.pk-metro')).toHaveAttribute('aria-pressed', 'true')
+  const unlink = detail.locator('[data-act="task-unlink"]')
+  await unlink.click()
+  await unlink.click()
+  await expect(detail).toHaveCount(0)
+  const beats = await page.evaluate(() => window.__beats)
+  await page.waitForTimeout(900)
+  expect(await page.evaluate(() => window.__beats)).toBe(beats)
 })
 
 test('番茄鐘：開始後重新整理，照原本的結束時間接著倒數；停掉後重新整理是待機', async ({ page, context, site }) => {

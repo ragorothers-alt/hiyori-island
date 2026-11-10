@@ -447,7 +447,8 @@ function cleanSub(x, today) {
     createdAt: ts(x.createdAt) || Date.now(),
   }
 }
-const cleanSubs = (list, today) => cleanList(list, (x) => cleanSub(x, today)).slice(0, SUBS_MAX)
+// 訂閱不留不認得的欄位：付款的東西只存這裡列出來的（看起來像卡號的不存），匯入的檔案不能多帶別的進來
+const cleanSubs = (list, today) => cleanList(list, (x) => cleanSub(x, today), false).slice(0, SUBS_MAX)
 // ── 警語（輪播、提醒怎麼排在 src/mottos.js）──
 const mottoText = (v) => str(v, MOTTO_LEN * 2).replace(/\s+/g, ' ').trim().slice(0, MOTTO_LEN)
 function cleanMotto(x) {
