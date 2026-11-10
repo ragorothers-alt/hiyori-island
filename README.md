@@ -221,12 +221,20 @@ src/
   main.js          開機：資料、介面、提醒、同步，以及音效、通知和台詞；小島第一次要看時才動態載入 islandScene.js
   islandScene.js   小島：建 three.js 世界、兩人和ひより町，把資料事件接到島上的演出（App 模式開機時不載入）
   voice.js         挑台詞、填變數的小工具（開機流程和小島共用）
-  store.js         狀態、XP／等級、金平糖、連續天數、成就、每日任務、例行公事、習慣、作息、生活記錄、訂閱、警語、存檔清洗
+  store.js         狀態核心、XP／等級、金平糖、連續天數、成就、每日任務、例行公事、存取與事件；組合領域方法並轉出原有公開名稱
+  store/util.js    共用日期、識別碼、常數與純工具
+  store/migrate.js 範例資料、讀檔與匯入清洗、欄位驗證工具
+  store/tasks.js   任務、卡關提醒、任務範本、子任務、數字進度
+  store/projects.js 專案町、專案、里程碑細項、目標、進度日誌與筆記
+  store/habits.js  習慣與生活記錄
+  store/extras.js  訂閱服務、警語與重要日子
+  store/coach.js   時段安排、作息與ふじ的排程教練
   planner.js       時段安排：作息色帶、衝突、空檔、最佳化時程、睡眠統計（純函式）
   habits.js        習慣：連續天數、達成率、戒除天數與里程碑、熱度圖（純函式）
   projects.js      專案的細節：進度算法（含細項和任務）、任務算在哪個里程碑、時間軸、統計、熱度格、筆記排版、匯出 Markdown（純函式）
   projectSearch.js 專案的快捷搜尋：比對、排序、截出找到的那一段、標記關鍵字（純函式）
-  ui.js            面板、表單、列表、番茄鐘、商店、回顧、設定
+  ui.js            面板、表單、列表、商店、回顧、設定；組合番茄鐘介面
+  ui/focus.js      番茄鐘 FocusTimer、計時顯示與專注頁互動
   focusClock.js    番茄鐘的計時規則：倒數、往上數、暫停、多輪、放太久作廢（純函式，ui.js 的計時器照這裡走）
   catWalk.js       專注頁的貓咪：接下來做什麼（走、坐、理毛、伸懶腰、睡）、每一格的姿勢、身體和尾巴的路徑、每天的毛色（純函式，ui/focusCat.js 照這裡畫）
   ui/              schedule.js（時間軸、排程、作息設定、編輯面板）、habits.js、life.js、subs.js（訂閱）、mottos.js（警語的卡片和面板上方那一句）、calendar.js、coach.js（ふじ教練：排程和週報）、cloud.js（線上同步的設定列、QR code）、ai.js（ふじ的 AI 設定列）、project.js（專案詳情：進度日誌、筆記、里程碑細項、任務清單和任務頁、拆細項與整理進度）、today.js（App 模式的今日總覽）、focusCat.js（專注頁散步的貓咪，SVG）、dom.js（共用的小工具）與各自的樣式。日曆、教練和專案詳情第一次用到時才載入，開機後閒下來就先載好（離線也能用）

@@ -22,7 +22,7 @@ const TERNARY = /^[^?'\n]*(?:'\w+'[^?'\n]*)?\?\s*'(\w+)'\s*:\s*'(\w+)'/
 const RELAY = /^type\s*,\s*payload\)/
 function emitted() {
   const out = new Set()
-  for (const [, rest] of read(join(SRC, 'store.js')).matchAll(SITE)) {
+  for (const [, rest] of [join(SRC, 'store.js'), ...files(join(SRC, 'store'))].map(read).join('\n').matchAll(SITE)) {
     const m = rest.match(LITERAL) || rest.match(TERNARY)
     if (m) for (const n of m.slice(1)) out.add(n)
   }
@@ -49,7 +49,7 @@ describe('事件目錄', () => {
     expect(missing).toEqual([])
   })
   it('store 發事件的寫法都掃得到（名字是算出來的話，拼錯了上面兩條也抓不到）', () => {
-    const t = read(join(SRC, 'store.js'))
+    const t = [join(SRC, 'store.js'), ...files(join(SRC, 'store'))].map(read).join('\n')
     // 第一個元素是字串的都算掃得到（中文開頭的是範例資料之類的陣列，不是事件）
     const odd = [...t.matchAll(SITE)].map(([, rest]) => rest.trim()).filter((r) => !r.startsWith("'") && !TERNARY.test(r) && !RELAY.test(r))
     expect(odd).toEqual([])
