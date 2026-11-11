@@ -637,7 +637,7 @@ test('快速記錄：在總覽按＋，一行字記下待辦、日程和生活�
   // 主畫面圖示的捷徑（?add）：打開就是快速記錄，網址上的參數拿掉
   await page.goto(site.url + '?add=1')
   await bootReady(page)
-  await expect(cap).toBeVisible()
+  await expect(cap).toBeVisible({ timeout: 30000 })
   await expect(input).toBeFocused()
   expect(new URL(page.url()).search).toBe('')
 })

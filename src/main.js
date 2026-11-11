@@ -857,20 +857,21 @@ async function boot() {
   // 開場前就存不進去、讀到新版 App 存的資料（事件那時還沒人聽）
   else if (store.newerApp) newerToast()
   else if (store.saveError) saveFailedToast()
+  // 從主畫面圖示長按的捷徑「快速記錄」打開（網址帶 ?add）：參數先拿掉（重新整理不會再跳一次），
+  // 直接叫出快速記錄；今日摘要、回顧這些等它關掉以後再說。
+  // 不等開場畫面淡出（下面那兩個畫格在慢的機器上要等一下）：畫面一出來就能打字
+  if (new URLSearchParams(location.search).has('add')) {
+    history.replaceState(history.state, '', location.pathname + location.hash)
+    // 上次的專注還在跑（重新打開時全螢幕計時會先蓋上來）：縮小它，計時照走
+    ui.focus.toggleBig(false)
+    ui.openCapture()
+  }
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
       const loader = document.getElementById('loader')
       loader.classList.add('done')
       // 淡出後整個拿掉：只藏起來的話，もち跳跳的無限動畫會在背後一直跑
       setTimeout(() => loader.remove(), 1000)
-      // 從主畫面圖示長按的捷徑「快速記錄」打開（網址帶 ?add）：參數先拿掉（重新整理不會再跳一次），
-      // 直接叫出快速記錄；今日摘要、回顧這些等它關掉以後再說
-      if (new URLSearchParams(location.search).has('add')) {
-        history.replaceState(history.state, '', location.pathname + location.hash)
-        // 上次的專注還在跑（重新打開時全螢幕計時會先蓋上來）：縮小它，計時照走
-        ui.focus.toggleBig(false)
-        ui.openCapture()
-      }
       setTimeout(() => {
         const g = greetKey()
         const h = hooks.hourNow()
