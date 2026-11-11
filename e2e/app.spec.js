@@ -444,7 +444,11 @@ test.describe('打開時的今日摘要', () => {
 
   // 固定在今天上午 10 點跑：晚上 9 點後會跳晚間回顧，內容也跟著時段變。
   // 只固定「現在幾點」，計時器照常跑：整個接管的話，重新整理後要補跑累積的計時器，慢的機器會卡住
-  const morning = (page) => page.clock.setFixedTime(new Date(new Date().setHours(10, 0, 0, 0)))
+  // 瀏覽器的時區在 playwright.config.js 固定是台北；跑測試的機器（CI 是 UTC）不一定，所以照台北的今天算
+  const morning = (page) => {
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+    return page.clock.setFixedTime(new Date(`${ymd}T10:00:00+08:00`))
+  }
 
   test('每天第一次打開：貓咪走進來說今天有什麼；點一項跳過去；重新整理不再出來；設定裡可以再看、可以關掉', async ({ page, context, site }) => {
     await useAppMode(context)
