@@ -9,8 +9,14 @@
 //   subs: 快扣款的訂閱 [{ name, days, price, trial }],
 //   stuck: 卡住的任務 { title, moved, late } 或 null, idle: 好久沒碰的長期任務 { id, title, idle, pid, projectName } 或 null,
 //   streak: 連續天數,
+//   away: 上次看 App 之後的事（沒有上次、或一直開著在看就不給）{
+//     since: 上次看 App 的時間（毫秒）,
+//     events: 最近幾天有時段的日程 [{ title, date, start, end }], charges: 最近幾天扣款的訂閱 [{ name, date, price }],
+//     habits: 昨天要做的習慣 { total, done },
+//   },
 // }
-// 回傳 { hello, date, lead, today: [項目], alerts: [項目], bye, first }
+// 回傳 { hello, date, lead, away, today: [項目], alerts: [項目], bye, first }
+//   away：你不在的時候 { label: '離開了 14 小時', items: [項目] }；離開不到半小時、或沒有錯過什麼是 null
 //   項目：{ icon, text, sub, go }；go 是點了去哪：['tab', 分頁, 要看的日期（沒寫是今天）]、['project', 專案 id]、['task', 專案 id, 任務 id]
 //   first：最該先做的那一件（給「專注這一件」的按鈕），沒有是 null
 const WEEK = ['日', '一', '二', '三', '四', '五', '六']
@@ -23,6 +29,51 @@ const toMin = (hhmm) => {
 const clip = (s, n = 18) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const inDays = (n) => (n <= 0 ? '今天' : n === 1 ? '明天' : n === 2 ? '後天' : `${n} 天後`)
 const span = (min) => (min >= 60 ? `${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}` : `${min} 分鐘`)
+
+const AWAY_MIN = 30 * 60000
+const pad = (n) => String(n).padStart(2, '0')
+const dayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const dayOf = (s) => {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+const plusDays = (s, n) => {
+  const d = dayOf(s)
+  d.setDate(d.getDate() + n)
+  return dayStr(d)
+}
+const gone = (ms) => (ms < 3600000 ? `${Math.round(ms / 60000)} 分鐘` : ms < 86400000 ? `${Math.round(ms / 3600000)} 小時` : `${Math.round(ms / 86400000)} 天`)
+
+// 你不在的時候：上次看 App 之後開始、現在已經結束的日程（那時沒人提醒），這段時間扣的款，昨天沒打卡的習慣。
+// 最多回頭看三天；還沒結束的日程在「今天」那一段
+function awayOf(d, today, mins) {
+  const a = d.away
+  const now = d.now.getTime()
+  if (!a || !(a.since > 0) || now - a.since < AWAY_MIN) return null
+  const from = Math.max(a.since, now - 3 * 86400000)
+  const yesterday = plusDays(today, -1)
+  const when = (date) => (date === today ? '今天' : date === yesterday ? '昨天' : `${+date.slice(5, 7)}/${+date.slice(8)}`)
+  const items = []
+  const missed = (a.events || [])
+    .filter((e) => {
+      const start = dayOf(e.date).getTime() + toMin(e.start) * 60000
+      return start > from && (e.date < today || (e.date === today && toMin(e.end) <= mins))
+    })
+    .sort((x, y) => y.date.localeCompare(x.date) || toMin(y.start) - toMin(x.start))
+  for (const e of missed.slice(0, 3)) items.push({ icon: '時', text: `${when(e.date)} ${e.start} ${e.title}`, sub: '那時沒提醒到', go: ['tab', 'schedule', e.date] })
+  if (missed.length > 3) items.push({ icon: '…', text: `還有 ${missed.length - 3} 個日程`, sub: '', go: ['tab', 'schedule', missed[3].date] })
+  // 扣款：離開的那天之後、到昨天為止（今天要扣的在「提醒」）
+  const left = dayStr(new Date(from))
+  for (const c of (a.charges || []).filter((c) => c.date > left && c.date < today).slice(0, 2)) {
+    items.push({ icon: '払', text: `${when(c.date)}扣款了：${c.name}`, sub: c.price || '', go: ['tab', 'records'] })
+  }
+  // 昨天傍晚以前就離開了：昨天沒打卡的習慣
+  const h = a.habits
+  if (h && h.total > h.done && a.since < dayOf(yesterday).getTime() + 18 * 3600000) {
+    items.push({ icon: '習', text: `昨天有 ${h.total - h.done} 個習慣沒打卡`, sub: h.done ? `做了 ${h.done}／${h.total}` : '', go: ['tab', 'habits', yesterday] })
+  }
+  return items.length ? { label: `離開了 ${gone(now - a.since)}`, items } : null
+}
 
 // 還沒做的任務照「先做哪一件」排：本命、重要的、排了時間早的
 function order(tasks) {
@@ -92,11 +143,13 @@ export function buildBrief(d) {
   if (d.idle) alerts.push({ icon: '久', text: `「${clip(d.idle.title)}」${d.idle.idle} 天沒碰`, sub: d.idle.projectName || '', go: ['task', d.idle.pid, d.idle.id] })
 
   // 日期照 App 認定的今天寫：跟清單裡的內容是同一天
-  const [y, mo, da] = /^\d{4}-\d{2}-\d{2}$/.test(d.today || '') ? d.today.split('-').map(Number) : [now.getFullYear(), now.getMonth() + 1, now.getDate()]
+  const todayStr = /^\d{4}-\d{2}-\d{2}$/.test(d.today || '') ? d.today : dayStr(now)
+  const day = dayOf(todayStr)
   return {
     hello: HELLO[partOf(now.getHours())],
-    date: `${mo} 月 ${da} 日 星期${WEEK[new Date(y, mo - 1, da).getDay()]}`,
+    date: `${day.getMonth() + 1} 月 ${day.getDate()} 日 星期${WEEK[day.getDay()]}`,
     lead,
+    away: awayOf(d, todayStr, mins),
     today,
     alerts,
     bye: d.streak >= 2 ? `已經連續 ${d.streak} 天了，今天也慢慢來。` : '今天也慢慢來。',

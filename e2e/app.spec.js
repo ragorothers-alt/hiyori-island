@@ -494,6 +494,53 @@ test.describe('打開時的今日摘要', () => {
     expect(await page.evaluate(() => window.hiyori.ui.brief.open)).toBe(false)
   })
 
+  test('你不在的時候：上次看 App 之後錯過的日程列在最前面，點了跳到那一天', async ({ page, context, site }) => {
+    await useAppMode(context)
+    await morning(page)
+    // 重新整理時頁面會把「上次看的時間」記成現在：測試要的時間在下一次載入一開始放進去
+    await context.addInitScript(() => {
+      const t = localStorage.getItem('e2e-away')
+      if (!t) return
+      localStorage.setItem('hiyori-seen-at', t)
+      localStorage.removeItem('hiyori-brief-day')
+      localStorage.removeItem('e2e-away')
+    })
+    await page.goto(site.url)
+    await bootReady(page)
+    const card = page.locator('#brief .bf-card')
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 10000 })
+    // 剛打開、沒有上次：沒有這一段
+    await expect(card).not.toContainText('你不在的時候')
+    await page.keyboard.press('Escape')
+
+    // 昨天下午有個日程；上次看 App 是 20 小時前（昨天下午兩點）
+    const yesterday = await page.evaluate(() => {
+      const s = window.hiyori.store
+      const d = new Date()
+      d.setDate(d.getDate() - 1)
+      const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      s.addEvent({ title: '牙醫回診', date, start: '15:00', end: '16:00' })
+      localStorage.setItem('e2e-away', String(Date.now() - 20 * 3600000))
+      return date
+    })
+    await page.reload()
+    await bootReady(page)
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 10000 })
+    await expect(card.locator('.bf-body h4').first()).toContainText('你不在的時候')
+    await expect(card.locator('.bf-body h4').first()).toContainText('離開了 20 小時')
+    // 範例資料裡昨天晚上還有別的日程（新的在前），所以照名字找
+    const missed = card.locator('.bf-list button', { hasText: '昨天 15:00 牙醫回診' })
+    await expect(missed).toBeVisible()
+    await expect(missed).toContainText('那時沒提醒到')
+    await missed.click()
+    expect(await page.evaluate(() => [window.hiyori.ui.tab, window.hiyori.store.selectedDate])).toEqual(['schedule', yesterday])
+    // 同一天再看一次：這一段還在
+    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.locator('#briefNow').click()
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 10000 })
+    await expect(card).toContainText('昨天 15:00 牙醫回診')
+  })
+
   test('系統開了減少動態效果：貓直接坐在那裡，字一次出來', async ({ page, context, site }) => {
     await useAppMode(context)
     await morning(page)

@@ -105,8 +105,12 @@ async function boot() {
   )
   // 在背景打開的、鎖著過了一天的：回到 App 時才說
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) setTimeout(() => ui.maybeShowBrief(), 400)
+    // 離開時記下時間、回來時抄下來：摘要的「你不在的時候」從那裡算起
+    if (document.hidden) return ui.markSeen(true)
+    ui.returned()
+    setTimeout(() => ui.maybeShowBrief(), 400)
   })
+  addEventListener('pagehide', () => ui.markSeen(true))
 
   // ── 計時器到點的通知 ──
   // 頁面睡著時（手機鎖著、切到別的 App）靠伺服器到點推一則（push.js）；頁面醒著但沒在看時自己發。
@@ -693,6 +697,7 @@ async function boot() {
       // 日程頁沒在看就不重畫（切過去時會重畫）
       if (store.selectedDate === store.today && ui.tab === 'schedule') ui.renderSchedule(false)
       if (!scene?.placing && ui.focus.mode !== 'focus') ui.maybeAskReview()
+      ui.markSeen()
     }
   }, 1000)
   ui.tickClock()

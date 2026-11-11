@@ -91,6 +91,61 @@ describe('今日摘要', () => {
     expect(buildBrief(base({ today: 'oops' })).date).toBe('11 月 11 日 星期三')
   })
 
+  describe('你不在的時候', () => {
+    const NOW = at(8, 20).getTime()
+    const H = 3600000
+    const events = [
+      { title: '牙醫', date: '2026-11-10', start: '15:30', end: '16:00' },
+      { title: '晚餐', date: '2026-11-10', start: '19:00', end: '20:00' },
+      { title: '晨會', date: '2026-11-11', start: '07:30', end: '08:00' },
+      { title: '設計週會', date: '2026-11-11', start: '10:00', end: '11:00' },
+      { title: '上週的事', date: '2026-11-06', start: '10:00', end: '11:00' },
+    ]
+    const away = (o = {}) => ({ since: NOW - 18 * H, events, charges: [], habits: { total: 0, done: 0 }, ...o })
+
+    it('上次看 App 之後開始、現在已經結束的日程（新的在前）；還沒開始的留在「今天」', () => {
+      const b = buildBrief(base({ today: '2026-11-11', events: events.filter((e) => e.date === '2026-11-11'), away: away() }))
+      expect(b.away.label).toBe('離開了 18 小時')
+      expect(b.away.items.map((x) => `${x.icon}|${x.text}|${x.sub}`)).toEqual(['時|今天 07:30 晨會|那時沒提醒到', '時|昨天 19:00 晚餐|那時沒提醒到', '時|昨天 15:30 牙醫|那時沒提醒到'])
+      expect(b.away.items.map((x) => x.go)).toEqual([['tab', 'schedule', '2026-11-11'], ['tab', 'schedule', '2026-11-10'], ['tab', 'schedule', '2026-11-10']])
+      expect(b.today[0].text).toBe('10:00 設計週會')
+      // 昨天下午四點半才離開：牙醫那時候還在看，不算錯過
+      expect(buildBrief(base({ today: '2026-11-11', away: away({ since: at(8, 20).getTime() - 15.8 * H }) })).away.items.map((x) => x.text)).toEqual(['今天 07:30 晨會', '昨天 19:00 晚餐'])
+    })
+
+    it('離開不到半小時、沒有上次的時間、沒錯過什麼：沒有這一段', () => {
+      expect(buildBrief(base({ away: away({ since: NOW - 20 * 60000 }) })).away).toBeNull()
+      expect(buildBrief(base({ away: away({ since: 0 }) })).away).toBeNull()
+      expect(buildBrief(base({ away: null })).away).toBeNull()
+      expect(buildBrief(base()).away).toBeNull()
+      expect(buildBrief(base({ away: away({ events: [] }) })).away).toBeNull()
+    })
+
+    it('離開很多天：最多回頭看三天，超過三個日程收成一項；離開多久照實寫', () => {
+      const many = ['09:00', '11:00', '13:00', '15:00', '17:00'].map((start, i) => ({ title: `會議 ${i + 1}`, date: '2026-11-09', start, end: start.replace(':00', ':30') }))
+      const b = buildBrief(base({ today: '2026-11-11', away: away({ since: NOW - 9 * 86400000, events: [...events, ...many] }) }))
+      expect(b.away.label).toBe('離開了 9 天')
+      expect(b.away.items.map((x) => x.text)).toEqual(['今天 07:30 晨會', '昨天 19:00 晚餐', '昨天 15:30 牙醫', '還有 5 個日程'])
+      expect(b.away.items.at(-1).go).toEqual(['tab', 'schedule', '2026-11-09'])
+      expect(JSON.stringify(b.away)).not.toContain('上週的事')
+      expect(buildBrief(base({ away: away({ since: NOW - 45 * 60000, events: [{ title: 'x', date: '2026-11-11', start: '07:50', end: '08:10' }] }) })).away.label).toBe('離開了 45 分鐘')
+    })
+
+    it('這段時間扣的款（離開那天之後到昨天）、昨天沒打卡的習慣（昨天傍晚前就離開才說）', () => {
+      const charges = [
+        { name: 'Netflix', date: '2026-11-10', price: 'NT$390' },
+        { name: '今天的', date: '2026-11-11', price: 'NT$1' },
+        { name: '離開那天的', date: '2026-11-08', price: 'NT$2' },
+        { name: 'iCloud', date: '2026-11-09', price: 'NT$90' },
+      ]
+      const b = buildBrief(base({ today: '2026-11-11', away: away({ since: new Date(2026, 10, 8, 22).getTime(), events: [], charges, habits: { total: 4, done: 1 } }) }))
+      expect(b.away.items.map((x) => `${x.icon}|${x.text}|${x.sub}`)).toEqual(['払|昨天扣款了：Netflix|NT$390', '払|11/9扣款了：iCloud|NT$90', '習|昨天有 3 個習慣沒打卡|做了 1／4'])
+      expect(b.away.items.at(-1).go).toEqual(['tab', 'habits', '2026-11-10'])
+      // 昨天晚上還在看：習慣那時看得到，不算
+      expect(buildBrief(base({ today: '2026-11-11', away: away({ since: new Date(2026, 10, 10, 21).getTime(), events: [], habits: { total: 4, done: 1 } }) })).away).toBeNull()
+    })
+  })
+
   it('連續好幾天了：結尾說一聲', () => {
     expect(buildBrief(base({ streak: 12 })).bye).toBe('已經連續 12 天了，今天也慢慢來。')
     expect(buildBrief(base({ streak: 1 })).bye).toBe('今天也慢慢來。')

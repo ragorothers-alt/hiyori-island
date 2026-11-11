@@ -49,15 +49,17 @@ export class BriefView {
     this.open = true
     this._clear()
     const b = (this.brief = buildBrief(this.hooks.data()))
-    this.goes = [...b.today, ...b.alerts].map((x) => x.go)
+    const gone = b.away?.items || []
+    this.goes = [...gone, ...b.today, ...b.alerts].map((x) => x.go)
     const list = (items, from) => items.map((it, i) => item(it, from + i, from + i)).join('')
     this.card.innerHTML = `
       <header class="bf-head"><b class="bf-hello">${esc(b.hello)}</b><time>${esc(b.date)}</time><button type="button" class="icon-btn bf-x" data-act="ok" aria-label="關閉今日摘要" title="關閉 (Esc)">×</button></header>
       <p class="bf-lead"><span class="bf-typed" aria-hidden="true"></span><span class="sr-only">${esc(b.lead)}</span></p>
       <div class="bf-body" hidden>
-        ${b.today.length ? `<h4>今天</h4><ul class="bf-list">${list(b.today, 0)}</ul>` : ''}
+        ${gone.length ? `<h4>你不在的時候<small>${esc(b.away.label)}</small></h4><ul class="bf-list">${list(gone, 0)}</ul>` : ''}
+        ${b.today.length ? `<h4>今天</h4><ul class="bf-list">${list(b.today, gone.length)}</ul>` : ''}
         <h4>提醒</h4>
-        ${b.alerts.length ? `<ul class="bf-list">${list(b.alerts, b.today.length)}</ul>` : '<p class="bf-none">沒有要特別留意的事。</p>'}
+        ${b.alerts.length ? `<ul class="bf-list">${list(b.alerts, gone.length + b.today.length)}</ul>` : '<p class="bf-none">沒有要特別留意的事。</p>'}
         <p class="bf-bye" style="--i:${this.goes.length}">${esc(b.bye)}</p>
       </div>
       <footer class="bf-foot">

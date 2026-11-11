@@ -1,7 +1,7 @@
 import { FocusTimer } from './ui/focus.js'
 import { BriefView } from './ui/brief.js'
 import { coatOfDay } from './catWalk.js'
-import { fmtMoney } from './subs.js'
+import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
@@ -65,6 +65,8 @@ const NEWS_KEY = 'hiyori-news'
 const STUCK_OFF_KEY = 'hiyori-stuck-off'
 // 今日摘要：這台裝置哪一天看過了（一天只自己出來一次）
 const BRIEF_KEY = 'hiyori-brief-day'
+// 這台裝置上次有人在看 App 的時間（毫秒）：摘要的「你不在的時候」從這裡算起
+const SEEN_KEY = 'hiyori-seen-at'
 const STUCK_SAID_KEY = 'hiyori-stuck-said'
 // 好久沒碰的長期任務：按了「過一週再提醒」的 { 任務 id: 到哪一天 }、ふじ今天說過了沒
 const IDLE_OFF_KEY = 'hiyori-idle-off'
@@ -142,6 +144,8 @@ export class UI {
     this.focus = new FocusTimer(this, hooks)
     // 打開時的今日摘要（貓咪）
     this._afterBrief = []
+    // 上次有人在看是什麼時候（這次打開以前）：之後每分鐘會記成現在，所以先抄下來
+    this._left = { since: readLocal(SEEN_KEY, 0), at: Date.now() }
     this.brief = new BriefView($('#brief'), $('#briefCat'), {
       data: () => this._briefData(),
       coat: () => coatOfDay(store.today),
@@ -383,9 +387,28 @@ export class UI {
   }
 
   // ── 打開時的今日摘要：貓咪走進來說今天有什麼、該留意什麼（ui/brief.js，內容在 brief.js 整理）──
+  // 有人在看：記下現在（每分鐘、離開分頁時）。分頁在背景時不記，除非是剛要離開（leaving）
+  markSeen(leaving = false) {
+    if (leaving || !document.hidden) writeLocal(SEEN_KEY, Date.now())
+  }
+  // 回到 App：抄下離開的時間（還沒被下一次 markSeen 蓋掉）
+  returned() {
+    this._left = { since: readLocal(SEEN_KEY, 0), at: Date.now() }
+  }
+  // 「你不在的時候」從什麼時候算起：剛打開、剛回來那幾分鐘內的摘要才算（一直開著在看、過了午夜的那次沒有離開過）；
+  // 同一天再按「現在看」沿用那一次的
+  _awaySince() {
+    const today = this.store.today
+    const c = this._left
+    if (c.since > 0 && Date.now() - c.at < 3 * 60000) this._awayFor = { day: today, since: c.since }
+    return this._awayFor?.day === today ? this._awayFor.since : 0
+  }
   _briefData() {
     const s = this.store
     const today = s.today
+    const since = this._awaySince()
+    const yesterday = addDays(today, -1)
+    const days = [-3, -2, -1, 0].map((n) => addDays(today, n))
     const on = s.state.settings.stuckNudge
     const stuck = on ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
     const idle = this.idleTasks()[0]
@@ -402,6 +425,14 @@ export class UI {
       stuck: stuck ? { title: stuck.task.title, moved: stuck.moved, late: stuck.late } : null,
       idle: idle ? { id: idle.task.id, title: idle.task.title, idle: idle.idle, pid: idle.project.id, projectName: idle.project.name } : null,
       streak: s.streak,
+      away: since
+        ? {
+            since,
+            events: days.flatMap((date) => s.eventsOn(date).map((e) => ({ title: e.title, date, start: e.start, end: e.end }))),
+            charges: s.state.subscriptions.flatMap((sub) => chargesBetween(sub, days[0], yesterday).map((date) => ({ name: sub.name, date, price: fmtMoney(sub.price, sub.cur) }))),
+            habits: todayProgress(s.state.habits, yesterday),
+          }
+        : null,
     }
   }
   // 每天第一次打開（或開著過了一天）：貓咪自己出來說。回傳有沒有出來。
