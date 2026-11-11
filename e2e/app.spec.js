@@ -560,3 +560,125 @@ test.describe('打開時的今日摘要', () => {
     await expect(page.locator('#briefCat')).toBeHidden()
   })
 })
+test('快速記錄：在總覽按＋，一行字記下待辦、日程和生活記錄，接著記下一件；記錯了可以復原；N 鍵和 ?add 也叫得出來', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const cap = page.locator('#capture')
+  const input = page.locator('#capInput')
+  const count = () => page.evaluate(() => ({ tasks: window.hiyori.store.state.tasks.length, events: window.hiyori.store.state.events.length, life: (window.hiyori.store.state.life[window.hiyori.store.today]?.items || []).length }))
+  const before = await count()
+
+  // 留在總覽，不用換到任務頁
+  await page.locator('#captureBtn').click()
+  await expect(input).toBeFocused()
+  await input.fill('買牛奶 #生活')
+  await expect(page.locator('#capPreview')).toContainText('今天')
+  await input.press('Enter')
+  // 輸入框留著，直接記下一件：寫了時間的變成日程
+  await expect(input).toBeFocused()
+  await expect(input).toHaveValue('')
+  await input.fill('明天 15:00 看牙醫')
+  await expect(page.locator('#capPreview')).toContainText('15:00–16:00')
+  await input.press('Enter')
+  await expect(page.locator('#capDone li')).toHaveCount(2)
+  expect(await count()).toEqual({ ...before, tasks: before.tasks + 1, events: before.events + 1 })
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('today')
+  const milk = await page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '買牛奶'))
+  expect(milk).toMatchObject({ tag: 'life', date: await page.evaluate(() => window.hiyori.store.today) })
+
+  // 生活記錄：花費把金額拿出來
+  await page.locator('#capMode [data-v="log"]').click()
+  await page.locator('#capKinds [data-kind="spend"]').click()
+  await input.fill('午餐 120')
+  await input.press('Enter')
+  const spent = await page.evaluate(() => window.hiyori.store.state.life[window.hiyori.store.today].items.at(-1))
+  expect(spent).toMatchObject({ kind: 'spend', text: '午餐', amount: 120 })
+
+  // 復原：最上面那一筆（剛記的花費）拿掉
+  await page.locator('#capDone [data-undo="0"]').click()
+  await expect(page.locator('#capDone li').first()).toContainText('已復原')
+  expect((await count()).life).toBe(before.life)
+
+  // 例行任務的復原：例行公事和它今天產生的那一件都拿掉
+  await page.locator('#capMode [data-v="todo"]').click()
+  await input.fill('每天 喝水')
+  await input.press('Enter')
+  expect(await page.evaluate(() => window.hiyori.store.state.routines.some((r) => r.title === '喝水'))).toBe(true)
+  await page.locator('#capDone [data-undo="0"]').click()
+  expect(await page.evaluate(() => [window.hiyori.store.state.routines.some((r) => r.title === '喝水'), window.hiyori.store.state.tasks.some((t) => t.title === '喝水')])).toEqual([false, false])
+
+  // 空的不會記；打到一半按 Esc 關掉：字留著（算打到一半的字，不會被自動換新版刷掉），焦點回到＋
+  await input.press('Enter')
+  expect(await count()).toEqual({ ...before, tasks: before.tasks + 1, events: before.events + 1 })
+  await input.fill('還沒記完')
+  await page.keyboard.press('Escape')
+  await expect(cap).toBeHidden()
+  await expect(page.locator('#captureBtn')).toBeFocused()
+  expect(await page.evaluate(() => window.hiyori.ui.hasDraft())).toBe(true)
+  await page.locator('#captureBtn').click()
+  await expect(input).toHaveValue('還沒記完')
+  await input.fill('')
+  await page.keyboard.press('Escape')
+  expect(await page.evaluate(() => window.hiyori.ui.hasDraft())).toBe(false)
+
+  // N 鍵：別的分頁叫出快速記錄（每次都從「待辦」開始）；任務頁是跳到那一行輸入框
+  await page.locator('#captureBtn').blur()
+  await page.keyboard.press('n')
+  await expect(cap).toBeVisible()
+  await expect(page.locator('#capMode [data-v="todo"]')).toHaveClass(/on/)
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+  await page.locator('#tab-tasks').focus()
+  await page.keyboard.press('n')
+  await expect(cap).toBeHidden()
+  await expect(page.locator('#taskTitle')).toBeFocused()
+
+  // 主畫面圖示的捷徑（?add）：打開就是快速記錄，網址上的參數拿掉
+  await page.goto(site.url + '?add=1')
+  await bootReady(page)
+  await expect(cap).toBeVisible()
+  await expect(input).toBeFocused()
+  expect(new URL(page.url()).search).toBe('')
+})
+
+test('檢視進度：總覽有這週每天做完幾件，點「看週報」到教練的週報；紀錄頁最上面一排直接跳到設定；分頁各自記住捲到哪', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 393, height: 800 })
+  await page.goto(site.url)
+  await bootReady(page)
+  // 做完今天的一件：今天那一根有實心的一段
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.toggleTask(s.tasksOn(s.today)[0].id)
+  })
+  const week = page.locator('.td-pw')
+  await expect(week.locator('.td-pw-h')).toContainText('這週做完 1')
+  await expect(week.locator('.td-pw-d')).toHaveCount(7)
+  await expect(week.locator('.td-pw-d.now')).toHaveCount(1)
+  expect(await week.locator('.td-pw-d.now b').evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(0)
+
+  // 分頁各自記住捲到哪裡：總覽往下捲，換到任務是從頭開始，回來還在原地；再點一次總覽回到最上面
+  const body = page.locator('.panel-body')
+  await body.evaluate((el) => el.scrollTo(0, 500))
+  await page.locator('#tab-tasks').click()
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(0)
+  await page.locator('#tab-today').click()
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(500)
+  await page.locator('#tab-today').click()
+  await expect.poll(() => body.evaluate((el) => el.scrollTop)).toBe(0)
+
+  await week.locator('[data-act="report"]').click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('coach')
+  await expect(page.locator('#coachRoot [data-v="report"]')).toHaveClass(/on/)
+
+  // 紀錄頁：設定在好幾個畫面底下，最上面那一排點了就到
+  await page.locator('#tab-records').click()
+  const nav = page.locator('#recNav')
+  await expect(nav.locator('button').first()).toHaveText('設定')
+  await expect(nav.locator('button', { hasText: '最近七天' })).toBeVisible()
+  const title = page.locator('[data-page="records"] h3.sec-title', { hasText: '設定' })
+  await expect(title).not.toBeInViewport()
+  await nav.locator('button.set').click()
+  await expect(title).toBeInViewport()
+})

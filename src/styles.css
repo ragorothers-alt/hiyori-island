@@ -403,6 +403,13 @@ body.night .proj-search input { color-scheme: dark; }
 .stat { padding: 11px 12px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
 .stat b { font-family: var(--font-num); font-size: 22px; font-weight: 600; display: block; line-height: 1.1; }
 .stat span { font-size: 11.5px; color: var(--ink-soft); }
+/* 紀錄頁最上面那一排：跳到各區塊（這一頁很長，設定在最下面）。捲動時黏在上面，橫向可以滑 */
+.rec-nav { position: sticky; top: 0; z-index: 4; display: flex; gap: 6px; margin: 0 0 10px; padding: 6px; border-radius: 16px; overflow-x: auto; scrollbar-width: none; background: var(--lg-bg-strong); backdrop-filter: var(--lg-filter); -webkit-backdrop-filter: var(--lg-filter); border: 1px solid var(--glass-border); }
+.rec-nav::-webkit-scrollbar { display: none; }
+.rec-nav:empty { display: none; }
+.rec-nav button { flex: none; padding: 6px 12px; border-radius: 12px; font-size: 12.5px; color: var(--ink-soft); background: rgba(140, 170, 200, .12); white-space: nowrap; transition: background .15s, color .15s; }
+.rec-nav button:hover { color: var(--ink); background: rgba(140, 170, 200, .24); }
+.rec-nav button.set { color: var(--ink); border: 1px solid var(--glass-border); }
 .sec-title { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 18px 2px 8px; letter-spacing: .12em; display: flex; align-items: baseline; gap: 8px; }
 .sec-title small { font-size: 10.5px; color: var(--ink-deco); letter-spacing: .16em; }
 .sec-title .count { margin-left: auto; font-family: var(--font-num); font-size: 12px; color: var(--ink-soft); }
@@ -980,6 +987,11 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
   .panel.full .pg-side { grid-area: 1 / 1; min-width: 0; }
   .panel.full .pg-after { grid-area: 2 / 1; }
   .panel.full .pg-main { grid-area: 1 / 2 / 3 / 3; min-width: 0; }
+  /* 紀錄：最上面那一排橫跨兩欄，左右兩欄往下一列 */
+  .panel.full [data-page="records"].active { grid-template-rows: auto auto 1fr; }
+  .panel.full [data-page="records"] .rec-nav { grid-area: 1 / 1 / 2 / 3; }
+  .panel.full [data-page="records"] .pg-side { grid-area: 2 / 1; }
+  .panel.full [data-page="records"] .pg-main { grid-area: 2 / 2 / 4 / 3; }
   /* 日程：右欄的時間軸固定在畫面裡、撐滿高度，左欄捲動時它不動 */
   .panel.full [data-page="schedule"] .pg-main { position: sticky; top: 0; display: flex; flex-direction: column; height: calc(100dvh - 292px); min-height: 420px; }
   .panel.full [data-page="schedule"] .dayline { flex: 1; min-height: 240px; max-height: none; margin-bottom: 0; }
@@ -1091,7 +1103,9 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
   body.app-mode .panel-body { padding: 12px 14px calc(160px + env(safe-area-inset-bottom)); }
   /* 番茄鐘縮成右下角的小膠囊，浮在分頁列上面；其他 Dock 按鈕先藏起來（日曆從日期列點） */
   body.app-mode .dock { left: auto; right: 12px; transform: none; bottom: calc(82px + env(safe-area-inset-bottom)); padding: 4px 8px 4px 4px; }
-  body.app-mode .dock > :not(#focusBox) { display: none; }
+  body.app-mode .dock > :not(#focusBox, #captureBtn) { display: none; }
+  /* 快速記錄的＋留在膠囊最左邊：拇指按得到，不用另外浮一顆按鈕 */
+  body.app-mode .dock #captureBtn { width: 44px; height: 44px; border-radius: 50%; color: var(--ink); }
   body.app-mode .focus-pick { bottom: calc(140px + env(safe-area-inset-bottom)); }
   body.app-mode .toasts { top: 66px; }
 }

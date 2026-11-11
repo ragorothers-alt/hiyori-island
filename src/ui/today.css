@@ -71,7 +71,20 @@ body.night .td-link { color: #ffb3c8; }
 .td svg { overflow: visible; }
 
 /* 今日進度：漸層圓環＋三個數字 */
-.td-prog { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.td-prog { display: grid; gap: 14px; align-content: start; }
+.td-prog-main { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+/* 這週每天做完幾件：七根小長條（高度＝那天的任務數，實心＝做完的） */
+.td-pw { padding-top: 12px; border-top: 1px solid var(--line); }
+.td-pw-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--ink-soft); }
+.td-pw-h b { font-family: var(--font-num); font-size: 16px; color: var(--ink); }
+.td-pw-bars { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.td-pw-d { display: grid; justify-items: center; gap: 5px; font-size: 11px; color: var(--ink-faint); }
+.td-pw-d i { position: relative; display: block; width: 100%; max-width: 30px; height: 44px; border-bottom: 2px solid rgba(160, 170, 210, .22); border-radius: 0 0 2px 2px; }
+.td-pw-d i::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); border-radius: 6px 6px 0 0; background: rgba(160, 170, 210, .18); }
+.td-pw-d b { position: absolute; left: 0; right: 0; bottom: 0; height: var(--f); border-radius: 6px 6px 0 0; background: linear-gradient(180deg, #d7b4ec, #f4a7bd); transition: height .6s var(--ease); }
+.td-pw-d.now { color: var(--sakura); font-weight: 600; }
+.td-pw-d.now i { border-bottom-color: var(--sakura); }
+.td-pw-d.later i::before { background: transparent; outline: 1px dashed rgba(160, 170, 210, .3); outline-offset: -1px; }
 .td-ring { position: relative; width: 150px; height: 150px; flex: none; }
 .td-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
 .td-ring circle { fill: none; stroke: rgba(160, 170, 210, .16); stroke-width: 9; }
@@ -221,15 +234,13 @@ body.night .td-claim { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
   .td-h h3 { font-size: 17px; letter-spacing: .08em; gap: 0 8px; }
   .td-h h3 small { font-size: 10.5px; letter-spacing: .1em; }
   .td-more { padding-left: 6px; font-size: 12px; }
-  .td-prog { position: relative; gap: 14px; flex-wrap: nowrap; }
+  .td-prog-main { gap: 14px; flex-wrap: nowrap; }
   .td-ring { width: 112px; height: 112px; }
   .td-ring b { font-size: 26px; }
   .td-ring em { display: none; }
   .td-counts { padding-left: 12px; min-width: 0; gap: 10px; }
   .td-counts li { gap: 6px; font-size: 13px; }
   .td-counts span { min-width: 3.2em; }
-  .td-prog-add { position: absolute; left: 0; right: 0; bottom: 8px; }
-  .td-prog:has(.td-prog-add) { padding-bottom: 36px; }
   .td-t { gap: 10px; }
   .td-n { margin-left: 12px; }
   .td-dur { display: none; }

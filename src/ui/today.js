@@ -142,6 +142,7 @@ export class TodayView {
     switch (b.dataset.act) {
       case 'tab': return this.hooks.setTab(b.dataset.v)
       case 'add': return this.hooks.addTask()
+      case 'report': return this.hooks.openReport?.()
       case 'cal': return this.hooks.openCalendar(s.today)
       case 'edit': return this.hooks.openEdit(b.dataset.type, id)
       case 'toggle': return s.toggleTask(id)
@@ -348,14 +349,42 @@ export class TodayView {
     const C = 2 * Math.PI * 52
     const row = (icon, label, n, cls) => `<li class="${cls}">${icon}<span>${label}</span><b>${n}</b><small>件</small></li>`
     return `<section class="td-card td-prog" aria-label="今日進度">
+      <div class="td-prog-main">
       <div class="td-ring" role="img" aria-label="今天完成 ${pct}%">
         <svg viewBox="0 0 120 120"><defs><linearGradient id="tdRingG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4a7bd"/><stop offset=".55" stop-color="#d7b4ec"/><stop offset="1" stop-color="#9cc8ec"/></linearGradient></defs>
           <circle cx="60" cy="60" r="52"/><circle cx="60" cy="60" r="52" class="fg" style="stroke-dasharray:${C};stroke-dashoffset:${C * (1 - pct / 100)}"/></svg>
         <div><small>今日進度</small><em>きょうのしんちょく</em><b>${pct}<i>%</i></b></div>
       </div>
       <ul class="td-counts">${row(IC.check, '已完成', done, 'c-done')}${row(IC.clock, '進行中', going, 'c-going')}${row(IC.pending, '待完成', left, 'c-left')}</ul>
+      </div>
       ${tasks.length ? '' : '<button type="button" class="td-link td-prog-add" data-act="add" data-fk="add">種下今天的第一件 ›</button>'}
+      ${this._weekHTML()}
     </section>`
+  }
+
+  // ── 這週（週一到週日）每天做完幾件：一排小長條，今天那根亮起來；點「看週報」到教練的週報 ──
+  // 長條的高度是那天的任務數（淡的），裡面實心的是做完的；還沒有任務的日子只有一條底線
+  _weekHTML() {
+    const s = this.store
+    const today = s.today
+    const dow = (parseDate(today).getDay() + 6) % 7
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const date = addDays(today, i - dow)
+      const ts = s.tasksOn(date)
+      return { date, n: ts.length, done: ts.filter((t) => t.done).length }
+    })
+    const max = Math.max(1, ...days.map((d) => d.n))
+    const total = days.reduce((a, d) => a + d.done, 0)
+    const all = days.reduce((a, d) => a + d.n, 0)
+    const bar = (d, i) => {
+      const cls = d.date === today ? ' now' : d.date > today ? ' later' : ''
+      const what = d.n ? `做完 ${d.done}／${d.n} 件` : '沒有任務'
+      return `<li class="td-pw-d${cls}" title="週${WEEK_ZH[(i + 1) % 7]}：${what}"><i style="--h:${Math.round((d.n / max) * 100)}%"><b style="--f:${Math.round((d.done / max) * 100)}%"></b></i><span>${WEEK_ZH[(i + 1) % 7]}</span></li>`
+    }
+    return `<div class="td-pw">
+      <div class="td-pw-h"><span>這週做完 <b>${total}</b>${all ? `／${all}` : ''} 件</span><button type="button" class="td-link" data-act="report" data-fk="report">看週報 ›</button></div>
+      <ol class="td-pw-bars" role="img" aria-label="這週每天做完的任務：${days.map((d, i) => `週${WEEK_ZH[(i + 1) % 7]} ${d.done}／${d.n}`).join('、')}">${days.map(bar).join('')}</ol>
+    </div>`
   }
 
   // ── 今天的一句話（同一天固定） ──

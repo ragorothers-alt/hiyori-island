@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { describeQuick, parseQuick } from '../src/parse.js'
+import { describeQuick, parseQuick, parseSpend } from '../src/parse.js'
 
 const TODAY = '2026-10-25'
 
@@ -321,5 +321,28 @@ describe('整天的日程', () => {
   it('一般的日期與時段不受影響', () => {
     expect(parseQuick('11/17 牙醫', { today: TODAY }).allDay).toBeUndefined()
     expect(parseQuick('14:00-15:30 牙醫', { today: TODAY }).allDay).toBeUndefined()
+  })
+})
+
+describe('parseSpend：花費的一行字', () => {
+  it.each([
+    ['午餐 120', '午餐', 120],
+    ['120', '', 120],
+    ['咖啡 $85', '咖啡', 85],
+    ['午餐 NT$1,200', '午餐', 1200],
+    ['咖啡85元', '咖啡', 85],
+    ['買 2 杯咖啡 $120', '買 2 杯咖啡', 120],
+    // 店名、型號、數量裡的數字不是金額
+    ['7-11 咖啡 45', '7-11 咖啡', 45],
+    ['iPhone 16 手機殼 390', 'iPhone 16 手機殼', 390],
+    ['2 杯拿鐵 150', '2 杯拿鐵', 150],
+  ])('%s → %s／%i', (raw, text, amount) => {
+    expect(parseSpend(raw)).toEqual({ text, amount })
+  })
+
+  it('沒寫金額：整句照記，金額是 0', () => {
+    expect(parseSpend('2 杯拿鐵')).toEqual({ text: '2 杯拿鐵', amount: 0 })
+    expect(parseSpend('7-11 買早餐')).toEqual({ text: '7-11 買早餐', amount: 0 })
+    expect(parseSpend('  ')).toEqual({ text: '', amount: 0 })
   })
 })

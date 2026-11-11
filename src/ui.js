@@ -1,5 +1,7 @@
 import { FocusTimer } from './ui/focus.js'
 import { BriefView } from './ui/brief.js'
+import { CaptureView } from './ui/capture.js'
+import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
@@ -7,7 +9,7 @@ import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, 
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
 import { native } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
-import { parseQuick, describeQuick } from './parse.js'
+import { parseQuick, describeQuick, parseSpend } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
@@ -163,6 +165,37 @@ export class UI {
         if (!acted) queue.forEach((fn) => fn())
       },
     })
+    // 快速記錄：加在今天（字裡寫了日期就照寫的），不跟著上面選的日期走
+    this.capture = new CaptureView($('#capture'), {
+      preview: (text) => {
+        const p = parseQuick(text, { today: store.today, projects: store.activeProjects() })
+        if (!p.title) return []
+        const chips = describeQuick(p, store.today)
+        if (!p.date) chips.splice(p.kind === 'event' ? 1 : 0, 0, '今天')
+        if (p.kind === 'task') chips.push(tagOf(p.tag || this.tag).label)
+        return chips
+      },
+      // 剛過午夜、每秒的 tick 還沒跑到：先換日再記，不然會記到昨天
+      add: (text) => {
+        store.tick()
+        return this.quickAdd(text, { base: store.today })
+      },
+      logPreview: (kind, text) => {
+        const { amount } = this._logParts(kind, text)
+        return amount ? [`${amount} 元`] : []
+      },
+      log: (kind, text) => {
+        store.tick()
+        return this.quickLog(kind, text)
+      },
+      tags: () => TAGS,
+      tag: () => this.tag,
+      setTag: (id) => {
+        this.tag = id
+        this._syncPickers()
+      },
+    })
+    $('#captureBtn').onclick = () => (this.capture.isOpen ? this.capture.close() : this.openCapture())
     // 時段安排、習慣、生活記錄、日曆：各自是一個模組，透過 viewHooks 和外面溝通
     const viewHooks = {
       toast: (o) => this.toast(o),
@@ -194,10 +227,12 @@ export class UI {
     this.dates.render()
     this.today = new TodayView($('#todayRoot'), store, {
       ...viewHooks,
-      addTask: () => {
-        this.store.selectDate(this.store.today)
-        this.setTab('tasks')
-        $('#taskTitle').focus()
+      // 「種下一件」：留在總覽，直接叫出快速記錄
+      addTask: () => this.openCapture('todo'),
+      // 「看週報」：教練分頁的週報那一頁
+      openReport: () => {
+        this.setTab('coach')
+        this._use(this._coach, (c) => c.show('report'))
       },
       startFocus: (id) => this.focus.ask(id),
       focusTaskId: () => (this.focus.mode === 'focus' ? this.focus.taskId : null),
@@ -276,7 +311,11 @@ export class UI {
     for (const b of $$('.tab')) {
       b.id = `tab-${b.dataset.tab}`
       b.setAttribute('aria-controls', `page-${b.dataset.tab}`)
-      b.addEventListener('click', () => this.setTab(b.dataset.tab))
+      b.addEventListener('click', () => {
+        // 再點一次目前的分頁：回到最上面
+        if (b.dataset.tab === this.tab && !$('#panel').classList.contains('collapsed')) $('.panel-body').scrollTo({ top: 0, behavior: scrollMode() })
+        this.setTab(b.dataset.tab)
+      })
     }
     for (const p of $$('.tab-page')) {
       p.id = `page-${p.dataset.page}`
@@ -366,8 +405,12 @@ export class UI {
       if (typing || e.ctrlKey || e.metaKey || e.altKey || this._topLayer()) return
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault()
-        this.setTab('tasks')
-        $('#taskTitle').focus()
+        // 在任務頁：直接到那一行輸入框（可以選優先度、重複、專案）；別的分頁：叫出快速記錄，不用換頁
+        // （setTab 會把收起來的面板展開：小島模式收著面板時輸入框拿不到焦點）
+        if (this.tab === 'tasks') {
+          this.setTab('tasks')
+          $('#taskTitle').focus()
+        } else this.openCapture()
       } else if (e.key === 'e' || e.key === 'E') this.toggleFull()
       else if (e.key === 'd' || e.key === 'D') this.toggleTheme()
       // 回到全景是要看島，先離開全螢幕
@@ -473,6 +516,7 @@ export class UI {
         newsModal: () => this.closeNews(),
         weekModal: () => this.closeWeekCard(),
         brief: () => this.brief.close(),
+        capture: () => this.capture.close(),
         levelModal: () => this.closeModal(),
         focusSet: () => this.focus.toggleSet(false),
         focusPick: () => this.focus.togglePicker(false),
@@ -516,7 +560,8 @@ export class UI {
         if (!el.hidden && !back.has(el)) {
           back.set(el, el.contains(last) ? prev : last)
           requestAnimationFrame(() => {
-            if (!el.hidden && !el.contains(document.activeElement)) focusables(el)[0]?.focus({ preventScroll: true })
+            // 不是最上面那一層（快速記錄開著時，番茄鐘自動進下一輪打開了全螢幕計時）：焦點留在上面，不搶到後面去
+            if (!el.hidden && !el.contains(document.activeElement) && this._topLayer() === el) focusables(el)[0]?.focus({ preventScroll: true })
           })
         } else if (el.hidden && back.has(el)) {
           const to = back.get(el)
@@ -546,6 +591,10 @@ export class UI {
       this._projRank = null
       this._stale?.add('projects')
     }
+    // 每個分頁各自記住捲到哪裡（共用同一個捲動區：不記的話，在總覽往下捲再換到任務，會停在任務頁的半中間）
+    const body = $('.panel-body')
+    const from = this.tab
+    if (from !== tab) (this._tabScroll ||= {})[from] = body.scrollTop
     this.tab = tab
     // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
     document.body.dataset.tab = tab
@@ -562,6 +611,7 @@ export class UI {
     if (tab === 'habits') this.habits.render()
     if (tab === 'coach') this._use(this._coach, (c) => c.render())
     if (tab === 'today') this.today.render()
+    if (from !== tab) body.scrollTop = this._tabScroll?.[tab] || 0
   }
 
   togglePanel(force) {
@@ -822,6 +872,89 @@ export class UI {
     b.title = night ? '切換成白天 (D)' : '切換成夜晚 (D)'
   }
 
+  // ── 一行字變成任務或日程：任務頁的輸入框和「快速記錄」共用 ──
+  // base：沒寫日期時加在哪一天；repeat、project：表單下拉選的重複和專案（字裡寫了「每天」「@專案」的優先）。
+  // 回傳 { icon, title, sub, undo, toasts }；沒有標題（空的、只寫了日期）是 null。
+  //   sub：加到哪裡的一句話（快速記錄列出來用）；undo()：拿掉剛加的；toasts：任務頁要跳的提示
+  quickAdd(raw, { base = this.store.selectedDate, repeat: picked = null, project: pickedProj = null } = {}) {
+    const s = this.store
+    const p = parseQuick(raw, { today: s.today, projects: s.activeProjects() })
+    if (!p.title) return null
+    const date = p.date || base
+    const repeat = p.repeat || picked
+    const md = date.slice(5).replace('-', '/')
+    const day = date === s.today ? '今天' : md
+    const toasts = []
+    if (p.kind === 'event') {
+      // 整天的日程不會重複（例行公事只有有時段的）
+      const allDay = !!p.allDay
+      const routine = !allDay && !!repeat
+      const ev = allDay ? { title: p.title, color: this.eventColor, date, allDay: true, endDate: p.endDate } : { title: p.title, start: p.start, end: p.end, color: this.eventColor, date }
+      const made = routine ? s.addRoutine({ kind: 'event', ...ev, repeat }) : s.addEvent(ev)
+      this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
+      this._syncPickers()
+      const until = allDay && p.endDate && p.endDate !== date ? `–${p.endDate.slice(5).replace('-', '/')}` : ''
+      if (allDay) toasts.push({ icon: '環', title: '已加入整天的日程', sub: `${p.title}・${md}${until}${repeat ? '（整天的日程不會重複）' : ''}` })
+      else toasts.push({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${p.start}–${p.end}` })
+      return {
+        icon: '環', title: p.title, toasts,
+        sub: allDay ? `整天的日程・${day}${until}` : `${routine ? '例行日程' : '日程'}・${day} ${p.start}–${p.end}`,
+        undo: made ? () => (routine ? this._undoRoutine(made.id) : s.deleteEvent(made.id)) : null,
+      }
+    }
+    const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur }
+    // 「@專案」優先，沒打就用下拉選的專案（例行任務不歸專案）
+    const proj = p.project ? { id: p.project, name: p.projectName } : pickedProj
+    let made
+    if (repeat) {
+      made = s.addRoutine({ kind: 'task', ...t, repeat })
+      if (proj) toasts.push({ icon: '↻', title: '已加入例行任務', sub: `例行任務不會歸到專案「${proj.name}」` })
+    } else {
+      made = s.addTask({ ...t, project: proj?.id || null })
+      if (made && p.star) s.toggleStar(made.id)
+    }
+    if (date !== s.selectedDate) toasts.push({ icon: '種', title: `已種在 ${md}`, sub: proj && !repeat ? `${p.title}・${proj.name}` : p.title })
+    return {
+      icon: repeat ? '↻' : '種', title: p.title, toasts,
+      sub: [repeat ? '例行任務' : '任務', day, tagOf(t.tag).label, proj && !repeat ? proj.name : ''].filter(Boolean).join('・'),
+      undo: made ? () => (repeat ? this._undoRoutine(made.id) : s.deleteTask(made.id)) : null,
+    }
+  }
+  // 復原剛加的例行公事：連它已經產生、還沒做的那幾件一起拿掉。
+  // （deleteRoutine 會把今天以前的留著當紀錄：加完跨了午夜才按復原，昨天那件會變成逾期）
+  _undoRoutine(id) {
+    const s = this.store
+    s.deleteRoutine(id)
+    for (const t of s.state.tasks.filter((x) => x.routineId === id && !x.done)) s.deleteTask(t.id)
+    for (const e of s.state.events.filter((x) => x.routineId === id && !x.done)) s.deleteEvent(e.id)
+  }
+
+  // ── 快速記錄（ui/capture.js）：不用先切到任務頁，Dock 的＋或 N 鍵叫出來 ──
+  openCapture(mode) {
+    // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去
+    const top = this._topLayer()
+    if (top && top.id !== 'capture') return false
+    this.capture.open(mode)
+    return true
+  }
+  // 生活記錄的一行字：花費把金額拿出來（parse.js 的 parseSpend），其他種類整句照記
+  _logParts(kind, raw) {
+    return kind === 'spend' ? parseSpend(raw) : { text: String(raw || '').trim(), amount: 0 }
+  }
+  quickLog(kind, raw) {
+    const s = this.store
+    const { text, amount } = this._logParts(kind, raw)
+    const date = s.today
+    const item = s.addLife(date, { kind, text, amount })
+    if (!item) return null
+    const k = lifeKindOf(item.kind)
+    return {
+      icon: k.kanji, title: item.text || `${amount} 元`,
+      sub: ['生活記錄', k.label, item.t || '', item.text && amount ? `${amount} 元` : ''].filter(Boolean).join('・'),
+      undo: () => s.deleteLife(date, item.id),
+    }
+  }
+
   // ── 任務 ──
   _renderQuickPreview() {
     const box = $('#quickPreview')
@@ -923,42 +1056,12 @@ export class UI {
     $('#taskForm').addEventListener('submit', (e) => {
       e.preventDefault()
       const input = $('#taskTitle')
-      const s = this.store
-      const p = parseQuick(input.value, { today: s.today, projects: s.activeProjects() })
-      if (!p.title) {
+      const r = this.quickAdd(input.value, { repeat: this._repeatValue('#taskRepeat'), project: this._taskProject() })
+      if (!r) {
         input.focus()
         return
       }
-      const date = p.date || s.selectedDate
-      const repeat = p.repeat || this._repeatValue('#taskRepeat')
-      const md = date.slice(5).replace('-', '/')
-      if (p.kind === 'event' && p.allDay) {
-        // 整天的日程（例行公事只有有時段的）
-        s.addEvent({ title: p.title, color: this.eventColor, date, allDay: true, endDate: p.endDate })
-        this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
-        this._syncPickers()
-        const until = p.endDate && p.endDate !== date ? `–${p.endDate.slice(5).replace('-', '/')}` : ''
-        this.toast({ icon: '環', title: '已加入整天的日程', sub: `${p.title}・${md}${until}${repeat ? '（整天的日程不會重複）' : ''}` })
-      } else if (p.kind === 'event') {
-        const ev = { title: p.title, start: p.start, end: p.end, color: this.eventColor, date }
-        if (repeat) s.addRoutine({ kind: 'event', ...ev, repeat })
-        else s.addEvent(ev)
-        this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
-        this._syncPickers()
-        this.toast({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${p.start}–${p.end}` })
-      } else {
-        const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur }
-        // 「@專案」優先，沒打就用下拉選的專案
-        const proj = p.project ? { id: p.project, name: p.projectName } : this._taskProject()
-        if (repeat) {
-          s.addRoutine({ kind: 'task', ...t, repeat })
-          if (proj) this.toast({ icon: '↻', title: '已加入例行任務', sub: `例行任務不會歸到專案「${proj.name}」` })
-        } else {
-          const added = s.addTask({ ...t, project: proj?.id || null })
-          if (added && p.star) s.toggleStar(added.id)
-        }
-        if (date !== s.selectedDate) this.toast({ icon: '種', title: `已種在 ${md}`, sub: proj && !repeat ? `${p.title}・${proj.name}` : p.title })
-      }
+      r.toasts.forEach((t) => this.toast(t))
       $('#taskRepeat').value = 'none'
       $('#taskRepeat').classList.remove('on')
       input.value = ''
@@ -2201,7 +2304,8 @@ export class UI {
 
   // 新的一週第一次打開：如果上週有在用，就給一張回顧卡（其他視窗開著時先不打擾）
   maybeShowWeekCard() {
-    if (!this.store.weekCardDue() || !$('#levelModal').hidden || !$('#reviewModal').hidden) return false
+    // 正在快速記錄：不要蓋上去打斷（下次打開再出來）
+    if (!this.store.weekCardDue() || !$('#levelModal').hidden || !$('#reviewModal').hidden || this.capture?.isOpen) return false
     this.openWeekCard()
     return true
   }
@@ -2273,7 +2377,7 @@ export class UI {
     try {
       later = localStorage.getItem('hiyori-review-later')
     } catch {}
-    if (later === s.today || !$('#reviewModal').hidden || !$('#levelModal').hidden) return false
+    if (later === s.today || !$('#reviewModal').hidden || !$('#levelModal').hidden || this.capture?.isOpen) return false
     // 今日摘要先說（還開著、或今天還沒說過）：回顧等它關掉，下一分鐘再問
     if (this.brief.open || this.maybeShowBrief()) return false
     this.openReview()
@@ -2411,7 +2515,37 @@ export class UI {
       })
   }
 
+  // 紀錄頁最上面那一排：照頁面上看得到的標題排出來，點了跳到那一段（設定在最下面，放第一個）
+  _renderRecNav() {
+    const nav = $('#recNav')
+    const page = nav.closest('.tab-page')
+    if (!nav.dataset.bound) {
+      nav.dataset.bound = '1'
+      nav.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-i]')
+        const el = b && this._recTargets?.[+b.dataset.i]
+        if (!el) return
+        // 留出這一排自己的高度，標題才不會被它蓋住
+        el.style.scrollMarginTop = `${nav.offsetHeight + 10}px`
+        el.scrollIntoView({ behavior: scrollMode(), block: 'start' })
+      })
+    }
+    const label = (h) => h.dataset.nav || [...h.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim()
+    const heads = $$('h3.sec-title', page).filter((h) => !h.hidden && h.getClientRects().length)
+    const items = heads.map((h) => [label(h), h]).filter(([t]) => t)
+    const stats = $('#statsGrid')
+    const at = items.findIndex(([, h]) => stats.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING)
+    items.splice(at < 0 ? items.length : at, 0, ['統計', stats])
+    const set = items.findIndex(([t]) => t === '設定')
+    if (set > 0) items.unshift(...items.splice(set, 1))
+    this._recTargets = items.map(([, el]) => el)
+    const html = items.map(([t], i) => `<button type="button" data-i="${i}"${t === '設定' ? ' class="set"' : ''}>${esc(t)}</button>`).join('')
+    if (nav.innerHTML !== html) nav.innerHTML = html
+  }
+
   renderRecords() {
+    // 各區都畫完（小日記有沒有、訂閱開了沒）再排最上面那一排
+    queueMicrotask(() => this._renderRecNav())
     this.mottos.render()
     this.life.render()
     this.subs.render()
@@ -2671,7 +2805,16 @@ export class UI {
       el.append(b)
       el.classList.add('has-act')
     }
-    $('#toasts').append(el)
+    // 正在某個新增表單裡打字（任務、日程那一行）：提示放到表單下面，不要蓋住正在打的字
+    const box = $('#toasts')
+    box.style.top = ''
+    const r = document.activeElement?.closest?.('.add-form')?.getBoundingClientRect()
+    if (r?.height) {
+      const top = parseFloat(getComputedStyle(box).top) || 0
+      const mid = innerWidth / 2
+      if (r.top < top + 64 && r.bottom > top && r.left < mid + 170 && r.right > mid - 170) box.style.top = `${Math.round(r.bottom + 8)}px`
+    }
+    box.append(el)
     setTimeout(() => {
       el.classList.add('out')
       setTimeout(() => el.remove(), 500)
@@ -2684,6 +2827,8 @@ export class UI {
     // 編輯到一半的表單（日程、任務的編輯面板，新增或編輯訂閱）：只改了時間、下拉選單也算
     const open = (el) => !!el?.getClientRects().length
     if (open($('#editSheet')) || open($('form.sb-form'))) return true
+    // 快速記錄關掉後字還留著（下次打開接著打）：看不到也算，重新整理會把它弄丟
+    if ($('#capInput').value.trim()) return true
     // 清掉原本的字也算改了（跟畫出來時的值不一樣，前後空白不算）。data-nodraft：搜尋框這類，字不見了也沒關係
     return $$('input:not([type]), input[type="text"], input[type="search"], input[type="url"], input[type="email"], textarea, [contenteditable="true"]').some((el) => {
       if (!el.getClientRects().length || el.dataset.nodraft !== undefined) return false

@@ -10,6 +10,15 @@
   "background_color": "#eaf5fc",
   "theme_color": "#cfe8f6",
   "lang": "zh-Hant",
+  "shortcuts": [
+    {
+      "name": "快速記錄",
+      "short_name": "快速記錄",
+      "description": "記一件待辦或一筆生活記錄",
+      "url": "./?add=1",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },

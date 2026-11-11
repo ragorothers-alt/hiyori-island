@@ -229,6 +229,8 @@
 
       <!-- 紀錄 -->
       <section class="tab-page" data-page="records">
+        <!-- 這一頁很長：最上面一排跳到各區塊（ui.js 的 _renderRecNav 照頁面上的標題排出來） -->
+        <nav class="rec-nav" id="recNav" aria-label="跳到這一頁的哪一段"></nav>
         <div class="pg-side"><div id="mottoRoot"></div><div id="lifeRoot"></div><div id="subsRoot"></div></div>
         <div class="pg-main">
         <div class="stats-grid" id="statsGrid"></div>
@@ -302,6 +304,8 @@
 
   <!-- ── 下方：Dock ── -->
   <div class="dock glass">
+    <button class="icon-btn cap-btn" id="captureBtn" title="快速記錄 (N)" aria-label="快速記錄" aria-haspopup="dialog" aria-controls="capture"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
+    <div class="dock-sep cap-sep"></div>
     <div class="focus" id="focusBox">
       <button class="focus-btn" id="focusBtn" title="開始專注">
         <svg viewBox="0 0 44 44" class="focus-ring"><circle cx="22" cy="22" r="19"/><circle cx="22" cy="22" r="19" class="fg" id="focusArc"/></svg>
@@ -421,6 +425,23 @@
   <div class="sr-only" id="chatLive" role="status" aria-live="polite"></div>
 
   <!-- 打開 App 時的今日摘要（src/ui/brief.js）：貓咪走進來坐下，用對話卡說今天有什麼。貓走動的那一層分開放：卡片關掉後牠還要走出去 -->
+<!-- 快速記錄：任何分頁都叫得出來（Dock 的＋、N 鍵）；內容在 src/ui/capture.js -->
+<div class="modal cap" id="capture" role="dialog" aria-modal="true" aria-label="快速記錄" hidden>
+  <div class="cap-card">
+    <div class="cap-head">
+      <div class="seg" id="capMode" role="group" aria-label="要記什麼"><button type="button" data-v="todo">待辦</button><button type="button" data-v="log">生活記錄</button></div>
+      <button type="button" class="icon-btn small" id="capClose" aria-label="關閉快速記錄" title="關閉 (Esc)">×</button>
+    </div>
+    <form id="capForm" autocomplete="off">
+      <div class="cap-kinds" id="capKinds" role="group" aria-label="記錄的種類" hidden></div>
+      <div class="cap-row"><input id="capInput" type="text" maxlength="80" enterkeyhint="done" /><button class="btn-primary" type="submit">記下</button></div>
+      <div class="quick-preview" id="capPreview" hidden></div>
+      <div class="cap-tags" id="capTags" role="group" aria-label="分類"></div>
+    </form>
+    <ul class="cap-done" id="capDone" aria-live="polite" hidden></ul>
+    <p class="cap-tip" id="capTip"></p>
+  </div>
+</div>
 <div class="brief" id="brief" role="dialog" aria-modal="true" aria-label="今天的摘要" hidden><div class="bf-card"></div></div>
 <div class="brief-cat" id="briefCat" aria-hidden="true" hidden></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>

@@ -265,6 +265,24 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
   return out
 }
 
+// 花費的一行字 → 買了什麼（text）和金額（amount，沒寫是 0）。快速記錄的「花費」用。
+// 有標記的優先：「$120」「NT$1,200」「120元」；沒有標記就只認最後面、前面有空白的整個數字（「午餐 120」）。
+// 前面和中間的數字不動：「7-11 咖啡 45」是 45、「iPhone 16 手機殼 390」是 390、「2 杯拿鐵」沒寫金額
+export function parseSpend(raw) {
+  const src = String(raw || '').trim()
+  const NUM = '(\\d{1,3}(?:,\\d{3})+|\\d{1,7})'
+  const cut = (m) => ({
+    text: (src.slice(0, m.index) + ' ' + src.slice(m.index + m[0].length)).replace(/\s+/g, ' ').trim(),
+    amount: Math.min(1e7, +m[1].replace(/,/g, '')),
+  })
+  const marked =
+    src.match(new RegExp(`(?:NT\\$|\\$|＄)\\s*${NUM}(?![\\d,])\\s*(?:元|塊|圓)?`, 'i')) ||
+    src.match(new RegExp(`(?<![\\w.,\\-])${NUM}\\s*(?:元|塊|圓)`))
+  if (marked) return cut(marked)
+  const tail = src.match(/(?:^|\s)(\d{1,7})$/)
+  return tail ? cut(tail) : { text: src, amount: 0 }
+}
+
 // 給輸入框下方的預覽用
 export function describeQuick(p, today) {
   const chips = []

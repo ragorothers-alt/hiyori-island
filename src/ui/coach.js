@@ -164,6 +164,14 @@ export class CoachView {
     return this.a.focus.size > 0 && this.a.slots.size > 0
   }
 
+  // 從別的地方直接開某一頁（總覽的「看週報」）：plan 排程、report 週報
+  show(view) {
+    this.view = view === 'report' ? 'report' : 'plan'
+    this.history = false
+    this.render()
+    this.root.closest('.panel-body')?.scrollTo({ top: 0 })
+  }
+
   // 任務頁「讓ふじ排這天」
   preset({ scope, date = null }) {
     this._stop()
