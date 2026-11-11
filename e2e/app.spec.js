@@ -442,8 +442,9 @@ test('番茄鐘到點的通知：開始時把「幾毫秒後」交給伺服器�
 test.describe('打開時的今日摘要', () => {
   test.use({ brief: true })
 
-  // 固定在今天上午 10 點跑：晚上 9 點後會跳晚間回顧，內容也跟著時段變
-  const morning = (page) => page.clock.install({ time: new Date(new Date().setHours(10, 0, 0, 0)) })
+  // 固定在今天上午 10 點跑：晚上 9 點後會跳晚間回顧，內容也跟著時段變。
+  // 只固定「現在幾點」，計時器照常跑：整個接管的話，重新整理後要補跑累積的計時器，慢的機器會卡住
+  const morning = (page) => page.clock.setFixedTime(new Date(new Date().setHours(10, 0, 0, 0)))
 
   test('每天第一次打開：貓咪走進來說今天有什麼；點一項跳過去；重新整理不再出來；設定裡可以再看、可以關掉', async ({ page, context, site }) => {
     await useAppMode(context)
@@ -452,9 +453,9 @@ test.describe('打開時的今日摘要', () => {
     await bootReady(page)
     const card = page.locator('#brief .bf-card')
     // 貓坐好了卡片才冒出來，第一句說完清單才出現
-    await expect(card).toHaveClass(/in/, { timeout: 8000 })
+    await expect(card).toHaveClass(/in/, { timeout: 20000 })
     await expect(card.locator('.bf-hello')).toContainText('にゃ')
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 8000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await expect(card.locator('.bf-lead .sr-only')).toContainText('今天')
     expect(await page.evaluate(() => window.hiyori.ui.brief.cat.arrived)).toBe(true)
     // 範例資料裡今天有任務：清單第一項是今天的事，點了關掉摘要、跳到那一頁
@@ -464,7 +465,7 @@ test.describe('打開時的今日摘要', () => {
     await expect(page.locator('#brief')).toBeHidden()
     expect(['tasks', 'schedule', 'habits']).toContain(await page.evaluate(() => window.hiyori.ui.tab))
     // 貓自己走出去，那一層收起來
-    await expect(page.locator('#briefCat')).toBeHidden({ timeout: 8000 })
+    await expect(page.locator('#briefCat')).toBeHidden({ timeout: 20000 })
 
     // 今天看過了：重新整理不再出來
     await page.reload()
@@ -475,13 +476,13 @@ test.describe('打開時的今日摘要', () => {
     // 設定裡「現在看」再看一次，Esc 關掉；關掉開關後，隔天也不出來
     await page.evaluate(() => window.hiyori.ui.setTab('records'))
     await page.locator('#briefNow').click()
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 8000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await page.keyboard.press('Escape')
     await expect(page.locator('#brief')).toBeHidden()
     // 正在看別天時點「今天」的項目：日期跟著回到今天，不會開到別天的空清單
     await page.evaluate(() => window.hiyori.store.selectDate('2030-01-01'))
     await page.locator('#briefNow').click()
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 8000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await card.locator('.bf-list button').first().click()
     expect(await page.evaluate(() => window.hiyori.store.selectedDate === window.hiyori.store.today)).toBe(true)
     await page.evaluate(() => window.hiyori.ui.setTab('records'))
@@ -508,7 +509,7 @@ test.describe('打開時的今日摘要', () => {
     await page.goto(site.url)
     await bootReady(page)
     const card = page.locator('#brief .bf-card')
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 10000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     // 剛打開、沒有上次：沒有這一段
     await expect(card).not.toContainText('你不在的時候')
     await page.keyboard.press('Escape')
@@ -525,7 +526,7 @@ test.describe('打開時的今日摘要', () => {
     })
     await page.reload()
     await bootReady(page)
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 10000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await expect(card.locator('.bf-body h4').first()).toContainText('你不在的時候')
     await expect(card.locator('.bf-body h4').first()).toContainText('離開了 20 小時')
     // 範例資料裡昨天晚上還有別的日程（新的在前），所以照名字找
@@ -537,7 +538,7 @@ test.describe('打開時的今日摘要', () => {
     // 同一天再看一次：這一段還在
     await page.evaluate(() => window.hiyori.ui.setTab('records'))
     await page.locator('#briefNow').click()
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 10000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await expect(card).toContainText('昨天 15:00 牙醫回診')
   })
 
@@ -548,7 +549,7 @@ test.describe('打開時的今日摘要', () => {
     await page.goto(site.url)
     await bootReady(page)
     const card = page.locator('#brief .bf-card')
-    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 5000 })
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     expect(await page.evaluate(() => ({ still: window.hiyori.ui.brief.cat.cat.still, arrived: window.hiyori.ui.brief.cat.arrived, typed: document.querySelector('.bf-typed').textContent === document.querySelector('.bf-lead .sr-only').textContent }))).toEqual({ still: true, arrived: true, typed: true })
     await card.locator('.btn-primary').click()
     await expect(page.locator('#brief')).toBeHidden()
