@@ -1,7 +1,7 @@
 // 專注頁（App 模式的全螢幕計時）上散步的貓咪：用 SVG 畫，身體每一格照 src/catWalk.js 算出來的姿勢重畫。
 // 只在專注頁開著時動；畫面在背景上、計時卡片底下，不會擋到按鈕。系統開了「減少動態效果」就只在角落睡覺。
 import {
-  COATS, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds,
+  COATS, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, callCat,
   bodyPath, legPath, sockPath, smoothPath, stripesPath, LEG, TAIL,
 } from '../catWalk.js'
 import './focusCat.css'
@@ -132,6 +132,31 @@ export class FocusCat {
     this._start()
   }
 
+  // ── 今日摘要用（ui/brief.js）：叫牠過來坐好、說話 ──
+  // 小跑步到地板上的 x（這一層的座標）坐下；要在 show() 之後叫
+  callTo(x) {
+    if (!this.on || !this.cat?.bounds) return
+    callCat(this.cat, x, this.cat.bounds.bottom, this.ctx)
+    if (this.cat.still) this._stillStep(0)
+  }
+  // 到了、坐好看著你了
+  get arrived() {
+    return !!this.cat && !this.cat.away && this.cat.act.kind === 'look'
+  }
+  // 說話中：嘴巴一開一合（每一格在 _tick 裡動）
+  talk(on) {
+    this._talking = !!on
+    if (!on && this.cat) this.cat.mouthT = 0
+  }
+  // 說完了：瞇眼笑一下
+  smile() {
+    const a = this.cat?.act
+    if (!a || a.kind !== 'look') return
+    a.happyT = 2.2
+    this.cat.mood = 'happy'
+    if (this.cat.still) this._stillStep(0)
+  }
+
   // 專注頁關掉（縮小、結束）：停下來，狀態留著，很快又打開時接著走
   hide() {
     if (!this.on) return
@@ -238,6 +263,7 @@ export class FocusCat {
     this._prev = now
     stepCat(this.cat, dt, this.ctx)
     if (this.cat.away && this.cat.leaving) return this.hide()
+    if (this._talking && this.cat.act.kind === 'look') this.cat.mouthT = Math.sin(now / 55) > 0 ? 0.42 : 0
     this._events()
     // 睡著、趴著時身體只是一脹一縮：一秒畫 15 次就夠，省電
     const calm = this.cat.act.kind === 'sleep' || this.cat.act.kind === 'loaf'

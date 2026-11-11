@@ -3,6 +3,18 @@ import { test as base, expect } from '@playwright/test'
 import { startServer } from './server.js'
 
 export const test = base.extend({
+  // 每天第一次打開時貓咪會出來說今日摘要，蓋住畫面：測別的東西時先當成今天看過了（要測它的把 brief 設成 true）
+  brief: [false, { option: true }],
+  context: async ({ context, brief }, use) => {
+    if (!brief) {
+      await context.addInitScript(() => {
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        if (!localStorage.getItem('hiyori-brief-day')) localStorage.setItem('hiyori-brief-day', JSON.stringify(today))
+      })
+    }
+    await use(context)
+  },
   site: async ({}, use) => {
     const site = await startServer('a')
     await use(site)

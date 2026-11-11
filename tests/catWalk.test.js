@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  COATS, COAT_IDS, coatOfDay, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, sleepiness, depth,
+  COATS, COAT_IDS, coatOfDay, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, sleepiness, depth, callCat,
   bodyPath, legPath, tailPoints, smoothPath, stripesPath, POSES,
 } from '../src/catWalk.js'
 
@@ -20,6 +20,48 @@ const fresh = (seed = 7, ctx = focus(0)) => {
   return cat
 }
 const noNaN = (s) => !/NaN|Infinity|undefined/.test(s)
+
+describe('叫貓咪過來（今日摘要）', () => {
+  const paused = { mode: 'focus', paused: true, focusMs: 0 }
+  it('從比較近的那一邊小跑步進來，到了坐下看著你，之後一直坐著', () => {
+    for (const [x, from] of [[120, -1], [780, 1]]) {
+      const cat = fresh(3, paused)
+      callCat(cat, x, BOUNDS.bottom, paused)
+      expect(cat.away).toBe(false)
+      expect(Math.sign(cat.x - BOUNDS.w / 2)).toBe(from)
+      expect(cat.act.kind).toBe('enter')
+      expect(cat.gait).toBe('trot')
+      // 兩秒內到（路遠就跑快一點）
+      run(cat, 2, paused)
+      expect([Math.round(cat.x), cat.y, cat.act.kind, cat.pose]).toEqual([x, BOUNDS.bottom, 'look', 'sit'])
+      run(cat, 60, paused)
+      expect([Math.round(cat.x), cat.act.kind]).toEqual([x, 'look'])
+      // 臉朝著你、眼睛張開
+      expect(cat.faceT).toBe(0)
+      expect(noNaN(JSON.stringify(poseOf(cat)))).toBe(true)
+    }
+  })
+
+  it('叫到地板外面的位置會收進來；請牠離開就小跑步走出去', () => {
+    const cat = fresh(5, paused)
+    callCat(cat, -500, 0, paused)
+    run(cat, 3, paused)
+    expect(cat.x).toBeGreaterThanOrEqual(52)
+    expect(cat.y).toBe(BOUNDS.top)
+    leaveCat(cat)
+    run(cat, 4, paused)
+    expect(cat.away).toBe(true)
+  })
+
+  it('減少動態效果：不走進來，直接坐在那裡看著你', () => {
+    const cat = createCat({ seed: 1, coat: 'mike', bounds: BOUNDS, still: true })
+    placeCat(cat, paused)
+    callCat(cat, 150, BOUNDS.bottom, paused)
+    expect([cat.x, cat.y, cat.away, cat.act.kind, cat.pose]).toEqual([150, BOUNDS.bottom, false, 'look', 'sit'])
+    run(cat, 5, paused)
+    expect([cat.x, cat.act.kind]).toEqual([150, 'look'])
+  })
+})
 
 describe('專注頁的貓咪：要做什麼', () => {
   it('同一個種子走出同一條路', () => {

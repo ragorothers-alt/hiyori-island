@@ -1,0 +1,52 @@
+/* 打開 App 時的今日摘要（src/ui/brief.js）：畫面下方一張對話卡，貓咪坐在卡片左下角說話 */
+.brief { position: fixed; inset: 0; z-index: 58; display: grid; align-items: end; justify-items: center; padding: calc(16px + env(safe-area-inset-top)) 16px calc(128px + env(safe-area-inset-bottom)); background: rgba(226, 238, 249, .5); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); animation: fadeIn .35s both; }
+body.night .brief { background: rgba(20, 22, 40, .5); }
+.brief.out { opacity: 0; transition: opacity .18s; pointer-events: none; }
+/* 貓走動的那一層：蓋滿畫面但不擋操作（只有貓身上點得到），卡片關掉後牠還要走出去 */
+.brief-cat { position: fixed; left: 0; right: 0; top: 0; bottom: env(safe-area-inset-bottom, 0px); z-index: 59; overflow: hidden; pointer-events: none; }
+
+.bf-card { position: relative; box-sizing: border-box; width: min(430px, 100%); max-height: calc((100dvh - 176px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) / var(--ui-zoom, 1)); display: flex; flex-direction: column; padding: 16px 18px 14px; border-radius: 22px; color: var(--ink); background: var(--card-bg, #fff); box-shadow: 0 14px 40px rgba(70, 95, 140, .24); zoom: var(--ui-zoom, 1); opacity: 0; transform: translateY(10px) scale(.96); transform-origin: 12% 100%; }
+body.night .bf-card { background: var(--card-bg, #27243c); box-shadow: 0 14px 40px rgba(0, 0, 0, .45); }
+.bf-card:focus { outline: none; }
+/* 貓坐好了才冒出來（對話框從牠頭上彈出來） */
+.bf-card.in { opacity: 1; transform: none; transition: opacity .22s, transform .38s var(--ease); }
+/* 對話框的小尾巴：指著左下角的貓 */
+.bf-tail { position: absolute; left: 42px; bottom: -9px; width: 20px; height: 20px; border-radius: 4px; background: inherit; transform: rotate(45deg); }
+
+.bf-head { display: flex; align-items: baseline; gap: 10px; padding-right: 30px; }
+.bf-hello { font: 700 17px/1.3 var(--font-display); letter-spacing: .04em; }
+.bf-head time { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+.bf-x { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; font-size: 18px; line-height: 1; color: var(--ink-faint); }
+.bf-lead { margin: 6px 0 2px; min-height: 1.5em; font-size: 15px; line-height: 1.5; }
+.bf-typed::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; opacity: .5; animation: bfCaret .8s steps(1) infinite; }
+.bf-card:has(.bf-body:not([hidden])) .bf-typed::after { display: none; }
+@keyframes bfCaret { 50% { opacity: 0; } }
+
+.bf-body { flex: 1; min-height: 0; overflow-y: auto; margin: 4px -6px 0; padding: 0 6px; overscroll-behavior: contain; }
+.bf-body h4 { margin: 10px 2px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .14em; color: var(--ink-faint); animation: bfIn .3s both; }
+.bf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+/* 一項一項出現 */
+.bf-list li, .bf-bye { animation: bfIn .34s var(--ease) both; animation-delay: calc(var(--i, 0) * 70ms + 60ms); }
+@keyframes bfIn { from { opacity: 0; transform: translateY(6px); } }
+.bf-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 12px; text-align: left; color: inherit; cursor: pointer; transition: background .15s; }
+.bf-list button:hover { background: var(--glass-hover, rgba(140, 170, 200, .14)); }
+.bf-list button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.bf-ic { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; font: 600 13px var(--font-display); font-style: normal; color: var(--ink-soft); background: rgba(140, 170, 200, .16); }
+.bf-list span { min-width: 0; display: grid; }
+.bf-list b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-list small { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-none { margin: 2px 2px 0; font-size: 13.5px; color: var(--ink-soft); animation: bfIn .3s both; }
+.bf-bye { margin: 10px 2px 2px; font-size: 13px; color: var(--ink-soft); }
+
+.bf-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 12px; }
+/* 設定裡的那一列：「現在看」和開關 */
+.bf-set { display: flex; gap: 6px; flex: none; }
+.bf-foot .btn-ghost { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-foot .btn-primary { min-width: 96px; }
+
+/* 手機橫放、視窗很矮：卡片下面留不出貓的位置，就不留那麼多 */
+@media (max-height: 460px) {
+  .brief { padding-bottom: calc(16px + env(safe-area-inset-bottom)); align-items: center; }
+  .bf-card { max-height: calc((100dvh - 32px) / var(--ui-zoom, 1)); }
+  .bf-tail { display: none; }
+}

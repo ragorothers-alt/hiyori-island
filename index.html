@@ -275,6 +275,7 @@
           <div class="set-row theme-row"><div><b>字體大小</b><small>面板、對話框和提示卡的字</small></div>
             <div class="seg" id="fontPick" role="group" aria-label="字體大小"><button type="button" data-v="0.9">小</button><button type="button" data-v="1">標準</button><button type="button" data-v="1.12">大</button><button type="button" data-v="1.25">特大</button></div></div>
           <div class="set-row"><div><b>卡關提醒</b><small>任務一直往後挪、或逾期好幾天時，ふじ陪你拆小一點</small></div><button class="chip-toggle" id="stuckBtn"></button></div>
+          <div class="set-row"><div><b>開啟時的今日摘要</b><small>每天第一次打開，貓咪走進來告訴你今天有什麼、該留意什麼</small></div><div class="bf-set"><button class="chip-toggle" id="briefNow">現在看</button><button class="chip-toggle" id="briefBtn"></button></div></div>
           <div class="set-row"><div><b>這一版的新功能<i class="news-dot" id="newsDot" hidden></i></b><small id="newsInfo"></small></div><button class="chip-toggle" id="newsBtn">看看</button></div>
           <div class="set-row"><div><b>意見回饋</b><small>想要的功能、遇到的問題，到 GitHub 上告訴我們（需要 GitHub 帳號）</small></div><button class="chip-toggle" id="feedbackBtn">寫回饋</button></div>
           <div class="set-row sync-row" id="cloudRow"></div>
@@ -419,7 +420,10 @@
   <!-- App 模式的對話框一出現一消失，報讀軟體跟不上：同一句話放進一直都在的報讀區 -->
   <div class="sr-only" id="chatLive" role="status" aria-live="polite"></div>
 
-  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <!-- 打開 App 時的今日摘要（src/ui/brief.js）：貓咪走進來坐下，用對話卡說今天有什麼。貓走動的那一層分開放：卡片關掉後牠還要走出去 -->
+<div class="brief" id="brief" role="dialog" aria-modal="true" aria-label="今天的摘要" hidden><div class="bf-card"></div></div>
+<div class="brief-cat" id="briefCat" aria-hidden="true" hidden></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
   <div class="modal" id="levelModal" role="dialog" aria-modal="true" aria-label="升級了" hidden>
     <div class="modal-card glass">

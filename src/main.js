@@ -96,7 +96,17 @@ async function boot() {
   applySeason()
   store.on('dateChanged', applySeason)
   // App 開著跨到新的一週：等一下再給回顧卡
-  store.on('dateChanged', () => setTimeout(() => ui.maybeShowWeekCard(), 3000))
+  // 開著過了一天：貓咪說新的一天的摘要，一週回顧等摘要關掉再出來
+  store.on('dateChanged', () =>
+    setTimeout(() => {
+      ui.maybeShowBrief()
+      ui.afterBrief(() => ui.maybeShowWeekCard())
+    }, 3000),
+  )
+  // 在背景打開的、鎖著過了一天的：回到 App 時才說
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) setTimeout(() => ui.maybeShowBrief(), 400)
+  })
 
   // ── 計時器到點的通知 ──
   // 頁面睡著時（手機鎖著、切到別的 App）靠伺服器到點推一則（push.js）；頁面醒著但沒在看時自己發。
@@ -854,10 +864,12 @@ async function boot() {
         const night = scene ? scene.night() : lookNight()
         const skyDiffers = night > 0.5 !== nightAt(((h % 24) + 24) % 24) > 0.5
         const avoid = skyDiffers ? SKY_WORDS : null
-        if (!(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
+        // 今天第一次打開：貓咪走進來說今日摘要（牠在說的時候兩人先不搶話）
+        if (!(ui.maybeShowBrief() || ui.brief.open) && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
         scene?.greet()
       }, 900)
-      setTimeout(() => {
+      // 摘要還開著就等它關掉：回顧和提醒不要疊在上面
+      setTimeout(() => ui.afterBrief(() => {
         if (ui.maybeShowWeekCard()) return
         if (ui.maybeAskReview()) return
         const overdue = store.overdue().length
@@ -868,7 +880,7 @@ async function boot() {
         else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) talk('planAsk', {}, 4200, '今天最重要的三件事是什麼？點 ☆ 選起來吧。')
         else if (!store.tasksOn(store.today).length) talk('emptyDay', {}, 3800)
         else talk(`season.${season}`, {}, 3800)
-      }, 5600)
+      }), 5600)
     }),
   )
   // 開場忙完再把月曆、教練、專案詳情載好；載過的檔案（含之後才載的）都請 Service Worker 收進離線快取

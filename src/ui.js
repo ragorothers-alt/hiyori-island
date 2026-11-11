@@ -1,4 +1,7 @@
 import { FocusTimer } from './ui/focus.js'
+import { BriefView } from './ui/brief.js'
+import { coatOfDay } from './catWalk.js'
+import { fmtMoney } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
@@ -28,7 +31,7 @@ import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
 import { TodayView } from './ui/today.js'
 import { readBackup, readBackups, restoreBackup } from './sync.js'
-import { doneOn } from './habits.js'
+import { doneOn, todayProgress } from './habits.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 不常用的畫面（月曆、教練、專案詳情）：開場不載，第一次用到才下載。開完閒下來時也會先在背景載好（preloadViews），
@@ -60,6 +63,8 @@ const THEME_INFO = {
 // 「這一版的新功能」看過到哪一版（這台裝置自己記）；卡關提醒：不再提醒的任務、今天ふじ說過了沒
 const NEWS_KEY = 'hiyori-news'
 const STUCK_OFF_KEY = 'hiyori-stuck-off'
+// 今日摘要：這台裝置哪一天看過了（一天只自己出來一次）
+const BRIEF_KEY = 'hiyori-brief-day'
 const STUCK_SAID_KEY = 'hiyori-stuck-said'
 // 好久沒碰的長期任務：按了「過一週再提醒」的 { 任務 id: 到哪一天 }、ふじ今天說過了沒
 const IDLE_OFF_KEY = 'hiyori-idle-off'
@@ -135,6 +140,25 @@ export class UI {
     this._bindRecords()
     this._bindChrome()
     this.focus = new FocusTimer(this, hooks)
+    // 打開時的今日摘要（貓咪）
+    this._afterBrief = []
+    this.brief = new BriefView($('#brief'), $('#briefCat'), {
+      data: () => this._briefData(),
+      coat: () => coatOfDay(store.today),
+      go: (to) => {
+        if (to[0] !== 'tab') return this.openProject(to[1], undefined, to[2] || null)
+        // 說的是今天（或那個日子）的事：先把日期選過去，不然會停在之前在看的那一天
+        if (to[1] !== 'records') store.selectDate(to[2] || store.today)
+        this.setTab(to[1])
+      },
+      focus: (id) => id && this.focus.ask(id),
+      onPoke: () => hooks.catPoke?.(),
+      // 排在摘要後面的事（一週回顧、開場的話）：只是關掉就接著做；點了某一項、按了專注就不插進來擋他
+      onClose: (acted) => {
+        const queue = this._afterBrief.splice(0)
+        if (!acted) queue.forEach((fn) => fn())
+      },
+    })
     // 時段安排、習慣、生活記錄、日曆：各自是一個模組，透過 viewHooks 和外面溝通
     const viewHooks = {
       toast: (o) => this.toast(o),
@@ -358,10 +382,53 @@ export class UI {
     })
   }
 
-  // ── 蓋在面板上的幾層：對話框（DOM 裡越後面越上層）→ 番茄鐘的小視窗 → App 模式的全螢幕計時 → 商店 → 日曆 ──
+  // ── 打開時的今日摘要：貓咪走進來說今天有什麼、該留意什麼（ui/brief.js，內容在 brief.js 整理）──
+  _briefData() {
+    const s = this.store
+    const today = s.today
+    const on = s.state.settings.stuckNudge
+    const stuck = on ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
+    const idle = this.idleTasks()[0]
+    return {
+      now: new Date(),
+      today,
+      tasks: s.tasksOn(today),
+      overdue: s.overdue().length,
+      events: s.eventsOn(today),
+      allDay: s.allDayOn(today),
+      habits: todayProgress(s.state.habits, today),
+      dates: s.upcomingDates(6, 3),
+      subs: s.subReminders().map((r) => ({ name: r.sub.name, days: r.days, trial: r.trial, price: fmtMoney(r.sub.price, r.sub.cur) })),
+      stuck: stuck ? { title: stuck.task.title, moved: stuck.moved, late: stuck.late } : null,
+      idle: idle ? { id: idle.task.id, title: idle.task.title, idle: idle.idle, pid: idle.project.id, projectName: idle.project.name } : null,
+      streak: s.streak,
+    }
+  }
+  // 每天第一次打開（或開著過了一天）：貓咪自己出來說。回傳有沒有出來。
+  // 正在專注、有別的視窗開著、正在打字、分頁在背景時不出來（也不算看過），之後再回來時才說
+  maybeShowBrief() {
+    const s = this.store
+    if (s.state.settings.brief === false || this.brief.open || document.hidden) return false
+    // 開著過了午夜：先換到新的一天，說的才是新的一天（日期和內容是同一天）
+    s.tick()
+    if (readLocal(BRIEF_KEY, '') === s.today) return false
+    if (this.focus.mode !== 'idle' || this._topLayer()) return false
+    // 打到一半的字、用同步連結加入的流程：不打斷
+    if (document.activeElement?.closest?.('input, textarea, select, [contenteditable]') || /[#&]sync=/.test(location.hash)) return false
+    writeLocal(BRIEF_KEY, s.today)
+    return this.brief.show()
+  }
+  // 摘要關掉之後才做（沒開著就現在做）：一週回顧、晚間回顧這些不要疊在摘要上面
+  afterBrief(fn) {
+    if (this.brief.open) this._afterBrief.push(fn)
+    else fn()
+  }
+
+  // ── 蓋在面板上的幾層：對話框（DOM 裡越後面越上層）→ 今日摘要 → 番茄鐘的小視窗 → App 模式的全螢幕計時 → 商店 → 日曆 ──
   _topLayer() {
     const modal = $$('.modal').filter((m) => !m.hidden).pop()
     if (modal) return modal
+    if (this.brief?.open) return $('#brief')
     // 擺放裝飾時：方向鍵是挪裝飾，不是換日期；Tab 在擺放列的按鈕裡轉
     return [$('#placeBar'), $('#focusSet'), $('#focusPick'), $('#focusFull'), $('#shop')].find((el) => !el.hidden) || (this._calendar.view?.isOpen ? $('#calendar') : null)
   }
@@ -374,6 +441,7 @@ export class UI {
         reviewModal: () => $('#reviewLater').click(),
         newsModal: () => this.closeNews(),
         weekModal: () => this.closeWeekCard(),
+        brief: () => this.brief.close(),
         levelModal: () => this.closeModal(),
         focusSet: () => this.focus.toggleSet(false),
         focusPick: () => this.focus.togglePicker(false),
@@ -1782,6 +1850,9 @@ export class UI {
     const stuck = this.store.state.settings.stuckNudge
     setOn($('#stuckBtn'), stuck)
     $('#stuckBtn').textContent = stuck ? '開' : '關'
+    const brief = this.store.state.settings.brief !== false
+    setOn($('#briefBtn'), brief)
+    $('#briefBtn').textContent = brief ? '開' : '關'
     $('#newsInfo').textContent = `${CHANGELOG[0].date.slice(5).replace('-', '/')}・${CHANGELOG[0].title}`
     this.renderNewsDot()
     // 第一次打開時放的範例還在才顯示
@@ -2172,6 +2243,8 @@ export class UI {
       later = localStorage.getItem('hiyori-review-later')
     } catch {}
     if (later === s.today || !$('#reviewModal').hidden || !$('#levelModal').hidden) return false
+    // 今日摘要先說（還開著、或今天還沒說過）：回顧等它關掉，下一分鐘再問
+    if (this.brief.open || this.maybeShowBrief()) return false
     this.openReview()
     return true
   }
@@ -2226,6 +2299,14 @@ export class UI {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()
       this.renderTasks()
+    }
+    $('#briefBtn').onclick = () => {
+      this.store.setSetting('brief', this.store.state.settings.brief === false)
+      this.renderSettings()
+    }
+    $('#briefNow').onclick = () => {
+      this.store.tick()
+      this.brief.show()
     }
     $('#newsBtn').onclick = () => this.openNews()
     $('#newsClose').onclick = () => this.closeNews()

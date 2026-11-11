@@ -500,7 +500,8 @@ export function stepCat(cat, dt, ctx = {}) {
     a = cat.act
   } else if (['walk', 'trot', 'enter', 'exit'].includes(a.kind)) {
     if (a.t >= (a.wait || 0)) {
-      const speed = SPEED[cat.gait] * cat.k * depth(cat)
+      // rush：被叫過來時跑快一點（路遠也不會讓人等）
+      const speed = SPEED[cat.gait] * cat.k * depth(cat) * (a.rush || 1)
       if (moveToward(cat, dt, speed)) {
         a.done = true
         if (a.kind === 'exit') {
@@ -689,6 +690,40 @@ export function comeBack(cat) {
   // 還沒走出去：不走了（正在轉身準備離開的，排在後面的離開也取消）
   cat.queue = cat.queue.filter(([kind]) => kind !== 'exit')
   if (cat.act.kind === 'exit') begin(cat, 'stand')
+}
+
+// 叫牠過來（打開 App 時的今日摘要）：從比較近的那一邊小跑步進來，到 (x, y) 停下。
+// 到了之後做什麼照 ctx：暫停中就坐下看著你。不動的貓直接坐在那裡
+export function callCat(cat, x, y, ctx = {}) {
+  const b = cat.bounds
+  if (!b) return
+  const m = margin(cat)
+  x = clamp(x, m, Math.max(m, b.w - m))
+  y = clamp(y, b.top, b.bottom)
+  const left = x < b.w / 2
+  cat.mode = modeOf(ctx)
+  cat.leaving = false
+  cat.queue = []
+  cat.air = 0
+  cat.hover = false
+  if (cat.still) {
+    settle(cat)
+    cat.x = cat.tx = x
+    cat.y = cat.ty = y
+    cat.dir = left ? 1 : -1
+    return
+  }
+  cat.away = false
+  cat.dir = left ? 1 : -1
+  cat.x = left ? -60 * cat.k : b.w + 60 * cat.k
+  cat.y = y
+  cat.tx = x
+  cat.ty = y
+  cat.base = clonePose(POSES.stand)
+  cat.blend = { from: clonePose(POSES.stand), to: POSES.stand, t: 1, dur: 0 }
+  cat.pose = 'stand'
+  // 大約一秒半內跑到：路遠就跑快一點（最多三倍多，再遠就讓牠慢慢來）
+  begin(cat, 'enter', { fast: true, rush: clamp(Math.abs(x - cat.x) / (1.5 * SPEED.trot * cat.k), 1, 3.4) })
 }
 
 // ── 這一格畫成什麼樣子 ──
