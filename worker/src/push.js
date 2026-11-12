@@ -78,10 +78,30 @@ export async function vapidAuth(keys, aud, sub, now) {
 
 const reply = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } })
 
+// 紀錄（npx wrangler@4 tail 看得到）：哪台裝置（物件 id 的前 8 碼）、推播服務的網域、時間差、推播服務回什麼。
+// 不記網址後面那段：那是這台裝置的推播鑰匙
+const log = (o) => console.log(JSON.stringify({ push: o.ev, ...o }))
+const hostOf = (endpoint) => {
+  try {
+    return new URL(endpoint).host
+  } catch {
+    return '?'
+  }
+}
+
 export class PushHub {
   constructor(state, env) {
     this.state = state
     this.env = env
+  }
+
+  // 紀錄上認裝置用：這個物件 id 的前 8 碼（物件的名字是推播網址的 SHA-256，看不出網址）
+  _dev() {
+    try {
+      return String(this.state.id?.toString?.() ?? '?').slice(0, 8)
+    } catch {
+      return '?'
+    }
   }
 
   // 金鑰只產生一次：同一個物件裡同時來好幾個請求也共用同一次
@@ -108,14 +128,20 @@ export class PushHub {
     if (pathname === '/key') return reply({ key: (await this._keys()).pub })
     if (pathname === '/sign') return reply({ auth: await vapidAuth(await this._keys(), body.aud, body.sub, Date.now()) })
     if (pathname === '/set') {
+      const old = await storage.get('timer')
+      const now = Date.now()
+      // 換掉的那一則還有多久到點（負的是已經過了還沒送出）
+      const was = old ? old.at - now : null
       // 一台裝置同時只有一個計時器：新的蓋掉舊的，沒帶時間就是取消（整個清空，不留空的物件）
       if (body.endpoint && body.at) {
         // id：這一次排的。到點送出時用它認「還是不是我這一則」，送到一半被換成新的就不會把新的清掉
         await storage.put('timer', { endpoint: body.endpoint, contact: body.contact, at: body.at, id: crypto.randomUUID() })
         await storage.setAlarm(body.at)
+        log({ ev: 'set', dev: this._dev(), host: hostOf(body.endpoint), in: body.at - now, was })
       } else {
         await storage.deleteAlarm()
         await storage.deleteAll()
+        log({ ev: 'cancel', dev: this._dev(), was })
       }
       return reply({ ok: true })
     }
@@ -134,7 +160,12 @@ export class PushHub {
       const cur = await storage.get('timer')
       if (cur?.id === t.id) await storage.deleteAll()
     }
-    if (Date.now() - t.at > TTL * 1000) return finish()
+    const dev = this._dev()
+    const host = hostOf(t.endpoint)
+    if (Date.now() - t.at > TTL * 1000) {
+      log({ ev: 'expired', dev, host, late: Date.now() - t.at })
+      return finish()
+    }
     const { auth } = await call(hub(this.env, 'vapid'), '/sign', { aud: new URL(t.endpoint).origin, sub: t.contact })
     let sent = false
     for (let i = 0; i < 2 && !sent; i++) {
@@ -143,7 +174,11 @@ export class PushHub {
         const res = await fetch(t.endpoint, { method: 'POST', redirect: 'manual', headers: { TTL: String(TTL), Urgency: 'high', Authorization: auth } })
         // 4xx：訂閱失效了（解除安裝、關掉通知）或這邊送錯了，再試也一樣
         sent = res.status < 500
-      } catch {}
+        const why = res.ok ? undefined : (await res.text().catch(() => '')).slice(0, 160)
+        log({ ev: 'send', dev, host, late: Date.now() - t.at, status: res.status, why })
+      } catch (e) {
+        log({ ev: 'send-error', dev, host, late: Date.now() - t.at, err: String(e).slice(0, 120) })
+      }
     }
     if (!sent) throw new Error('push service unavailable')
     await finish()

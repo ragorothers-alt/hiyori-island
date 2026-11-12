@@ -11,6 +11,21 @@ export const PLAN_CACHE = 'hiyoripush'
 export const PLAN_FILE = '__timer-plan'
 // Service Worker 最近一次照推播顯示的是哪一則 { at }：頁面看了就知道不用自己再發一次
 export const SHOWN_FILE = '__timer-shown'
+// 最近幾則推播送到這台的時間 [{ got, at, closed }]（Service Worker 寫，設定裡顯示上一則）
+export const LOG_FILE = '__push-log'
+
+// Service Worker 收到推播時問「正看著 App 嗎」（正看著的話，通知幾秒後自己收掉，畫面上已經有提示）。
+// 頁面醒著才回得了話：手機鎖著、頁面被凍住時等不到回答，通知就會留著
+export function answerLooking(sw = globalThis.navigator?.serviceWorker, now = () => document.visibilityState === 'visible' && document.hasFocus()) {
+  if (typeof sw?.addEventListener !== 'function') return
+  sw.addEventListener('message', (e) => {
+    if (e.data?.type !== 'hiyori-looking?') return
+    const to = e.source || sw.controller
+    try {
+      to?.postMessage({ type: 'hiyori-looking', id: e.data.id, looking: !!now() })
+    } catch {}
+  })
+}
 // 到點多久以內的字還留著（推播最晚 10 分鐘後送到）
 const KEEP = 15 * 60000
 // 上次成功排到伺服器的那一則的時間（這台的時鐘）。所有分頁共用：別的分頁排的，這個分頁停掉時也知道要取消。
@@ -150,6 +165,19 @@ export class TimerPush {
       return !!hit && (await hit.json())?.at === at
     } catch {
       return false
+    }
+  }
+
+  // 上一則送到這台的推播 { got, at, closed }（沒有是 null）：設定裡寫「上一則到點通知幾點送到」
+  async last() {
+    try {
+      const reg = await this._reg()
+      const hit = reg && (await (await this.storage.open(PLAN_CACHE)).match(new URL(LOG_FILE, reg.scope).href))
+      const list = hit ? await hit.json() : null
+      const e = Array.isArray(list) ? list.filter((x) => x && Number.isFinite(x.got)).pop() : null
+      return e || null
+    } catch {
+      return null
     }
   }
 

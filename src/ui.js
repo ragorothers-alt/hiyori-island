@@ -1568,6 +1568,7 @@ export class UI {
     // 專注到點的通知：鎖著螢幕也收得到的（推播）才有「試一則」
     const state = this.hooks.push?.state
     test.hidden = !on || !pushSupported() || state === 'unsupported'
+    this._renderPushLast(test.hidden)
     // Android 殼：即時倒數和到點都由手機自己發，不看這個開關（這個開關管日程、就寢這些提醒）
     hint.hidden = !on && !native
     hint.textContent = native
@@ -1577,6 +1578,19 @@ export class UI {
         : state === 'error'
           ? '專注到點、休息結束也會通知。現在連不上通知伺服器：頁面開著時照常通知，鎖著螢幕時可能收不到'
           : '專注到點、休息結束也會通知，鎖著螢幕、切到別的 App 也收得到（鎖著時專注到點，休息要等你回到 App 才開始算）'
+  }
+
+  // 「上一則到點通知幾點送到這台」：到點沒看到通知時，看這一行就知道是沒送到，還是送到了被收掉
+  async _renderPushLast(off) {
+    const el = $('#notifyLast')
+    const e = off ? null : await this.hooks.push?.last()
+    el.hidden = !e
+    if (!e) return
+    const d = new Date(e.got)
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const day = dateStr(d) === this.store.today ? '今天' : `${d.getMonth() + 1}/${d.getDate()}`
+    const late = Number.isFinite(e.at) && e.got - e.at >= 60000 ? `，比到點晚了 ${Math.round((e.got - e.at) / 60000)} 分鐘` : ''
+    el.textContent = `上一則到點通知：${day} ${hm} 送到這台${late}${e.closed ? '（那時正看著 App，幾秒後自己收掉了）' : ''}`
   }
 
   renderSchedule(force = true) {

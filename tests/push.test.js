@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import worker, { PushHub } from '../worker/src/index.js'
 import { MAX_AFTER, checkEndpoint } from '../worker/src/push.js'
-import { PLAN_CACHE, PLAN_FILE, SHOWN_FILE, TimerPush, timerNotice, timerTag } from '../src/push.js'
+import { LOG_FILE, PLAN_CACHE, PLAN_FILE, SHOWN_FILE, TimerPush, answerLooking, timerNotice, timerTag } from '../src/push.js'
 import { FREE_MAX, focusStart, breakStart, nextEnd, pauseToggle } from '../src/focusClock.js'
 import { createD1 } from './helpers/d1.js'
 
@@ -406,6 +406,34 @@ describe('前端什麼時候排、什麼時候取消', () => {
     files.set(`${PLAN_CACHE}|${SCOPE}${SHOWN_FILE}`, { at: NOW })
     expect(await p.shown(NOW)).toBe(true)
     expect(await p.shown(NOW + 1)).toBe(false)
+  })
+
+  it('上一則推播送到這台的時間：讀 Service Worker 的紀錄，沒有或壞掉是 null', async () => {
+    const p = make()
+    expect(await p.last()).toBeNull()
+    files.set(`${PLAN_CACHE}|${SCOPE}${LOG_FILE}`, [{ got: NOW - MIN, at: NOW - MIN - 900, closed: false }, { got: NOW, at: null, closed: true }, { got: 'x' }])
+    expect(await p.last()).toEqual({ got: NOW, at: null, closed: true })
+    files.set(`${PLAN_CACHE}|${SCOPE}${LOG_FILE}`, 'oops')
+    expect(await p.last()).toBeNull()
+  })
+
+  it('Service Worker 問「正看著 App 嗎」：醒著的頁面照現在的樣子回答，別的訊息不理', () => {
+    const sent = []
+    let handler = null
+    const sw = { addEventListener: (type, fn) => type === 'message' && (handler = fn), controller: { postMessage: (m) => sent.push(['controller', m]) } }
+    let looking = true
+    answerLooking(sw, () => looking)
+    handler({ data: { type: 'keep' } })
+    handler({ data: null })
+    handler({ data: { type: 'hiyori-looking?', id: 'a' } })
+    looking = false
+    handler({ data: { type: 'hiyori-looking?', id: 'b' }, source: { postMessage: (m) => sent.push(['source', m]) } })
+    expect(sent).toEqual([
+      ['controller', { type: 'hiyori-looking', id: 'a', looking: true }],
+      ['source', { type: 'hiyori-looking', id: 'b', looking: false }],
+    ])
+    // 沒有 Service Worker 的瀏覽器：什麼都不做
+    expect(() => answerLooking(undefined)).not.toThrow()
   })
 
   it('兩個分頁都開著：一個排的，另一個停掉時也會取消', async () => {

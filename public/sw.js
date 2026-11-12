@@ -10,6 +10,10 @@ const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com']
 const PLAN_CACHE = 'hiyoripush'
 const PLAN_FILE = '__timer-plan'
 const SHOWN_FILE = '__timer-shown'
+// 最近幾則推播是什麼時候送到這台的 [{ got, at, closed }]：設定裡的「上一則到點通知」讀這個
+const LOG_FILE = '__push-log'
+// 推播送到時問頁面「正看著 App 嗎」，等它回答：問題的 id → 收到回答時叫的函式
+const asking = new Map()
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -120,6 +124,8 @@ self.addEventListener('fetch', (event) => {
 // 第一次要看時才下載的，那時 Service Worker 可能還沒接手（第一次打開 App），下載的檔案不會經過上面的 fetch，要頁面來說。
 // App 模式從沒切回小島的裝置不會送來這些檔案，也就不用下載
 self.addEventListener('message', (event) => {
+  // 頁面回答「正看著 App 嗎」（src/push.js 的 answerLooking）
+  if (event.data?.type === 'hiyori-looking') return asking.get(event.data.id)?.(!!event.data.looking)
   if (event.data?.type !== 'keep' || !Array.isArray(event.data.urls)) return
   event.waitUntil(
     (async () => {
@@ -140,6 +146,45 @@ self.addEventListener('message', (event) => {
 // 還沒到點的是下一段的（頁面醒著時，推播還沒到就已經排好下一則了）。找不到（取消沒送到伺服器）就顯示一般的字。
 // 每一則推播都一定要顯示通知：不顯示的話瀏覽器會自己補一則「網站在背景更新」，iPhone 還會取消這台的訂閱。
 // 所以顯示以外的事（讀快取、收掉舊通知、記下顯示過了）各自包起來，哪一步出錯都不擋顯示
+
+// 有沒有頁面醒著、正看著 App：直接問頁面，它自己回答（src/push.js 的 answerLooking）。
+// 不看 clients 回報的 visibilityState／focused：手機鎖著時頁面被凍住，有的 Android 瀏覽器還留著鎖螢幕前「正在看」的樣子，
+// 照它收掉的話，通知在螢幕暗著時就不見了。凍住的頁面回不了話：等不到回答就當成沒在看
+async function looking(ms = 1500) {
+  const wins = await self.clients.matchAll({ type: 'window' })
+  if (!wins.length) return false
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return new Promise((resolve) => {
+    let left = wins.length
+    const done = (v) => {
+      asking.delete(id)
+      clearTimeout(timer)
+      resolve(v)
+    }
+    const timer = setTimeout(() => done(false), ms)
+    // 有一個說「正看著」就算；全部都說沒在看就不用等到時間到
+    const answer = (v) => (v ? done(true) : --left <= 0 && done(false))
+    asking.set(id, answer)
+    for (const c of wins) {
+      try {
+        c.postMessage({ type: 'hiyori-looking?', id })
+      } catch {
+        answer(false)
+      }
+    }
+  })
+}
+
+// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆
+async function note(cache, url, entry) {
+  try {
+    const old = await (await cache.match(url))?.json()
+    const list = (Array.isArray(old) ? old : []).filter((x) => x && x.got !== entry.got)
+    list.push(entry)
+    await cache.put(url, new Response(JSON.stringify(list.slice(-8)), { headers: { 'Content-Type': 'application/json' } }))
+  } catch {}
+}
+
 self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
@@ -168,12 +213,17 @@ self.addEventListener('push', (event) => {
       try {
         if (plan) await cache.put(new URL(SHOWN_FILE, reg.scope).href, new Response(JSON.stringify({ at: plan.at })))
       } catch {}
+      const entry = { got: now, at: plan ? plan.at : null, closed: false }
+      const logUrl = new URL(LOG_FILE, reg.scope).href
+      if (cache) await note(cache, logUrl, entry)
       // 正看著 App：畫面上已經有提示卡和音效，這一則幾秒後自己收掉（那時已經沒在看就留著；有的瀏覽器不讓剛出來的通知馬上收，那就留著）
       try {
-        const looking = async () => (await self.clients.matchAll({ type: 'window' })).some((c) => c.visibilityState === 'visible' && c.focused)
         if (await looking()) {
           await new Promise((r) => setTimeout(r, 4000))
-          if (await looking()) for (const n of await reg.getNotifications({ tag })) n.close()
+          if (await looking()) {
+            for (const n of await reg.getNotifications({ tag })) n.close()
+            if (cache) await note(cache, logUrl, { ...entry, closed: true })
+          }
         }
       } catch {}
     })(),

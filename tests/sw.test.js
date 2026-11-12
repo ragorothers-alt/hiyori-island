@@ -151,7 +151,9 @@ describe('Service Worker', () => {
 describe('Service Worker：計時器到點的推播', () => {
   const NOW = Date.UTC(2026, 10, 10, 4)
   const MIN = 60000
-  // 假的通知中心：同一個 tag 的新通知換掉舊的。broken：getNotifications 壞掉的瀏覽器
+  // 假的通知中心：同一個 tag 的新通知換掉舊的。broken：getNotifications 壞掉的瀏覽器。
+  // windows：開著的頁面 [{ looking, frozen, visibilityState, focused }]。Service Worker 問「正看著嗎」時，
+  // 醒著的頁面照 looking 回答；frozen（手機鎖著、頁面被凍住）回不了話。visibilityState／focused 是瀏覽器回報的樣子，不該被拿來判斷
   function setup({ plans, windows = () => [], before = [], broken = null } = {}) {
     const caches = new FakeCaches()
     let list = before.map((tag) => ({ tag, title: 'old' }))
@@ -165,10 +167,20 @@ describe('Service Worker：計時器到點的推播', () => {
     }
     if (broken === 'missing') delete registration.getNotifications
     if (broken === 'throws') registration.getNotifications = () => { throw new Error('nope') } // prettier-ignore
-    const on = loadSW({ caches, registration, clients: { matchAll: async () => windows() } })
+    let on = null
+    const page = (w) => ({
+      ...w,
+      postMessage: (msg) => {
+        if (w.frozen || msg?.type !== 'hiyori-looking?') return
+        queueMicrotask(() => on.message({ data: { type: 'hiyori-looking', id: msg.id, looking: !!(typeof w.looking === 'function' ? w.looking() : w.looking) } }))
+      },
+    })
+    on = loadSW({ caches, registration, clients: { matchAll: async () => windows().map(page) } })
     const ready = plans === undefined ? Promise.resolve() : caches.open('hiyoripush').then((c) => c.put(SCOPE + '__timer-plan', new Response(JSON.stringify(plans))))
     const marker = async () => (await (await caches.open('hiyoripush')).match(SCOPE + '__timer-shown'))?.json()
-    return { on, ready, shown: () => list, alerts, marker, caches }
+    // 推播送到這台的紀錄（設定裡的「上一則到點通知」讀這個）。假快取回的是同一個 Response：測試最後才讀
+    const log = async () => (await (await caches.open('hiyoripush')).match(SCOPE + '__push-log'))?.json()
+    return { on, ready, shown: () => list, alerts, marker, log, caches }
   }
   const withClock = async (fn) => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout'] })
@@ -226,7 +238,7 @@ describe('Service Worker：計時器到點的推播', () => {
       expect(s.shown().map((n) => n.tag).sort()).toEqual(['event-1', `hiyori-focus-${focus.at}`])
 
       for (const broken of ['missing', 'throws']) {
-        const b = setup({ plans: [focus], broken, windows: () => [{ visibilityState: 'visible', focused: true }] })
+        const b = setup({ plans: [focus], broken, windows: () => [{ looking: true }] })
         await b.ready
         const done = run(b.on.push, { data: null })
         await vi.advanceTimersByTimeAsync(5000)
@@ -238,7 +250,7 @@ describe('Service Worker：計時器到點的推播', () => {
   it('正看著 App：通知幾秒後自己收掉（畫面上已經有提示）；沒在看、或這幾秒內切走了就留著', () =>
     withClock(async () => {
       let looking = true
-      const s = setup({ plans: [focus], windows: () => [{ visibilityState: looking ? 'visible' : 'hidden', focused: looking }] })
+      const s = setup({ plans: [focus], windows: () => [{ looking: () => looking }] })
       await s.ready
       let done = run(s.on.push, { data: null })
       await vi.advanceTimersByTimeAsync(3000)
@@ -255,9 +267,53 @@ describe('Service Worker：計時器到點的推播', () => {
       await done
       expect(s.shown()).toHaveLength(1)
 
-      const bg = setup({ plans: [focus], windows: () => [{ visibilityState: 'hidden', focused: false }] })
+      // 好幾個分頁：有一個正看著就算
+      const two = setup({ plans: [focus], windows: () => [{ looking: false }, { looking: true }] })
+      await two.ready
+      done = run(two.on.push, { data: null })
+      await vi.advanceTimersByTimeAsync(5000)
+      await done
+      expect(two.shown()).toEqual([])
+
+      const bg = setup({ plans: [focus], windows: () => [{ looking: false }] })
       await bg.ready
       await run(bg.on.push, { data: null })
       expect(bg.shown()).toHaveLength(1)
+    }))
+
+  it('手機鎖著、頁面被凍住：瀏覽器還回報鎖螢幕前「正看著」也不收掉（頁面回不了話就當沒在看）', () =>
+    withClock(async () => {
+      // Samsung Internet 這類：頁面凍住了，clients 回報的還是鎖螢幕前的樣子
+      const s = setup({ plans: [focus], windows: () => [{ visibilityState: 'visible', focused: true, frozen: true }] })
+      await s.ready
+      const done = run(s.on.push, { data: null })
+      await vi.advanceTimersByTimeAsync(10000)
+      await done
+      expect(s.shown()).toEqual([expect.objectContaining({ title: focus.title, tag: `hiyori-focus-${focus.at}` })])
+      expect(await s.log()).toEqual([{ got: NOW, at: focus.at, closed: false }])
+    }))
+
+  it('每一則推播送到的時間都記下來（最近 8 筆）；正看著而收掉的也記著是收掉的', () =>
+    withClock(async () => {
+      const s = setup({ plans: [focus] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      // 對不上字的那一則（at 是 null）也記
+      for (let i = 1; i <= 9; i++) {
+        vi.setSystemTime(NOW + i * MIN)
+        await run(s.on.push, { data: null })
+      }
+      const log = await s.log()
+      expect(log).toHaveLength(8)
+      expect(log.at(-1)).toEqual({ got: NOW + 9 * MIN, at: null, closed: false })
+      expect(log.map((x) => x.got)).toEqual(Array.from({ length: 8 }, (_, i) => NOW + (i + 2) * MIN))
+
+      vi.setSystemTime(NOW)
+      const one = setup({ plans: [focus], windows: () => [{ looking: true }] })
+      await one.ready
+      const d1 = run(one.on.push, { data: null })
+      await vi.advanceTimersByTimeAsync(5000)
+      await d1
+      expect(await one.log()).toEqual([{ got: NOW, at: focus.at, closed: true }])
     }))
 })

@@ -5,7 +5,7 @@ import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
-import { TimerPush, timerNotice, timerTag } from './push.js'
+import { TimerPush, timerNotice, timerTag, answerLooking } from './push.js'
 import { native, showLiveTimer } from './native.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
@@ -131,8 +131,13 @@ async function boot() {
   }
   // 上次沒排上（開始計時時剛好沒網路）：連上線、回到 App 時再試
   addEventListener('online', () => timerPush.retry())
+  // 推播送到時 Service Worker 會問「正看著 App 嗎」：醒著的頁面回答（凍住的回不了，通知就留著）
+  answerLooking()
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) timerPush.retry()
+    if (document.hidden) return
+    timerPush.retry()
+    // 設定裡「上一則到點通知」：剛剛鎖著時可能送來了一則
+    ui.renderRemind()
   })
 
   // ── UI 掛鉤 ──
