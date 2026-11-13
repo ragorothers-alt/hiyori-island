@@ -412,15 +412,31 @@
     <div class="ff-cat" id="ffCat" aria-hidden="true" hidden></div>
     <button class="icon-btn ff-min" id="ffMin" title="縮小（計時繼續）"><svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></svg></button>
     <button class="icon-btn ff-catbtn" id="ffCatBtn" aria-pressed="true" title="散步的貓咪：點一下請牠先離開" aria-label="散步的貓咪"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="15.6" rx="4.3" ry="3.6"/><circle cx="6.3" cy="10.4" r="1.9"/><circle cx="9.7" cy="6.6" r="1.9"/><circle cx="14.3" cy="6.6" r="1.9"/><circle cx="17.7" cy="10.4" r="1.9"/></svg></button>
+    <!-- 今天已經專注了多久（還沒有紀錄時不顯示） -->
+    <div class="ff-today" id="ffToday" hidden></div>
     <div class="ff-card">
       <div class="ff-kicker" id="ffKicker">專注中</div>
-      <div class="ff-ring"><svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="88"/><circle cx="100" cy="100" r="88" class="fg" id="ffArc"/></svg><div class="ff-time" id="ffTime">25:00</div></div>
+      <div class="ff-ring" id="ffRing">
+        <div class="ff-aura" aria-hidden="true"></div>
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+          <defs><linearGradient id="ffGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="ff-g1"/><stop offset="1" class="ff-g2"/></linearGradient></defs>
+          <circle cx="100" cy="100" r="97" class="tick"/><circle cx="100" cy="100" r="97" class="tick major"/>
+          <circle cx="100" cy="100" r="86" class="track"/><circle cx="100" cy="100" r="86" class="fg" id="ffArc"/>
+        </svg>
+        <!-- 進度走到哪裡的小圓點（跟著圓環轉） -->
+        <div class="ff-knob" id="ffKnob" aria-hidden="true"><i></i></div>
+        <div class="ff-rounds" id="ffRounds" aria-hidden="true" hidden></div>
+        <div class="ff-time" id="ffTime">25:00</div>
+        <div class="ff-sub" id="ffSub"></div>
+      </div>
+      <div class="ff-ctl">
       <div class="ff-task" id="ffTask"></div>
-      <select class="ff-target" id="ffTarget" aria-label="專注的目標"></select>
-      <div class="ff-btns"><button class="btn-ghost" id="ffStop">結束</button><button class="btn-primary" id="ffToggle">暫停</button></div>
+      <label class="ff-target-wrap" id="ffTargetWrap"><i id="ffTargetDot"></i><select class="ff-target" id="ffTarget" aria-label="專注的目標"></select><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></label>
+      <div class="ff-btns"><button class="btn-ghost" id="ffStop">結束</button><button class="btn-primary" id="ffToggle"><span class="ff-ico" id="ffToggleIcon" aria-hidden="true"></span><span id="ffToggleText">暫停</span></button></div>
       <!-- 休息時：還沒做完就延長（從到點那時接著正計時）、最後一輪做完了還想繼續就再加一輪 -->
       <div class="ff-more" hidden><button type="button" class="btn-ghost" id="ffExtend" hidden>還沒做完，延長</button><button type="button" class="btn-ghost" id="ffAddRound" hidden>＋ 再加一輪</button></div>
       <button class="cm-link ff-cabin" id="ffCabin">到小木屋看兩人陪你讀書</button>
+      </div>
     </div>
   </div>
   <!-- App 模式看不到小島：もち和ふじ說的話出現在這裡 -->

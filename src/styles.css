@@ -1123,30 +1123,11 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
 .app-chat p b { margin-right: 6px; font-size: 11.5px; color: var(--ink-faint); font-weight: 500; }
 @media (max-width: 860px) { .app-chat { left: 12px; right: 12px; transform: none; bottom: calc(140px + env(safe-area-inset-bottom)); max-width: none; } body.app-mode .coach-say { bottom: calc(134px + env(safe-area-inset-bottom)); } }
 
-/* App 模式：專注時的全螢幕計時 */
-.focus-full { position: fixed; inset: 0; z-index: 48; display: grid; place-items: center; padding: 20px; background: var(--app-bg); animation: fadeIn .3s var(--ease); }
-.ff-min { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; }
-.ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; }
-.ff-kicker { font-family: var(--font-display); font-size: 15px; letter-spacing: .3em; color: var(--sakura); }
-.focus-full.break .ff-kicker { color: #4aa17c; }
-.ff-ring { position: relative; width: min(68vw, 280px); aspect-ratio: 1; }
-.ff-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
-.ff-ring circle { fill: none; stroke: rgba(140, 170, 200, .18); stroke-width: 7; }
-.ff-ring circle.fg { stroke: var(--sakura); stroke-linecap: round; stroke-dasharray: 552.9; stroke-dashoffset: 552.9; transition: stroke-dashoffset 1s linear, stroke .4s; }
-.focus-full.break .ff-ring circle.fg { stroke: var(--mint); }
-.ff-time { position: absolute; inset: 0; display: grid; place-content: center; font-family: var(--font-num); font-size: clamp(44px, 14vw, 64px); font-weight: 700; letter-spacing: .03em; }
-.ff-task { font-size: 15px; color: var(--ink-soft); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 全螢幕計時的目標：看起來像一行字，點了是下拉選單 */
-.ff-target { max-width: min(320px, 100%); border: 0; border-radius: 12px; padding: 6px 12px; font: inherit; font-size: 15px; color: var(--ink-soft); background: var(--field); text-align: center; text-overflow: ellipsis; cursor: pointer; }
-.ff-target:hover { color: var(--ink); }
-.ff-btns { display: flex; gap: 10px; }
-.ff-btns button { min-width: 112px; padding: 11px 18px; font-size: 14px; margin: 0; }
-/* 休息時的「還沒做完，延長」「再加一輪」 */
-.ff-more { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.ff-more[hidden], .fs-more[hidden] { display: none; }
-.ff-more button, .fs-more button { padding: 9px 14px; font-size: 13px; color: var(--ink); }
+/* App 模式專注時的全螢幕計時（專注頁）在 ui/focus.css；這裡是點時間打開的小視窗裡，休息時的「還沒做完，延長」「再加一輪」 */
 .fs-more { display: grid; gap: 6px; margin: 0 0 10px; }
-.ff-cabin { font-size: 12.5px; }
+.fs-more[hidden] { display: none; }
+.fs-more button { padding: 9px 14px; font-size: 13px; color: var(--ink); }
+.fs-more button small { margin-left: 6px; font-size: 11.5px; color: var(--ink-faint); }
 /* 提示卡上有好幾顆按鈕（專注到點：延長、再加一輪、寫紀錄）：按鈕排到下面一列 */
 .toast.acts { flex-wrap: wrap; max-width: min(360px, calc(100vw - 24px)); }
 .toast-acts { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }

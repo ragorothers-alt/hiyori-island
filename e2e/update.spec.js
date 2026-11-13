@@ -28,11 +28,19 @@ test('部署了新版：舊頁面要載入新畫面時，自動重新整理換�
   test.setTimeout(150000)
   await openOld(page, context, site)
   await deployNew(page, site)
+  // 「有新版本了」的提示卡出來 1.2 秒就重新整理：電腦一忙，測試可能還沒看到頁面就換掉了。
+  // 所以請頁面自己記下「提示卡出現過」（記在 sessionStorage，重新整理後還在），之後再查
+  await page.evaluate(() => {
+    const box = document.querySelector('#toasts')
+    new MutationObserver(() => {
+      if (box.textContent.includes('有新版本了')) sessionStorage.setItem('e2e-saw-update-toast', '1')
+    }).observe(box, { childList: true, subtree: true })
+  })
   const reloaded = page.waitForEvent('load', { timeout: 20000 })
   await openIsland(page)
-  await expect(page.locator('#toasts')).toContainText('有新版本了')
   await reloaded
   await bootReady(page)
+  expect(await page.evaluate(() => sessionStorage.getItem('e2e-saw-update-toast'))).toBe('1')
   expect(await page.evaluate(() => window.__oldPage)).toBeUndefined()
   expect(await entryScript(page)).toContain('-b.js')
   // 換到新版後切回小島照常載得起來（軟體算圖建小島比較慢，給久一點）

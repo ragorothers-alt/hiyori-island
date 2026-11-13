@@ -223,10 +223,14 @@ async function boot() {
     },
     focusFinished: (minutes, taskId, info = {}) => {
       // 休息時可以按的：還沒做完就延長（從到點那時接著正計時）；設定的輪數都做完了，還想繼續就再加一輪
-      const more = () => [
-        ...(ui.focus.canExtend ? [{ label: '還沒做完，延長', run: () => ui.focus.extend() }] : []),
-        ...(ui.focus.canAddRound ? [{ label: '再加一輪', soft: true, run: () => ui.focus.addRound() }] : []),
-      ]
+      // 專注頁開著的時候頁面上就有這兩顆，提示卡只說一聲，不再放一次（不然會蓋住計時）
+      const more = () =>
+        ui.focus.bigOpen
+          ? []
+          : [
+              ...(ui.focus.canExtend ? [{ label: '還沒做完，延長', run: () => ui.focus.extend() }] : []),
+              ...(ui.focus.canAddRound ? [{ label: '再加一輪', soft: true, run: () => ui.focus.addRound() }] : []),
+            ]
       // 加時做完：多做的分鐘記進去（不多算一顆番茄）；不到 1 分鐘就不另外記
       if (info.ext) {
         if (minutes < 1 || store.completePomodoro(minutes, taskId, info.projectId, info.sid, { extra: true }) === false) {

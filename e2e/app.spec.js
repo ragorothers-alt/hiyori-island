@@ -94,6 +94,18 @@ test('專注頁的貓咪：從旁邊走進來；點腳印請牠離開（設定�
   const still = await x()
   await page.waitForTimeout(1500)
   expect(await x()).toBe(still)
+
+  // 手機橫放（圓環在左、按鈕在右，卡片下面沒有地板）：貓收起來、不出錯，按鈕都還在畫面裡；轉回直的又出來
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  const size = page.viewportSize()
+  await page.setViewportSize({ width: 720, height: 360 })
+  await expect(page.locator('#ffCat')).toBeHidden()
+  await expect(page.locator('#ffStop')).toBeInViewport({ ratio: 1 })
+  await expect(page.locator('#ffTime')).toBeInViewport({ ratio: 1 })
+  await page.setViewportSize(size)
+  await expect(cat).toBeVisible()
+  expect(errors).toEqual([])
 })
 
 test('平板：專案的任務有自己的一欄；長期任務不會排進今天；點任務左邊打開、右邊清單留著直接換件', async ({ page, context, site }) => {
@@ -704,17 +716,22 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
     window.hiyori.store.setSetting('focusRounds', 1)
     window.hiyori.store.setSetting('focusUp', false)
     window.hiyori.ui.focus.toggle()
+    // 專注頁縮小了（或是小島模式）：到點的提示卡上要有「延長」「再加一輪」
+    window.hiyori.ui.focus.toggleBig(false)
   })
   await skip(26 * 60000)
   await expect.poll(async () => (await state()).mode).toBe('break')
   expect(await state()).toMatchObject({ pomos: 1, mins: 25, round: 1, rounds: 1 })
+  await expect(page.locator('.toast-acts .toast-act')).toHaveText(['還沒做完，延長', '再加一輪'])
 
-  // 休息畫面和提示卡上都有「延長」「再加一輪」
+  // 專注頁的休息畫面上也有這兩顆；時間下面寫休息到幾點、最上面寫今天專注了多久
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
   const extend = page.locator('#ffExtend')
   await expect(extend).toBeVisible()
   await expect(extend).toContainText('還沒做完，延長')
   await expect(page.locator('#ffAddRound')).toBeVisible()
-  await expect(page.locator('.toast-acts .toast-act')).toHaveText(['還沒做完，延長', '再加一輪'])
+  await expect(page.locator('#ffSub')).toHaveText(/^休息到 \d\d:\d\d$/)
+  await expect(page.locator('#ffToday')).toHaveText('今天已專注 25 分')
 
   // 延長：變成往上數的「加時中」，從到點那時（1 分鐘前）接著算；提示卡收掉
   await extend.click()
@@ -732,12 +749,19 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await expect(page.locator('#ffStop')).toHaveText('做完了')
   await page.locator('#ffStop').click()
   expect(await state()).toMatchObject({ mode: 'break', ext: false, up: false, pomos: 1, mins: 33 })
+  // 專注頁開著：按鈕在頁面上，提示卡只說一聲，不再放一次按鈕蓋住計時
+  await expect(page.locator('#toasts .toast', { hasText: '多做了 8 分鐘' })).toBeVisible()
+  await expect(page.locator('.toast-acts')).toHaveCount(0)
 
   // 最後一輪的休息：再加一輪，休息完自動開始第 2 輪
   await page.locator('#ffAddRound').click()
   expect(await state()).toMatchObject({ mode: 'break', round: 1, rounds: 2 })
   await expect(page.locator('#ffAddRound')).toBeHidden()
   await expect(page.locator('#ffKicker')).toHaveText('休息 · 下一輪 2/2')
+  // 多輪：時間上面的點（第 1 輪做完了、第 2 輪還沒到），下面寫幾點接著下一輪
+  await expect(page.locator('#ffRounds i')).toHaveCount(2)
+  await expect(page.locator('#ffRounds i.done')).toHaveCount(1)
+  await expect(page.locator('#ffSub')).toHaveText(/^\d\d:\d\d 接著第 2 輪$/)
   await skip(6 * 60000)
   await expect.poll(async () => (await state()).mode).toBe('focus')
   expect(await state()).toMatchObject({ round: 2, rounds: 2, ext: false, up: false })

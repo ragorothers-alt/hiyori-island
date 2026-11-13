@@ -1,0 +1,125 @@
+/* App 模式：專注時的全螢幕計時（專注頁）。計時的介面在 focus.js，散步的貓咪在 focusCat.css */
+
+/* 這一頁的主色跟著狀態換：專注（粉・天藍）、休息（綠）、加時（金）。登記成顏色，換狀態時才會慢慢過渡 */
+@property --ff-a { syntax: '<color>'; inherits: true; initial-value: #f19bb2; }
+@property --ff-b { syntax: '<color>'; inherits: true; initial-value: #8cc6ea; }
+@property --ff-ink { syntax: '<color>'; inherits: true; initial-value: #c2486c; }
+
+.focus-full {
+  --ff-a: #f19bb2; --ff-b: #8cc6ea; --ff-ink: #c2486c;
+  /* 圓環的大小。圓環固定在畫面中間偏上：專注和休息下面的東西不一樣高，換狀態時圓環不會跟著上下跳 */
+  --ff-ring: min(72vw, 44dvh, 320px);
+  position: fixed; inset: 0; z-index: 48; display: grid; place-items: start center; padding: 20px; overflow-y: auto;
+  background:
+    radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--ff-b) 16%, transparent), transparent 70%),
+    radial-gradient(90% 60% at 50% 112%, color-mix(in srgb, var(--ff-a) 13%, transparent), transparent 70%),
+    var(--app-bg);
+  transition: --ff-a .8s ease, --ff-b .8s ease, --ff-ink .8s ease;
+  animation: fadeIn .3s var(--ease);
+}
+.focus-full.break { --ff-a: #86cdb0; --ff-b: #8cc6ea; --ff-ink: #2f7d5c; }
+.focus-full.ext { --ff-a: #f0c36a; --ff-b: #f19bb2; --ff-ink: #94660f; }
+.focus-full.paused { --ff-ink: var(--ink-faint); }
+body.night .focus-full { --ff-ink: #f4a9bd; }
+body.night .focus-full.break { --ff-ink: #8fd6b8; }
+body.night .focus-full.ext { --ff-ink: #f0c36a; }
+body.night .focus-full.paused { --ff-ink: var(--ink-faint); }
+
+.ff-min { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; }
+/* 最上面中間：今天已經專注了多久 */
+.ff-today { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 60px; right: 60px; height: 38px; z-index: 1; line-height: 38px; text-align: center; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; letter-spacing: .06em; color: var(--ink-faint); pointer-events: none; white-space: nowrap; }
+.ff-today[hidden] { display: none; }
+.ff-today b { font-family: var(--font-num); font-weight: 700; color: var(--ink-soft); }
+
+.ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(50dvh - 104px - var(--ff-ring) / 2)); }
+.ff-ctl { display: contents; }
+/* 字距會在最後一個字後面多留一格：左邊補回來，整行才置中 */
+.ff-kicker { font-family: var(--font-display); font-size: 15px; line-height: 24px; letter-spacing: .3em; padding-left: .3em; color: var(--ff-ink); }
+
+/* 圓環：外圈一圈刻度、中間是進度，後面一團慢慢呼吸的光 */
+.ff-ring { position: relative; width: var(--ff-ring); aspect-ratio: 1; container-type: inline-size; animation: ffIn .6s var(--ease) both; }
+.ff-aura { position: absolute; inset: -15%; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, color-mix(in srgb, var(--ff-a) 24%, transparent), color-mix(in srgb, var(--ff-b) 13%, transparent) 56%, transparent); animation: ffBreathe 7s ease-in-out infinite; }
+body.night .ff-aura { background: radial-gradient(closest-side, color-mix(in srgb, var(--ff-a) 22%, transparent), color-mix(in srgb, var(--ff-b) 10%, transparent) 56%, transparent); }
+.ff-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.ff-ring circle { fill: none; }
+.ff-ring .tick { stroke: var(--ink-deco); opacity: .38; stroke-width: 3; stroke-dasharray: .9 9.2579; stroke-dashoffset: .45; }
+.ff-ring .tick.major { opacity: .7; stroke-width: 5; stroke-dasharray: 1.4 49.3894; stroke-dashoffset: .7; }
+.ff-ring .track { stroke: rgba(140, 170, 200, .2); stroke-width: 6; transition: stroke .8s; }
+.ff-ring .fg { stroke: url(#ffGrad); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 540.4; stroke-dashoffset: 540.4; transition: stroke-dashoffset 1s linear, opacity .4s; }
+.ff-g1 { stop-color: var(--ff-b); }
+.ff-g2 { stop-color: var(--ff-a); }
+/* 加時：原本排好的那一圈已經做完了（淡淡留著），多做的用金色再繞 */
+.focus-full.ext .ff-ring .track { stroke: color-mix(in srgb, var(--sakura) 40%, transparent); }
+/* 進度的頭：一顆小圓點跟著轉（圓環的半徑是寬度的 43%） */
+.ff-knob { position: absolute; inset: 0; pointer-events: none; transform: rotate(calc(var(--p, 0) * 1turn)); transition: transform 1s linear, opacity .4s; }
+.ff-knob i { position: absolute; left: 50%; top: 7%; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; border-radius: 50%; background: #fff; border: 3px solid var(--ff-a); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ff-a) 22%, transparent), 0 2px 6px rgba(60, 80, 120, .18); }
+body.night .ff-knob i { background: #1c1a2e; }
+
+/* 時間：每個數字一格一樣寬，秒數跳動時整串不會左右晃 */
+.ff-time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-num); font-size: clamp(44px, 14vw, 64px); font-size: 21.5cqw; font-weight: 700; line-height: 1; color: var(--ink); }
+.ff-time.long { font-size: 18cqw; }
+.ff-time span { display: inline-block; width: .61em; text-align: center; }
+.ff-time span.c { width: .27em; transform: translateY(-.05em); opacity: .8; }
+/* 換上來的數字輕輕浮現：每秒都會動一次，所以只動一點點 */
+.ff-time span.in { animation: ffDigit .28s var(--ease); }
+/* 加時：前面一個小小的 +（後面放一個看不見的，數字才還在正中間） */
+.focus-full.ext .ff-time::before, .focus-full.ext .ff-time::after { content: '+'; font-size: .5em; font-weight: 600; color: var(--ff-ink); }
+.focus-full.ext .ff-time::before { margin-right: .1em; }
+.focus-full.ext .ff-time::after { margin-left: .1em; visibility: hidden; }
+/* 時間下面一行小字：幾點結束、休息完接著什麼 */
+.ff-sub { position: absolute; left: 14%; right: 14%; top: 65.5%; font-size: 12.5px; letter-spacing: .05em; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ff-sub b { font-family: var(--font-num); font-weight: 700; color: var(--ink-soft); letter-spacing: .02em; }
+/* 時間上面：第幾輪（做完的實心、這一輪亮著、還沒到的空心） */
+.ff-rounds { position: absolute; left: 0; right: 0; top: 25.5%; display: flex; justify-content: center; gap: 6px; }
+.ff-rounds[hidden] { display: none; }
+.ff-rounds i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--ff-ink) 50%, transparent); transition: background .4s, border-color .4s, box-shadow .4s; }
+.ff-rounds i.done { background: var(--ff-ink); border-color: var(--ff-ink); }
+.ff-rounds i.now { background: var(--ff-a); border-color: var(--ff-a); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ff-a) 28%, transparent); }
+
+/* 暫停：圓環和光都靜下來，時間慢慢一明一暗 */
+.focus-full.paused .ff-ring .fg, .focus-full.paused .ff-knob { opacity: .45; }
+.focus-full.paused .ff-aura { animation-play-state: paused; opacity: .5; }
+.focus-full.paused .ff-time { color: var(--ink-soft); animation: ffHold 2.6s ease-in-out infinite; }
+/* 一輪專注結束的那一下：圓環往外散開一圈 */
+.ff-ring.ripple::after { content: ''; position: absolute; inset: 7%; border-radius: 50%; border: 2px solid var(--ff-a); pointer-events: none; animation: ffRipple 1.2s var(--ease) both; }
+
+.ff-task { font-size: 15px; color: var(--ink-soft); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 40px; }
+.ff-task[hidden] { display: none; }
+/* 目標：一顆膠囊（前面的點是分類或專案的顏色），點了是下拉選單 */
+.ff-target-wrap { position: relative; display: inline-flex; align-items: center; gap: 8px; max-width: min(320px, 100%); height: 40px; padding: 0 12px 0 15px; border-radius: 999px; background: var(--field); border: 1px solid var(--line); color: var(--ink-soft); cursor: pointer; transition: color .2s, border-color .2s; }
+.ff-target-wrap[hidden] { display: none; }
+.ff-target-wrap:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ff-a) 55%, transparent); }
+.ff-target-wrap:has(:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ff-target-wrap i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--ink-deco)); transition: background .3s; }
+.ff-target-wrap svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: .7; pointer-events: none; }
+:root .ff-target { appearance: none; -webkit-appearance: none; min-width: 0; max-width: 100%; height: 100%; border: 0; padding: 0; margin: 0; font: inherit; font-size: 15px; color: inherit; background: none; text-overflow: ellipsis; cursor: pointer; outline: none; }
+
+.ff-btns { display: flex; gap: 10px; }
+.focus-full .ff-btns button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 124px; height: 48px; padding: 0 20px; margin: 0; border-radius: 16px; font-size: 15px; }
+/* 這一頁的次要按鈕：實線、淡淡的底（虛線框在這麼空的畫面上像還沒做完的版位） */
+.focus-full .btn-ghost { border: 1px solid var(--line); background: var(--field); }
+.focus-full .btn-ghost:hover { background: var(--glass-hover); }
+.ff-ico { display: grid; }
+.ff-ico svg { width: 17px; height: 17px; fill: currentColor; }
+/* 休息時的「還沒做完，延長」「再加一輪」 */
+.ff-more { display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 8px; }
+.ff-more[hidden] { display: none; }
+.ff-more button { padding: 8px 15px; border-radius: 14px; font-size: 13px; line-height: 1.35; color: var(--ink); }
+.ff-more button small { display: block; font-size: 11px; color: var(--ink-faint); }
+.ff-cabin { font-size: 12.5px; }
+
+@keyframes ffIn { from { opacity: 0; transform: scale(.96); } }
+@keyframes ffBreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.07); opacity: .72; } }
+@keyframes ffHold { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+@keyframes ffDigit { from { opacity: .45; transform: translateY(.05em); } }
+@keyframes ffRipple { from { opacity: .7; transform: scale(1); } to { opacity: 0; transform: scale(1.24); } }
+
+/* 手機橫放、很矮的視窗：圓環在左、按鈕在右 */
+@media (max-height: 520px) and (min-aspect-ratio: 4/3) {
+  .focus-full { --ff-ring: min(58dvh, 240px); place-items: center; }
+  /* 橫放時卡片下面沒有地板了：貓咪先不出來（focus.js 的 _catSync 用同一個條件收起來） */
+  .ff-card { margin-top: 0; width: auto; max-width: 100%; grid-template-columns: auto minmax(0, 300px); grid-template-rows: auto auto; gap: 8px 32px; align-items: center; }
+  .ff-kicker { grid-column: 1; grid-row: 1; }
+  .ff-ring { grid-column: 1; grid-row: 2; }
+  .ff-ctl { display: grid; justify-items: center; gap: 12px; grid-column: 2; grid-row: 1 / span 2; }
+}

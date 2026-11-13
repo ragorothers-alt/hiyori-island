@@ -6,6 +6,7 @@ import { FREE_MIN, FREE_MAX } from '../focusClock.js'
 import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, tagOf } from '../theme.js'
 import { floating } from '../store.js'
 import { coatOfDay } from '../catWalk.js'
+import './focus.css'
 
 // ── 番茄鐘 ──
 const FOCUS_KEY = 'hiyori-focus'
@@ -15,6 +16,19 @@ const debugMin = import.meta.env.DEV && Number.isFinite(rawFocus) && rawFocus > 
 const RULER = Array.from({ length: 17 }, (_, i) => 10 + i * 5)
 const RULER_TICK = 14
 // 計時規則（正向計時的上下限、放太久的判斷、到點該做什麼）在 focusClock.js
+const LOW = typeof matchMedia === 'function' ? matchMedia('(max-height: 520px) and (min-aspect-ratio: 4/3)') : { matches: false }
+// 專注頁圓環的周長（半徑 86）
+const ARC = 540.4
+const hhmm = (ts) => {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+// 有變才寫進畫面（專注頁每秒重畫一次，大部分的字沒變）
+const put = (el, html) => {
+  if (el._html === html) return
+  el._html = html
+  el.innerHTML = html
+}
 export const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
 
 export class FocusTimer {
@@ -504,6 +518,11 @@ export class FocusTimer {
     this.render()
   }
 
+  // 專注頁開著（到點的提示卡就不用再放一次「延長」「再加一輪」，頁面上有）
+  get bigOpen() {
+    return !$('#focusFull').hidden
+  }
+
   // 專注頁的貓咪：專注頁開著、設定沒關才出來。每秒帶最新的狀態過去（暫停、休息、這一輪專注了多久）
   _catSync() {
     const open = !$('#focusFull').hidden && this.mode !== 'idle'
@@ -514,7 +533,8 @@ export class FocusTimer {
       btn.setAttribute('aria-pressed', String(on))
       btn.title = on ? '散步的貓咪：點一下請牠先離開' : '散步的貓咪：點一下請牠回來'
     }
-    if (!open) return this.cat.hide()
+    // 手機橫放、很矮的視窗（版面跟 focus.css 最後那一段同一個條件）：卡片下面沒有地板，貓先不出來
+    if (!open || LOW.matches) return this.cat.hide()
     if (!on) return this.cat.leave()
     const focusMs = this.mode === 'focus' ? (this.counting ? this.elapsed : this.total - this.left) : 0
     this.cat.show({ mode: this.mode, paused: this.paused != null, focusMs }, coatOfDay(this.ui.store.today))
@@ -670,23 +690,87 @@ export class FocusTimer {
     const el = $('#focusFull')
     if (this.mode === 'idle') el.hidden = true
     this._catSync()
-    if (el.hidden) return
-    el.classList.toggle('break', this.mode === 'break')
-    $('#ffKicker').textContent = this.paused != null ? '暫停中' : label
-    $('#ffTime').textContent = time
-    $('#ffArc').style.strokeDashoffset = 552.9 * (1 - frac)
-    // 專注中可以直接在這裡換目標；休息時寫一句話
+    if (el.hidden) {
+      this._bigMode = null
+      return
+    }
+    const paused = this.paused != null
     const brk = this.mode === 'break'
+    // 整頁的顏色跟著狀態：專注、休息、加時；暫停時靜下來
+    el.classList.toggle('break', brk)
+    el.classList.toggle('ext', !!this.ext && !brk)
+    el.classList.toggle('paused', paused)
+    // 一輪專注剛結束、進到休息的那一下：圓環往外散開一圈
+    if (brk && this._bigMode === 'focus') {
+      const ring = $('#ffRing')
+      ring.classList.remove('ripple')
+      void ring.offsetWidth
+      ring.classList.add('ripple')
+    }
+    this._bigMode = this.mode
+    $('#ffKicker').textContent = paused ? '暫停中' : label
+    this._digits($('#ffTime'), time)
+    $('#ffArc').style.strokeDashoffset = ARC * (1 - frac)
+    $('#ffKnob').style.setProperty('--p', frac.toFixed(4))
+    // 第幾輪：做完的實心、這一輪亮著、還沒到的空心（只有一輪就不畫）
+    const dot = (i) => (i < this.round || (brk && i === this.round) ? 'done' : i === this.round ? 'now' : '')
+    const dots = $('#ffRounds')
+    put(dots, this.rounds > 1 ? Array.from({ length: this.rounds }, (_, i) => `<i class="${dot(i + 1)}"></i>`).join('') : '')
+    dots.hidden = this.rounds <= 1
+    put($('#ffSub'), this._subLine())
+    // 今天已經專注了多久（一輪做完才會變）
+    const mins = this.ui.store.peekDay(this.ui.store.today).focus || 0
+    const h = Math.floor(mins / 60)
+    put($('#ffToday'), mins ? `今天已專注 ${[h ? `<b>${h}</b> 小時` : '', mins % 60 ? `<b>${mins % 60}</b> 分` : ''].filter(Boolean).join(' ')}` : '')
+    $('#ffToday').hidden = !mins
+    // 專注中可以直接在這裡換目標；休息時寫一句話
     $('#ffTask').hidden = !brk
-    $('#ffTask').textContent = '起來動一動、喝口水'
+    $('#ffTask').textContent = this.round >= this.rounds && this.rounds > 1 ? '這一組做完了，起來動一動、喝口水' : '起來動一動、喝口水'
     const sel = $('#ffTarget')
-    sel.hidden = brk
+    $('#ffTargetWrap').hidden = brk
     // 選單在打開全螢幕時填好；目標從別的地方換了才重填（正在選的時候不動它）
     if (!brk && document.activeElement !== sel && sel.value !== this._targetKey()) this._fillTargets(sel)
-    $('#ffToggle').textContent = this.paused != null ? '繼續' : '暫停'
-    $('#ffStop').textContent = this.counting ? '做完了' : this.mode === 'break' ? '跳過休息' : '結束'
+    // 目標前面的點：任務分類或專案的顏色（沒指定是灰的）
+    const color = this.task ? tagOf(this.task.tag).color : this.project ? PROJECT_COLORS[this.project.color % PROJECT_COLORS.length] : ''
+    if (color !== this._bigColor) {
+      this._bigColor = color
+      $('#ffTargetDot').style.cssText = color ? `--c:${color}` : ''
+    }
+    $('#ffToggleText').textContent = paused ? '繼續' : '暫停'
+    put($('#ffToggleIcon'), paused ? ICON.play : ICON.pause)
+    $('#ffStop').textContent = this.counting ? '做完了' : brk ? '跳過休息' : '結束'
     $('#ffCabin').hidden = this.mode !== 'focus'
     this._renderMore($('#ffExtend'), $('#ffAddRound'))
+  }
+
+  // 時間下面的一行小字：幾點結束、休息完接著什麼
+  _subLine() {
+    if (this.paused != null) return '計時停在這裡'
+    const at = clock.nextEnd(this)
+    if (this.mode === 'break') return this.round < this.rounds ? `<b>${hhmm(at)}</b> 接著第 ${this.round + 1} 輪` : `休息到 <b>${hhmm(at)}</b>`
+    if (this.ext) return `原定的 ${this.focusMin} 分做完了`
+    // 正向計時：不寫「幾點開始」（暫停過的話，記著的起點會往後挪，不是真的開始的時間）
+    if (this.counting) return this.elapsed < FREE_MIN * 60000 ? `滿 ${FREE_MIN} 分鐘就會記下來` : '做完了就按「做完了」'
+    return `<b>${hhmm(at)}</b> 結束`
+  }
+
+  // 時間拆成一格一格（每格一樣寬，秒數跳動時整串不會左右晃）：只換有變的那幾格，換上來的輕輕浮現
+  _digits(el, text) {
+    if (el._text === text) return
+    const old = el._text || ''
+    el._text = text
+    if (old.length !== text.length || el.children.length !== text.length) {
+      el.innerHTML = [...text].map((ch) => `<span${ch === ':' ? ' class="c"' : ''}>${ch}</span>`).join('')
+      el.classList.toggle('long', text.length > 5)
+      return
+    }
+    ;[...text].forEach((ch, i) => {
+      if (ch === old[i]) return
+      const s = document.createElement('span')
+      s.className = 'in'
+      s.textContent = ch
+      el.children[i].replaceWith(s)
+    })
   }
 
   // 休息時的兩顆按鈕：「還沒做完，延長」和（最後一輪）「再加一輪」。全螢幕計時和點時間打開的小視窗各有一組
@@ -700,7 +784,7 @@ export class FocusTimer {
       // 從到點那時接著算：寫出已經過了多久，按之前就知道會從哪裡開始
       const now = Date.now()
       const over = now - clock.extendStart(this, now).endAt
-      ext.textContent = over >= 60000 ? `還沒做完，延長（已經多做 ${Math.floor(over / 60000)} 分）` : '還沒做完，延長'
+      put(ext, over >= 60000 ? `還沒做完，延長<small>已經多做 ${Math.floor(over / 60000)} 分</small>` : '還沒做完，延長')
       ext.title = '休息先不休了：從剛才到點的時間接著往上數，做完按「做完了」，多做的分鐘會記進去'
     }
     if (canAdd) add.title = `休息完再接一輪 ${this.focusMin} 分鐘`
