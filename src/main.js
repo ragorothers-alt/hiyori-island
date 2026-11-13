@@ -200,10 +200,16 @@ async function boot() {
     focusStarted: (resumed, taskId, info = {}) => {
       scene?.focusStarted(resumed, taskId)
       if (!resumed) {
+        // 上一段留下的提示卡（延長、再加一輪、再來一輪）：已經開始了，收掉。
+        // （resumed 是開機時接回計時、另一個分頁開始的：開機那時畫面還沒建好，也沒有提示卡要收）
+        // 休息完自動接下一輪的不收：「休息結束，第 N 輪開始了」那一張才剛放上去
+        if (info.ext || !(info.round > 1)) ui.dropToasts('focus')
         sfx.chime()
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
         const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
-        if (info.round > 1) talk('focusRound', { round: info.round, rounds: info.rounds })
+        // 加時：倒數到點了還沒做完，接著做
+        if (info.ext) say('mochi', '還差一點點對吧，我們陪你做完。')
+        else if (info.round > 1) talk('focusRound', { round: info.round, rounds: info.rounds })
         else if (t || p) talk('focusTask', { task: short(t ? t.title : p.name) })
         else if (info.free) talk('focusFree', {}, undefined, '', 'fuji')
         else if (!duet('focusStart')) talk('focusStart')
@@ -216,6 +222,26 @@ async function boot() {
       if ((t || p) && ui.focus.mode === 'focus') talk('focusTask', { task: short(t ? t.title : p.name) })
     },
     focusFinished: (minutes, taskId, info = {}) => {
+      // 休息時可以按的：還沒做完就延長（從到點那時接著正計時）；設定的輪數都做完了，還想繼續就再加一輪
+      const more = () => [
+        ...(ui.focus.canExtend ? [{ label: '還沒做完，延長', run: () => ui.focus.extend() }] : []),
+        ...(ui.focus.canAddRound ? [{ label: '再加一輪', soft: true, run: () => ui.focus.addRound() }] : []),
+      ]
+      // 加時做完：多做的分鐘記進去（不多算一顆番茄）；不到 1 分鐘就不另外記
+      if (info.ext) {
+        if (minutes < 1 || store.completePomodoro(minutes, taskId, info.projectId, info.sid, { extra: true }) === false) {
+          scene?.focusStopped()
+          if (minutes < 1) ui.toast({ icon: '灯', title: '加時不到 1 分鐘', sub: '沒有另外記，接著休息一下吧', tag: 'focus', ms: 9000, actions: more() })
+          return
+        }
+        sfx.temple()
+        if (info.at) timerNotify({ at: info.at, mode: 'focus', up: true, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
+        scene?.focusFinished(taskId, info.projectId)
+        talk('focusEnd')
+        const next = info.rounds > 1 && !info.last ? `休息 ${info.breakMin} 分鐘後接著第 ${info.round + 1} 輪` : '接著休息一下吧'
+        ui.toast({ icon: '灯', title: `多做了 ${minutes} 分鐘，也記進去了`, sub: next, ms: 9000, actions: more(), tag: 'focus' })
+        return
+      }
       // 同一輪另一個分頁已經記過了：這邊不再記、也不再放天燈
       if (store.completePomodoro(minutes, taskId, info.projectId, info.sid) === false) return scene?.focusStopped()
       sfx.temple()
@@ -232,20 +258,28 @@ async function boot() {
       const sub = t ? `「${short(t.title, 10)}」長大了一點` : p ? `「${short(p.name, 10)}」+${minutes} 分鐘` : `+${minutes} 分鐘`
       // 專注的是專案裡的任務（例如一首練習曲）：趁還記得，直接接到那件的紀錄（練到哪、卡在哪、速度）
       const log = !!t?.project && store.state.projects.some((x) => x.id === t.project)
-      ui.toast({ icon: '灯', title, sub: `${sub}・${rest}`, ...(log ? { ms: 9000, action: { label: '寫紀錄', run: () => ui.openTaskLog(t.id) } } : {}) })
+      const actions = [...more(), ...(log ? [{ label: '寫紀錄', soft: true, run: () => ui.openTaskLog(t.id) }] : [])]
+      ui.toast({ icon: '灯', title, sub: `${sub}・${rest}`, ...(actions.length ? { ms: 12000, actions } : {}), tag: 'focus' })
+    },
+    // 最後一輪的休息中又加了一輪
+    roundAdded: ({ next }) => {
+      sfx.chime()
+      ui.toast({ icon: '輪', title: '加了一輪', sub: `休息完接著第 ${next} 輪`, tag: 'focus' })
     },
     // next：還有下一輪時是 { next, rounds }，計時器接著會自己開始下一輪（台詞交給 focusStarted）
     breakFinished: (next, at = null) => {
       sfx.chime()
       timerNotify({ at, mode: 'break', round: next ? next.next - 1 : 1, rounds: next ? next.rounds : 1 })
       if (next) {
-        ui.toast({ icon: '風', title: '休息結束', sub: `第 ${next.next}/${next.rounds} 輪開始了` })
+        ui.toast({ icon: '風', title: '休息結束', sub: `第 ${next.next}/${next.rounds} 輪開始了`, tag: 'focus' })
         return
       }
       talk('breakEnd')
-      ui.toast({ icon: '風', title: '休息結束', sub: '準備好了就再開始一輪吧' })
+      // 還想繼續：照剛才的長度和目標直接再來一輪
+      ui.toast({ icon: '風', title: '休息結束', sub: '準備好了就再開始一輪吧', ms: 12000, tag: 'focus', actions: [{ label: '再來一輪', run: () => ui.focus.again() }] })
     },
     focusStopped: () => {
+      ui.dropToasts('focus')
       scene?.focusStopped()
       say('fuji', '沒關係，下次再一起專注。')
     },

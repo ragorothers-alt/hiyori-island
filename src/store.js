@@ -960,7 +960,8 @@ export class Store {
   // projectId：專注的目標直接選了專案（沒綁任務時才看）
   // sid：這一輪專注的 id（番茄鐘開始時給的）。同一個 id 只記一次：兩個分頁開著同一個計時、同時到點時，
   // 另一邊已經記過了（換成了那一版）就回傳 false，不再加一次
-  completePomodoro(minutes, taskId = null, projectId = null, sid = null) {
+  // extra：加時（倒數到點後接著做的那幾分鐘）。只加專注的分鐘，不多算一顆番茄，經驗值照分鐘給
+  completePomodoro(minutes, taskId = null, projectId = null, sid = null, { extra = false } = {}) {
     if (sid && this.state.pomoSids.includes(sid)) return false
     // 分鐘數壞掉（NaN、負的）就當 0：一個 NaN 會讓經驗值、金平糖和統計整個變成 NaN，存檔後歸零
     minutes = Number.isFinite(+minutes) ? Math.min(600, Math.max(0, +minutes)) : 0
@@ -968,7 +969,7 @@ export class Store {
     this._refreshToday()
     const task = taskId ? this._find('tasks', taskId) : null
     if (task) {
-      task.pomos = (task.pomos || 0) + 1
+      if (!extra) task.pomos = (task.pomos || 0) + 1
       task.touched = Date.now()
     }
     // 任務歸在某個專案、或目標就是專案：專注的分鐘記到專案上（專案的時間軸和統計用）
@@ -977,18 +978,21 @@ export class Store {
       proj.focus[this.today] = Math.min(1440, (proj.focus[this.today] || 0) + Math.round(minutes))
       this._edited(proj)
     }
-    const fx = [['pomodoro', { minutes, task, project: proj }]]
-    this.stats.pomodoros++
+    const fx = [['pomodoro', { minutes, task, project: proj, extra }]]
+    if (!extra) this.stats.pomodoros++
     this.stats.focusMinutes += minutes
     const d = this.day()
-    d.pomodoros++
+    if (!extra) d.pomodoros++
     d.focus += minutes
     // 這次專注落在哪個時段：用中間的時間點算
     const mid = new Date(Date.now() - minutes * 30000).getHours()
     d[mid < 5 ? 'focusLate' : mid < 12 ? 'focusAm' : mid < 18 ? 'focusPm' : 'focusEve'] += minutes
     // XP 依長度：25 分＝原本的份量，短的少一點、長的最多兩倍
-    this._gain(Math.round(XP.pomodoro * Math.min(2, Math.max(0.4, minutes / 25))), fx, { kind: 'focus' })
-    this._bondGain(BOND_POINTS.pomodoro, fx)
+    if (extra) this._gain(Math.round(XP.pomodoro * Math.min(2, minutes / 25)), fx, { kind: 'focus' })
+    else {
+      this._gain(Math.round(XP.pomodoro * Math.min(2, Math.max(0.4, minutes / 25))), fx, { kind: 'focus' })
+      this._bondGain(BOND_POINTS.pomodoro, fx)
+    }
     this._finish(fx)
     return true
   }

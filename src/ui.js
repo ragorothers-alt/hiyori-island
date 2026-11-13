@@ -2804,11 +2804,20 @@ export class UI {
     setTimeout(() => this.highlight(null), 2200)
   }
 
+  // 收掉某一類的提示卡
+  dropToasts(tag) {
+    for (const el of $$('#toasts .toast')) if (el.dataset.tag === tag) el.remove()
+  }
+
   // ── 通知 ──
   // action：{ label, run }，toast 右邊多一顆按鈕（例如「重新整理」）
-  toast({ icon = '花', title, sub = '', stamp = false, ms = 3400, action = null }) {
+  // actions：好幾顆按鈕 [{ label, run, soft }]（排在下面一列；soft 是次要的樣子）。按了就把這張收掉
+  // tag：同一類的提示只留最新的一張（番茄鐘的：上一張的按鈕在狀態變了以後就不能按了）
+  toast({ icon = '花', title, sub = '', stamp = false, ms = 3400, action = null, actions = null, tag = '' }) {
+    if (tag) this.dropToasts(tag)
     const el = document.createElement('div')
     el.className = 'toast'
+    if (tag) el.dataset.tag = tag
     el.innerHTML = `${stamp ? `<div class="stamp-k">${esc(icon)}</div>` : `<div class="t-icon">${esc(icon)}</div>`}<div><b>${esc(title)}</b><small>${esc(sub)}</small></div>`
     if (action) {
       const b = document.createElement('button')
@@ -2818,6 +2827,23 @@ export class UI {
       b.addEventListener('click', () => action.run())
       el.append(b)
       el.classList.add('has-act')
+    }
+    if (actions?.length) {
+      const row = document.createElement('div')
+      row.className = 'toast-acts'
+      for (const a of actions) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = `toast-act${a.soft ? ' soft' : ''}`
+        b.textContent = a.label
+        b.addEventListener('click', () => {
+          el.remove()
+          a.run()
+        })
+        row.append(b)
+      }
+      el.append(row)
+      el.classList.add('has-act', 'acts')
     }
     // 正在某個新增表單裡打字（任務、日程那一行）：提示放到表單下面，不要蓋住正在打的字
     const box = $('#toasts')

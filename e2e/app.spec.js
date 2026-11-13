@@ -682,3 +682,103 @@ test('檢視進度：總覽有這週每天做完幾件，點「看週報」到�
   await nav.locator('button.set').click()
   await expect(title).toBeInViewport()
 })
+
+test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正計時，多做的分鐘記進去）；輪數做完了可以再加一輪、休息完再來一輪', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const state = () =>
+    page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      const s = window.hiyori.store
+      return { mode: f.mode, ext: !!f.ext, up: f.up, round: f.round, rounds: f.rounds, pomos: s.stats.pomodoros, mins: s.stats.focusMinutes }
+    })
+  // 把這一段的結束時間往前挪：不用真的等 25 分鐘
+  const skip = (ms) =>
+    page.evaluate((ms) => {
+      const f = window.hiyori.ui.focus
+      f.endAt -= ms
+      f._save()
+    }, ms)
+  await page.evaluate(() => {
+    window.hiyori.store.setSetting('focusRounds', 1)
+    window.hiyori.store.setSetting('focusUp', false)
+    window.hiyori.ui.focus.toggle()
+  })
+  await skip(26 * 60000)
+  await expect.poll(async () => (await state()).mode).toBe('break')
+  expect(await state()).toMatchObject({ pomos: 1, mins: 25, round: 1, rounds: 1 })
+
+  // 休息畫面和提示卡上都有「延長」「再加一輪」
+  const extend = page.locator('#ffExtend')
+  await expect(extend).toBeVisible()
+  await expect(extend).toContainText('還沒做完，延長')
+  await expect(page.locator('#ffAddRound')).toBeVisible()
+  await expect(page.locator('.toast-acts .toast-act')).toHaveText(['還沒做完，延長', '再加一輪'])
+
+  // 延長：變成往上數的「加時中」，從到點那時（1 分鐘前）接著算；提示卡收掉
+  await extend.click()
+  expect(await state()).toMatchObject({ mode: 'focus', ext: true, up: true })
+  await expect(page.locator('#ffKicker')).toHaveText('加時中')
+  await expect(page.locator('#ffTime')).toHaveText(/^01:\d\d$/)
+  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  // 重新整理後還是加時中
+  await page.reload()
+  await bootReady(page)
+  expect(await state()).toMatchObject({ mode: 'focus', ext: true, up: true })
+  // 再多做 7 分鐘，按「做完了」：多做的 8 分鐘記進去，番茄數不變；回到休息
+  await skip(7 * 60000)
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
+  await expect(page.locator('#ffStop')).toHaveText('做完了')
+  await page.locator('#ffStop').click()
+  expect(await state()).toMatchObject({ mode: 'break', ext: false, up: false, pomos: 1, mins: 33 })
+
+  // 最後一輪的休息：再加一輪，休息完自動開始第 2 輪
+  await page.locator('#ffAddRound').click()
+  expect(await state()).toMatchObject({ mode: 'break', round: 1, rounds: 2 })
+  await expect(page.locator('#ffAddRound')).toBeHidden()
+  await expect(page.locator('#ffKicker')).toHaveText('休息 · 下一輪 2/2')
+  await skip(6 * 60000)
+  await expect.poll(async () => (await state()).mode).toBe('focus')
+  expect(await state()).toMatchObject({ round: 2, rounds: 2, ext: false, up: false })
+  // 自動接下一輪時說一聲（這張提示卡不會被「開始了」收掉）
+  await expect(page.locator('#toasts .toast', { hasText: '第 2/2 輪開始了' })).toBeVisible()
+  await skip(26 * 60000)
+  await expect.poll(async () => (await state()).mode).toBe('break')
+  expect(await state()).toMatchObject({ pomos: 2, mins: 58 })
+
+  // 休息也結束了：提示卡上「再來一輪」，照剛才的長度直接開始（休息中改了設定也照剛才那一組）
+  await page.evaluate(() => window.hiyori.store.setSetting('focusMin', 10))
+  await skip(6 * 60000)
+  await expect.poll(async () => (await state()).mode).toBe('idle')
+  await page.locator('.toast-acts .toast-act', { hasText: '再來一輪' }).click()
+  expect(await state()).toMatchObject({ mode: 'focus', round: 1, rounds: 1, ext: false })
+  expect(await page.evaluate(() => window.hiyori.ui.focus.focusMin)).toBe(25)
+  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.stop()
+    window.hiyori.store.setSetting('focusMin', 25)
+  })
+
+  // 正向計時自己按做完的：休息時不能延長
+  await page.evaluate(() => {
+    window.hiyori.store.setSetting('focusUp', true)
+    window.hiyori.ui.focus.toggle()
+  })
+  await skip(10 * 60000)
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  expect(await state()).toMatchObject({ mode: 'break', pomos: 3 })
+  await expect(page.locator('#ffExtend')).toBeHidden()
+  await expect(page.locator('#ffAddRound')).toBeVisible()
+  // 往上數放了五個小時才回來，手快在下一次檢查之前按「做完了」：跟自動檢查一樣當成過期，不記
+  const late = await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.toggle()
+    f.endAt -= 5 * 3600000
+    f.stop()
+    return { mode: f.mode, pomos: window.hiyori.store.stats.pomodoros }
+  })
+  expect(late).toEqual({ mode: 'idle', pomos: 3 })
+  await page.evaluate(() => window.hiyori.store.setSetting('focusUp', false))
+})

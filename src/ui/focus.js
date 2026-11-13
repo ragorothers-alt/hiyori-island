@@ -40,7 +40,14 @@ export class FocusTimer {
     // 另一個分頁開始、暫停、換目標或結束了計時：這邊跟著換成同一個。
     // 不然兩邊各自倒數，到點時各記一次專注（同一輪的 sid 一樣，store 那邊也只會記一次）
     addEventListener('storage', (e) => {
-      if (e.key === FOCUS_KEY) this._otherTab(e.newValue)
+      if (e.key !== FOCUS_KEY) return
+      // 照現在存著的最新狀態，不照事件帶來的那一份：兩個分頁幾乎同時按了不同的按鈕（一邊延長、一邊加一輪）時，
+      // 事件是晚到的舊樣子，照它換的話兩邊會停在不一樣的狀態
+      let now = e.newValue
+      try {
+        now = localStorage.getItem(FOCUS_KEY)
+      } catch {}
+      this._otherTab(now)
     })
     $('#focusBtn').onclick = () => this.toggle()
     $('#focusStop').onclick = () => this.stop()
@@ -58,6 +65,8 @@ export class FocusTimer {
     $('#ffToggle').onclick = () => this.toggle()
     $('#ffStop').onclick = () => this.stop()
     $('#ffMin').onclick = () => this.toggleBig(false)
+    for (const id of ['#ffExtend', '#fsExtend']) $(id).onclick = () => this.extend()
+    for (const id of ['#ffAddRound', '#fsAddRound']) $(id).onclick = () => this.addRound()
     $('#ffCabin').onclick = () => this.hooks.goCabin?.()
     // 專注頁上散步的貓咪：右上角的腳印請牠離開、再請牠回來（設定會記住）
     this.cat = new FocusCat($('#ffCat'), { card: $('#focusFull .ff-card'), onPoke: () => this.hooks.catPoke?.() })
@@ -109,6 +118,8 @@ export class FocusTimer {
     this.breakMin = debugMin ? debugMin / 2 : st.breakMin || BREAK_MIN
     this.rounds = this.up ? 1 : st.focusRounds || 1
     this.round = 1
+    this.ext = false
+    this.doneAt = null
   }
 
   // 重新整理前的計時：每個欄位都檢查過才用（壞掉的數字會一路變成 NaN 分鐘）
@@ -121,9 +132,9 @@ export class FocusTimer {
   }
 
   _save() {
-    const { mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid } = this
+    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid } = this
     try {
-      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, focusMin, breakMin, round, rounds, sid }))
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid }))
     } catch {}
     // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排，Android 殼裡的即時倒數跟著換
     this.hooks.focusPlan?.(this.boundary)
@@ -137,7 +148,7 @@ export class FocusTimer {
     const { mode, round, rounds } = this
     const paused = this.paused != null
     const counting = this.counting
-    return { mode, paused, counting, at: clock.nextEnd(this), since: counting && !paused ? this.endAt : null, leftMs: counting ? this.elapsed : this.left, round, rounds, target: this.task?.title || this.project?.name || '' }
+    return { mode, paused, counting, ext: !!this.ext, at: clock.nextEnd(this), since: counting && !paused ? this.endAt : null, leftMs: counting ? this.elapsed : this.left, round, rounds, target: this.task?.title || this.project?.name || '' }
   }
 
   // 下一次自己到點的時間和那時的狀況（排通知用）：沒在計時、暫停中是 null
@@ -190,7 +201,7 @@ export class FocusTimer {
     return clock.counting(this)
   }
   get info() {
-    return { round: this.round, rounds: this.rounds, free: this.up, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
+    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
   }
   // 可以選的目標：今天還沒做完的任務、專案裡的長期任務（收藏起來的專案不列）、進行中的專案（暫停的也可以）
   _targets() {
@@ -375,7 +386,7 @@ export class FocusTimer {
     const live = this.mode === 'focus' || (this.mode === 'break' && !this._asking)
     const up = live ? this.up : st.focusUp
     const v = st.focusMin
-    $('#focusSet h4').firstChild.textContent = live ? '計時中・換個目標' : '要怎麼專注？'
+    $('#focusSet h4').firstChild.textContent = !live ? '要怎麼專注？' : this.mode === 'break' ? '休息中' : '計時中・換個目標'
     $('#fsMode').hidden = live
     pickOne($$('#fsMode button'), (b) => (b.dataset.v === 'up') === up)
     $('#fsTime').textContent = live ? $('#focusTime').textContent : up ? '00:00' : `${v}:00`
@@ -388,11 +399,15 @@ export class FocusTimer {
     $('#fsRoundsRow').hidden = up || live
     $('#fsBreakRow').hidden = live
     $('#fsStart').hidden = live
+    this._renderMore($('#fsExtend'), $('#fsAddRound'))
+    if (!live) $('#fsMore').hidden = true
     pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
     pickOne($$('#fsBreak button'), (b) => +b.dataset.v === st.breakMin)
     const target = this.project ? `，時間記進「${this.project.name}」` : ''
     $('#fsSum').textContent = live
-      ? `換了目標，這一輪的時間就算在新的目標上${target}`
+      ? this.mode === 'break'
+        ? this.round < this.rounds ? `休息完接著第 ${this.round + 1}/${this.rounds} 輪` : '休息完就結束了。還沒做完可以延長，想繼續可以再加一輪'
+        : this.ext ? '加時中：做完按 ■，多做的分鐘會記進去' : `換了目標，這一輪的時間就算在新的目標上${target}`
       : up
         ? `從 0 開始往上數，做完按 ■；滿 ${FREE_MIN} 分鐘就記下來（最長 ${FREE_MAX / 60} 小時）${target}`
         : `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪，中間休息 ${st.breakMin} 分` : `，做完休息 ${st.breakMin} 分`}${target}`
@@ -509,13 +524,60 @@ export class FocusTimer {
   _finishFocus(minutes, at = null) {
     const info = { ...this.info, last: this.round >= this.rounds, at, target: this.task?.title || this.project?.name || '' }
     this.toggleSet(false)
-    Object.assign(this, clock.breakStart(this, Date.now()))
+    const now = Date.now()
+    Object.assign(this, clock.breakStart(this, now, at ?? now))
     this._save()
     this.hooks.focusFinished(minutes, this.task?.id || null, info)
     this.render()
   }
 
+  // 還沒做完：休息先不休了，從剛才到點的時間接著往上數（加時）。做完按「做完了」，多做的分鐘記進去，
+  // 再休息、照原本的輪數接下去
+  get canExtend() {
+    return clock.canExtend(this)
+  }
+  extend() {
+    if (!this.canExtend) return false
+    Object.assign(this, clock.extendStart(this, Date.now()))
+    this.sid = `-${Math.random().toString(36).slice(2, 10)}`
+    this._asking = false
+    this.togglePicker(false)
+    this.toggleSet(false)
+    this._save()
+    this.render()
+    this.hooks.focusStarted(false, this.task?.id || null, this.info)
+    if (this.ui.appMode) this.toggleBig(true)
+    return true
+  }
+
+  // 設定的輪數都做完了還想繼續：最後一輪的休息中再加一輪（休息完自動開始）
+  get canAddRound() {
+    return clock.canAddRound(this)
+  }
+  addRound() {
+    if (!this.canAddRound) return false
+    this.rounds = this.round + 1
+    this._save()
+    this.render()
+    if (!$('#focusSet').hidden) this._renderSet()
+    this.hooks.roundAdded?.({ next: this.rounds, rounds: this.rounds })
+    return true
+  }
+
+  // 全部做完、休息也結束了：照剛才的長度和目標再來一輪（就一輪，不照設定的輪數從頭跑）
+  again() {
+    if (this.mode !== 'idle') return false
+    this._loadLengths()
+    if (this._last) Object.assign(this, this._last)
+    this.rounds = 1
+    this.ui.toggleFull(false)
+    this._startFocus()
+    return true
+  }
+
   stop() {
+    // 放太久才回來（頁面睡著時早就過了該結束的時間一小時以上）：跟自動檢查一樣不記，不因為手快按了「做完了」就照全長記
+    if (this.mode !== 'idle' && this._stale()) return this._expire()
     // 往上數的專注按 ■ 是「做完了」：滿 5 分鐘就照實際分鐘數記下來
     const done = clock.stopMinutes(this, Date.now())
     if (done != null) return this._finishFocus(done)
@@ -543,6 +605,8 @@ export class FocusTimer {
       this._startFocus()
     } else if (step?.do === 'done') {
       this.toggleSet(false)
+      // 記著剛才這一組的樣子：提示卡上的「再來一輪」照它開始（中途改了設定也一樣）
+      this._last = { up: this.up, focusMin: this.focusMin, breakMin: this.breakMin }
       this.mode = 'idle'
       this._loadLengths()
       this._save()
@@ -572,7 +636,10 @@ export class FocusTimer {
     }
     const counting = this.counting
     const time = this.mode === 'idle' && this.up ? '00:00' : mmss(counting ? this.elapsed : this.left)
-    if (this.mode !== 'idle' && !$('#focusSet').hidden) $('#fsTime').textContent = time
+    if (this.mode !== 'idle' && !$('#focusSet').hidden) {
+      $('#fsTime').textContent = time
+      if (!this._asking) this._renderMore($('#fsExtend'), $('#fsAddRound'))
+    }
     $('#focusTime').textContent = time
     $('#focusTime').title = this.mode === 'idle' ? '倒數或正向計時、長度、目標' : this.ui.appMode ? '打開全螢幕計時' : '換專注的目標'
     const box = $('#focusBox')
@@ -582,7 +649,7 @@ export class FocusTimer {
     const multi = this.rounds > 1
     const label = {
       idle: this.up ? '正向計時 · ↑' : multi ? `${this.focusMin} 分 × ${this.rounds} 輪` : '專注 · しゅうちゅう',
-      focus: multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : '專注中',
+      focus: this.ext ? (multi ? `加時中 · ${this.round}/${this.rounds}` : '加時中') : multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : '專注中',
       break: multi && this.round < this.rounds ? `休息 · 下一輪 ${this.round + 1}/${this.rounds}` : '休息 · きゅうけい',
     }[this.mode]
     const t = this.targetText
@@ -590,7 +657,7 @@ export class FocusTimer {
     $('#focusLabel').classList.toggle('set', !!t && this.mode !== 'break')
     $('#focusIcon').innerHTML = this.mode !== 'idle' && this.paused == null ? ICON.pause : ICON.play
     $('#focusStop').hidden = this.mode === 'idle'
-    $('#focusStop').title = counting ? `做完了（滿 ${FREE_MIN} 分鐘會記下來）` : '結束'
+    $('#focusStop').title = counting ? (this.ext ? '做完了（多做的分鐘會記下來）' : `做完了（滿 ${FREE_MIN} 分鐘會記下來）`) : '結束'
     $('#focusBtn').title = this.mode === 'idle' ? '開始專注 (F)' : this.paused != null ? '繼續' : '暫停'
     // 往上數時，圓環每一小時繞一圈
     const frac = this.mode === 'idle' ? 0 : counting ? (this.elapsed % 3600000) / 3600000 : 1 - this.left / this.total
@@ -619,5 +686,23 @@ export class FocusTimer {
     $('#ffToggle').textContent = this.paused != null ? '繼續' : '暫停'
     $('#ffStop').textContent = this.counting ? '做完了' : this.mode === 'break' ? '跳過休息' : '結束'
     $('#ffCabin').hidden = this.mode !== 'focus'
+    this._renderMore($('#ffExtend'), $('#ffAddRound'))
+  }
+
+  // 休息時的兩顆按鈕：「還沒做完，延長」和（最後一輪）「再加一輪」。全螢幕計時和點時間打開的小視窗各有一組
+  _renderMore(ext, add) {
+    const canExt = this.canExtend
+    const canAdd = this.canAddRound
+    ext.hidden = !canExt
+    add.hidden = !canAdd
+    ext.parentElement.hidden = !canExt && !canAdd
+    if (canExt) {
+      // 從到點那時接著算：寫出已經過了多久，按之前就知道會從哪裡開始
+      const now = Date.now()
+      const over = now - clock.extendStart(this, now).endAt
+      ext.textContent = over >= 60000 ? `還沒做完，延長（已經多做 ${Math.floor(over / 60000)} 分）` : '還沒做完，延長'
+      ext.title = '休息先不休了：從剛才到點的時間接著往上數，做完按「做完了」，多做的分鐘會記進去'
+    }
+    if (canAdd) add.title = `休息完再接一輪 ${this.focusMin} 分鐘`
   }
 }

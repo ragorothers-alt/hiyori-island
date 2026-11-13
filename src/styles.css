@@ -1141,7 +1141,17 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
 .ff-target:hover { color: var(--ink); }
 .ff-btns { display: flex; gap: 10px; }
 .ff-btns button { min-width: 112px; padding: 11px 18px; font-size: 14px; margin: 0; }
+/* 休息時的「還沒做完，延長」「再加一輪」 */
+.ff-more { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ff-more[hidden], .fs-more[hidden] { display: none; }
+.ff-more button, .fs-more button { padding: 9px 14px; font-size: 13px; color: var(--ink); }
+.fs-more { display: grid; gap: 6px; margin: 0 0 10px; }
 .ff-cabin { font-size: 12.5px; }
+/* 提示卡上有好幾顆按鈕（專注到點：延長、再加一輪、寫紀錄）：按鈕排到下面一列 */
+.toast.acts { flex-wrap: wrap; max-width: min(360px, calc(100vw - 24px)); }
+.toast-acts { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.toast-acts .toast-act { margin-left: 0; }
+.toast-act.soft { background: rgba(140, 170, 200, .2); color: var(--ink); }
 
 /* ── App 模式・電腦：左邊側欄放分頁（寬螢幕再加問候和番茄鐘），右邊上方是頁名和日期、下面是內容 ──
    中等寬度只留圖示側欄、番茄鐘浮在內容下方；太矮的視窗沿用上面的分頁列版面 */

@@ -402,6 +402,7 @@
     <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds" role="group" aria-label="輪數"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
     <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak" role="group" aria-label="休息"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
     <p class="fs-sum" id="fsSum"></p>
+    <div class="fs-more" id="fsMore" hidden><button type="button" class="btn-ghost" id="fsExtend" hidden>還沒做完，延長</button><button type="button" class="btn-ghost" id="fsAddRound" hidden>＋ 再加一輪</button></div>
     <button type="button" class="btn-primary" id="fsStart">開始專注</button>
   </div>
 
@@ -417,6 +418,8 @@
       <div class="ff-task" id="ffTask"></div>
       <select class="ff-target" id="ffTarget" aria-label="專注的目標"></select>
       <div class="ff-btns"><button class="btn-ghost" id="ffStop">結束</button><button class="btn-primary" id="ffToggle">暫停</button></div>
+      <!-- 休息時：還沒做完就延長（從到點那時接著正計時）、最後一輪做完了還想繼續就再加一輪 -->
+      <div class="ff-more" hidden><button type="button" class="btn-ghost" id="ffExtend" hidden>還沒做完，延長</button><button type="button" class="btn-ghost" id="ffAddRound" hidden>＋ 再加一輪</button></div>
       <button class="cm-link ff-cabin" id="ffCabin">到小木屋看兩人陪你讀書</button>
     </div>
   </div>

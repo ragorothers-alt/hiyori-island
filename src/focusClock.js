@@ -1,13 +1,17 @@
 // 番茄鐘的計時規則（純函式，不碰 DOM、不讀時鐘）：ui.js 的 FocusTimer 照這裡算下一步，測試直接測這裡。
-// s：{ mode: 'idle'|'focus'|'break', endAt, paused, up, focusMin, breakMin, round, rounds }
+// s：{ mode: 'idle'|'focus'|'break', endAt, paused, up, ext, doneAt, focusMin, breakMin, round, rounds }
 //   endAt：倒數時是這一段結束的時間；往上數的專注是開始的時間（暫停過就往後挪）
 //   paused：暫停中時，倒數剩下的毫秒、往上數已經過的毫秒；沒暫停是 null
+//   ext：這一段是「加時」——倒數到點了還沒做完，從到點那時接著往上數；做完後照原本的輪數繼續
+//   doneAt：休息中才有，上一段專注是幾點結束的（加時從這裡接著數）
 
 // 正向計時（往上數）：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
 export const FREE_MIN = 5
 export const FREE_MAX = 180
 // 計時在關掉頁面、手機鎖著時早就結束了：結束後一小時內回來照常記，再晚就不照全長記進今天
 export const LATE = 60 * 60000
+// 做完了還想繼續時可以一輪一輪加，最多到這麼多輪
+export const MAX_ROUNDS = 12
 
 // 往上數中（休息一律倒數）
 export const counting = (s) => !!s.up && s.mode === 'focus'
@@ -48,30 +52,52 @@ export function pauseToggle(s, now) {
 }
 
 // 按 ■：往上數滿 5 分鐘算「做完了」，回傳要記的分鐘數；其他情況是取消，回傳 null
+// 加時按 ■ 一律是「做完了」：多做幾分鐘就記幾分鐘（不到 1 分鐘是 0，不另外記）
 export function stopMinutes(s, now) {
   if (!counting(s)) return null
-  const ms = elapsedMs(s, now)
+  // 最長 3 小時：頁面睡著時超過了、回來在下一次檢查之前就按，也不多記
+  const ms = Math.min(elapsedMs(s, now), FREE_MAX * 60000)
+  if (s.ext) return Math.floor(ms / 60000)
   return ms >= FREE_MIN * 60000 ? Math.floor(ms / 60000) : null
 }
 
 // 開始一輪專注：回傳新的 { mode, endAt, paused }
 export const focusStart = (s, now) => ({ mode: 'focus', paused: null, endAt: s.up ? now : now + s.focusMin * 60000 })
-// 專注結束、開始休息
-export const breakStart = (s, now) => ({ mode: 'break', paused: null, endAt: now + s.breakMin * 60000 })
+// 專注結束、開始休息。doneAt：那一段專注是幾點結束的（倒數的是本來排好到點的時間，自己按「做完了」的是現在）。
+// 加時做完：回到原本的計時方式（加時只有倒數的專注才有）
+export const breakStart = (s, now, doneAt = now) => ({
+  mode: 'break', paused: null, endAt: now + s.breakMin * 60000,
+  doneAt: Number.isFinite(doneAt) && doneAt <= now ? doneAt : now,
+  ext: false, up: s.ext ? false : !!s.up,
+})
+
+// 休息中可以「還沒做完，延長」嗎：倒數的專注才有（正向計時是自己按做完的）
+export const canExtend = (s) => s.mode === 'break' && !s.up
+// 加時：休息不休了，從剛才到點的時間接著往上數。到點太久以前（頁面睡了很久才回來）就從現在開始
+export function extendStart(s, now) {
+  const from = Number.isFinite(s.doneAt) && s.doneAt > 0 && s.doneAt <= now && now - s.doneAt <= LATE ? s.doneAt : now
+  return { mode: 'focus', paused: null, up: true, ext: true, endAt: from, doneAt: null }
+}
+// 最後一輪的休息中可以「再加一輪」嗎
+export const canAddRound = (s) => s.mode === 'break' && s.round >= s.rounds && s.rounds < MAX_ROUNDS
 
 // 重新整理前存的計時（localStorage、另一個分頁）：每個欄位都檢查過才用，壞掉的數字不會一路變成 NaN 分鐘。
 // dflt 是現在的長度（存的長度壞掉時用）；回傳整理好的欄位，mode 由呼叫的一方先確認是 focus 或 break
 export function restoreState(saved, dflt = {}) {
   const n = (v, lo, hi, d) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d)
   const taskId = typeof saved?.taskId === 'string' ? saved.taskId : null
-  const rounds = Math.round(n(saved?.rounds, 1, 4, 1))
+  const rounds = Math.round(n(saved?.rounds, 1, MAX_ROUNDS, 1))
+  const up = saved?.up === true
   return {
     mode: saved?.mode,
     endAt: n(saved?.endAt, 0, 8.64e15, 0),
     paused: Number.isFinite(saved?.paused) ? Math.max(0, saved.paused) : null,
     taskId,
     projectId: !taskId && typeof saved?.projectId === 'string' ? saved.projectId : null,
-    up: saved?.up === true,
+    up,
+    // 加時一定是往上數的專注
+    ext: up && saved?.mode === 'focus' && saved?.ext === true,
+    doneAt: saved?.mode === 'break' && Number.isFinite(saved?.doneAt) && saved.doneAt > 0 ? saved.doneAt : null,
     focusMin: n(saved?.focusMin, 0.05, FREE_MAX, dflt.focusMin ?? 25),
     breakMin: n(saved?.breakMin, 0.05, 60, dflt.breakMin ?? 5),
     rounds,

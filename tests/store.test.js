@@ -2652,3 +2652,22 @@ describe('數字進度的單位、任務範本、好久沒碰的長期任務', (
     expect(store.idleLongTasks()).toEqual([])
   })
 })
+describe('加時（倒數到點後接著做的那幾分鐘）', () => {
+  it('只加專注的分鐘：不多算一顆番茄、任務的番茄數不變，專案的時間照加，經驗值照分鐘給', () => {
+    const store = new Store()
+    const p = store.addProject({ name: '練琴' })
+    const t = store.addTask({ title: '練習曲', project: p.id })
+    store.completePomodoro(25, t.id, null, 'round-a')
+    const before = { pomos: store.stats.pomodoros, day: store.day().pomodoros, focus: store.stats.focusMinutes, xp: store.state.player.xp, level: store.state.player.level }
+    expect(store.completePomodoro(8, t.id, null, 'round-a-ext', { extra: true })).toBe(true)
+    expect(store.stats.pomodoros).toBe(before.pomos)
+    expect(store.day().pomodoros).toBe(before.day)
+    expect(store.stats.focusMinutes).toBe(before.focus + 8)
+    expect(store.day().focus).toBe(33)
+    expect(store.state.tasks.find((x) => x.id === t.id).pomos).toBe(1)
+    expect(store.state.projects.find((x) => x.id === p.id).focus[store.today]).toBe(33)
+    // 同一段加時兩個分頁都記：只算一次
+    expect(store.completePomodoro(8, t.id, null, 'round-a-ext', { extra: true })).toBe(false)
+    expect(store.stats.focusMinutes).toBe(before.focus + 8)
+  })
+})

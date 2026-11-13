@@ -28,7 +28,7 @@ export function liveTimer(l, done = null) {
     return { ...out, at: l.at, title: '休息中', text: `${hhmm(l.at)} 結束${multi && l.round < l.rounds ? `・接著第 ${l.round + 1}/${l.rounds} 輪` : ''}` }
   }
   // 正向計時：從開始的時間往上數，滿 3 小時（at）自動結束
-  if (l.counting) return { ...out, since: l.since, doneAt: l.at, title: `正向計時中${what}`, text: '做完回到 App 按「做完了」' }
+  if (l.counting) return { ...out, since: l.since, doneAt: l.at, title: `${l.ext ? '加時中' : '正向計時中'}${what}`, text: '做完回到 App 按「做完了」' }
   return { ...out, at: l.at, title: `專注中${what}`, text: `${hhmm(l.at)} 結束${multi ? `・第 ${l.round}/${l.rounds} 輪` : ''}` }
 }
 
