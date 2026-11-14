@@ -990,3 +990,35 @@ test('提示卡：同時最多三張，多的從最舊的收；有按鈕的游�
   await expect(second).not.toHaveClass(/held/)
   await expect(second).toHaveCount(0, { timeout: 10000 })
 })
+test('分頁列選到的那一格墊的膠囊會滑過去、停在選到的那一格；換到後一天時任務從右邊滑進來', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 393, height: 852 })
+  await page.goto(site.url)
+  await bootReady(page)
+  const ink = page.locator('#panel .tabs .tab-ink')
+  await expect(ink).toBeVisible()
+  const gap = (tab) =>
+    page.evaluate((tab) => {
+      const a = document.querySelector('#panel .tabs .tab-ink').getBoundingClientRect()
+      const b = document.querySelector(`.tab[data-tab="${tab}"]`).getBoundingClientRect()
+      return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.width - b.width)
+    }, tab)
+  for (const tab of ['habits', 'tasks', 'records']) {
+    await page.locator(`.tab[data-tab="${tab}"]`).click()
+    await expect.poll(() => gap(tab)).toBeLessThan(2)
+  }
+  // 電腦的側欄也一樣
+  await page.setViewportSize({ width: 1400, height: 860 })
+  await expect.poll(() => gap('records')).toBeLessThan(2)
+  await page.locator('.tab[data-tab="tasks"]').click()
+  await expect.poll(() => gap('tasks')).toBeLessThan(2)
+
+  // 換到後一天：新的那一頁從右邊滑進來（淡入的位移換成水平的）
+  await page.evaluate(() => window.hiyori.store.addTask({ title: '明天的事', date: (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() }))
+  await page.locator('#nextDay').click()
+  expect(await page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('22px')
+  await expect(page.locator('#taskList .item', { hasText: '明天的事' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('')
+  await page.locator('#prevDay').click()
+  expect(await page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('-22px')
+})

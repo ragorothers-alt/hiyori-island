@@ -394,6 +394,8 @@ export class UI {
     this._bindFold()
     this._bindSheet()
     this._bindTuck()
+    this._shownDate = this.store.selectedDate
+    this.store.on('dateChanged', (d) => this._slideDay(d))
 
     this._bindLayers()
     addEventListener('keydown', (e) => {
@@ -588,6 +590,61 @@ export class UI {
       b.setAttribute('aria-selected', String(on))
       b.tabIndex = on ? 0 : -1
     }
+    this._moveTabInk()
+  }
+
+  // App 模式的分頁列：選到的那一格墊的灰色膠囊從上一格滑過去，滑的途中先往前伸長、再把後面收過來（像一滴水）。
+  // instant：剛打開、換版面、視窗大小變了，直接放到位置上
+  _moveTabInk(instant = false) {
+    const bar = $('#panel .tabs')
+    if (!bar) return
+    if (!this.appMode) {
+      bar.classList.remove('has-ink')
+      this._inkAt = null
+      return
+    }
+    let ink = bar.querySelector(':scope > .tab-ink')
+    if (!ink) {
+      ink = document.createElement('i')
+      ink.className = 'tab-ink'
+      ink.setAttribute('aria-hidden', 'true')
+      bar.prepend(ink)
+      // 版面變了（轉向、側欄收起、字變大）：跟著換位置，不用滑
+      if (typeof ResizeObserver === 'function') new ResizeObserver(() => this._moveTabInk(true)).observe(bar)
+    }
+    const tab = bar.querySelector('.tab.active')
+    if (!tab?.offsetWidth) return
+    bar.classList.add('has-ink')
+    const to = { x: tab.offsetLeft, y: tab.offsetTop, w: tab.offsetWidth, h: tab.offsetHeight }
+    const from = this._inkAt
+    this._inkAt = to
+    const frame = (r) => ({ transform: `translate(${r.x}px, ${r.y}px)`, width: `${r.w}px`, height: `${r.h}px` })
+    Object.assign(ink.style, frame(to), { borderRadius: getComputedStyle(tab).borderRadius })
+    if (instant || !from || calmMotion() || (from.x === to.x && from.y === to.y && from.w === to.w)) return
+    // 往前的那一邊先到 85%，後面那一邊才走 20%：中間拉成一條，再收回來
+    const lerp = (a, b, k) => a + (b - a) * k
+    const mid = (a0, a1, b0, b1, fwd) => {
+      const lead = fwd ? [lerp(a0, b0, 0.2), lerp(a1, b1, 0.85)] : [lerp(a0, b0, 0.85), lerp(a1, b1, 0.2)]
+      return [Math.min(...lead), Math.max(...lead)]
+    }
+    const [l, r] = mid(from.x, from.x + from.w, to.x, to.x + to.w, to.x >= from.x)
+    const [t, b] = mid(from.y, from.y + from.h, to.y, to.y + to.h, to.y >= from.y)
+    ink.animate([frame(from), { ...frame({ x: l, y: t, w: r - l, h: b - t }), offset: 0.42 }, frame(to)], { duration: 440, easing: 'cubic-bezier(.3, .7, .3, 1)' })
+  }
+
+  // 換日期（前一天、後一天、點日曆）：任務和日程從那一邊滑進來，看得出是往前還是往後
+  _slideDay(date) {
+    const prev = this._shownDate
+    this._shownDate = date
+    if (!prev || prev === date || !['tasks', 'schedule'].includes(this.tab)) return
+    const body = $('.panel-body')
+    body.style.setProperty('--enter-x', `${date > prev ? 22 : -22}px`)
+    body.style.setProperty('--enter-y', '0px')
+    clearTimeout(this._dayT)
+    this._dayT = setTimeout(() => {
+      body.style.removeProperty('--enter-x')
+      body.style.removeProperty('--enter-y')
+    }, 700)
   }
 
   setTab(tab) {
@@ -829,6 +886,7 @@ export class UI {
     if (on) this.toggleShop(false)
     this._setFull(on)
     this._syncPanelInert()
+    this._moveTabInk(true)
     if (!on) {
       this.focus.toggleBig(false)
       $('#appChat').hidden = true

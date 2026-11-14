@@ -207,7 +207,7 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 22px; scrollbar-width: thin; scrollbar-color: rgba(120, 150, 190, .3) transparent; }
 .tab-page { display: none; animation: fadeUp .45s var(--ease); }
 .tab-page.active { display: block; }
-@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } }
+@keyframes fadeUp { from { opacity: 0; transform: translate(var(--enter-x, 0px), var(--enter-y, 8px)); } }
 /* 本身用 transform: translateX(-50%) 置中的（小視窗、商店、對話框）：用 translate 屬性往上浮，不蓋掉置中的 transform（用 fadeUp 會變成斜著滑進來） */
 @keyframes riseIn { from { opacity: 0; translate: 0 8px; } }
 @keyframes sinkOut { to { opacity: 0; translate: 0 6px; } }
@@ -1345,3 +1345,10 @@ body.in-room .hud, body.in-room .datebar, body.in-room .quests { opacity: 0; poi
   .shop-card { max-height: calc(100dvh - 130px); }
   .place-bar { top: 60px; left: var(--mid); }
 }
+
+/* App 模式的分頁列：選到的那一格墊的灰色膠囊是一塊會滑的底（ui.js 的 _moveTabInk），不是每一格自己的底色 */
+.tab-ink { display: none; }
+body.app-mode .tabs.has-ink .tab-ink { display: block; position: absolute; left: 0; top: 0; z-index: 0; background: var(--lg-sel); pointer-events: none; }
+body.app-mode .tabs.has-ink .tab.active { background: none; }
+body.app-mode .tabs.has-ink .tab { z-index: 1; }
+@media (min-width: 861px) { body.app-mode .panel.full .tabs { position: relative; } }
