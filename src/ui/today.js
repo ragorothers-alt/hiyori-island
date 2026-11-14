@@ -435,11 +435,11 @@ export class TodayView {
     const bar = (d, i) => {
       const cls = d.date === today ? ' now' : d.date > today ? ' later' : ''
       const what = d.n ? `做完 ${d.done}／${d.n} 件` : '沒有任務'
-      return `<li class="td-pw-d${cls}" title="週${WEEK_ZH[(i + 1) % 7]}：${what}"><i style="--h:${Math.round((d.n / max) * 100)}%"><b style="--f:${Math.round((d.done / max) * 100)}%"></b></i><span>${WEEK_ZH[(i + 1) % 7]}</span></li>`
+      return `<div class="td-pw-d${cls}" title="週${WEEK_ZH[(i + 1) % 7]}：${what}"><i style="--h:${Math.round((d.n / max) * 100)}%"><b style="--f:${Math.round((d.done / max) * 100)}%"></b></i><span>${WEEK_ZH[(i + 1) % 7]}</span></div>`
     }
     return `<div class="td-pw">
       <div class="td-pw-h"><span>這週做完 <b>${total}</b>${all ? `／${all}` : ''} 件</span><button type="button" class="td-link" data-act="report" data-fk="report">看週報 ›</button></div>
-      <ol class="td-pw-bars" role="img" aria-label="這週每天做完的任務：${days.map((d, i) => `週${WEEK_ZH[(i + 1) % 7]} ${d.done}／${d.n}`).join('、')}">${days.map(bar).join('')}</ol>
+      <div class="td-pw-bars" role="img" aria-label="這週每天做完的任務：${days.map((d, i) => `週${WEEK_ZH[(i + 1) % 7]} ${d.done}／${d.n}`).join('、')}">${days.map(bar).join('')}</div>
     </div>`
   }
 

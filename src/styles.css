@@ -300,7 +300,8 @@ body.night input[type=time], body.night input[type=date] { color-scheme: dark; }
 .item-meta { font-size: 11px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: 1px; align-items: center; }
 .item-meta > * { white-space: nowrap; }
 .pri { font-family: var(--font-num); letter-spacing: .1em; }
-.pri-3 { color: #e08aa2; }
+.pri-3 { color: #b84468; }
+body.night .pri-3 { color: #e08aa2; }
 .item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity .2s; }
 .item:hover .item-actions, .item:focus-within .item-actions { opacity: 1; }
 .mini { width: 26px; height: 26px; border-radius: 9px; display: grid; place-content: center; color: var(--ink-faint); transition: scale .2s var(--ease); }
@@ -424,7 +425,8 @@ body.night .proj-search input { color-scheme: dark; }
 .rec-nav:empty { display: none; }
 .rec-nav button { flex: none; padding: 6px 12px; border-radius: 12px; font-size: 12.5px; color: var(--ink-soft); background: rgba(140, 170, 200, .12); white-space: nowrap; transition: background .15s, color .15s; }
 .rec-nav button:hover { color: var(--ink); background: rgba(140, 170, 200, .24); }
-.rec-nav button.on { color: var(--tint, var(--ink)); background: var(--lg-sel, rgba(140, 170, 200, .3)); }
+.rec-nav button.on { color: #a8395d; background: var(--lg-sel, rgba(140, 170, 200, .3)); }
+body.night .rec-nav button.on { color: #ffb3c8; }
 .rec-nav button svg { width: 13px; height: 13px; margin: -2px 4px 0 -2px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .sec-title { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 18px 2px 8px; letter-spacing: .12em; display: flex; align-items: baseline; gap: 8px; }
 .sec-title small { font-size: 10.5px; color: var(--ink-deco); letter-spacing: .16em; }
@@ -488,7 +490,7 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .wk-badge { font-style: normal; font-size: 10px; padding: 0 5px; margin-right: 5px; border-radius: 6px; color: #fff; background: linear-gradient(135deg, #f3b37f, #ee9ab5); vertical-align: 1px; }
 
 .quest-mini { display: none; margin: -4px 0 12px; padding: 10px 12px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
-.quest-mini h4 { margin: 0 0 6px; font-family: var(--font-display); font-weight: 400; font-size: 13px; letter-spacing: .1em; }
+.quest-mini h3 { margin: 0 0 6px; font-family: var(--font-display); font-weight: 400; font-size: 13px; letter-spacing: .1em; }
 .quest-mini ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 
 /* ── Dock ── */
@@ -523,8 +525,8 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 /* 留得比較久的（有按鈕）：下面一條細線慢慢縮短；游標停著、手指按著時停住 */
 .toast.timed::after { content: ''; position: absolute; left: 16px; right: 16px; bottom: 4px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, #8cc6ea, #f2a8bf); opacity: .7; transform-origin: left center; animation: toastLife var(--life, 10s) linear forwards; }
 .toast.timed.held::after { animation-play-state: paused; opacity: .35; }
-/* 白天和夜晚換過去（App 模式，main.js 的 syncNight 用 View Transitions）：比預設的淡入淡出慢一點 */
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: .6s; animation-timing-function: ease-in-out; }
+/* 自己切換白天和夜晚時（App 模式，main.js 的 syncNight 用 View Transitions）：淡淡地換過去。轉場中整頁點不到東西，所以要短 */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .3s; animation-timing-function: ease-in-out; }
 @keyframes toastLife { from { transform: scaleX(var(--from, 1)); } to { transform: scaleX(0); } }
 .toast-act { margin-left: 4px; padding: 5px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 600; color: #2f3a4f; background: linear-gradient(135deg, #8cc6ea, #f2a8bf); white-space: nowrap; transition: scale .2s var(--ease); }
 .toast .stamp-k { width: 34px; height: 34px; font-size: 17px; }
@@ -533,6 +535,12 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .toast .t-icon { width: 30px; height: 30px; border-radius: 10px; display: grid; place-content: center; background: linear-gradient(135deg, #d6ecfa, #fde3eb); font-family: var(--font-display); color: #c0607c; }
 /* 第一次載入小島時的「準備中」：圖示輕輕呼吸，好了就收掉 */
 .toast.busy .t-icon { animation: busyPulse 1.2s ease-in-out infinite; }
+/* 還沒下載好的畫面（教練）：先放幾塊淡淡閃著的底，載好就整個換掉 */
+.lz-skel { display: grid; gap: 12px; padding: 4px 0; }
+.lz-skel i { display: block; height: 72px; border-radius: 18px; background: linear-gradient(100deg, var(--glass) 30%, var(--glass-strong) 50%, var(--glass) 70%); background-size: 300% 100%; animation: lzShimmer 1.4s ease-in-out infinite; }
+.lz-skel i:first-child { height: 132px; }
+.lz-skel i:last-child { width: 64%; height: 44px; }
+@keyframes lzShimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @keyframes busyPulse { 50% { opacity: .45; transform: scale(.9); } }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-14px) scale(.96); } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-10px) scale(.97); } }
@@ -766,7 +774,7 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .wk-m { font-family: var(--font-display); font-size: 11px; color: var(--mc); height: 14px; }
 
 /* ── 專注任務 ── */
-.focus-task { padding: 0; border-radius: 6px; text-align: left; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; cursor: pointer; }
+.focus-task { padding: 0; border-radius: 6px; text-align: left; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; cursor: pointer; min-height: 24px; line-height: 24px; }
 .focus-task:hover { color: var(--ink); }
 .focus-task.set { color: #d58a3f; }
 body.night .focus-task.set { color: #ffd38f; }
@@ -811,7 +819,7 @@ body.night .pomo { color: #ffd38f; }
 
 /* ── 專注長度：刻度尺 ── */
 /* 點時間：沒在計時時打開計時設定，計時中可以換目標 */
-.focus .focus-time { cursor: pointer; border-radius: 6px; padding: 0; display: block; text-align: left; }
+.focus .focus-time { cursor: pointer; border-radius: 6px; padding: 0; display: block; text-align: left; min-height: 24px; }
 .focus .focus-time:hover { color: #d58a3f; }
 body.night .focus .focus-time:hover { color: #ffd38f; }
 .focus-set { text-align: center; padding: 14px 14px 12px; overflow-y: auto; overscroll-behavior: contain; }
@@ -944,13 +952,12 @@ body.night .remind-row select { color-scheme: dark; }
 .item-meta .pri-3 { color: #e08aa2; }
 .item-meta .star { color: #d9b25a; font-size: 12px; transition: scale .2s var(--ease); }
 /* 按下去的手感（手指操作的裝置）：按著時縮一點點，放開彈回來。iPhone 要有 touchstart 的監聽 :active 才會出現（main.js）。
-   滑鼠不縮：縮了以後在按鈕邊緣按下、原地放開會落在按鈕外面，那一下就不算按到。寬的按鈕、一格挨一格的分頁列只縮裡面的字和圖示，按得到的範圍不變 */
+   滑鼠不縮：縮了以後在按鈕邊緣按下、原地放開會落在按鈕外面，那一下就不算按到（看的是這一下用什麼按，main.js 記在 html 的 data-input；
+   觸控為主的平板接了滑鼠也一樣）。寬的按鈕、一格挨一格的分頁列只縮裡面的字和圖示，按得到的範圍不變 */
 .tab > :is(.tab-ic, span) { transition: scale .2s var(--ease); }
-@media (hover: none) {
-  :is(.btn-ghost:not(.wide), .chip-toggle, .seg button, .tag-pick button, .toast-act, .mini, .item-meta .star):active:not(:disabled) { scale: .94; transition-duration: .08s; }
-  .tab:active > :is(.tab-ic, span) { scale: .9; transition-duration: .08s; }
-  .check:active { transform: scale(.86); }
-}
+:root[data-input="touch"] :is(.btn-ghost:not(.wide), .chip-toggle, .seg button, .tag-pick button, .toast-act, .mini, .item-meta .star):active:not(:disabled) { scale: .94; transition-duration: .08s; }
+:root[data-input="touch"] .tab:active > :is(.tab-ic, span) { scale: .9; transition-duration: .08s; }
+:root[data-input="touch"] .check:active { transform: scale(.86); }
 .item-meta .star.on { color: #c99632; font-weight: 500; }
 .item-meta .star:disabled { cursor: default; }
 .item.starred:not(.done) { box-shadow: inset 0 0 0 1.5px rgba(232, 190, 90, .55); }
@@ -1108,7 +1115,12 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
 @media (max-width: 860px) {
   body.app-mode .app-bar { height: 60px; padding: 0 16px; }
   body.app-mode .ab-hi b { font-size: 19px; }
-  body.app-mode .ab-hi small { font-size: 10.5px; }
+  body.app-mode .ab-hi small { display: block; font-size: 10.5px; }
+  /* 看別天時的「回到今天」：放在日期列左邊的同一列（掉到下面會被內容區蓋住、按不到）；問候那兩行讓出位置，太長就省略 */
+  body.app-mode .datebar .chip-btn { top: 50%; right: calc(100% + 8px); translate: 0 -50%; }
+  body.app-mode .ab-hi { min-width: 0; max-width: calc(100vw - 210px); }
+  body.app-mode:has(#todayBtn:not([hidden])) .ab-hi { max-width: calc(100vw - 292px); }
+  body.app-mode .ab-hi :is(b, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body.app-mode .datebar { top: 8px; }
   body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: transparent; backdrop-filter: none; }
   body.app-mode .panel::before { display: none; }
@@ -1362,6 +1374,8 @@ body.in-room .hud, body.in-room .datebar, body.in-room .quests { opacity: 0; poi
 
 /* App 模式的分頁列：選到的那一格墊的灰色膠囊是一塊會滑的底（ui.js 的 _moveTabInk），不是每一格自己的底色 */
 .tab-ink { display: none; }
+/* 分頁按鈕外面那一層 role="tablist"：不佔版面，分頁照舊是分頁列的格子 */
+.tab-list { display: contents; }
 body.app-mode .tabs.has-ink .tab-ink { display: block; position: absolute; left: 0; top: 0; z-index: 0; background: var(--lg-sel); pointer-events: none; }
 body.app-mode .tabs.has-ink .tab.active { background: none; }
 body.app-mode .tabs.has-ink .tab { z-index: 1; }

@@ -280,16 +280,44 @@ export class UI {
     const waiting = !!lz.want
     lz.want = { fn, tab: this.tab }
     if (waiting) return
+    // 下載超過一下下還沒好（網路慢、剛打開就點）：在提示卡的位置說一聲正在打開，不然按了像沒反應
+    let shown = false
+    const slow = setTimeout(() => {
+      shown = true
+      this._busy(1)
+    }, 350)
+    const done = () => {
+      clearTimeout(slow)
+      if (shown) this._busy(-1)
+    }
     lz.get().then((v) => {
+      done()
       const want = lz.want
       lz.want = null
       if (want && want.tab === this.tab) want.fn(v)
     }, (err) => {
+      done()
       lz.want = null
       console.warn('[hiyori] 畫面載入失敗', err)
       // 是部署了新版（main.js 會重新整理）就不叫人連網路
       if (!err?.updating) this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
     })
+  }
+  // 延後載入的畫面正在下載：一張「正在打開…」的提示卡（好幾個一起下載時共用一張，都好了才收）
+  _busy(d) {
+    this._busyN = Math.max(0, (this._busyN || 0) + d)
+    if (this._busyN && !this._busyEl) {
+      const el = (this._busyEl = document.createElement('div'))
+      el.className = 'toast busy'
+      el.setAttribute('role', 'status')
+      el.innerHTML = '<div class="t-icon">開</div><div><b>正在打開…</b><small>第一次打開要下載一下</small></div>'
+      $('#toasts').append(el)
+    } else if (!this._busyN && this._busyEl) {
+      const el = this._busyEl
+      this._busyEl = null
+      el.classList.add('out')
+      setTimeout(() => el.remove(), 500)
+    }
   }
   // 開場後閒下來時把月曆、教練、專案詳情先載好（一個一個來，不搶開場的資源）
   preloadViews() {
@@ -2769,9 +2797,11 @@ export class UI {
     this._recTargets = items.map(([, el]) => el)
     // 設定那格前面放一個小圖示：它是跳到最下面的捷徑，不是「現在在這裡」
     const gear = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>'
-    const html = items.map(([t], i) => `<button type="button" data-i="${i}"${t === '設定' ? ' class="set"' : ''}>${t === '設定' ? gear : ''}${esc(t)}</button>`).join('')
-    if (nav.innerHTML !== html) {
-      nav.innerHTML = html
+    // 段落有增減才重建（比對段落的名字，不比 HTML：亮起的那格會改 class）；沒變就留著原本的按鈕，焦點和左右捲的位置都不動
+    const key = items.map(([t]) => t).join('|')
+    if (key !== this._recKey || !nav.children.length) {
+      this._recKey = key
+      nav.innerHTML = items.map(([t], i) => `<button type="button" data-i="${i}"${t === '設定' ? ' class="set"' : ''}>${t === '設定' ? gear : ''}${esc(t)}</button>`).join('')
       this._recCur = null
     }
     this._spyRecNav()

@@ -121,6 +121,8 @@ body.night .ws-day.today b { color: #9fd0f3; }
 .blk.ghost { cursor: default; background: color-mix(in srgb, var(--gold) 10%, transparent); border: 1.5px dashed color-mix(in srgb, var(--gold) 75%, var(--c)); box-shadow: none; pointer-events: none; animation: fadeIn .4s both; }
 body.night .blk { background: color-mix(in srgb, var(--c) 26%, rgba(40, 52, 94, .9)); }
 body.night .blk.tk { background: rgba(40, 52, 94, .88); }
+/* 夜晚：區塊上的時間（10.5px）在帶顏色的底上要再亮一點 */
+body.night .blk-txt small { color: #dde4f0; }
 body.night .dl-hour span { background: transparent; }
 
 /* 作息設定 */

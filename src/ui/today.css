@@ -142,7 +142,7 @@ body.night .td-now time { background: rgba(241, 155, 178, .2); color: #ffb3c8; }
 .td-t.n3 { --n: #c3b2ec; }
 .td-n { flex: none; width: 28px; height: 28px; margin-left: 18px; border-radius: 50%; display: grid; place-content: center; font-family: var(--font-num); font-size: 14px; color: color-mix(in srgb, var(--n) 70%, #4a5470); background: color-mix(in srgb, var(--n) 22%, transparent); }
 .td-check { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 1.6px solid color-mix(in srgb, var(--ink-faint) 70%, transparent); display: grid; place-content: center; background: var(--glass-strong); transition: background .2s, border-color .2s, scale .2s var(--ease); }
-@media (hover: none) { .td-check:active { scale: .86; transition-duration: .08s; } }
+:root[data-input="touch"] .td-check:active { scale: .86; transition-duration: .08s; }
 .td-check svg { width: 14px; height: 14px; fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
 .td-check:hover { border-color: var(--n); }
 .td-t.done .td-check { background: var(--n); border-color: var(--n); }

@@ -22,12 +22,12 @@ body.night .cm-link { color: #cbbcff; }
 
 /* 問卷卡 */
 .ccard { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 16px 14px 14px; border-radius: 20px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow); margin-left: 43px; animation: fadeUp .4s var(--ease); }
-.cq h5 { margin: 0 0 9px; font-size: 14px; font-weight: 600; letter-spacing: .04em; }
-.cq h5 small { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--ink-faint); }
+.cq h3 { margin: 0 0 9px; font-size: 14px; font-weight: 600; letter-spacing: .04em; }
+.cq h3 small { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--ink-faint); }
 .cq .hint { margin: -4px 0 8px; font-size: 11.5px; color: var(--ink-faint); }
 .cq .cdays + .hint { margin: 7px 0 0; }
 .cq-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 10px; flex-wrap: wrap; }
-.cq-row h5 { margin: 0; white-space: nowrap; }
+.cq-row h3 { margin: 0; white-space: nowrap; }
 .cq .seg button { white-space: nowrap; }
 .cq-row + .cchips, .cq-row + .hint { margin-top: 9px; }
 .copts { display: grid; gap: 6px; }
@@ -39,6 +39,9 @@ body.night .cm-link { color: #cbbcff; }
 .cchips button { display: inline-flex; align-items: baseline; gap: 5px; padding: 6px 12px; border-radius: 999px; background: var(--field); font-size: 12.5px; color: var(--ink-soft); transition: background .2s, box-shadow .2s, color .2s; }
 .cchips button small { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-faint); }
 .cchips button.on { color: var(--ink); background: color-mix(in srgb, var(--c, var(--gold)) 26%, var(--field)); box-shadow: inset 0 0 0 1.5px var(--c, var(--gold)); }
+/* 選到的選項底色比較深：下面的小字也加深，才讀得清楚 */
+:is(.copts, .cchips, .cdays) button.on small { color: #4d596b; }
+body.night :is(.copts, .cchips, .cdays) button.on small { color: #dfe5ef; }
 .cchips button.add { background: transparent; border: 1px dashed rgba(120, 150, 190, .45); }
 .coach-other { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .coach-other input { flex: 1; min-width: 110px; border: 0; outline: 0; padding: 8px 11px; border-radius: 12px; background: var(--field); font-size: 13px; color: var(--ink); }
@@ -59,8 +62,8 @@ body.night .cm-link { color: #cbbcff; }
 .cp-sum b { font-family: var(--font-num); font-size: 22px; font-weight: 700; color: var(--ink); margin-right: 2px; }
 .cp-sum em { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; font-style: normal; color: #4aa17c; font-size: 12px; }
 .cp-sum em svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; }
-.cp-day h6 { margin: 0 0 5px; font-size: 12px; font-weight: 600; color: var(--ink-soft); display: flex; gap: 6px; align-items: center; }
-.cp-day h6 em { font-style: normal; font-size: 10.5px; font-weight: 500; color: #fff; background: var(--sakura); border-radius: 6px; padding: 0 5px; }
+.cp-day h4 { margin: 0 0 5px; font-size: 12px; font-weight: 600; color: var(--ink-soft); display: flex; gap: 6px; align-items: center; }
+.cp-day h4 em { font-style: normal; font-size: 10.5px; font-weight: 500; color: #fff; background: var(--sakura); border-radius: 6px; padding: 0 5px; }
 .cp-day ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .cp-day li { display: grid; grid-template-columns: 42px 8px 1fr auto; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 12px; background: var(--field); font-size: 13px; }
 .cp-day li time { font-family: var(--font-num); font-size: 12px; font-weight: 600; color: var(--ink-soft); }
@@ -74,8 +77,8 @@ body.night .cm-link { color: #cbbcff; }
 
 /* 最近的排程 */
 .coach-hist { padding: 12px 14px; border-radius: 18px; background: var(--glass-strong); border: 1px solid var(--glass-border); animation: fadeUp .3s var(--ease); }
-.coach-hist h5 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
-.coach-hist h5 small { margin-left: 6px; font-weight: 400; font-size: 11px; color: var(--ink-faint); }
+.coach-hist h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.coach-hist h3 small { margin-left: 6px; font-weight: 400; font-size: 11px; color: var(--ink-faint); }
 .coach-hist ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .coach-hist li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 12px; background: var(--field); }
 .coach-hist li b { display: block; font-size: 13px; font-weight: 500; }
@@ -107,7 +110,7 @@ body.night .cm-link { color: #cbbcff; }
 .dt-t b { font-size: 12.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dt-t small { font-family: var(--font-num); font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; }
 .dt-chip.soon { border-color: color-mix(in srgb, #e8899f 70%, transparent); background: color-mix(in srgb, #e8899f 14%, var(--glass-strong)); }
-.dt-chip.soon small { color: #d0607f; font-weight: 600; }
+.dt-chip.soon small { color: #ad3f61; font-weight: 600; }
 body.night .dt-chip.soon small { color: #ffb0c4; }
 .dt-del { width: 18px; height: 18px; flex: none; display: grid; place-content: center; border-radius: 50%; color: var(--ink-faint); opacity: 0; transition: opacity .2s; }
 .dt-chip:hover .dt-del, .dt-del:focus-visible, .dt-del.armed { opacity: 1; }
@@ -129,8 +132,8 @@ body.night .dt-chip.soon small { color: #ffb0c4; }
 
 /* ── 週報 ── */
 .wr-card { padding: 14px; border-radius: 20px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow); animation: fadeUp .4s var(--ease); }
-.wr-card h5 { margin: 0 0 10px; font-size: 14px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.wr-card h5 small { font-family: var(--font-num); font-size: 11px; font-weight: 400; color: var(--ink-faint); }
+.wr-card h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wr-card h3 small { font-family: var(--font-num); font-size: 11px; font-weight: 400; color: var(--ink-faint); }
 .wr-badge { margin-left: auto; font-style: normal; font-size: 11px; font-weight: 500; color: var(--ink-soft); background: var(--field); border-radius: 8px; padding: 2px 8px; }
 .wr-stats { display: grid; grid-template-columns: repeat(4, 1fr); border-radius: 16px; padding: 12px 4px; background: linear-gradient(110deg, color-mix(in srgb, #e9ef7a 26%, transparent), color-mix(in srgb, #f6c6d4 26%, transparent)); }
 .wr-stats div { display: flex; flex-direction: column; align-items: center; gap: 2px; }

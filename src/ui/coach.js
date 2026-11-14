@@ -493,7 +493,7 @@ export class CoachView {
       return `<li><div><b>${esc(p.title || 'ふじ排的計畫')}</b><small>${p.from ? span(p.from, p.to) : ''}・${p.count} 段${left < p.count ? `・做完 ${p.count - left} 段` : ''}</small></div>
         ${left ? `<button class="btn-ghost" data-act="undo" data-id="${esc(p.id)}">撤銷 ${left} 件</button>` : '<span class="ch-done">都做完了</span>'}</li>`
     })
-    return `<div class="coach-hist"><h5>最近的排程<small>撤銷只刪還沒完成的</small></h5>${rows.length ? `<ul>${rows.join('')}</ul>` : '<p class="hint">還沒有排過，從下面的問卷開始吧。</p>'}</div>`
+    return `<div class="coach-hist"><h3>最近的排程<small>撤銷只刪還沒完成的</small></h3>${rows.length ? `<ul>${rows.join('')}</ul>` : '<p class="hint">還沒有排過，從下面的問卷開始吧。</p>'}</div>`
   }
 
   _summary() {
@@ -555,12 +555,12 @@ export class CoachView {
       : ''
 
     return `<form class="ccard" data-r="ask">
-      <section class="cq"><h5>${sunday ? '這週只剩今天了' : '要排哪段？'}</h5>${sunday ? '<p class="hint">要排今天就好，還是從下週開始排一整週？</p>' : ''}<div class="copts" data-q="scope" role="group" aria-label="要排哪段">${scope}</div></section>
-      <section class="cq"><h5>想主攻哪些？<small>可多選</small></h5><div class="cchips" data-q="focus" role="group" aria-label="想主攻哪些（可多選）">${focus}<button type="button" data-act="other" class="add" aria-expanded="${!!this.otherOpen}">＋ 其他</button></div>${other}</section>
-      <section class="cq"><h5>什麼時候比較有空？<small>可多選・照你的作息換算</small></h5><div class="cchips" data-q="slots" role="group" aria-label="什麼時候比較有空（可多選）">${slots}</div></section>
-      <section class="cq"><div class="cq-row"><h5>最近有考試或截止日？</h5><button type="button" class="chip-toggle${a.exam ? ' on' : ''}" data-act="examToggle" aria-pressed="${!!a.exam}">${a.exam ? '有' : '沒有'}</button></div>${exam}</section>
-      <section class="cq"><h5>這週想做到幾天？</h5><div class="cdays" data-q="days" role="group" aria-label="這週想做到幾天">${DAYS.map((d) => `<button type="button" data-v="${d.v}" class="${a.days === d.v ? 'on' : ''}" aria-pressed="${a.days === d.v}"><b>${d.label}</b><small>${d.sub}</small></button>`).join('')}</div><p class="hint">做到一天＝那天排的都完成。</p></section>
-      <section class="cq"><div class="cq-row"><h5>每次多久？</h5><div class="seg" data-q="len" role="group" aria-label="每次多久">${LENS.map((v) => `<button type="button" data-v="${v}" class="${!a.total && a.len === v ? 'on' : ''}" aria-pressed="${!a.total && a.len === v}">${v} 分</button>`).join('')}</div></div>
+      <section class="cq"><h3>${sunday ? '這週只剩今天了' : '要排哪段？'}</h3>${sunday ? '<p class="hint">要排今天就好，還是從下週開始排一整週？</p>' : ''}<div class="copts" data-q="scope" role="group" aria-label="要排哪段">${scope}</div></section>
+      <section class="cq"><h3>想主攻哪些？<small>可多選</small></h3><div class="cchips" data-q="focus" role="group" aria-label="想主攻哪些（可多選）">${focus}<button type="button" data-act="other" class="add" aria-expanded="${!!this.otherOpen}">＋ 其他</button></div>${other}</section>
+      <section class="cq"><h3>什麼時候比較有空？<small>可多選・照你的作息換算</small></h3><div class="cchips" data-q="slots" role="group" aria-label="什麼時候比較有空（可多選）">${slots}</div></section>
+      <section class="cq"><div class="cq-row"><h3>最近有考試或截止日？</h3><button type="button" class="chip-toggle${a.exam ? ' on' : ''}" data-act="examToggle" aria-pressed="${!!a.exam}">${a.exam ? '有' : '沒有'}</button></div>${exam}</section>
+      <section class="cq"><h3>這週想做到幾天？</h3><div class="cdays" data-q="days" role="group" aria-label="這週想做到幾天">${DAYS.map((d) => `<button type="button" data-v="${d.v}" class="${a.days === d.v ? 'on' : ''}" aria-pressed="${a.days === d.v}"><b>${d.label}</b><small>${d.sub}</small></button>`).join('')}</div><p class="hint">做到一天＝那天排的都完成。</p></section>
+      <section class="cq"><div class="cq-row"><h3>每次多久？</h3><div class="seg" data-q="len" role="group" aria-label="每次多久">${LENS.map((v) => `<button type="button" data-v="${v}" class="${!a.total && a.len === v ? 'on' : ''}" aria-pressed="${!a.total && a.len === v}">${v} 分</button>`).join('')}</div></div>
         ${a.total ? `<p class="hint">照你說的總共 ${hours(a.total)}，切成差不多長的幾段 <button type="button" class="cm-link" data-act="clearTotal">改成每次固定長度</button></p>` : ''}</section>
       <div class="cq-send"><button class="btn-primary" type="submit"${this._ready() ? '' : ' disabled'}>送出回答</button>${this._ready() ? '' : '<small>至少選一個主攻項目和一個時段</small>'}</div>
     </form>`
@@ -572,7 +572,7 @@ export class CoachView {
     const count = r.days.reduce((n, d) => n + d.items.length, 0)
     const days = r.days
       .map(
-        (d) => `<div class="cp-day"><h6>${dayLabel(d.date)}${d.date === today ? '<em>今天</em>' : ''}</h6><ul>${d.items
+        (d) => `<div class="cp-day"><h4>${dayLabel(d.date)}${d.date === today ? '<em>今天</em>' : ''}</h4><ul>${d.items
           .map((it) => `<li style="--c:${tagOf(it.tag).color}"><time>${it.at}</time><i></i><span>${esc(it.title)}</span><small>${it.dur} 分</small></li>`)
           .join('')}</ul></div>`,
       )
@@ -613,7 +613,7 @@ export class CoachView {
     // 本週到目前
     const range = `${md(w.week)}–${md(w.end)}`
     parts.push(`<section class="wr-card wr-now">
-      <h5>本週到目前<small>${range}</small></h5>
+      <h3>本週到目前<small>${range}</small></h3>
       <div class="wr-stats">
         <div><b>${Math.round(w.rate * 100)}<small>%</small></b><span>完成率</span></div>
         <div><b>${fmtMin(w.focus)}</b><span>投入時數</span></div>
@@ -636,7 +636,7 @@ export class CoachView {
       ['習慣達成', w.habitRate == null ? '<small>—</small>' : `${Math.round(w.habitRate * 100)}<small>%</small>`, ''],
     ]
     parts.push(`<section class="wr-card">
-      <h5>本週表現分析<small>跟上週同一段比</small></h5>
+      <h3>本週表現分析<small>跟上週同一段比</small></h3>
       <div class="wr-perf">
         <div class="wr-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34"/><circle cx="40" cy="40" r="34" class="fg" style="stroke-dasharray:${C};stroke-dashoffset:${C * (1 - w.rate)}"/></svg><b>${pctNow}<small>%</small></b><span>總體完成度</span></div>
         <ul>${rows.map(([k, v, d]) => `<li><span>${k}</span><b>${v}</b>${d}</li>`).join('')}</ul>
@@ -650,7 +650,7 @@ export class CoachView {
     const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today })
     const guess = list.some((x) => x.guess)
     parts.push(`<section class="wr-card">
-      <h5>習慣洞察${guess ? '<em class="wr-badge">部分依作息推測</em>' : ''}</h5>
+      <h3>習慣洞察${guess ? '<em class="wr-badge">部分依作息推測</em>' : ''}</h3>
       <ul class="wr-ins">${list
         .map(
           (x) => `<li class="${x.guess ? 'guess' : ''}"><span class="wr-k">${x.kanji}</span><div><b>${esc(x.title)}</b><p>${esc(x.text)}</p>${
@@ -674,7 +674,7 @@ export class CoachView {
       })
       .join('')
     parts.push(`<section class="wr-card">
-      <h5>記憶圖鑑<small>像相簿一樣收藏每週的努力軌跡</small></h5>
+      <h3>記憶圖鑑<small>像相簿一樣收藏每週的努力軌跡</small></h3>
       <div class="wr-album">${cards}</div>
     </section>`)
     return parts.join('')
@@ -709,7 +709,7 @@ export class CoachView {
         ${tempo ? `<ul class="wr-pj-tp">${tempo}</ul>` : ''}${idle}</li>`
     }
     return `<section class="wr-card">
-      <h5>專案這週<small>投入、完成，和一路往前的數字</small></h5>
+      <h3>專案這週<small>投入、完成，和一路往前的數字</small></h3>
       <ul class="wr-pjs">${list.slice(0, 6).map(card).join('')}</ul>
     </section>`
   }
@@ -728,7 +728,7 @@ export class CoachView {
         <small class="wr-ai-at">${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')} 整理・<button type="button" class="cm-link" data-act="aiWeek">用現在的數字再看一次</button></small>`
     } else body = `<p class="wr-ai-p">讓ふじ讀讀這週的數字，說說做得好的地方，和下週可以試的小調整。</p><button type="button" class="btn-ghost" data-act="aiWeek">請ふじ看看這週</button>`
     const err = this.weekErr ? `<p class="wr-ai-err" role="alert">${esc(this.weekErr)}</p>` : ''
-    return `<section class="wr-card wr-ai"><h5>ふじ的週報洞察<em class="wr-badge">✦ Claude</em></h5>${body}${err}</section>`
+    return `<section class="wr-card wr-ai"><h3>ふじ的週報洞察<em class="wr-badge">✦ Claude</em></h3>${body}${err}</section>`
   }
   async _aiWeek() {
     if (this.weekBusy) return

@@ -182,7 +182,7 @@ async function boot() {
     // 省電和畫質只跟小島有關：小島建好時會照設定套上
     setPowerSave: (on) => scene?.setPowerSave(on),
     setQuality: (q) => scene?.setQuality(q),
-    setTheme: (t) => (scene ? scene.setTheme(t) : syncNight(lookNight())),
+    setTheme: (t) => (scene ? scene.setTheme(t) : syncNight(lookNight(), true)),
     // 現在幾點（網址帶 ?hour= 時用那個）
     hourNow: () => (scene ? scene.hour() : clockHour()),
     // 卡關提醒：nudge 是第一次看到卡關小卡（n：挪了幾次或逾期幾天），其他是按了哪個選項
@@ -312,7 +312,8 @@ async function boot() {
   // ── 夜晚切換深色玻璃 ──
   // 有小島時跟著天空的顏色走（小島每幀呼叫），還沒有就照時間和外觀設定算；回傳這次有沒有換
   let isNight = null
-  const syncNight = (night) => {
+  // fade：自己切換的（設定、Dock 的切換鈕）才淡淡地換過去
+  const syncNight = (night, fade = false) => {
     const on = isNight ? night > 0.45 : night > 0.55
     if (on === isNight) return false
     const first = isNight === null
@@ -322,8 +323,10 @@ async function boot() {
       document.querySelector('meta[name=theme-color]')?.setAttribute('content', on ? '#283667' : '#cfe8f6')
       ui.renderTheme()
     }
-    // App 模式看不到小島（小島的天空自己會慢慢變）：白天和夜晚之間整個畫面淡淡地換過去，不要一下子整片變色
-    if (!first && ui.appMode && document.visibilityState === 'visible' && document.startViewTransition && !calmMotion()) document.startViewTransition(flip)
+    // App 模式看不到小島（小島的天空自己會慢慢變）：自己切換白天和夜晚時，整個畫面淡淡地換過去，不要一下子整片變色。
+    // 轉場的那一下整頁點不到東西（View Transitions 的規定）：所以只在剛按了切換時用、而且很短；傍晚自動換的直接換，
+    // 不會在使用者正在按別的東西時突然吃掉一下
+    if (fade && !first && ui.appMode && document.visibilityState === 'visible' && document.startViewTransition && !calmMotion()) document.startViewTransition(flip)
     else flip()
     return true
   }
@@ -365,6 +368,9 @@ async function boot() {
   trackTaps()
   // iPhone 的 Safari：頁面上要有 touchstart 的監聽，手指按著按鈕時 :active 的樣子（縮一下）才會出來
   document.addEventListener('touchstart', () => {}, { passive: true })
+  // 這一下是手指還是滑鼠：按下去縮一下只給手指（styles.css 的 [data-input="touch"]）。
+  // 滑鼠按著時按鈕縮小，在邊緣按下、原地放開會落在按鈕外面，那一下就不算按到
+  addEventListener('pointerdown', (e) => (document.documentElement.dataset.input = e.pointerType), true)
   store.on('taskDone', (t) => {
     haptic(t.star ? 'star' : 'done')
     const c = tagOf(t.tag).color

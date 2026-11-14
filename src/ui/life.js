@@ -510,7 +510,7 @@ export class LifeView {
     const intro = st.n ? '' : '<small>早上醒來記一下昨晚幾點睡、幾點起，就能看到自己的節奏</small>'
     return `<div class="slp-grid4">${cells}</div>
       <div class="slp-reg">
-        <div class="slp-reg-h"><b>規律度</b><span class="slp-dots" aria-label="規律度 ${reg.lv} / 5">${dots}</span><span class="slp-reg-d">${detail}</span></div>
+        <div class="slp-reg-h"><b>規律度</b><span class="slp-dots" role="img" aria-label="規律度 ${reg.lv} / 5">${dots}</span><span class="slp-reg-d">${detail}</span></div>
         <p>${reg.say}</p>${extra}${intro}
       </div>`
   }

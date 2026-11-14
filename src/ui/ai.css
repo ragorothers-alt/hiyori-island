@@ -1,5 +1,5 @@
 /* 設定裡的「ふじ的 AI」：通行碼、模型、怎麼設定 Worker */
-.ai-tag { font-style: normal; font-family: var(--font-num); font-size: 10.5px; font-weight: 600; color: #8f78c9; background: color-mix(in srgb, #b9a7e6 18%, transparent); border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
+.ai-tag { font-style: normal; font-family: var(--font-num); font-size: 10.5px; font-weight: 600; color: #654fa3; background: color-mix(in srgb, #b9a7e6 18%, transparent); border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
 body.night .ai-tag { color: #cbbcff; }
 .ai-panel { display: flex; flex-direction: column; gap: 8px; }
 .ai-panel .ai-pass { letter-spacing: .04em; text-transform: none; }

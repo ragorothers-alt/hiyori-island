@@ -57,10 +57,10 @@
   <!-- ── App 模式的頂欄：問候和等級（日期列疊在它上面） ── -->
   <!-- App 模式寬螢幕：收起／展開側欄 -->
   <button class="icon-btn small side-btn" id="sideBtn" aria-controls="panel" aria-expanded="true" title="收起側欄"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/><path id="sideArrow" d="M15.5 10l-2 2 2 2"/></svg></button>
-  <div class="app-bar" id="appBar"><div class="ab-hi"><b id="abGreet">午安</b><small id="abSub"></small><div class="ab-xp" id="abXpBar"><i id="abXp"></i></div></div></div>
+  <div class="app-bar" id="appBar" role="banner"><div class="ab-hi"><b id="abGreet">午安</b><small id="abSub"></small><div class="ab-xp" id="abXpBar"><i id="abXp"></i></div></div></div>
 
   <!-- ── 上方中央：日期 ── -->
-  <div class="datebar glass">
+  <div class="datebar glass" role="navigation" aria-label="日期">
     <button class="icon-btn" id="prevDay" title="前一天" aria-label="前一天">
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
     </button>
@@ -77,7 +77,8 @@
 
   <!-- ── 右側：主面板 ── -->
   <aside class="panel glass" id="panel">
-    <nav class="tabs" role="tablist">
+    <nav class="tabs" aria-label="主要分頁">
+      <div class="tab-list" role="tablist" aria-label="分頁">
       <!-- 今日總覽：兩種模式都有；App 模式打開時先看這一頁 -->
       <button class="tab" data-tab="today" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></svg></i><span><i class="tab-pre">今日</i>總覽</span><small>まとめ</small></button>
       <button class="tab active" data-tab="tasks" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7.5l2 2 3.2-3.5"/><path d="M5 15.5l2 2 3.2-3.5"/><path d="M13.5 8h6M13.5 16h6"/></svg></i><span>任務</span><small>きょう</small><em class="tab-n" id="tnTasks" hidden></em></button>
@@ -86,6 +87,7 @@
       <button class="tab" data-tab="habits" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17 3.5l3 3-3 3"/><path d="M4 11.5V9.5a3 3 0 0 1 3-3h13"/><path d="M7 20.5l-3-3 3-3"/><path d="M20 12.5v2a3 3 0 0 1-3 3H4"/></svg></i><span>習慣</span><small>しゅうかん</small><em class="tab-n" id="tnHabits" hidden></em></button>
       <button class="tab" data-tab="projects" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></i><span>專案</span><small>しごと</small></button>
       <button class="tab" data-tab="records" role="tab"><i class="tab-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V4.5M19 20v-6.5"/></svg></i><span>紀錄</span><small>きろく</small></button>
+      </div>
       <button class="icon-btn small full-btn" id="fullBtn" title="全螢幕編輯 (E)" aria-pressed="false"></button>
     </nav>
     <!-- App 模式（電腦）：內容上方的頁名，日期列在它右邊 -->
@@ -126,7 +128,7 @@
         </div>
         <div class="star-bar" id="starBar" hidden></div>
 
-        <div class="quest-mini"><h4>今日のおつとめ</h4><ul id="questMini"></ul></div>
+        <div class="quest-mini"><h3>今日のおつとめ</h3><ul id="questMini"></ul></div>
         </div>
         <div class="pg-main">
         <div id="stuckBox"></div>
@@ -185,7 +187,7 @@
       </section>
       <!-- 教練：ふじ幫你排一天或一週 -->
       <section class="tab-page" data-page="coach">
-        <div id="coachRoot"></div>
+        <div id="coachRoot"><div class="lz-skel" role="status" aria-label="正在準備教練"><i></i><i></i><i></i></div></div>
       </section>
 
       <!-- 習慣 -->
@@ -351,7 +353,7 @@
     <div class="modal-card news-card glass">
       <div class="modal-kicker">あたらしいこと</div>
       <h3 class="news-title">這一版的新功能</h3>
-      <div class="news-list" id="newsList"></div>
+      <div class="news-list" id="newsList" tabindex="0" role="region" aria-label="更新紀錄"></div>
       <button class="btn-primary" id="newsClose">知道了</button>
     </div>
   </div>
@@ -441,7 +443,7 @@
     </div>
   </div>
   <!-- App 模式看不到小島：もち和ふじ說的話出現在這裡 -->
-  <div class="app-chat" id="appChat" hidden></div>
+  <div class="app-chat" id="appChat" role="region" aria-label="もち和ふじ說的話" hidden></div>
   <!-- App 模式的對話框一出現一消失，報讀軟體跟不上：同一句話放進一直都在的報讀區 -->
   <div class="sr-only" id="chatLive" role="status" aria-live="polite"></div>
 
