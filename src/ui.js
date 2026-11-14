@@ -934,9 +934,14 @@ export class UI {
     $('#abXp').style.width = `${(cur / need) * 100}%`
     $('#abXpBar').title = `${cur} / ${need} XP`
     // 電腦的側欄：今天還沒做完的任務、還沒打卡的習慣
+    // 數字變了輕輕跳一下（剛出現的從小長出來；第一次畫、變成 0 藏起來時不跳）
     const badge = (el, n) => {
+      const was = el.hidden ? 0 : +el.dataset.n || 0
       el.hidden = !n
       el.textContent = n > 99 ? '99+' : n
+      el.dataset.n = n
+      if (n && n !== was && el._drawn && !calmMotion()) el.animate([{ scale: was ? 1 : 0.4 }, { scale: 1.3 }, { scale: 1 }], { duration: 380, easing: 'cubic-bezier(.2, .8, .2, 1)' })
+      el._drawn = true
     }
     badge($('#tnTasks'), s.tasksOn(s.today).filter((t) => !t.done).length)
     badge($('#tnHabits'), s.habitsDueToday().filter((h) => !doneOn(h, s.today)).length)
@@ -2739,6 +2744,19 @@ export class UI {
         el.style.scrollMarginTop = `${nav.offsetHeight + 10}px`
         el.scrollIntoView({ behavior: scrollMode(), block: 'start' })
       })
+      // 捲動時亮起現在看的那一段
+      let raf = 0
+      nav.closest('.panel-body')?.addEventListener(
+        'scroll',
+        () => {
+          if (raf || this.tab !== 'records') return
+          raf = requestAnimationFrame(() => {
+            raf = 0
+            this._spyRecNav()
+          })
+        },
+        { passive: true },
+      )
     }
     const label = (h) => h.dataset.nav || [...h.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim()
     const heads = $$('h3.sec-title', page).filter((h) => !h.hidden && h.getClientRects().length)
@@ -2749,8 +2767,40 @@ export class UI {
     const set = items.findIndex(([t]) => t === '設定')
     if (set > 0) items.unshift(...items.splice(set, 1))
     this._recTargets = items.map(([, el]) => el)
-    const html = items.map(([t], i) => `<button type="button" data-i="${i}"${t === '設定' ? ' class="set"' : ''}>${esc(t)}</button>`).join('')
-    if (nav.innerHTML !== html) nav.innerHTML = html
+    // 設定那格前面放一個小圖示：它是跳到最下面的捷徑，不是「現在在這裡」
+    const gear = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>'
+    const html = items.map(([t], i) => `<button type="button" data-i="${i}"${t === '設定' ? ' class="set"' : ''}>${t === '設定' ? gear : ''}${esc(t)}</button>`).join('')
+    if (nav.innerHTML !== html) {
+      nav.innerHTML = html
+      this._recCur = null
+    }
+    this._spyRecNav()
+  }
+  // 現在看的是哪一段：照頁面上的位置找，標題已經捲到這一排下面的最後一段（捲到底就是最下面那段）。
+  // 亮起那一格，換了的話把它捲到這一排的中間
+  _spyRecNav() {
+    const nav = $('#recNav')
+    const els = this._recTargets || []
+    if (!els.length || !nav.getClientRects().length) return
+    const body = nav.closest('.panel-body')
+    const line = nav.getBoundingClientRect().bottom + 16
+    const end = body && body.scrollTop + body.clientHeight >= body.scrollHeight - 4
+    const tops = els.map((el) => el.getBoundingClientRect().top)
+    let cur = -1
+    tops.forEach((top, i) => {
+      if ((end || top <= line) && (cur < 0 || top > tops[cur])) cur = i
+    })
+    if (cur < 0) cur = tops.indexOf(Math.min(...tops))
+    const btns = $$('button[data-i]', nav)
+    btns.forEach((b, i) => {
+      b.classList.toggle('on', i === cur)
+      if (i === cur) b.setAttribute('aria-current', 'location')
+      else b.removeAttribute('aria-current')
+    })
+    if (cur === this._recCur) return
+    this._recCur = cur
+    const b = btns[cur]
+    if (b && nav.scrollWidth > nav.clientWidth) nav.scrollTo({ left: b.offsetLeft - (nav.clientWidth - b.offsetWidth) / 2, behavior: scrollMode() })
   }
 
   renderRecords() {

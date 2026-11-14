@@ -1230,6 +1230,63 @@ test('今日總覽的進度：做完幾件時百分比從原本的數字一路�
   expect(mid.after).toBe(mid.before)
   await expect(pct).toHaveText('75%')
 })
+test('手機的 App 模式：捲到最底時最後一張卡片在分頁列和番茄鐘膠囊上面；紀錄頁最上面那一排跟著捲動亮起現在那一段；分頁列上的件數變了會跳一下', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 393, height: 852 })
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+    for (let i = 1; i <= 14; i++) s.addTask({ title: `第 ${i} 件`, date: s.today })
+    window.hiyori.ui.setTab('tasks')
+  })
+  // 捲到最底：內容的最下緣在膠囊和分頁列上面
+  const gap = await page.evaluate(async () => {
+    const b = document.querySelector('.panel-body')
+    b.scrollTop = b.scrollHeight
+    await new Promise((r) => setTimeout(r, 400))
+    const bottom = Math.max(...[...b.querySelectorAll('.tab-page.active *')].filter((x) => x.getClientRects().length).map((x) => x.getBoundingClientRect().bottom))
+    return { bottom, tabs: document.querySelector('#panel .tabs').getBoundingClientRect().top, dock: document.querySelector('.dock').getBoundingClientRect().top }
+  })
+  expect(gap.bottom).toBeLessThanOrEqual(gap.tabs)
+  expect(gap.bottom).toBeLessThanOrEqual(gap.dock + 1)
+  // 教練的輸入列黏在膠囊上面一點（不會因為底下留了空間，就浮到畫面中間蓋住問卷）
+  await page.evaluate(() => window.hiyori.ui.setTab('coach'))
+  await expect(page.locator('.coach-say')).toBeVisible()
+  const say = await page.evaluate(() => ({ say: document.querySelector('.coach-say').getBoundingClientRect().bottom, dock: document.querySelector('.dock').getBoundingClientRect().top }))
+  expect(say.say).toBeLessThanOrEqual(say.dock)
+  expect(say.say).toBeGreaterThan(say.dock - 80)
+  await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+
+  // 分頁列「任務」上的件數：做完一件，數字變了輕輕跳一下
+  await expect(page.locator('#tnTasks')).toHaveText('14')
+  const popped = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.toggleTask(s.tasksOn(s.today)[0].id)
+    return new Promise((r) => queueMicrotask(() => setTimeout(() => r(document.getElementById('tnTasks').getAnimations().length), 0)))
+  })
+  await expect(page.locator('#tnTasks')).toHaveText('13')
+  expect(popped).toBeGreaterThan(0)
+
+  // 紀錄頁：最上面是第一段，捲到「睡眠」亮睡眠，捲到底亮設定（設定那格有個小圖示）
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  const on = page.locator('#recNav button.on')
+  await expect(on).toHaveCount(1)
+  await page.evaluate(() => {
+    const b = document.querySelector('.panel-body')
+    const h = [...document.querySelectorAll('[data-page="records"] h3.sec-title')].find((x) => x.textContent.includes('睡眠'))
+    b.scrollTop += h.getBoundingClientRect().top - 140
+  })
+  await expect(on).toHaveText('睡眠')
+  await expect(on).toHaveAttribute('aria-current', 'location')
+  await page.evaluate(() => {
+    const b = document.querySelector('.panel-body')
+    b.scrollTop = b.scrollHeight
+  })
+  await expect(on).toHaveText('設定')
+  await expect(page.locator('#recNav button.set svg')).toHaveCount(1)
+})
 test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出去放開，照樣接著倒數；停過的倒數細線從停住的地方接著縮', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)

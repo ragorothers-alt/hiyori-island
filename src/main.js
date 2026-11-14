@@ -12,7 +12,7 @@ import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
 import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf } from './theme.js'
-import { burst, floatText, petalRain, tapPoint, trackTaps } from './ui/motion.js'
+import { burst, floatText, petalRain, tapPoint, trackTaps, calmMotion } from './ui/motion.js'
 import { haptic } from './ui/haptics.js'
 import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
@@ -314,10 +314,16 @@ async function boot() {
   const syncNight = (night) => {
     const on = isNight ? night > 0.45 : night > 0.55
     if (on === isNight) return false
+    const first = isNight === null
     isNight = on
-    document.body.classList.toggle('night', on)
-    document.querySelector('meta[name=theme-color]')?.setAttribute('content', on ? '#283667' : '#cfe8f6')
-    ui.renderTheme()
+    const flip = () => {
+      document.body.classList.toggle('night', on)
+      document.querySelector('meta[name=theme-color]')?.setAttribute('content', on ? '#283667' : '#cfe8f6')
+      ui.renderTheme()
+    }
+    // App 模式看不到小島（小島的天空自己會慢慢變）：白天和夜晚之間整個畫面淡淡地換過去，不要一下子整片變色
+    if (!first && ui.appMode && document.visibilityState === 'visible' && document.startViewTransition && !calmMotion()) document.startViewTransition(flip)
+    else flip()
     return true
   }
   syncNight(lookNight())
