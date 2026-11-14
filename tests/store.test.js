@@ -2027,6 +2027,44 @@ describe('卡關提醒與設定', () => {
     expect(store.undoPostpone(null)).toBe(false)
   })
 
+  it('復原往後挪：之後在新的那天排了時段就不搬回去；原本那天的本命之間滿了、挪過去後拿掉的本命都不再當本命；挪的次數只扣這一次', () => {
+    const tomorrow = addDays(TODAY, 1)
+    // 挪過去之後在明天排了時段（自己排的，或別的裝置同步過來的）：不蓋掉
+    const a = store.addTask({ title: '寫報告', date: TODAY })
+    store.updateTask(a.id, { at: '09:30' })
+    const ua = store.postponeTask(a.id, tomorrow)
+    store.updateTask(a.id, { at: '11:00' })
+    expect(store.undoPostpone(ua)).toBe(false)
+    expect(a).toMatchObject({ date: tomorrow, at: '11:00' })
+
+    // 本命挪到還有空位的明天（還是本命），今天之間又選了別件：搬回來時今天已經有三件，這件就不再是本命
+    const [b, c, d, e] = ['一', '二', '三', '四'].map((title) => store.addTask({ title, date: TODAY }))
+    for (const x of [b, c, d]) store.toggleStar(x.id)
+    const ub = store.postponeTask(b.id, tomorrow)
+    expect(b.star).toBe(true)
+    store.toggleStar(e.id)
+    expect(store.undoPostpone(ub)).toBe(true)
+    expect(b).toMatchObject({ date: TODAY, star: false })
+    expect(store.starsOn(TODAY).length).toBe(3)
+
+    // 挪過去之後自己拿掉本命：復原時不放回去
+    const f = store.addTask({ title: '五', date: addDays(TODAY, 2) })
+    store.toggleStar(f.id)
+    const uf = store.postponeTask(f.id, addDays(TODAY, 3))
+    store.toggleStar(f.id)
+    expect(store.undoPostpone(uf)).toBe(true)
+    expect(f).toMatchObject({ date: addDays(TODAY, 2), star: false, moved: 0 })
+
+    // 之間又往後挪了一次再挪回來：只扣掉這一次加的
+    const g = store.addTask({ title: '六', date: TODAY })
+    const ug = store.postponeTask(g.id, tomorrow)
+    store.updateTask(g.id, { date: addDays(TODAY, 2) })
+    store.updateTask(g.id, { date: tomorrow })
+    expect(g.moved).toBe(2)
+    expect(store.undoPostpone(ug)).toBe(true)
+    expect(g).toMatchObject({ date: TODAY, moved: 1 })
+  })
+
   it('卡住的任務：挪了 2 次以上或逾期 3 天以上，例行公事和不再提醒的不算，挪最多的在前', () => {
     const a = store.addTask({ title: '挪兩次', date: TODAY })
     store.updateTask(a.id, { date: addDays(TODAY, 1) })

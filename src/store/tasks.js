@@ -190,24 +190,30 @@ export const tasksMethods = {
     if (moved) this._gatherTaskLogs(t)
     this._finish()
   },
-  // 往後挪到某一天（手機上往左滑「明天再做」）：回傳復原用的紀錄（null＝沒挪）
+  // 往後挪到某一天（手機上往左滑「明天再做」）：回傳復原用的紀錄（null＝沒挪）。
+  // after 記下挪完的樣子，復原時用來認出「之後又被改過」
   postponeTask(id, to) {
     const t = this._find('tasks', id)
     if (!t || t.done || !DATE_RE.test(to || '') || !(to > t.date)) return null
     const undo = { id, date: t.date, at: t.at ?? null, moved: t.moved || 0, star: !!t.star, to }
     this.updateTask(id, { date: to, at: null })
-    return t.date === to ? undo : null
+    if (t.date !== to) return null
+    undo.after = { at: t.at ?? null, moved: t.moved || 0, star: !!t.star }
+    return undo
   },
   // 復原剛才的往後挪：日期、時段、往後挪的次數（卡關提醒用）、本命都回到原本的樣子。
-  // 之後又被改過（已經不在挪過去的那天、做完了）就不動；本命那天已經滿了就不再當本命
+  // 之後又被改過就不動：已經不在挪過去的那天、做完了，或是在新的那天排了時段（自己排的、別的裝置同步過來的，
+  // 那是為新的那天排的，不要蓋掉）。挪的次數只扣掉這一次加的；本命挪過去之後被拿掉的不再放回去；
+  // 原本那天的本命已經滿了（之間另外選了別件）就不再當本命
   undoPostpone(u) {
-    const t = u && this._find('tasks', u.id)
-    if (!t || t.done || t.date !== u.to) return false
+    const t = u?.after && this._find('tasks', u.id)
+    if (!t || t.done || t.date !== u.to || (t.at ?? null) !== u.after.at) return false
     this._editedTask(t)
     t.date = u.date
     t.at = u.at
-    t.moved = u.moved
-    if (u.star && !t.star && !floating(t) && t.date >= this.today && this.starsOn(t.date).length < MAX_STARS) t.star = true
+    t.moved = Math.max(0, (t.moved || 0) - (u.after.moved - u.moved))
+    if (u.star && t.star === u.after.star && !floating(t) && t.date >= this.today) t.star = true
+    this._fitStar(t)
     this._editedTask(t)
     this._finish()
     return true

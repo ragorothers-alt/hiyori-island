@@ -998,6 +998,39 @@ test.describe('手機的觸控', () => {
     await swipe('讀一章小說', 170)
     await expect.poll(async () => (await task('讀一章小說')).done).toBe(true)
   })
+  test('提示卡：手指從按鈕上按下去、往下滑（瀏覽器拿去捲動）再放開，照樣接著倒數、時間到就收', async ({ page, context, site }) => {
+    await useAppMode(context)
+    await page.goto(site.url)
+    await bootReady(page)
+    await expect(page.locator('#toasts .toast')).toHaveCount(0, { timeout: 15000 })
+    await page.evaluate(() => {
+      window.__ptr = []
+      for (const t of ['pointerdown', 'pointerup', 'pointercancel']) document.addEventListener(t, (e) => window.__ptr.push(e.type), true)
+      window.hiyori.ui.toast({ icon: '試', title: '有按鈕的提示', ms: 2500, actions: [{ label: '好', run: () => (window.__ran = true) }] })
+    })
+    const card = page.locator('#toasts .toast', { hasText: '有按鈕的提示' })
+    const btn = card.locator('.toast-act')
+    const b = await btn.boundingBox()
+    const x = b.x + b.width / 2
+    const y = b.y + b.height / 2
+    // 開場畫面讓開、手指真的按得到按鈕
+    await expect.poll(() => page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.toast-act'), [x, y])).toBe(true)
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+    await expect(card).toHaveClass(/held/)
+    for (let i = 1; i <= 12; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + i * 18 }] })
+      await page.waitForTimeout(16)
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    const seen = await page.evaluate(() => window.__ptr)
+    expect(seen[0]).toBe('pointerdown')
+    expect(seen.some((t) => t === 'pointercancel' || t === 'pointerup')).toBe(true)
+    // 放開了：接著倒數，時間到就收；按鈕沒有被按到
+    await expect(card).not.toHaveClass(/held/)
+    await expect(card).toHaveCount(0, { timeout: 8000 })
+    expect(await page.evaluate(() => window.__ran)).toBeFalsy()
+  })
 })
 test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出來', async ({ page, context, site }) => {
   await useAppMode(context)

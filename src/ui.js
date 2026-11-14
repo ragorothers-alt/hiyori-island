@@ -1348,7 +1348,13 @@ export class UI {
       sub: t.title,
       ms: 5200,
       tag: 'swipe',
-      actions: [{ label: '復原', run: () => s.undoPostpone(undo) }],
+      actions: [
+        {
+          label: '復原',
+          // 挪過去之後又排了時段、做完了、換了日子：不搬回去，說一聲
+          run: () => s.undoPostpone(undo) || this.toast({ icon: '延', title: '這件挪過去之後又改過了', sub: '就留在現在的樣子', ms: 3400 }),
+        },
+      ],
     })
   }
 
@@ -3003,67 +3009,85 @@ export class UI {
       fast ? 160 : 380,
     )
   }
-  // 有按鈕的提示卡：游標停在上面、手指按著、鍵盤焦點在裡面時先不倒數（看清楚再按）；
-  // 手機上可以往左右滑掉
+  // 有按鈕的提示卡：游標停在上面、手指按著（按在按鈕上也算）、鍵盤焦點在裡面時先不倒數（看清楚再按），
+  // 這些都沒有了才接著倒數（剩下的至少 1.2 秒）。手機上可以往左右滑掉
   _holdToast(el, ms) {
     let left = ms
     let at = 0
-    const run = () => {
-      at = performance.now()
-      el._life = setTimeout(() => this._dropToast(el), left)
-      el.classList.remove('held')
+    // 現在為什麼停著：hover／touch／focus，空的就在倒數
+    const why = new Set()
+    const sync = () => {
+      if (!el.isConnected || el.classList.contains('out')) return
+      const held = el.classList.contains('held')
+      if (why.size && !held) {
+        clearTimeout(el._life)
+        left = Math.max(1200, left - (performance.now() - at))
+        el.classList.add('held')
+      } else if (!why.size && (held || !at)) {
+        at = performance.now()
+        el._life = setTimeout(() => this._dropToast(el), left)
+        el.classList.remove('held')
+      }
     }
-    const pause = () => {
-      if (el.classList.contains('held') || el.classList.contains('out')) return
-      clearTimeout(el._life)
-      left = Math.max(1200, left - (performance.now() - at))
-      el.classList.add('held')
+    const hold = (k, on) => {
+      if (on) why.add(k)
+      else why.delete(k)
+      sync()
     }
-    const resume = () => {
-      if (!el.classList.contains('held') || el.contains(document.activeElement) || el.matches(':hover')) return
-      run()
-    }
-    el.addEventListener('pointerenter', pause)
-    el.addEventListener('pointerleave', (e) => e.pointerType !== 'touch' && resume())
-    el.addEventListener('focusin', pause)
-    el.addEventListener('focusout', () => setTimeout(resume, 0))
-    // 手指往左右滑：跟著走，滑夠遠就收掉，不夠就彈回來
+    // 手機沒有「停在上面」：手指另外算（放開時 :hover 還會黏著，不能拿來判斷）
+    el.addEventListener('pointerenter', (e) => e.pointerType !== 'touch' && hold('hover', true))
+    el.addEventListener('pointerleave', (e) => e.pointerType !== 'touch' && hold('hover', false))
+    // 用鍵盤移進來的焦點才算：滑鼠點過按鈕留下的焦點不算（不然游標移開了也一直不收）
+    el.addEventListener('focusin', (e) => e.target.matches?.(':focus-visible') && hold('focus', true))
+    el.addEventListener('focusout', () => setTimeout(() => el.contains(document.activeElement) || hold('focus', false), 0))
+    // 手指：按著的時候不倒數，放開、或被瀏覽器拿去捲動（pointercancel）就接著倒數。
+    // 從字上（不是按鈕）開始往左右滑：跟著走，放開時滑夠遠就收掉，不夠就彈回來；被取消的不算滑掉。
+    // 放開的事件在 document 上接：手指滑出提示卡外、按下去的那個元素不見了，也收得到
+    const fingers = new Set()
     let drag = null
-    el.addEventListener('pointerdown', (e) => {
-      if (e.pointerType !== 'touch' || e.target.closest('button')) return
-      drag = { x: e.clientX, id: e.pointerId, dx: 0 }
-      pause()
-    })
-    el.addEventListener('pointermove', (e) => {
+    const move = (e) => {
       if (!drag || e.pointerId !== drag.id) return
       drag.dx = e.clientX - drag.x
       el.style.translate = `${drag.dx}px 0`
       el.style.opacity = String(1 - Math.min(0.8, Math.abs(drag.dx) / 260))
-    })
-    const release = (e) => {
-      if (!drag || e.pointerId !== drag.id) return
-      const { dx } = drag
-      drag = null
-      if (Math.abs(dx) > 70) {
-        el.style.transition = 'translate .2s ease-in, opacity .2s'
-        el.style.translate = `${Math.sign(dx) * innerWidth * 0.6}px 0`
-        el.style.opacity = '0'
-        clearTimeout(el._life)
-        el.classList.add('out')
-        setTimeout(() => el.remove(), 210)
-        return
-      }
-      el.style.transition = 'translate .25s cubic-bezier(.2, .8, .2, 1), opacity .25s'
-      el.style.translate = ''
-      el.style.opacity = ''
-      setTimeout(() => (el.style.transition = ''), 260)
-      // 手指離開：接著倒數
-      el.classList.add('held')
-      run()
     }
-    el.addEventListener('pointerup', release)
-    el.addEventListener('pointercancel', release)
-    run()
+    const end = (e) => {
+      if (!fingers.delete(e.pointerId)) return
+      if (drag?.id === e.pointerId) {
+        const { dx } = drag
+        drag = null
+        if (e.type === 'pointerup' && Math.abs(dx) > 70 && el.isConnected && !el.classList.contains('out')) {
+          el.style.transition = 'translate .2s ease-in, opacity .2s'
+          el.style.translate = `${Math.sign(dx) * innerWidth * 0.6}px 0`
+          el.style.opacity = '0'
+          clearTimeout(el._life)
+          el.classList.add('out')
+          setTimeout(() => el.remove(), 210)
+        } else if (dx) {
+          el.style.transition = 'translate .25s cubic-bezier(.2, .8, .2, 1), opacity .25s'
+          el.style.translate = ''
+          el.style.opacity = ''
+          setTimeout(() => (el.style.transition = ''), 260)
+        }
+      }
+      if (fingers.size) return
+      document.removeEventListener('pointermove', move, true)
+      document.removeEventListener('pointerup', end, true)
+      document.removeEventListener('pointercancel', end, true)
+      hold('touch', false)
+    }
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch') return
+      if (!fingers.size) {
+        document.addEventListener('pointermove', move, true)
+        document.addEventListener('pointerup', end, true)
+        document.addEventListener('pointercancel', end, true)
+      }
+      fingers.add(e.pointerId)
+      if (!drag && !e.target.closest('button')) drag = { id: e.pointerId, x: e.clientX, dx: 0 }
+      hold('touch', true)
+    })
+    sync()
   }
 
   // ── 通知 ──
