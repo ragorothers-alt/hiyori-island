@@ -665,6 +665,7 @@ export class UI {
   _slideDay(date) {
     const prev = this._shownDate
     this._shownDate = date
+    this._hideAdded()
     if (!prev || prev === date || !['tasks', 'schedule'].includes(this.tab)) return
     const body = $('.panel-body')
     body.style.setProperty('--enter-x', `${date > prev ? 22 : -22}px`)
@@ -677,6 +678,7 @@ export class UI {
   }
 
   setTab(tab) {
+    this._hideAdded?.()
     // 進到專案分頁：照最近動過的重新排一次
     if (tab === 'projects' && this.tab !== 'projects') {
       this._projRank = null
@@ -1209,11 +1211,14 @@ export class UI {
     $('#taskForm').addEventListener('submit', (e) => {
       e.preventDefault()
       const input = $('#taskTitle')
+      const before = new Set(this.store.state.tasks.map((t) => t.id))
       const r = this.quickAdd(input.value, { repeat: this._repeatValue('#taskRepeat'), project: this._taskProject() })
       if (!r) {
         input.focus()
         return
       }
+      // 重畫完（下一個 task）再找剛加的那件
+      setTimeout(() => this._showAdded(before), 0)
       r.toasts.forEach((t) => this.toast(t))
       $('#taskRepeat').value = 'none'
       $('#taskRepeat').classList.remove('on')
@@ -1367,6 +1372,64 @@ export class UI {
     }
     return { right, left }
   }
+  // 剛用上面的輸入框加的那件：看得到就亮一下；排在看不到的地方（清單很長、加到下面去了），輸入框下面浮一顆
+  // 「剛加的在下面」，點了捲過去再亮。不自動捲：還要接著打下一件，輸入框不能被捲走
+  _showAdded(before) {
+    this._hideAdded()
+    const li = $$('#taskList .item[data-id], #overdueBox .item[data-id]').find((el) => !before.has(el.dataset.id))
+    if (!li) return
+    const id = li.dataset.id
+    if (this._inView(li)) return this._glow(li)
+    const hint = $('#addedHint')
+    const title = li.querySelector('.item-title')?.textContent.trim() || ''
+    hint.innerHTML = `<span>剛加的「${esc(title)}」在下面</span><i aria-hidden="true">↓</i>`
+    hint.hidden = false
+    this._addedId = id
+    hint.onclick = () => {
+      this._hideAdded()
+      const el = $(`#taskList .item[data-id="${CSS.escape(id)}"], #overdueBox .item[data-id="${CSS.escape(id)}"]`)
+      if (!el) return
+      el.scrollIntoView({ block: 'center', behavior: scrollMode() })
+      setTimeout(() => this._glow(el), calmMotion() ? 0 : 380)
+    }
+    this._addedT = setTimeout(() => this._hideAdded(), 6000)
+    // 自己捲下去看到了：膠囊收起來，那件亮一下
+    if (!this._addedScroll) {
+      this._addedScroll = true
+      $('.panel-body').addEventListener(
+        'scroll',
+        () => {
+          if (!this._addedId) return
+          const el = $(`.item[data-id="${CSS.escape(this._addedId)}"]`)
+          if (!el || !this._inView(el)) return
+          this._hideAdded()
+          this._glow(el)
+        },
+        { passive: true },
+      )
+    }
+  }
+  _hideAdded() {
+    clearTimeout(this._addedT)
+    this._addedId = null
+    const hint = $('#addedHint')
+    if (hint) hint.hidden = true
+  }
+  // 這一列在面板裡看得到嗎（手機 App 模式下面被番茄鐘膠囊和分頁列蓋住的那段不算）
+  _inView(el) {
+    const body = el.closest('.panel-body')
+    if (!body || !el.getClientRects().length) return false
+    const r = el.getBoundingClientRect()
+    const v = body.getBoundingClientRect()
+    const dock = $('.dock')?.getBoundingClientRect()
+    const bottom = this.appMode && matchMedia('(max-width: 860px)').matches && dock?.height ? Math.min(v.bottom, dock.top) : v.bottom
+    return r.top >= v.top - 2 && r.bottom <= bottom + 2
+  }
+  _glow(el) {
+    if (calmMotion() || !el?.isConnected) return
+    el.animate([{ offset: 0, backgroundColor: 'rgba(241, 155, 178, .32)' }], { duration: 1600, easing: 'ease-out' })
+  }
+
   // 往後挪一天，說一聲，可以復原（復原回到原本的日子和時段）
   _postpone(id) {
     const s = this.store

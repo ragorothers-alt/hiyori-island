@@ -1335,6 +1335,47 @@ test('手機的 App 模式：捲到最底時最後一張卡片在分頁列和番
   await expect(chip).toBeHidden()
   expect(await page.evaluate(() => window.hiyori.store.selectedDate === window.hiyori.store.today)).toBe(true)
 })
+test('用上面的輸入框加任務：看得到的那件亮一下；排到看不到的地方時輸入框下面冒「剛加的在下面」，點了捲過去', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 393, height: 852 })
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+    for (const t of s.overdue()) s.deleteTask(t.id)
+    window.hiyori.ui.setTab('tasks')
+  })
+  await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').contains(document.elementFromPoint(200, 420))), { timeout: 30000 }).toBe(true)
+  const input = page.locator('#taskTitle')
+  const hint = page.locator('#addedHint')
+  // 清單還短：加了就看得到，那一列亮一下，不用膠囊
+  await input.fill('澆花')
+  await input.press('Enter')
+  const first = page.locator('#taskList .item', { hasText: '澆花' })
+  await expect(first).toBeVisible()
+  await expect.poll(() => first.evaluate((el) => el.getAnimations().some((a) => a.effect?.getKeyframes?.().some((k) => k.backgroundColor)))).toBe(true)
+  await expect(hint).toBeHidden()
+
+  // 清單很長、新的一件排到下面去了：輸入框還在原地（可以接著打），下面冒膠囊；點了捲過去
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    for (let i = 1; i <= 12; i++) s.addTask({ title: `重要的第 ${i} 件`, date: s.today, priority: 3 })
+    document.querySelector('.panel-body').scrollTop = 0
+  })
+  await input.fill('買花盆')
+  await input.press('Enter')
+  await expect(hint).toBeVisible()
+  await expect(hint).toContainText('買花盆')
+  await expect(input).toBeFocused()
+  await hint.click()
+  await expect(hint).toBeHidden()
+  await expect.poll(() => page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = s.tasksOn(s.today).find((x) => x.title === '買花盆')
+    return window.hiyori.ui._inView(document.querySelector(`#taskList .item[data-id="${t.id}"]`))
+  })).toBe(true)
+})
 test.describe('還沒下載好的畫面', () => {
   // Service Worker 接管頁面後會直接從快取給程式，繞過下面的閘門：這個測試不開
   test.use({ serviceWorkers: 'block' })

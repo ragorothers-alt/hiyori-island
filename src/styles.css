@@ -231,6 +231,12 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 }
 .add-form textarea { border-top: 1px dashed var(--line); padding-top: 8px; font-size: 13px; line-height: 1.6; }
 .add-form ::placeholder { color: var(--ink-faint); }
+/* 剛加的那件排在看不到的地方：輸入框下面浮一顆小膠囊，點了捲過去（ui.js 的 _showAdded） */
+#taskForm { position: relative; }
+.added-hint { position: absolute; right: 12px; top: calc(100% + 6px); z-index: 4; display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 24px); padding: 6px 12px; border-radius: 14px; font-size: 12px; color: #2f3a4f; background: linear-gradient(135deg, #8cc6ea, #f2a8bf); box-shadow: 0 4px 14px rgba(240, 160, 190, .35); animation: riseIn .3s var(--ease); }
+.added-hint[hidden] { display: none; }
+.added-hint span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.added-hint i { font-style: normal; }
 .form-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .form-row.end { justify-content: flex-end; }
 .seg { display: flex; background: rgba(140, 170, 200, .14); border-radius: 11px; padding: 2px; }
