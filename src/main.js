@@ -338,10 +338,11 @@ async function boot() {
   }
   syncNight(lookNight())
   // 小島推過來的天色（每一幀；App 模式蓋住小島時每半秒）。App 模式剛自己切換過、天空還在快轉時先不跟：
-  // 天空要轉一兩秒才到另一邊，跟著它的話畫面會先被拉回原本那一邊、過一下又換過去
+  // 天空要轉一兩秒才到另一邊，跟著它的話畫面會先被拉回原本那一邊、過一下又換過去。
+  // 快轉途中回到小島模式就不再攔：看得到天空了，玻璃照天空現在的顏色走
   let skyLag = false
   const skySync = (night) => {
-    if (skyLag && scene?.skyShifting) return false
+    if (skyLag && ui.appMode && scene?.skyShifting) return false
     skyLag = false
     return syncNight(night)
   }

@@ -304,13 +304,18 @@ export class TodayView {
       a.currentTime = t - tw.t0
     }
     const fg = ring?.querySelector('.fg')
-    const rt = (this._ringTw ||= {})
+    const rt = this._ringTw
     const from = live ? live.pct : 0
-    if (fg && rt.to === now.pct && t - rt.t0 < rt.opt.duration) replay(fg, rt)
-    else if (fg && from != null && Math.abs(from - now.pct) > 0.3) {
-      const C = 2 * Math.PI * 52
-      Object.assign(rt, { to: now.pct, t0: t, kf: [{ strokeDashoffset: C * (1 - from / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], opt: { duration: 900, easing: EASE } })
-      fg.animate(rt.kf, rt.opt)
+    if (fg && rt?.to === now.pct && t - rt.t0 < rt.opt.duration) replay(fg, rt)
+    else {
+      // 目標變了（或上一段早就播完）：舊的時間軸不再算數，這次差太少不用動也要清掉
+      // （不然目標又改回原本的值時，會接到舊動畫的半途、一下子跳過去）
+      this._ringTw = null
+      if (fg && from != null && Math.abs(from - now.pct) > 0.3) {
+        const C = 2 * Math.PI * 52
+        this._ringTw = { to: now.pct, t0: t, kf: [{ strokeDashoffset: C * (1 - from / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], opt: { duration: 900, easing: EASE } }
+        fg.animate(this._ringTw.kf, this._ringTw.opt)
+      }
     }
     if (prev) {
       for (const [k, cls] of [['done', 'c-done'], ['going', 'c-going'], ['left', 'c-left']]) {
@@ -323,6 +328,7 @@ export class TodayView {
       const to = now.week?.[i] ?? 0
       const tw = bt[i]
       if (tw && tw.to === to && t - tw.t0 < tw.opt.duration + tw.opt.delay) return replay(b, tw)
+      bt[i] = null
       const was = live ? live.bars[i] : 0
       if (was == null || Math.abs(was - to) < 0.5) return
       bt[i] = { to, t0: t, kf: [{ height: `${was}%` }, { height: `${to}%` }], opt: { duration: 700, delay: live ? 0 : 120 + i * 45, easing: EASE, fill: 'backwards' } }

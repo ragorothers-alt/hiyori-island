@@ -87,6 +87,17 @@ describe('數字從原本的走到新的（countUp）', () => {
     expect(b.innerHTML).toBe('75%')
   })
 
+  it('走到一半系統改成減少動態效果：重畫時直接放結果，不再接著走', () => {
+    const state = {}
+    countUp(el(), 0, 100, { dur: 900, state })
+    frame(300)
+    calm = true
+    const b = el()
+    countUp(b, 100, 100, { dur: 900, state })
+    expect(b.innerHTML).toBe('100')
+    expect(cbs.size).toBe(0)
+  })
+
   it('數字沒變、還沒有上一次的數字、減少動態效果：直接放結果', () => {
     const a = el()
     countUp(a, 40, 40)

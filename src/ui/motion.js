@@ -106,8 +106,9 @@ export function countUp(el, from, to, { dur = 700, fmt = String, state = el } = 
     state._v = n
     state._el.innerHTML = state._fmt(n)
   }
-  // 正在走、目標沒變（只是又重畫了一次）：照原本的時間走完，不重新計時（一直重畫的話永遠走不完）
-  if (state._count && state._to === to) return put(state._v)
+  // 正在走、目標沒變（只是又重畫了一次）：照原本的時間走完，不重新計時（一直重畫的話永遠走不完）。
+  // 走到一半系統改成減少動態效果的話不接著走：往下停掉、直接放結果
+  if (state._count && state._to === to && !calmMotion()) return put(state._v)
   const start = state._count ? state._v : from
   cancelAnimationFrame(state._count)
   state._count = 0
