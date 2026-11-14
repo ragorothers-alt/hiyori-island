@@ -513,9 +513,14 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
   background: var(--lg-bg-strong); backdrop-filter: var(--lg-filter); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
   animation: toastIn .5s var(--ease) both;
 }
-.toast.out { animation: toastOut .45s var(--ease) forwards; }
-/* 有按鈕的 toast 要按得到（外框是 pointer-events: none） */
-.toast.has-act { pointer-events: auto; }
+.toast { position: relative; }
+.toast.out { animation: toastOut .45s var(--ease) forwards; pointer-events: none !important; }
+/* 有按鈕的 toast 要按得到（外框是 pointer-events: none）；手機上可以左右滑掉 */
+.toast.has-act { pointer-events: auto; touch-action: pan-y; }
+/* 留得比較久的（有按鈕）：下面一條細線慢慢縮短；游標停著、手指按著時停住 */
+.toast.timed::after { content: ''; position: absolute; left: 16px; right: 16px; bottom: 4px; height: 2px; border-radius: 2px; background: linear-gradient(90deg, #8cc6ea, #f2a8bf); opacity: .7; transform-origin: left center; animation: toastLife var(--life, 10s) linear forwards; }
+.toast.timed.held::after { animation-play-state: paused; opacity: .35; }
+@keyframes toastLife { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .toast-act { margin-left: 4px; padding: 5px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 600; color: #2f3a4f; background: linear-gradient(135deg, #8cc6ea, #f2a8bf); white-space: nowrap; }
 .toast .stamp-k { width: 34px; height: 34px; font-size: 17px; }
 .toast b { font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: .06em; display: block; }

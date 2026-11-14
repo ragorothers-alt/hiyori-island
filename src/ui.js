@@ -1,7 +1,7 @@
 import { FocusTimer } from './ui/focus.js'
 import { BriefView } from './ui/brief.js'
 import { CaptureView } from './ui/capture.js'
-import { flipItems, noteTap } from './ui/motion.js'
+import { flipItems, noteTap, calmMotion } from './ui/motion.js'
 import { bindSwipe } from './ui/swipe.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
@@ -2912,7 +2912,89 @@ export class UI {
 
   // 收掉某一類的提示卡
   dropToasts(tag) {
-    for (const el of $$('#toasts .toast')) if (el.dataset.tag === tag) el.remove()
+    for (const el of $$('#toasts .toast')) if (el.dataset.tag === tag) this._dropToast(el, true)
+  }
+  // 收一張提示卡：先淡出，再把高度收起來（後面的提示卡慢慢靠上去，不會一下子跳上去）
+  _dropToast(el, fast = false) {
+    if (!el?.isConnected || el.classList.contains('out')) return
+    clearTimeout(el._life)
+    el.classList.add('out')
+    const done = () => el.remove()
+    if (calmMotion()) return done()
+    setTimeout(
+      () => {
+        if (!el.isConnected) return
+        el.style.overflow = 'hidden'
+        el.animate([{ height: `${el.offsetHeight}px` }, { height: '0px', marginBottom: '-8px', paddingTop: '0px', paddingBottom: '0px', borderWidth: '0px' }], {
+          duration: 200,
+          easing: 'ease-in-out',
+          fill: 'forwards',
+        }).finished.then(done, done)
+      },
+      fast ? 160 : 380,
+    )
+  }
+  // 有按鈕的提示卡：游標停在上面、手指按著、鍵盤焦點在裡面時先不倒數（看清楚再按）；
+  // 手機上可以往左右滑掉
+  _holdToast(el, ms) {
+    let left = ms
+    let at = 0
+    const run = () => {
+      at = performance.now()
+      el._life = setTimeout(() => this._dropToast(el), left)
+      el.classList.remove('held')
+    }
+    const pause = () => {
+      if (el.classList.contains('held') || el.classList.contains('out')) return
+      clearTimeout(el._life)
+      left = Math.max(1200, left - (performance.now() - at))
+      el.classList.add('held')
+    }
+    const resume = () => {
+      if (!el.classList.contains('held') || el.contains(document.activeElement) || el.matches(':hover')) return
+      run()
+    }
+    el.addEventListener('pointerenter', pause)
+    el.addEventListener('pointerleave', (e) => e.pointerType !== 'touch' && resume())
+    el.addEventListener('focusin', pause)
+    el.addEventListener('focusout', () => setTimeout(resume, 0))
+    // 手指往左右滑：跟著走，滑夠遠就收掉，不夠就彈回來
+    let drag = null
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || e.target.closest('button')) return
+      drag = { x: e.clientX, id: e.pointerId, dx: 0 }
+      pause()
+    })
+    el.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return
+      drag.dx = e.clientX - drag.x
+      el.style.translate = `${drag.dx}px 0`
+      el.style.opacity = String(1 - Math.min(0.8, Math.abs(drag.dx) / 260))
+    })
+    const release = (e) => {
+      if (!drag || e.pointerId !== drag.id) return
+      const { dx } = drag
+      drag = null
+      if (Math.abs(dx) > 70) {
+        el.style.transition = 'translate .2s ease-in, opacity .2s'
+        el.style.translate = `${Math.sign(dx) * innerWidth * 0.6}px 0`
+        el.style.opacity = '0'
+        clearTimeout(el._life)
+        el.classList.add('out')
+        setTimeout(() => el.remove(), 210)
+        return
+      }
+      el.style.transition = 'translate .25s cubic-bezier(.2, .8, .2, 1), opacity .25s'
+      el.style.translate = ''
+      el.style.opacity = ''
+      setTimeout(() => (el.style.transition = ''), 260)
+      // 手指離開：接著倒數
+      el.classList.add('held')
+      run()
+    }
+    el.addEventListener('pointerup', release)
+    el.addEventListener('pointercancel', release)
+    run()
   }
 
   // ── 通知 ──
@@ -2920,7 +3002,9 @@ export class UI {
   // actions：好幾顆按鈕 [{ label, run, soft }]（排在下面一列；soft 是次要的樣子）。按了就把這張收掉
   // tag：同一類的提示只留最新的一張（番茄鐘的：上一張的按鈕在狀態變了以後就不能按了）
   toast({ icon = '花', title, sub = '', stamp = false, ms = 3400, action = null, actions = null, tag = '' }) {
-    if (tag) this.dropToasts(tag)
+    // 同一類的上一張：新的直接換在它的位置上（不會先空一格再從最下面冒出來）
+    const old = tag ? $$('#toasts .toast:not(.out)').find((x) => x.dataset.tag === tag) : null
+    if (tag) for (const x of $$('#toasts .toast')) if (x.dataset.tag === tag && x !== old) x.remove()
     const el = document.createElement('div')
     el.className = 'toast'
     if (tag) el.dataset.tag = tag
@@ -2960,11 +3044,21 @@ export class UI {
       const mid = innerWidth / 2
       if (r.top < top + 64 && r.bottom > top && r.left < mid + 170 && r.right > mid - 170) box.style.top = `${Math.round(r.bottom + 8)}px`
     }
-    box.append(el)
-    setTimeout(() => {
-      el.classList.add('out')
-      setTimeout(() => el.remove(), 500)
-    }, ms)
+    if (old?.isConnected) {
+      clearTimeout(old._life)
+      old.replaceWith(el)
+    } else box.append(el)
+    // 同時最多三張：一口氣來很多（升級、成就、新的花、每日任務…）時從最舊的開始收，不要疊滿半個畫面
+    const shown = $$('#toasts .toast:not(.out):not(.busy)')
+    for (const x of shown.slice(0, Math.max(0, shown.length - 3))) this._dropToast(x, true)
+    if (el.classList.contains('has-act')) {
+      // 有按鈕、留得比較久的：下面一條細線慢慢縮短，看得出還剩多久
+      if (ms >= 6000) {
+        el.classList.add('timed')
+        el.style.setProperty('--life', `${ms}ms`)
+      }
+      this._holdToast(el, ms)
+    } else el._life = setTimeout(() => this._dropToast(el), ms)
   }
 
   // 畫面上有沒有打到一半的字（自動換新版、重新整理之前檢查）。

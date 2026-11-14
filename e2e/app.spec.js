@@ -962,3 +962,31 @@ test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出�
   await page.waitForTimeout(600)
   await expect(page.locator('.mo-float')).toHaveCount(0)
 })
+test('提示卡：同時最多三張，多的從最舊的收；有按鈕的游標停著時不收，離開後接著倒數', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await expect(page.locator('#toasts .toast')).toHaveCount(0, { timeout: 15000 })
+  // 都留得夠久：測試的機器很忙時，檢查到之前不會自己先到時間
+  await page.evaluate(() => {
+    const ui = window.hiyori.ui
+    ui.toast({ icon: '一', title: '第一張', ms: 30000 })
+    ui.toast({ icon: '二', title: '第二張', ms: 6000, actions: [{ label: '好', run: () => {} }] })
+    // 游標一放上去就停住（直接發事件：不用等滑鼠移過去）
+    document.querySelector('#toasts .toast.has-act').dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }))
+    ui.toast({ icon: '三', title: '第三張', ms: 30000 })
+    ui.toast({ icon: '四', title: '第四張', ms: 30000 })
+  })
+  await expect(page.locator('#toasts .toast:not(.out)')).toHaveCount(3)
+  await expect(page.locator('#toasts .toast', { hasText: '第一張' })).toHaveCount(0)
+  // 留得久的有一條倒數的細線；停住的時候不收
+  const second = page.locator('#toasts .toast', { hasText: '第二張' })
+  await expect(second).toHaveClass(/timed/)
+  await expect(second).toHaveClass(/held/)
+  await page.waitForTimeout(7000)
+  await expect(second).toBeVisible()
+  // 游標離開：接著倒數，時間到就收
+  await second.evaluate((el) => el.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' })))
+  await expect(second).not.toHaveClass(/held/)
+  await expect(second).toHaveCount(0, { timeout: 10000 })
+})
