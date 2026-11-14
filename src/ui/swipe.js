@@ -60,17 +60,23 @@ export function bindSwipe(box, actions) {
     li.style.setProperty('--sx', '0px')
     back.finished.then(() => reset(li), () => reset(li))
   }
+  // 這一列在滑的時候被重畫掉了（同步、別的分頁、計時器）：之後的移動和放開不會再到這個列表，
+  // 所以放開、取消都在 document 上接；新的一次按下時，舊的手勢如果還掛著也先丟掉
+  const gone = () => s && !s.li.isConnected
   box.addEventListener('pointerdown', (e) => {
+    // 新的一下：上一次滑動補的 click 不會再來了，不要把這一下的點擊也吃掉
+    quietUntil = 0
+    if (gone()) s = null
     if (e.pointerType !== 'touch' || s || !e.isPrimary) return
     const li = e.target.closest('.item[data-id]')
     if (!li || !box.contains(li) || e.target.closest('input, textarea, select, .subs, .inline-input, [contenteditable="true"]')) return
     s = { li, id: li.dataset.id, x0: e.clientX, y0: e.clientY, pid: e.pointerId, x: 0, on: false, armed: false }
   })
-  box.addEventListener(
+  document.addEventListener(
     'pointermove',
     (e) => {
       if (!s || e.pointerId !== s.pid) return
-      if (!s.li.isConnected) return (s = null)
+      if (gone()) return (s = null)
       const dx = e.clientX - s.x0
       const dy = e.clientY - s.y0
       if (!s.on) {
@@ -98,16 +104,17 @@ export function bindSwipe(box, actions) {
     },
     { passive: false },
   )
-  box.addEventListener('pointerup', (e) => s?.pid === e.pointerId && end(true))
-  box.addEventListener('pointercancel', (e) => s?.pid === e.pointerId && end(false))
+  document.addEventListener('pointerup', (e) => s?.pid === e.pointerId && end(!gone()))
+  document.addEventListener('pointercancel', (e) => s?.pid === e.pointerId && end(false))
   // 手指按下時瀏覽器會自動把它抓在按到的那個字上；改抓到整列時，字那邊也會收到「失去抓取」：那不算中斷，
-  // 只有整列自己被拿走抓取（例如這一列在滑的時候被重畫掉）才算
-  box.addEventListener('lostpointercapture', (e) => s?.pid === e.pointerId && s.on && e.target === s.li && end(false))
-  // 滑完放開時瀏覽器可能還會補一個 click（點到勾、刪除）：滑過的這一下不算點
+  // 只有整列自己被拿走抓取才算（被重畫掉的那種，事件會跑到 document 上，target 不是這一列）
+  document.addEventListener('lostpointercapture', (e) => s?.pid === e.pointerId && s.on && (e.target === s.li || gone()) && end(false))
+  // 滑完放開時瀏覽器可能還會補一個 click（點到勾、刪除）：只吃掉這一次滑動補的那一個（新的一下按下去就不吃）
   box.addEventListener(
     'click',
     (e) => {
       if (performance.now() < quietUntil) {
+        quietUntil = 0
         e.stopPropagation()
         e.preventDefault()
       }

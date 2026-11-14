@@ -190,6 +190,28 @@ export const tasksMethods = {
     if (moved) this._gatherTaskLogs(t)
     this._finish()
   },
+  // 往後挪到某一天（手機上往左滑「明天再做」）：回傳復原用的紀錄（null＝沒挪）
+  postponeTask(id, to) {
+    const t = this._find('tasks', id)
+    if (!t || t.done || !DATE_RE.test(to || '') || !(to > t.date)) return null
+    const undo = { id, date: t.date, at: t.at ?? null, moved: t.moved || 0, star: !!t.star, to }
+    this.updateTask(id, { date: to, at: null })
+    return t.date === to ? undo : null
+  },
+  // 復原剛才的往後挪：日期、時段、往後挪的次數（卡關提醒用）、本命都回到原本的樣子。
+  // 之後又被改過（已經不在挪過去的那天、做完了）就不動；本命那天已經滿了就不再當本命
+  undoPostpone(u) {
+    const t = u && this._find('tasks', u.id)
+    if (!t || t.done || t.date !== u.to) return false
+    this._editedTask(t)
+    t.date = u.date
+    t.at = u.at
+    t.moved = u.moved
+    if (u.star && !t.star && !floating(t) && t.date >= this.today && this.starsOn(t.date).length < MAX_STARS) t.star = true
+    this._editedTask(t)
+    this._finish()
+    return true
+  },
   // 任務歸到（另一個）專案：在任務頁寫的紀錄跟著搬過去。只是移出專案時紀錄留在原本的專案，當成那個專案的進度
   // （之後放回來也還認得）。搬過去的紀錄不再指著原本專案的里程碑
   _gatherTaskLogs(t) {

@@ -873,6 +873,22 @@ test('手機往下捲時，右下角的番茄鐘膠囊讓開；往上捲一點�
   await expect(dock).toHaveCSS('opacity', '1')
   await page.mouse.wheel(0, 500)
   await expect(body).toHaveClass(/dock-tuck/)
+  // 鍵盤 Tab 進去：先回來，不讓焦點停在看不見的按鈕上
+  await page.locator('#captureBtn').focus()
+  await expect(body).not.toHaveClass(/dock-tuck/)
+  await page.locator('#captureBtn').blur()
+  await page.mouse.wheel(0, 400)
+  await expect(body).toHaveClass(/dock-tuck/)
+  // 藏著的時候開始專注（F 鍵），再把全螢幕計時縮小：膠囊要回來，計時器按得到
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(false))
+  await expect(body).not.toHaveClass(/dock-tuck/)
+  await expect(dock).toHaveCSS('opacity', '1')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 縮小時焦點被放回 Dock 的按鈕上（這個測試沒有用滑鼠點過東西，瀏覽器當成鍵盤的焦點，Dock 會一直留著）：先移開
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.mouse.wheel(0, 400)
+  await expect(body).toHaveClass(/dock-tuck/)
   // 換分頁：回來；換回來還原捲動位置的那一下不算往下捲
   await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
   await expect(body).not.toHaveClass(/dock-tuck/)
@@ -904,8 +920,13 @@ test.describe('手機的觸控', () => {
       const b = await row.boundingBox()
       const x = b.x + b.width / 2
       const y = b.y + b.height / 2
+      // 照真人的速度滑、放開前停一下：一瞬間滑完的話 Chrome 會當成甩動，下一下點擊會被拿去停住甩動
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
-      for (let i = 1; i <= 12; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + (dx * i) / 12, y }] })
+      for (let i = 1; i <= 12; i++) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + (dx * i) / 12, y }] })
+        await page.waitForTimeout(16)
+      }
+      await page.waitForTimeout(80)
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
     const task = (title) => page.evaluate((title) => window.hiyori.store.state.tasks.find((t) => t.title === title), title)
@@ -917,10 +938,14 @@ test.describe('手機的觸控', () => {
     await expect(page.locator('.mo-burst')).toHaveCount(1)
     await expect(page.locator('.item.sw')).toHaveCount(0)
 
-    // 滑一點點：彈回去，什麼都不做
+    // 滑一點點：彈回去，什麼都不做；彈回去之後馬上點勾照樣算數（不會被當成滑動補的那一下吃掉）
     await swipe('洗衣服', 45)
-    await expect(page.locator('.item.sw')).toHaveCount(0)
     expect(await task('洗衣服')).toMatchObject({ done: false, date: today })
+    await page.locator('#taskList .item', { hasText: '洗衣服' }).locator('.check').tap()
+    await expect.poll(async () => (await task('洗衣服')).done).toBe(true)
+    await expect(page.locator('.item.sw')).toHaveCount(0)
+    await page.locator('#taskList .item', { hasText: '洗衣服' }).locator('.check').tap()
+    await expect.poll(async () => (await task('洗衣服')).done).toBe(false)
 
     // 往左滑：明天再做；提示卡上可以復原
     await swipe('洗衣服', -170)
@@ -937,6 +962,26 @@ test.describe('手機的觸控', () => {
     // 做完的往右滑：還沒做完
     await swipe('寫信給老師', 170)
     await expect.poll(async () => (await task('寫信給老師')).done).toBe(false)
+
+    // 滑到一半整串被重畫（同步、別的分頁、計時器）：這一次作罷，之後照樣滑得動
+    const row = page.locator('#taskList .item', { hasText: '讀一章小說' })
+    const b = await row.boundingBox()
+    const x = b.x + b.width / 2
+    const y = b.y + b.height / 2
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+    for (let i = 1; i <= 6; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i * 14, y }] })
+      await page.waitForTimeout(16)
+    }
+    await page.evaluate(() => window.hiyori.ui.renderTasks())
+    for (let i = 7; i <= 12; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i * 14, y: y + 200 }] })
+      await page.waitForTimeout(16)
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    expect((await task('讀一章小說')).done).toBe(false)
+    await swipe('讀一章小說', 170)
+    await expect.poll(async () => (await task('讀一章小說')).done).toBe(true)
   })
 })
 test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出來', async ({ page, context, site }) => {
@@ -950,13 +995,25 @@ test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出�
     window.hiyori.ui.focus.toggle()
     window.hiyori.ui.focus.toggleBig(false)
     window.hiyori.ui.setTab('tasks')
-    // 快到點了
+  })
+  // 開場畫面讓開、輸入框真的點得到了，才開始倒數（不然點下去的時候早就到點了，測不到）
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const el = document.querySelector('#taskTitle')
+        const r = el.getBoundingClientRect()
+        return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el
+      }),
+    )
+    .toBe(true)
+  await page.evaluate(() => {
     const f = window.hiyori.ui.focus
-    f.endAt = Date.now() + 600
+    f.endAt = Date.now() + 1500
     f._save()
   })
   // 到點前剛好點了任務的輸入框：到點的經驗值不是它給的，不要從那裡冒出來
   await page.locator('#taskTitle').click()
+  expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
   await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
   expect(await page.evaluate(() => window.hiyori.store.stats.pomodoros)).toBe(1)
   await page.waitForTimeout(600)

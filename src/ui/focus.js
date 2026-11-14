@@ -505,6 +505,7 @@ export class FocusTimer {
     this.toggleSet(false)
     this._save()
     this.render()
+    this.ui.tuckDock?.(false)
     this.hooks.focusStarted(false, this.taskId, this.info)
     if (this.ui.appMode) this.toggleBig(true)
   }
@@ -513,7 +514,11 @@ export class FocusTimer {
   toggleBig(force) {
     const open = (force ?? $('#focusFull').hidden) && this.mode !== 'idle'
     $('#focusFull').hidden = !open
-    if (!open) return this._catSync()
+    // 縮小回來：手機上往下捲時讓開的 Dock 膠囊先回來（剛縮小就要按得到計時器）
+    if (!open) {
+      this.ui.tuckDock?.(false)
+      return this._catSync()
+    }
     this._fillTargets($('#ffTarget'))
     this.render()
   }

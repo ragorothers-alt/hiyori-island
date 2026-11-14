@@ -734,8 +734,15 @@ export class UI {
     )
   }
   tuckDock(on) {
-    // 正在用番茄鐘的小視窗、焦點在 Dock 裡（鍵盤）：不藏
-    if (on && (!$('#focusSet').hidden || !$('#focusPick').hidden || $('.dock')?.contains(document.activeElement))) on = false
+    // 鍵盤 Tab 進來（或讀屏軟體移進來）：先回來，不要讓焦點停在看不見的按鈕上
+    if (!this._tuckFocus) {
+      this._tuckFocus = true
+      $('.dock')?.addEventListener('focusin', () => this.tuckDock(false))
+    }
+    // 正在用番茄鐘的小視窗、鍵盤的焦點在 Dock 裡：不藏。
+    // 只認鍵盤的焦點（:focus-visible）：全螢幕計時縮小時焦點會被放回 Dock 的按鈕上，用手指的人不該因此一直藏不起來
+    const kb = document.activeElement?.matches?.(':focus-visible') && $('.dock')?.contains(document.activeElement)
+    if (on && (!$('#focusSet').hidden || !$('#focusPick').hidden || kb)) on = false
     if (on === !!this._tucked) return
     this._tucked = on
     document.body.classList.toggle('dock-tuck', on)
@@ -1331,16 +1338,17 @@ export class UI {
     const s = this.store
     const t = s.state.tasks.find((x) => x.id === id)
     if (!t) return
-    const was = { date: t.date, at: t.at ?? null }
     const to = addDays(t.date, 1)
-    s.updateTask(id, { date: to, at: null })
+    // 復原交給 store：日期、時段、往後挪的次數（卡關提醒用）、被擠掉的本命都放回去
+    const undo = s.postponeTask(id, to)
+    if (!undo) return
     this.toast({
       icon: '延',
       title: to === addDays(s.today, 1) ? '移到明天了' : `移到 ${to.slice(5).replace('-', '/')} 了`,
       sub: t.title,
       ms: 5200,
       tag: 'swipe',
-      actions: [{ label: '復原', run: () => s.updateTask(id, was) }],
+      actions: [{ label: '復原', run: () => s.undoPostpone(undo) }],
     })
   }
 
