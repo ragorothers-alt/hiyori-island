@@ -1,6 +1,7 @@
 import { FocusTimer } from './ui/focus.js'
 import { BriefView } from './ui/brief.js'
 import { CaptureView } from './ui/capture.js'
+import { flipItems } from './ui/motion.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
@@ -1286,14 +1287,16 @@ export class UI {
       .filter((i) => i.value)
       .map((i) => [i.closest('#overdueBox') ? '#overdueBox' : '#taskList', i.closest('.sub-add').dataset.id, i.value])
     const overdue = isToday ? s.overdue() : []
-    $('#overdueBox').innerHTML = overdue.length
-      ? `<div class="overdue"><h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><button data-act="allToday">全部移到今天</button></h4><ul class="list">${overdue.map((t) => this._taskItem(t, true)).join('')}</ul></div>`
-      : ''
-
-    $('#taskList').innerHTML = n
-      ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
-      : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
+    // 整串重畫：原本就在的那幾件不重播淡入，位置變了的滑過去（做完的排到後面、從逾期移到今天）
+    flipItems([$('#overdueBox'), $('#taskList')], () => {
+      $('#overdueBox').innerHTML = overdue.length
+        ? `<div class="overdue"><h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><button data-act="allToday">全部移到今天</button></h4><ul class="list">${overdue.map((t) => this._taskItem(t, true)).join('')}</ul></div>`
+        : ''
+      $('#taskList').innerHTML = n
+        ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
+        : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
           <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
+    })
     for (const [box, id, v] of subDrafts) {
       const input = $(`${box} .sub-add[data-id="${CSS.escape(id)}"] input`)
       if (input) input.value = v
@@ -1943,29 +1946,36 @@ export class UI {
       caret = { id: this._keepMsFocus, a: 0, b: 0 }
       this._keepMsFocus = null
     }
-    if (found) {
-      // 進行中的在前、收藏的另外一組；上下鍵照畫面上的順序走
-      const terms = queryTerms(query)
-      const on = found.filter((r) => !r.p.archived)
-      const off = found.filter((r) => r.p.archived)
-      this._projHits = [...on, ...off].map((r) => r.p.id)
-      const card = (r) => this._projectCard(r.p, r.p.archived, { terms, hit: r.hit })
-      const q = esc(query.trim())
-      $('#projectList').innerHTML = found.length
-        ? on.map(card).join('') + (off.length ? `<h4 class="proj-group">已收藏的專案</h4>${off.map(card).join('')}` : '')
-        : `<div class="empty"><span class="em">見つからない</span>名稱、里程碑、筆記和進度裡都沒有「${q}」。<br><button type="button" class="btn-ghost" data-act="new-from-q">＋ 開一個叫「${q}」的專案</button></div>`
-      $('#projectFound').textContent = found.length ? `找到 ${found.length} 個專案，按 Enter 打開第一個` : `找不到「${query.trim()}」`
-      $('#archiveBox').hidden = true
-      this._markProjSel(false)
-    } else {
-      this._projHits = null
-      $('#projectFound').textContent = ''
-      $('#projectList').innerHTML = active.length
-        ? shown.map((p) => this._projectCard(p)).join('')
-        : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段${this.appMode ? '（回到小島就看得到）' : ''}。</div>`
-      $('#archiveBox').hidden = !archived.length
-    }
-    $('#archiveList').innerHTML = found ? '' : archived.map((p) => this._projectCard(p, true)).join('')
+    // 整串重畫：原本就在的卡片不重播淡入（勾一個里程碑整頁就閃一下），位置變了的滑過去
+    flipItems(
+      [$('#projectList'), $('#archiveList')],
+      () => {
+        if (found) {
+          // 進行中的在前、收藏的另外一組；上下鍵照畫面上的順序走
+          const terms = queryTerms(query)
+          const on = found.filter((r) => !r.p.archived)
+          const off = found.filter((r) => r.p.archived)
+          this._projHits = [...on, ...off].map((r) => r.p.id)
+          const card = (r) => this._projectCard(r.p, r.p.archived, { terms, hit: r.hit })
+          const q = esc(query.trim())
+          $('#projectList').innerHTML = found.length
+            ? on.map(card).join('') + (off.length ? `<h4 class="proj-group">已收藏的專案</h4>${off.map(card).join('')}` : '')
+            : `<div class="empty"><span class="em">見つからない</span>名稱、里程碑、筆記和進度裡都沒有「${q}」。<br><button type="button" class="btn-ghost" data-act="new-from-q">＋ 開一個叫「${q}」的專案</button></div>`
+          $('#projectFound').textContent = found.length ? `找到 ${found.length} 個專案，按 Enter 打開第一個` : `找不到「${query.trim()}」`
+          $('#archiveBox').hidden = true
+          this._markProjSel(false)
+        } else {
+          this._projHits = null
+          $('#projectFound').textContent = ''
+          $('#projectList').innerHTML = active.length
+            ? shown.map((p) => this._projectCard(p)).join('')
+            : `<div class="empty"><span class="em">まっさらな島</span>建立專案並寫下里程碑，<br>每完成一個，專案町的房子就會再蓋一段${this.appMode ? '（回到小島就看得到）' : ''}。</div>`
+          $('#archiveBox').hidden = !archived.length
+        }
+        $('#archiveList').innerHTML = found ? '' : archived.map((p) => this._projectCard(p, true)).join('')
+      },
+      '.proj[data-id]',
+    )
     const msInput = (id) => $(`#projectList .proj[data-id="${CSS.escape(id)}"] .ms-add input`)
     for (const [id, v] of drafts) {
       const inp = msInput(id)

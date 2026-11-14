@@ -806,3 +806,47 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   expect(late).toEqual({ mode: 'idle', pomos: 3 })
   await page.evaluate(() => window.hiyori.store.setSetting('focusUp', false))
 })
+
+test('打勾的手感：列表不會整串重播淡入，做完的那件滑到後面；花瓣從勾爆開、App 模式冒出經驗值；今天全部做完時飄花瓣', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    // 今天只留這三件：全部做完時才會飄花瓣
+    for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+    for (const title of ['寫信給老師', '洗衣服', '讀一章小說']) s.addTask({ title, date: s.today })
+    window.hiyori.ui.setTab('tasks')
+  })
+  const items = page.locator('#taskList .item')
+  await expect(items).toHaveCount(3)
+  // 升級的視窗會擋住下一個勾：出現就先關掉
+  const closeModals = () => page.evaluate(() => document.querySelectorAll('.modal:not([hidden]) .btn-primary').forEach((b) => b.click()))
+  const fadeUps = () => page.evaluate(() => document.getAnimations().filter((a) => a.animationName === 'fadeUp' && a.effect?.target?.closest?.('#taskList')).length)
+  await expect.poll(fadeUps).toBe(3)
+
+  const title = await items.first().locator('.item-title').textContent()
+  await items.first().locator('.check').click()
+  // 花瓣從勾爆開、經驗值冒出來
+  await expect(page.locator('.mo-burst')).toHaveCount(1)
+  await expect(page.locator('.mo-float').first()).toHaveText(/^\+\d+ XP$/)
+  // 打勾前就在的三件都不再重播淡入，做完的那件排到最後
+  await expect(page.locator('#taskList .item.settled')).toHaveCount(3)
+  expect(await fadeUps()).toBe(0)
+  await expect(items.last().locator('.item-title')).toHaveText(title)
+  // 放完就拿掉
+  await expect(page.locator('.mo-burst, .mo-float')).toHaveCount(0, { timeout: 5000 })
+
+  // 新加一件：只有它淡入
+  await page.evaluate(() => window.hiyori.store.addTask({ title: '澆花', date: window.hiyori.store.today }))
+  await expect(items).toHaveCount(4)
+  expect(await fadeUps()).toBe(1)
+
+  // 剩下的都做完：飄一陣花瓣，飄完拿掉
+  for (let i = 0; i < 3; i++) {
+    await closeModals()
+    await page.locator('#taskList .item:not(.done) .check').first().click()
+  }
+  await expect(page.locator('.mo-rain')).toHaveCount(1, { timeout: 5000 })
+  await expect(page.locator('.mo-rain')).toHaveCount(0, { timeout: 10000 })
+})

@@ -11,7 +11,8 @@ import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
-import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS } from './theme.js'
+import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf } from './theme.js'
+import { burst, floatText, petalRain, tapPoint, trackTaps } from './ui/motion.js'
 import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
@@ -347,6 +348,17 @@ async function boot() {
   store.on('taskAdded', (t) => {
     if (inGarden(t)) sfx.plant()
   })
+  // 打勾的那一下：花瓣從剛按的那顆勾爆開（本命和高優先度大一點）。
+  // App 模式看不到小島，經驗值也從剛按的地方冒出來（小島模式在島上冒，islandScene.js）
+  trackTaps()
+  store.on('taskDone', (t) => {
+    const c = tagOf(t.tag).color
+    burst(tapPoint(), t.star ? ['#ffd76e', '#fff3c4', c, '#ffffff'] : [c, '#ffe1ea', '#ffffff', c], { big: t.star || t.priority === 3 })
+  })
+  store.on('xp', ({ amount, kind }) => {
+    if (!ui.appMode || !(amount > 0)) return
+    floatText(tapPoint(), `+${amount} XP`, { gold: kind === 'star' || kind === 'starAll' || kind === 'perfect' })
+  })
   store.on('taskDone', (t) => {
     if (!inGarden(t)) return
     sfx.bloom(t.priority)
@@ -444,6 +456,7 @@ async function boot() {
   store.on('starAll', () => {
     setTimeout(() => {
       sfx.fanfare()
+      if (ui.appMode) petalRain({ count: 22, colors: ['#ffd76e', '#fff3c4', '#f6c453', '#ffe9a8', '#ffffff'] })
       ui.toast({ icon: '★', title: '本命全清', sub: `最重要的三件事都完成了・+${XP.starAll} XP` })
       talk('starAll', {}, 4200, '最重要的三件，全部完成了。')
     }, 1100)
@@ -474,6 +487,8 @@ async function boot() {
   store.on('allDone', () => {
     setTimeout(() => {
       sfx.fanfare()
+      // 小島上兩人會出來慶祝；App 模式看不到小島，飄一陣花瓣
+      if (ui.appMode) petalRain()
       if (!duet('allDone')) talk('allDone', {}, 4200)
     }, 900)
   })

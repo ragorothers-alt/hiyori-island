@@ -1,0 +1,36 @@
+/* 小動畫（motion.js）：打勾的花瓣、冒出來的經驗值、全部完成的花瓣雨。都不擋點擊 */
+
+/* 列表重畫時，原本就在的那幾件不再重播淡入 */
+.settled { animation: none !important; }
+
+.mo-burst { position: fixed; width: 0; height: 0; z-index: 66; pointer-events: none; }
+.mo-burst b { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--c); opacity: 0; animation: moRing .55s cubic-bezier(.2, .8, .2, 1) forwards; }
+.mo-burst i { position: absolute; left: -4px; top: -3px; width: 8px; height: 6px; border-radius: 80% 10% 80% 10%; background: var(--c); opacity: 0; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .35); animation: moPetal .9s cubic-bezier(.15, .75, .35, 1) forwards; }
+@keyframes moRing { 0% { opacity: .85; transform: scale(.5); } 100% { opacity: 0; transform: scale(1.7); } }
+@keyframes moPetal {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0) scale(.4); }
+  55% { opacity: 1; transform: translate(var(--x), var(--y)) rotate(calc(var(--r) * .6)) scale(var(--s)); }
+  100% { opacity: 0; transform: translate(var(--x), calc(var(--y) + 16px)) rotate(var(--r)) scale(var(--s)); }
+}
+
+.mo-float { position: fixed; z-index: 66; pointer-events: none; transform: translate(-50%, -50%); font-family: var(--font-num); font-size: 14px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; color: #e0638a; text-shadow: 0 1px 0 rgba(255, 255, 255, .8), 0 0 10px rgba(255, 255, 255, .7); animation: moFloat 1.25s cubic-bezier(.2, .8, .2, 1) forwards; }
+.mo-float.gold { color: #c08a17; }
+body.night .mo-float { color: #ffb3c8; text-shadow: 0 0 10px rgba(20, 16, 40, .9); }
+body.night .mo-float.gold { color: #f6cf6e; }
+@keyframes moFloat {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(.8); }
+  14% { opacity: 1; transform: translate(-50%, -90%) scale(1.05); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -280%) scale(1); }
+}
+
+.mo-rain { position: fixed; inset: 0; z-index: 66; pointer-events: none; overflow: hidden; }
+.mo-rain i { position: absolute; top: -20px; left: var(--l); width: var(--w); height: calc(var(--w) * .72); border-radius: 80% 10% 80% 10%; background: var(--c); opacity: 0; animation: moFall var(--t) linear var(--d) forwards; }
+@keyframes moFall {
+  0% { opacity: 0; transform: translate(0, 0) rotate(0); }
+  8% { opacity: .95; }
+  30% { transform: translate(calc(var(--sx) * .5), 32vh) rotate(calc(var(--r) * .3)); }
+  60% { transform: translate(calc(var(--sx) * -.25), 66vh) rotate(calc(var(--r) * .65)); }
+  90% { opacity: .9; }
+  100% { opacity: 0; transform: translate(var(--sx), 106vh) rotate(var(--r)); }
+}
