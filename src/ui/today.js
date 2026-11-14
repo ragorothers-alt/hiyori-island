@@ -296,10 +296,21 @@ export class TodayView {
     countUp(ring?.querySelector('b'), prev ? prev.pct : 0, now.pct, { dur: 900, fmt: (n) => `${n}<i>%</i>`, state: this._pctTw })
     if (calmMotion()) return
     const EASE = 'cubic-bezier(.2, .8, .2, 1)'
+    const t = performance.now()
+    // 動畫走到一半又重畫、目標沒變：在新的元素上照原本的時間軸接著播（不重新計時，一直重畫也會走完）；
+    // 目標變了才從畫面上走到的地方重新起跑
+    const replay = (el, tw) => {
+      const a = el.animate(tw.kf, tw.opt)
+      a.currentTime = t - tw.t0
+    }
+    const fg = ring?.querySelector('.fg')
+    const rt = (this._ringTw ||= {})
     const from = live ? live.pct : 0
-    if (ring && from != null && Math.abs(from - now.pct) > 0.3) {
+    if (fg && rt.to === now.pct && t - rt.t0 < rt.opt.duration) replay(fg, rt)
+    else if (fg && from != null && Math.abs(from - now.pct) > 0.3) {
       const C = 2 * Math.PI * 52
-      ring.querySelector('.fg')?.animate([{ strokeDashoffset: C * (1 - from / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], { duration: 900, easing: EASE })
+      Object.assign(rt, { to: now.pct, t0: t, kf: [{ strokeDashoffset: C * (1 - from / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], opt: { duration: 900, easing: EASE } })
+      fg.animate(rt.kf, rt.opt)
     }
     if (prev) {
       for (const [k, cls] of [['done', 'c-done'], ['going', 'c-going'], ['left', 'c-left']]) {
@@ -307,11 +318,15 @@ export class TodayView {
         $(`.td-counts .${cls} b`, this.root)?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.4)', color: '#e0638a' }, { transform: 'scale(1)' }], { duration: 460, easing: 'ease-out' })
       }
     }
+    const bt = (this._barTw ||= [])
     $$('.td-pw-d b', this.root).forEach((b, i) => {
-      const was = live ? live.bars[i] : 0
       const to = now.week?.[i] ?? 0
+      const tw = bt[i]
+      if (tw && tw.to === to && t - tw.t0 < tw.opt.duration + tw.opt.delay) return replay(b, tw)
+      const was = live ? live.bars[i] : 0
       if (was == null || Math.abs(was - to) < 0.5) return
-      b.animate([{ height: `${was}%` }, { height: `${to}%` }], { duration: 700, delay: live ? 0 : 120 + i * 45, easing: EASE, fill: 'backwards' })
+      bt[i] = { to, t0: t, kf: [{ height: `${was}%` }, { height: `${to}%` }], opt: { duration: 700, delay: live ? 0 : 120 + i * 45, easing: EASE, fill: 'backwards' } }
+      b.animate(bt[i].kf, bt[i].opt)
     })
   }
 

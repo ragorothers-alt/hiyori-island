@@ -71,7 +71,8 @@ const tagged = tag
 export default defineConfig({
   // 相對路徑：部署到子目錄（例如 GitHub Pages）也能正常運作
   base: './',
-  server: { port: 5199, open: false },
+  // 端對端測試的建置和結果（e2e/.out）、截圖（.playwright-mcp）不用看：不然跑測試時開著的頁面會一直被重新整理
+  server: { port: 5199, open: false, watch: { ignored: ['**/e2e/.out/**', '**/.playwright-mcp/**'] } },
   plugins: [islandPreload(), swVersion()],
   build: {
     target: 'es2022',

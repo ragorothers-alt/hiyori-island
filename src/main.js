@@ -182,7 +182,13 @@ async function boot() {
     // 省電和畫質只跟小島有關：小島建好時會照設定套上
     setPowerSave: (on) => scene?.setPowerSave(on),
     setQuality: (q) => scene?.setQuality(q),
-    setTheme: (t) => (scene ? scene.setTheme(t) : syncNight(lookNight(), true)),
+    // 自己切換白天／夜晚。小島模式跟著小島的天空慢慢轉過去；App 模式看不到小島，馬上淡淡地換過去
+    // （小島載過的話天空在後面自己轉，轉完之前不被它拉回原本那一邊：skySync）
+    setTheme: (t) => {
+      scene?.setTheme(t)
+      if (scene && !ui.appMode) return
+      if (syncNight(lookNight(), true) && scene) skyLag = true
+    },
     // 現在幾點（網址帶 ?hour= 時用那個）
     hourNow: () => (scene ? scene.hour() : clockHour()),
     // 卡關提醒：nudge 是第一次看到卡關小卡（n：挪了幾次或逾期幾天），其他是按了哪個選項
@@ -331,6 +337,14 @@ async function boot() {
     return true
   }
   syncNight(lookNight())
+  // 小島推過來的天色（每一幀；App 模式蓋住小島時每半秒）。App 模式剛自己切換過、天空還在快轉時先不跟：
+  // 天空要轉一兩秒才到另一邊，跟著它的話畫面會先被拉回原本那一邊、過一下又換過去
+  let skyLag = false
+  const skySync = (night) => {
+    if (skyLag && scene?.skyShifting) return false
+    skyLag = false
+    return syncNight(night)
+  }
 
   // ── 遊戲事件 → 音效、通知、台詞（島上的演出在 islandScene.js）──
   // 花圃上有這朵花（看的那天的花圃）：完成任務時才有慶祝
@@ -371,6 +385,14 @@ async function boot() {
   // 這一下是手指還是滑鼠：按下去縮一下只給手指（styles.css 的 [data-input="touch"]）。
   // 滑鼠按著時按鈕縮小，在邊緣按下、原地放開會落在按鈕外面，那一下就不算按到
   addEventListener('pointerdown', (e) => (document.documentElement.dataset.input = e.pointerType), true)
+  // 用鍵盤按的（空白鍵、Enter）也不縮：剛剛用手指點過、接著換成鍵盤時，不沿用上一下的手指
+  addEventListener(
+    'keydown',
+    (e) => {
+      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) document.documentElement.dataset.input = 'key'
+    },
+    true,
+  )
   store.on('taskDone', (t) => {
     haptic(t.star ? 'star' : 'done')
     const c = tagOf(t.tag).color
@@ -818,7 +840,7 @@ async function boot() {
     (islandP ??= loadIsland()
       .then((m) =>
         m.createIsland({
-          store, ui, params, talk, duet, notice, syncNight,
+          store, ui, params, talk, duet, notice, syncNight: skySync,
           season: () => season,
           started: () => (started = true),
           attach: (s) => {

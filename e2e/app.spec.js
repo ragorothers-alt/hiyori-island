@@ -1067,7 +1067,7 @@ test.describe('手機的觸控', () => {
     await page.evaluate(() => {
       window.__ptr = []
       for (const t of ['pointerdown', 'pointerup', 'pointercancel']) document.addEventListener(t, (e) => window.__ptr.push(e.type), true)
-      window.hiyori.ui.toast({ icon: '試', title: '有按鈕的提示', ms: 2500, actions: [{ label: '好', run: () => (window.__ran = true) }] })
+      window.hiyori.ui.toast({ icon: '試', title: '有按鈕的提示', ms: 4000, actions: [{ label: '好', run: () => (window.__ran = true) }] })
     })
     const card = page.locator('#toasts .toast', { hasText: '有按鈕的提示' })
     const btn = card.locator('.toast-act')
@@ -1087,10 +1087,44 @@ test.describe('手機的觸控', () => {
     const seen = await page.evaluate(() => window.__ptr)
     expect(seen[0]).toBe('pointerdown')
     expect(seen.some((t) => t === 'pointercancel' || t === 'pointerup')).toBe(true)
-    // 放開了：接著倒數，時間到就收；按鈕沒有被按到
-    await expect(card).not.toHaveClass(/held/)
+    // 放開了：接著倒數，時間到就收；按鈕沒有被按到。
+    // （瀏覽器拿去捲動的那一下就接著倒數了：電腦忙、後面幾下滑動送得慢時，看的時候可能已經收掉，收掉也算放開了）
+    await expect.poll(() => card.evaluateAll((els) => els.some((el) => el.classList.contains('held')))).toBe(false)
     await expect(card).toHaveCount(0, { timeout: 8000 })
     expect(await page.evaluate(() => window.__ran)).toBeFalsy()
+  })
+  test('按下去縮一下：手指按著才縮；剛用手指點過、接著換成鍵盤按住空白鍵就不縮', async ({ page, context, site }) => {
+    await useAppMode(context)
+    await page.goto(site.url)
+    await bootReady(page)
+    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    const btn = page.locator('#fontPick button[data-v="1"]')
+    await btn.scrollIntoViewIfNeeded()
+    await expect.poll(() => btn.evaluate((b) => {
+      const r = b.getBoundingClientRect()
+      return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b
+    }), { timeout: 30000 }).toBe(true)
+    const scale = () => btn.evaluate((b) => getComputedStyle(b).scale)
+    const input = () => page.evaluate(() => document.documentElement.dataset.input)
+    await btn.tap()
+    expect(await input()).toBe('touch')
+    // 手指按著的樣子：縮一點（無頭瀏覽器模擬的觸控不會有 :active，用開發者工具把它設成按著）
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('DOM.enable')
+    await cdp.send('CSS.enable')
+    const { root } = await cdp.send('DOM.getDocument')
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#fontPick button[data-v="1"]' })
+    await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['active'] })
+    await expect.poll(scale).toBe('0.94')
+    await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] })
+    await expect.poll(scale).toBe('none')
+    // 換成鍵盤：焦點在同一顆、按住空白鍵（按著時是 :active，但這一下不是手指）
+    await btn.focus()
+    await page.keyboard.down(' ')
+    expect(await input()).toBe('key')
+    expect(await btn.evaluate((b) => b.matches(':active'))).toBe(true)
+    expect(await scale()).toBe('none')
+    await page.keyboard.up(' ')
   })
 })
 test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出來', async ({ page, context, site }) => {
@@ -1214,19 +1248,42 @@ test('今日總覽的進度：做完幾件時百分比從原本的數字一路�
   })
   const pct = page.locator('.td-ring b')
   await expect(pct).toHaveText('0%')
-  // 每一格畫面記下百分比（走到 50% 為止，最多 4 秒）：要看到中間的數字，不是一下子跳到 50%；也不會往反方向閃
+  // CI 的機器用軟體算圖，一秒只畫得出兩三格畫面（時間戳也走得比真的慢）：畫面更新改成每 16ms 一次，
+  // 數字照真的時間走，中間的每一格都看得到（不然 0.9 秒裡可能只畫出一兩格）
+  await page.evaluate(() => {
+    let id = 0
+    const timers = new Map()
+    window.requestAnimationFrame = (cb) => {
+      const i = ++id
+      timers.set(i, setTimeout(() => (timers.delete(i), cb(performance.now())), 16))
+      return i
+    }
+    window.cancelAnimationFrame = (i) => {
+      clearTimeout(timers.get(i))
+      timers.delete(i)
+    }
+  })
+  // 數字每變一次就記下來（走到 50% 為止，最多 6 秒）：要看到中間的數字，不是一下子跳到 50%；也不會往反方向閃。
+  // 看的是畫面上每一次改寫（不是每隔一格畫面抽一次：電腦忙的時候抽樣的那一格可能剛好錯過）
   const seen = page.evaluate(
     () =>
       new Promise((done) => {
-        const vals = new Set()
-        const t0 = performance.now()
-        const tick = () => {
-          const v = document.querySelector('.td-ring b')?.textContent
+        const read = () => document.querySelector('.td-ring b')?.textContent
+        const vals = new Set([read()])
+        let timer = 0
+        const mo = new MutationObserver(() => {
+          const v = read()
           vals.add(v)
-          if (v !== '50%' && performance.now() - t0 < 4000) requestAnimationFrame(tick)
-          else done([...vals])
-        }
-        tick()
+          if (v !== '50%') return
+          mo.disconnect()
+          clearTimeout(timer)
+          done([...vals])
+        })
+        mo.observe(document.querySelector('#todayRoot'), { subtree: true, childList: true, characterData: true })
+        timer = setTimeout(() => {
+          mo.disconnect()
+          done([...vals])
+        }, 6000)
       }),
   )
   await page.evaluate(() => {
@@ -1246,7 +1303,9 @@ test('今日總覽的進度：做完幾件時百分比從原本的數字一路�
     const s = window.hiyori.store
     const num = () => parseInt(document.querySelector('.td-ring b').textContent, 10)
     s.toggleTask(s.tasksOn(s.today).find((t) => !t.done).id)
-    await new Promise((r) => setTimeout(r, 150))
+    // 等數字開始走（離開 50%；電腦忙的時候第一格畫面會晚一點）
+    const t0 = performance.now()
+    while (num() <= 50 && performance.now() - t0 < 3000) await new Promise((r) => requestAnimationFrame(r))
     const before = num()
     window.hiyori.ui.today.render()
     return { before, after: num() }
@@ -1335,6 +1394,50 @@ test('手機的 App 模式：捲到最底時最後一張卡片在分頁列和番
   await expect(chip).toBeHidden()
   expect(await page.evaluate(() => window.hiyori.store.selectedDate === window.hiyori.store.today)).toBe(true)
 })
+test('手機的 App 模式：用鍵盤移到下面的按鈕時停在輸入列和分頁列上面；橫放時日期列和「回到今天」在最上面一條、按得到', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 393, height: 852 })
+  await page.goto(site.url)
+  await bootReady(page)
+  const shown = (loc) => loc.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return e === el || el.contains(e)
+  })
+  // 教練頁最下面的選項：捲到最上面再用鍵盤移過去，停在黏在下面的輸入列（和分頁列）上面
+  await page.evaluate(() => window.hiyori.ui.setTab('coach'))
+  await expect(page.locator('#coachRoot .coach')).toBeVisible({ timeout: 20000 })
+  const last = page.locator('#coachRoot button[data-v="90"]')
+  await page.evaluate(() => (document.querySelector('.panel-body').scrollTop = 0))
+  expect(await shown(last)).toBe(false)
+  await last.focus()
+  await expect.poll(() => shown(last)).toBe(true)
+  expect(await last.evaluate((el) => el.getBoundingClientRect().bottom <= document.querySelector('.coach-say').getBoundingClientRect().top)).toBe(true)
+
+  // 橫放：問候那一列不放，日期列留在最上面；內容從它下面開始（以前整個被內容蓋住，換不了日期）
+  await page.setViewportSize({ width: 740, height: 360 })
+  await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+  const next = page.locator('#nextDay')
+  await expect.poll(() => shown(next), { timeout: 30000 }).toBe(true)
+  await next.click()
+  const back = page.locator('#todayBtn')
+  await expect(back).toBeVisible()
+  expect(await shown(back)).toBe(true)
+  expect(await shown(page.locator('#taskTitle'))).toBe(true)
+  await back.click()
+  await expect(back).toBeHidden()
+  expect(await page.evaluate(() => window.hiyori.store.selectedDate === window.hiyori.store.today)).toBe(true)
+  // 提示卡在畫面正中間（小島模式橫放時右邊是面板，才放在左邊空間的中間）
+  await page.evaluate(() => window.hiyori.ui.toast({ icon: '試', title: '橫放的提示卡', ms: 6000 }))
+  const mid = await page.locator('#toasts .toast', { hasText: '橫放的提示卡' }).evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return r.left + r.width / 2
+  })
+  expect(Math.abs(mid - 370)).toBeLessThan(4)
+  // 總覽那一頁自己有日期：日期列藏起來，整頁往上用
+  await page.evaluate(() => window.hiyori.ui.setTab('today'))
+  expect(await page.evaluate(() => Math.round(document.querySelector('#panel').getBoundingClientRect().top))).toBe(0)
+})
 test('用上面的輸入框加任務：看得到的那件亮一下；排到看不到的地方時輸入框下面冒「剛加的在下面」，點了捲過去', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.setViewportSize({ width: 393, height: 852 })
@@ -1349,12 +1452,22 @@ test('用上面的輸入框加任務：看得到的那件亮一下；排到看�
   await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').contains(document.elementFromPoint(200, 420))), { timeout: 30000 }).toBe(true)
   const input = page.locator('#taskTitle')
   const hint = page.locator('#addedHint')
+  // 哪幾列亮過一下（亮 1.6 秒就收：電腦忙的時候等看的時候已經亮完了，所以在亮的那一下記下來）
+  await page.evaluate(() => {
+    window.__glows = []
+    const animate = Element.prototype.animate
+    Element.prototype.animate = function (kf, opt) {
+      if (this.matches?.('.item') && Array.isArray(kf) && kf.some((k) => k.backgroundColor)) window.__glows.push(this.textContent)
+      return animate.call(this, kf, opt)
+    }
+  })
+  const glowed = (title) => page.evaluate((t) => window.__glows.some((x) => x.includes(t)), title)
   // 清單還短：加了就看得到，那一列亮一下，不用膠囊
   await input.fill('澆花')
   await input.press('Enter')
   const first = page.locator('#taskList .item', { hasText: '澆花' })
   await expect(first).toBeVisible()
-  await expect.poll(() => first.evaluate((el) => el.getAnimations().some((a) => a.effect?.getKeyframes?.().some((k) => k.backgroundColor)))).toBe(true)
+  await expect.poll(() => glowed('澆花')).toBe(true)
   await expect(hint).toBeHidden()
 
   // 清單很長、新的一件排到下面去了：輸入框還在原地（可以接著打），下面冒膠囊；點了捲過去
@@ -1375,6 +1488,7 @@ test('用上面的輸入框加任務：看得到的那件亮一下；排到看�
     const t = s.tasksOn(s.today).find((x) => x.title === '買花盆')
     return window.hiyori.ui._inView(document.querySelector(`#taskList .item[data-id="${t.id}"]`))
   })).toBe(true)
+  await expect.poll(() => glowed('買花盆')).toBe(true)
 })
 test.describe('還沒下載好的畫面', () => {
   // Service Worker 接管頁面後會直接從快取給程式，繞過下面的閘門：這個測試不開
@@ -1398,6 +1512,35 @@ test.describe('還沒下載好的畫面', () => {
     await expect(page.locator('#coachRoot .coach')).toBeVisible({ timeout: 20000 })
     await expect(page.locator('#coachRoot .lz-skel')).toHaveCount(0)
     await expect(busy).toHaveCount(0)
+  })
+  test('離線時教練沒下載到：不再一直閃著準備中，說「這一頁還沒下載到」；連上網路按「再試一次」就打開', async ({ page, context, site }) => {
+    await useAppMode(context)
+    // 教練的程式先卡住，切成離線後才讓它失敗（連著網路時失敗，會當成部署了新版去重新整理）
+    let fail
+    const gate = new Promise((r) => (fail = r))
+    let blocked = true
+    await page.route(/\/assets\/coach-[^/]*\.js$/, async (route) => {
+      if (!blocked) return route.continue()
+      await gate
+      await route.abort('internetdisconnected')
+    })
+    await page.goto(site.url)
+    await bootReady(page)
+    await page.evaluate(() => window.hiyori.ui.setTab('coach'))
+    await expect(page.locator('#coachRoot .lz-skel')).toBeVisible()
+    await context.setOffline(true)
+    fail()
+    const box = page.locator('#coachRoot .lz-fail')
+    await expect(box).toBeVisible({ timeout: 15000 })
+    await expect(box).toContainText('這一頁還沒下載到')
+    await expect(page.locator('#coachRoot .lz-skel')).toHaveCount(0)
+    await expect(page.locator('#toasts .toast.busy')).toHaveCount(0)
+    // 連上網路再按一次：放回準備中的底，載好就換成教練
+    await context.setOffline(false)
+    blocked = false
+    await box.getByRole('button', { name: '再試一次' }).click()
+    await expect(page.locator('#coachRoot .coach')).toBeVisible({ timeout: 20000 })
+    await expect(box).toHaveCount(0)
   })
 })
 test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出去放開，照樣接著倒數；停過的倒數細線從停住的地方接著縮', async ({ page, context, site }) => {

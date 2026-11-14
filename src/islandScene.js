@@ -1264,6 +1264,10 @@ export async function createIsland(ctx) {
     setPowerSave: (on) => (world.powerSave = on),
     setQuality: (q) => applyQuality(q),
     setTheme: (t) => sky.setTheme(t),
+    // 切換外觀後天色還在快轉（main.js：App 模式自己切換過的，轉完之前玻璃不跟著天空換回去）
+    get skyShifting() {
+      return sky.shifting
+    },
     // ── 專注 ──
     focusStarted(resumed, taskId) {
       duo.setFocus(true, resumed)

@@ -40,11 +40,14 @@ import { doneOn, todayProgress } from './habits.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
 // 不常用的畫面（月曆、教練、專案詳情）：開場不載，第一次用到才下載。開完閒下來時也會先在背景載好（preloadViews），
-// 之後離線也打得開。view 是載好的那個（還沒載好是 null）
-function lazy(load) {
+// 之後離線也打得開。view 是載好的那個（還沒載好是 null）。
+// root：頁面裡先放了「正在準備」閃著的底的那一格（教練）；沒下載到時換成可以再試一次（_use）
+function lazy(load, root = null) {
   let p = null
   const lz = {
     view: null,
+    root,
+    skel: root?.innerHTML ?? '',
     get: () =>
       (p ||= load().then(
         (v) => (lz.view = v),
@@ -227,7 +230,7 @@ export class UI {
     this.mottoBar = new MottoBar($('#mottoBar'), store)
     this.mottos = new MottosView($('#mottoRoot'), store, { ...viewHooks, mottoBar: () => this.mottoBar.render() })
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
-    this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)))
+    this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)), $('#coachRoot'))
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
     this.dates.render()
     this.today = new TodayView($('#todayRoot'), store, {
@@ -280,6 +283,11 @@ export class UI {
     const waiting = !!lz.want
     lz.want = { fn, tab: this.tab }
     if (waiting) return
+    // 上次沒下載到、留著「再試一次」的那一格：換回正在準備的底
+    if (lz.failed) {
+      lz.failed = false
+      lz.root.innerHTML = lz.skel
+    }
     // 下載超過一下下還沒好（網路慢、剛打開就點）：在提示卡的位置說一聲正在打開，不然按了像沒反應
     let shown = false
     const slow = setTimeout(() => {
@@ -297,11 +305,20 @@ export class UI {
       if (want && want.tab === this.tab) want.fn(v)
     }, (err) => {
       done()
+      const want = lz.want
       lz.want = null
       console.warn('[hiyori] 畫面載入失敗', err)
       // 是部署了新版（main.js 會重新整理）就不叫人連網路
-      if (!err?.updating) this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
+      if (err?.updating) return
+      // 頁面裡先放了閃著的底（教練）：換成沒下載到、按一下再試，不要一直看起來像還在下載
+      if (lz.root) return this._lzFailed(lz, want?.fn || ((v) => v.render?.()))
+      this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
     })
+  }
+  _lzFailed(lz, fn) {
+    lz.failed = true
+    lz.root.innerHTML = '<div class="lz-fail" role="alert"><b>這一頁還沒下載到</b><small>連上網路後再試一次</small><button type="button" class="btn-ghost">再試一次</button></div>'
+    lz.root.querySelector('button').onclick = () => this._use(lz, fn)
   }
   // 延後載入的畫面正在下載：一張「正在打開…」的提示卡（好幾個一起下載時共用一張，都好了才收）
   _busy(d) {
@@ -2831,8 +2848,8 @@ export class UI {
         const b = e.target.closest('button[data-i]')
         const el = b && this._recTargets?.[+b.dataset.i]
         if (!el) return
-        // 留出這一排自己的高度，標題才不會被它蓋住
-        el.style.scrollMarginTop = `${nav.offsetHeight + 10}px`
+        // 捲動區上面留了這一排的高度（--rec-pad）：標題停在它下面，不會被它蓋住
+        this._recPad()
         el.scrollIntoView({ behavior: scrollMode(), block: 'start' })
       })
       // 捲動時亮起現在看的那一段
@@ -2867,7 +2884,15 @@ export class UI {
       nav.innerHTML = items.map(([t], i) => `<button type="button" data-i="${i}"${t === '設定' ? ' class="set"' : ''}>${t === '設定' ? gear : ''}${esc(t)}</button>`).join('')
       this._recCur = null
     }
+    this._recPad()
     this._spyRecNav()
+  }
+  // 跳轉列黏住時蓋到哪裡（捲動區的上內距＋它的高度；字體放大、換行時會變）：捲動區上面留這麼多再加一點（styles.css 的 --rec-pad）
+  _recPad() {
+    const nav = $('#recNav')
+    const body = nav.closest('.panel-body')
+    const h = nav.getClientRects().length ? nav.getBoundingClientRect().height : 0
+    if (h && body) body.style.setProperty('--rec-pad', `${Math.ceil((parseFloat(getComputedStyle(body).paddingTop) || 0) + h) + 10}px`)
   }
   // 現在看的是哪一段：照頁面上的位置找，標題已經捲到這一排下面的最後一段（捲到底就是最下面那段）。
   // 亮起那一格，換了的話把它捲到這一排的中間

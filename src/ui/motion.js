@@ -99,18 +99,25 @@ export function tapPoint(now = performance.now()) {
 // state 記著畫面上現在的數字：元素每次重畫都會換掉的話，傳一個留在畫面物件上的 {}（預設記在元素自己身上）
 export function countUp(el, from, to, { dur = 700, fmt = String, state = el } = {}) {
   if (!el) return
+  // 寫進最新的那個元素（整塊重畫後元素換了，還在跑的這一段接著寫進新的）
+  state._el = el
+  state._fmt = fmt
+  const put = (n) => {
+    state._v = n
+    state._el.innerHTML = state._fmt(n)
+  }
+  // 正在走、目標沒變（只是又重畫了一次）：照原本的時間走完，不重新計時（一直重畫的話永遠走不完）
+  if (state._count && state._to === to) return put(state._v)
   const start = state._count ? state._v : from
   cancelAnimationFrame(state._count)
   state._count = 0
-  const put = (n) => {
-    state._v = n
-    el.innerHTML = fmt(n)
-  }
+  state._to = to
   if (start == null || start === to || !Number.isFinite(start) || !Number.isFinite(to) || calmMotion()) return put(to)
   const t0 = performance.now()
-  const step = (t) => {
-    // 第一格畫面的時間戳可能比上面量的 t0 還早一點：不要算出負的（數字會先往反方向閃一下）
-    const k = Math.max(0, Math.min(1, (t - t0) / dur))
+  const step = () => {
+    // 照真的過了多久算（不用這一格畫面的時間戳：它可能比上面量的 t0 還早一點，數字會先往反方向閃；
+    // 畫面很慢的機器上它也可能走得比真的時間慢，數字就一直走不到）
+    const k = Math.max(0, Math.min(1, (performance.now() - t0) / dur))
     put(Math.round(start + (to - start) * (1 - (1 - k) ** 3)))
     state._count = k < 1 ? requestAnimationFrame(step) : 0
   }

@@ -6,6 +6,8 @@ import { extname, join, normalize } from 'node:path'
 import { OUT } from './builds.js'
 
 export const BASE = '/hiyori-island/'
+// Chromium 不讓連的埠（1024 以上的那些）：Windows 有時從很低的範圍配埠（例如配到 3659），打開就是 ERR_UNSAFE_PORT
+const UNSAFE_PORTS = new Set([1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080])
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -46,7 +48,12 @@ export async function startServer(tag = 'a') {
       res.writeHead(404, { 'Content-Type': 'text/plain' }).end('not found')
     }
   })
-  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  // 讓系統配一個空的埠；配到瀏覽器不讓連的就關掉再配一次
+  for (;;) {
+    await new Promise((r) => server.listen(0, '127.0.0.1', r))
+    if (!UNSAFE_PORTS.has(server.address().port)) break
+    await new Promise((r) => server.close(r))
+  }
   const url = `http://127.0.0.1:${server.address().port}${BASE}`
   return {
     url,
