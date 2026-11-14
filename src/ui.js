@@ -1,7 +1,8 @@
 import { FocusTimer } from './ui/focus.js'
 import { BriefView } from './ui/brief.js'
 import { CaptureView } from './ui/capture.js'
-import { flipItems } from './ui/motion.js'
+import { flipItems, noteTap } from './ui/motion.js'
+import { bindSwipe } from './ui/swipe.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
@@ -66,6 +67,8 @@ const THEME_INFO = {
 // 「這一版的新功能」看過到哪一版（這台裝置自己記）；卡關提醒：不再提醒的任務、今天ふじ說過了沒
 const NEWS_KEY = 'hiyori-news'
 const STUCK_OFF_KEY = 'hiyori-stuck-off'
+// 手機上第一次看到有任務的任務頁：說一聲可以左右滑（這台裝置說過就不再說）
+const SWIPE_TIP_KEY = 'hiyori-swipe-tip'
 // 今日摘要：這台裝置哪一天看過了（一天只自己出來一次）
 const BRIEF_KEY = 'hiyori-brief-day'
 // 這台裝置上次有人在看 App 的時間（毫秒）：摘要的「你不在的時候」從這裡算起
@@ -615,10 +618,18 @@ export class UI {
     if (tab === 'today') this.today.render()
     if (from !== tab) {
       // 還原這一頁捲到的位置：這一下的捲動不算使用者往下捲，Dock 不讓開
-      this._tuckHold = performance.now() + 250
       body.scrollTop = this._tabScroll?.[tab] || 0
+      this._tuckLast = body.scrollTop
     }
     this.tuckDock(false)
+    if (tab === 'tasks') this._swipeTip()
+  }
+  // 用手指的裝置第一次在任務頁看到任務：提一下左右滑（一台裝置只說一次）
+  _swipeTip() {
+    if (readLocal(SWIPE_TIP_KEY, false) || typeof matchMedia !== 'function' || !matchMedia('(pointer: coarse)').matches) return
+    if (!$$('#taskList .item, #overdueBox .item').length) return
+    writeLocal(SWIPE_TIP_KEY, true)
+    setTimeout(() => this.toast({ icon: '指', title: '任務可以左右滑', sub: '往右滑完成、往左滑明天再做（逾期的是移到今天）', ms: 6000 }), 700)
   }
 
   togglePanel(force) {
@@ -646,15 +657,16 @@ export class UI {
   _bindTuck() {
     const body = $('.panel-body')
     const narrow = typeof matchMedia === 'function' ? matchMedia('(max-width: 860px)') : { matches: false }
-    let last = body.scrollTop
+    // 上一次的位置；程式自己捲（換分頁還原位置）時直接改成新位置，那一下就不算往下捲
+    this._tuckLast = body.scrollTop
     let acc = 0
     body.addEventListener(
       'scroll',
       () => {
         const top = body.scrollTop
-        const d = top - last
-        last = top
-        if (!this.appMode || !narrow.matches || performance.now() < (this._tuckHold || 0)) return this.tuckDock(false)
+        const d = top - this._tuckLast
+        this._tuckLast = top
+        if (!this.appMode || !narrow.matches) return this.tuckDock(false)
         // 同一個方向累積一段才算（手指放上去的小抖動、慣性快停下來的那一點點不算）
         acc = Math.sign(d) === Math.sign(acc) ? acc + d : d
         if (top < 48) this.tuckDock(false)
@@ -1228,7 +1240,50 @@ export class UI {
         this.hooks.hoverTask(li ? li.dataset.id : null)
       })
       el.addEventListener('mouseleave', () => this.hooks.hoverTask(null))
+      // 手機上左右滑：往右完成、往左明天再做（逾期的移到今天）
+      bindSwipe(el, (id) => this._swipeActions(id))
     }
+  }
+
+  // 任務列左右滑可以做的事（swipe.js）：right 是往右滑、left 是往左滑；沒有的方向是 null
+  _swipeActions(id) {
+    const s = this.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    if (!t) return null
+    const right = t.done
+      ? { label: '↺ 還沒做完', color: '#b4c2d8', run: () => s.toggleTask(id) }
+      : {
+          label: '✓ 完成',
+          color: tagOf(t.tag).color,
+          run: (li) => {
+            // 花瓣從這一列的勾爆開（不是用按的，motion.js 量不到剛按的地方）
+            noteTap(li.querySelector('.check'))
+            s.toggleTask(id)
+          },
+        }
+    let left = null
+    if (!t.done && t.date) {
+      if (t.date < s.today) left = { label: '移到今天', color: '#9fcdec', run: () => s.moveToToday([id]) }
+      else left = { label: t.date === s.today ? '明天再做' : '延後一天', color: '#f3cd7d', run: () => this._postpone(id) }
+    }
+    return { right, left }
+  }
+  // 往後挪一天，說一聲，可以復原（復原回到原本的日子和時段）
+  _postpone(id) {
+    const s = this.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    if (!t) return
+    const was = { date: t.date, at: t.at ?? null }
+    const to = addDays(t.date, 1)
+    s.updateTask(id, { date: to, at: null })
+    this.toast({
+      icon: '延',
+      title: to === addDays(s.today, 1) ? '移到明天了' : `移到 ${to.slice(5).replace('-', '/')} 了`,
+      sub: t.title,
+      ms: 5200,
+      tag: 'swipe',
+      actions: [{ label: '復原', run: () => s.updateTask(id, was) }],
+    })
   }
 
   _taskItem(t, overdue = false) {

@@ -880,3 +880,85 @@ test('手機往下捲時，右下角的番茄鐘膠囊讓開；往上捲一點�
   await page.waitForTimeout(500)
   await expect(body).not.toHaveClass(/dock-tuck/)
 })
+test.describe('手機的觸控', () => {
+  test.use({ hasTouch: true, viewport: { width: 393, height: 852 } })
+  test('任務列左右滑：往右滑完成、往左滑明天再做（可以復原）、逾期的往左滑移到今天；滑一點點會彈回去', async ({ page, context, site }) => {
+    await useAppMode(context)
+    await page.goto(site.url)
+    await bootReady(page)
+    await page.evaluate(() => {
+      const s = window.hiyori.store
+      for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+      for (const title of ['寫信給老師', '洗衣服', '讀一章小說']) s.addTask({ title, date: s.today })
+      const y = new Date(Date.now() - 86400000)
+      s.addTask({ title: '昨天沒做的', date: `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}` })
+      window.hiyori.ui.setTab('tasks')
+    })
+    await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').contains(document.elementFromPoint(200, 420)))).toBe(true)
+    // 第一次在任務頁看到任務：提一下可以左右滑
+    await expect(page.locator('#toasts')).toContainText('任務可以左右滑')
+    const cdp = await context.newCDPSession(page)
+    const swipe = async (title, dx) => {
+      const row = page.locator('.item', { hasText: title }).first()
+      await row.scrollIntoViewIfNeeded()
+      const b = await row.boundingBox()
+      const x = b.x + b.width / 2
+      const y = b.y + b.height / 2
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+      for (let i = 1; i <= 12; i++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + (dx * i) / 12, y }] })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+    const task = (title) => page.evaluate((title) => window.hiyori.store.state.tasks.find((t) => t.title === title), title)
+    const today = await page.evaluate(() => window.hiyori.store.today)
+
+    // 往右滑：完成，花瓣從那一列的勾爆開
+    await swipe('寫信給老師', 170)
+    await expect.poll(async () => (await task('寫信給老師')).done).toBe(true)
+    await expect(page.locator('.mo-burst')).toHaveCount(1)
+    await expect(page.locator('.item.sw')).toHaveCount(0)
+
+    // 滑一點點：彈回去，什麼都不做
+    await swipe('洗衣服', 45)
+    await expect(page.locator('.item.sw')).toHaveCount(0)
+    expect(await task('洗衣服')).toMatchObject({ done: false, date: today })
+
+    // 往左滑：明天再做；提示卡上可以復原
+    await swipe('洗衣服', -170)
+    await expect.poll(async () => (await task('洗衣服')).date).not.toBe(today)
+    await expect(page.locator('#taskList .item', { hasText: '洗衣服' })).toHaveCount(0)
+    await page.locator('.toast-act', { hasText: '復原' }).click()
+    await expect.poll(async () => (await task('洗衣服')).date).toBe(today)
+    await expect(page.locator('#taskList .item', { hasText: '洗衣服' })).toHaveCount(1)
+
+    // 逾期的往左滑：移到今天
+    await swipe('昨天沒做的', -170)
+    await expect.poll(async () => (await task('昨天沒做的')).date).toBe(today)
+
+    // 做完的往右滑：還沒做完
+    await swipe('寫信給老師', 170)
+    await expect.poll(async () => (await task('寫信給老師')).done).toBe(false)
+  })
+})
+test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出來', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    window.hiyori.ui.focus.toggle()
+    window.hiyori.ui.focus.toggleBig(false)
+    window.hiyori.ui.setTab('tasks')
+    // 快到點了
+    const f = window.hiyori.ui.focus
+    f.endAt = Date.now() + 600
+    f._save()
+  })
+  // 到點前剛好點了任務的輸入框：到點的經驗值不是它給的，不要從那裡冒出來
+  await page.locator('#taskTitle').click()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  expect(await page.evaluate(() => window.hiyori.store.stats.pomodoros)).toBe(1)
+  await page.waitForTimeout(600)
+  await expect(page.locator('.mo-float')).toHaveCount(0)
+})

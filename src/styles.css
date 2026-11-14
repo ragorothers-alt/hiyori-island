@@ -275,6 +275,16 @@ body.night input[type=time], body.night input[type=date] { color-scheme: dark; }
 }
 .item:hover, .item.hl { background: var(--glass-strong); border-color: var(--glass-border); }
 .item.done .item-title { color: var(--ink-faint); text-decoration: line-through; text-decoration-color: rgba(240, 150, 180, .6); }
+/* 手機上左右滑（ui/swipe.js）：上下捲交給瀏覽器、左右由程式接手；滑開的地方露出顏色和要做的事，拉過門檻時亮起來 */
+#taskList .item, #overdueBox .item { touch-action: pan-y pinch-zoom; }
+.item.sw { position: relative; z-index: 1; transform: translateX(var(--sx, 0px)); transition: none; }
+.item.sw::after { content: attr(data-sw); position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding: 0 16px; overflow: hidden; white-space: nowrap; border-radius: inherit; font-size: 13px; font-weight: 600; letter-spacing: .04em; color: #2f3a4f; background: var(--sw-c, var(--sky)); opacity: .5; transition: opacity .15s; }
+.item.sw-r::after { right: 100%; width: var(--sx); justify-content: flex-end; }
+.item.sw-l::after { left: 100%; width: calc(var(--sx) * -1); justify-content: flex-start; }
+.item.sw.armed::after { opacity: 1; }
+.item.sw:not([data-sw])::after { content: none; }
+/* 滑的時候整串裁在卡片裡（平常不裁：按鈕的焦點框會被切掉） */
+.list:has(> .item.sw) { overflow: hidden; }
 .check {
   width: 24px; height: 24px; flex: none; border-radius: 50%; border: 1.6px solid var(--c, var(--sky)); display: grid; place-content: center;
   transition: background .25s, transform .25s;
