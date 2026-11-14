@@ -207,7 +207,8 @@ async function boot() {
         // 休息完自動接下一輪的不收：「休息結束，第 N 輪開始了」那一張才剛放上去
         if (info.ext || !(info.round > 1)) ui.dropToasts('focus')
         sfx.chime()
-        haptic('tick')
+        // 休息完自動接下一輪：剛剛「休息結束」已經震過了，這裡再震會把那一段截斷
+        if (info.ext || !(info.round > 1)) haptic('tick')
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
         const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
         // 加時：倒數到點了還沒做完，接著做

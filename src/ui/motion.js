@@ -109,7 +109,8 @@ export function countUp(el, from, to, { dur = 700, fmt = String, state = el } = 
   if (start == null || start === to || !Number.isFinite(start) || !Number.isFinite(to) || calmMotion()) return put(to)
   const t0 = performance.now()
   const step = (t) => {
-    const k = Math.min(1, (t - t0) / dur)
+    // 第一格畫面的時間戳可能比上面量的 t0 還早一點：不要算出負的（數字會先往反方向閃一下）
+    const k = Math.max(0, Math.min(1, (t - t0) / dur))
     put(Math.round(start + (to - start) * (1 - (1 - k) ** 3)))
     state._count = k < 1 ? requestAnimationFrame(step) : 0
   }

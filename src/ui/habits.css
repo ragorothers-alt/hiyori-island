@@ -157,7 +157,7 @@ button.hb-cell.pre { box-shadow: inset 0 0 0 1px var(--hb-empty); }
 .hb-cell.today.miss { background: transparent; box-shadow: inset 0 0 0 1.5px var(--mc), 0 0 0 1.5px var(--ink-soft); }
 button.hb-cell { cursor: pointer; }
 @media (hover: hover) { button.hb-cell:hover { transform: scale(1.18); box-shadow: 0 0 0 1.5px var(--mc), 0 2px 8px rgba(70, 110, 160, .25); z-index: 1; } }
-button.hb-cell:active { transform: scale(.88); }
+@media (hover: none) { button.hb-cell:active { transform: scale(.88); } }
 .hb-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 2px 0; font-size: 10.5px; color: var(--ink-faint); }
 .hb-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .hb-legend .hb-cell { width: 10px; height: 10px; border-radius: 3px; }

@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- 到點準時通知（計時器類的 App 可以直接用，不用另外開權限） -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- 網頁的震動回饋（打勾、番茄鐘到點時輕震，navigator.vibrate）：WebView 要有這個權限才會震。一般權限，安裝時就有，不會跳出詢問 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:label="@string/app_name"

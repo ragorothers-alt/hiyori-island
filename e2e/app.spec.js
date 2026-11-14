@@ -1048,6 +1048,16 @@ test.describe('手機的觸控', () => {
     await btn.tap()
     await expect(btn).toHaveText('開')
     await expect.poll(buzz).toEqual([14])
+
+    // 多輪番茄鐘：休息結束、自動接著下一輪時，只震「休息結束」那一段（下一輪開始的輕震不會把它截斷）
+    await page.evaluate(() => {
+      window.__buzz.length = 0
+      const f = window.hiyori.ui.focus
+      Object.assign(f, { mode: 'break', round: 1, rounds: 2, paused: null, endAt: Date.now() - 10 })
+      f.tick()
+    })
+    await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+    expect(await buzz()).toEqual([[40, 90, 40, 90, 70]])
   })
   test('提示卡：手指從按鈕上按下去、往下滑（瀏覽器拿去捲動）再放開，照樣接著倒數、時間到就收', async ({ page, context, site }) => {
     await useAppMode(context)
@@ -1166,17 +1176,31 @@ test('分頁列選到的那一格墊的膠囊會滑過去、停在選到的那�
   // 電腦的側欄也一樣
   await page.setViewportSize({ width: 1400, height: 860 })
   await expect.poll(() => gap('records')).toBeLessThan(2)
+  // 滑鼠在分頁的邊緣按住一下再原地放開：照樣換過去（滑鼠按著時按鈕不縮小，放開的地方不會落到按鈕外面）
+  const edge = await page.locator('.tab[data-tab="habits"]').boundingBox()
+  await page.mouse.move(edge.x + 2, edge.y + edge.height / 2)
+  await page.mouse.down()
+  await page.waitForTimeout(200)
+  await page.mouse.up()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.tab)).toBe('habits')
   await page.locator('.tab[data-tab="tasks"]').click()
   await expect.poll(() => gap('tasks')).toBeLessThan(2)
 
   // 換到後一天：新的那一頁從右邊滑進來（淡入的位移換成水平的）
   await page.evaluate(() => window.hiyori.store.addTask({ title: '明天的事', date: (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })() }))
+  // 位移只留 0.7 秒：請頁面記下設過的值（機器很忙時，按完再回頭問可能已經拿掉了）
+  await page.evaluate(() => {
+    window.__enter = []
+    const b = document.querySelector('.panel-body')
+    new MutationObserver(() => window.__enter.push(b.style.getPropertyValue('--enter-x'))).observe(b, { attributes: true, attributeFilter: ['style'] })
+  })
+  const seen = () => page.evaluate(() => window.__enter)
   await page.locator('#nextDay').click()
-  expect(await page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('22px')
+  await expect.poll(seen).toContain('22px')
   await expect(page.locator('#taskList .item', { hasText: '明天的事' })).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('')
   await page.locator('#prevDay').click()
-  expect(await page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('-22px')
+  await expect.poll(seen).toContain('-22px')
 })
 test('今日總覽的進度：做完幾件時百分比從原本的數字一路走到新的', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -1190,15 +1214,16 @@ test('今日總覽的進度：做完幾件時百分比從原本的數字一路�
   })
   const pct = page.locator('.td-ring b')
   await expect(pct).toHaveText('0%')
-  // 每一格畫面記下百分比：要看到中間的數字，不是一下子跳到 50%
+  // 每一格畫面記下百分比（走到 50% 為止，最多 4 秒）：要看到中間的數字，不是一下子跳到 50%；也不會往反方向閃
   const seen = page.evaluate(
     () =>
       new Promise((done) => {
         const vals = new Set()
         const t0 = performance.now()
         const tick = () => {
-          vals.add(document.querySelector('.td-ring b')?.textContent)
-          if (performance.now() - t0 < 1500) requestAnimationFrame(tick)
+          const v = document.querySelector('.td-ring b')?.textContent
+          vals.add(v)
+          if (v !== '50%' && performance.now() - t0 < 4000) requestAnimationFrame(tick)
           else done([...vals])
         }
         tick()
@@ -1213,6 +1238,7 @@ test('今日總覽的進度：做完幾件時百分比從原本的數字一路�
   const vals = await seen
   expect(vals).toContain('50%')
   expect(vals.filter((v) => v !== '0%' && v !== '50%').length).toBeGreaterThan(1)
+  expect(vals.filter((v) => v?.startsWith('-'))).toEqual([])
   await expect(pct).toHaveText('50%')
 
   // 走到一半整頁又重畫了（接著又有變動）：從走到的數字接著走，不會先跳到終點
@@ -1301,19 +1327,20 @@ test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出�
       }),
     )
     .toBe(true)
-  await page.evaluate(() =>
-    window.hiyori.ui.toast({ icon: '試', title: '兩顆按鈕', ms: 6000, actions: [{ label: '甲', run: () => (window.__ran = 1) }, { label: '乙', run: () => (window.__ran = 2) }] }),
-  )
+  // 用鍵盤移進來：停住（放上來和移進去在同一步，機器很忙時也不會先到時間）
+  await page.keyboard.press('Shift')
+  await page.evaluate(() => {
+    window.hiyori.ui.toast({ icon: '試', title: '兩顆按鈕', ms: 6000, actions: [{ label: '甲', run: () => (window.__ran = 1) }, { label: '乙', run: () => (window.__ran = 2) }] })
+    const el = [...document.querySelectorAll('#toasts .toast')].find((x) => x.textContent.includes('兩顆按鈕'))
+    el.querySelector('.toast-act').focus()
+  })
   const card = page.locator('#toasts .toast', { hasText: '兩顆按鈕' })
+  expect(await card.evaluate((el) => !!el.querySelector(':focus-visible'))).toBe(true)
+  await expect(card).toHaveClass(/held/)
   const second = card.locator('.toast-act', { hasText: '乙' })
   const b = await second.boundingBox()
   const x = b.x + b.width / 2
   const y = b.y + b.height / 2
-  // 用鍵盤移進來：停住
-  await page.keyboard.press('Shift')
-  await card.locator('.toast-act', { hasText: '甲' }).focus()
-  expect(await card.evaluate((el) => !!el.querySelector(':focus-visible'))).toBe(true)
-  await expect(card).toHaveClass(/held/)
   // 滑鼠按另一顆、拖出去放開（不算按到）：焦點換成滑鼠的、游標也離開了，接著倒數
   await page.mouse.move(x, y)
   await page.mouse.down()
