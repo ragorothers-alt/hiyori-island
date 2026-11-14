@@ -1,5 +1,6 @@
 import './today.css'
-import { $, esc, ICON } from './dom.js'
+import { $, $$, esc, ICON } from './dom.js'
+import { calmMotion, countUp } from './motion.js'
 import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS } from '../theme.js'
 import { TODAY_QUOTES, TODAY_LEADS } from '../data/todayLines.js'
 import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
@@ -245,6 +246,7 @@ export class TodayView {
       </div>
     </div>`
     this._drawn = true
+    this._animateProg()
     for (const [sel, top, left] of scroll) {
       const el = $(sel, this.root)
       if (el && top != null) Object.assign(el, { scrollTop: top, scrollLeft: left })
@@ -260,6 +262,35 @@ export class TodayView {
     const to = by(fk) || by(`tg-${id}`) || by(`fc-${id}`) || (card && ($(`.${card} :is(li, .td-hr) button:not(:disabled)`, this.root) || $(`.${card} button:not(:disabled)`, this.root)))
     to?.focus({ preventScroll: true })
     if (to === nt && caret) nt.setSelectionRange(...caret)
+  }
+
+  // 進度變了：圓環和百分比從上一次的數字走到新的，件數輕輕跳一下，這週的長條長上去或縮下來。
+  // 第一次畫：圓環從 0 轉到現在、長條一根一根長上來。換分頁回來、數字沒變就不動
+  _animateProg() {
+    const now = this._progNow
+    const prev = this._progPrev
+    this._progPrev = now
+    if (!now || calmMotion()) return
+    const was = prev || { pct: 0, week: null }
+    const ring = $('.td-ring', this.root)
+    if (ring && was.pct !== now.pct) {
+      const C = 2 * Math.PI * 52
+      ring.querySelector('.fg')?.animate([{ strokeDashoffset: C * (1 - was.pct / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], { duration: 900, easing: 'cubic-bezier(.2, .8, .2, 1)' })
+      countUp(ring.querySelector('b'), was.pct, now.pct, { fmt: (n) => `${n}<i>%</i>` })
+    }
+    if (prev) {
+      for (const [k, cls] of [['done', 'c-done'], ['going', 'c-going'], ['left', 'c-left']]) {
+        if (prev[k] === now[k]) continue
+        $(`.td-counts .${cls} b`, this.root)?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.4)', color: '#e0638a' }, { transform: 'scale(1)' }], { duration: 460, easing: 'ease-out' })
+      }
+    }
+    const bars = $$('.td-pw-d b', this.root)
+    bars.forEach((b, i) => {
+      const from = was.week ? was.week[i] : 0
+      const to = now.week?.[i] ?? 0
+      if (from === to) return
+      b.animate([{ height: `${from}%` }, { height: `${to}%` }], { duration: 700, delay: was.week ? 0 : 120 + i * 45, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'backwards' })
+    })
   }
 
   // ── 最上面：日期、標題、一句問候（依今天的狀態） ──
@@ -346,6 +377,8 @@ export class TodayView {
     const going = tasks.filter((t) => !t.done && (t.pomos || t.id === focusId || (t.at && toMin(t.at) <= nowMin))).length
     const left = tasks.length - done - going
     const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0
+    // 畫完之後拿來跟上一次比（_animateProg）
+    this._progNow = { pct, done, going, left, week: null }
     const C = 2 * Math.PI * 52
     const row = (icon, label, n, cls) => `<li class="${cls}">${icon}<span>${label}</span><b>${n}</b><small>件</small></li>`
     return `<section class="td-card td-prog" aria-label="今日進度">
@@ -374,6 +407,7 @@ export class TodayView {
       return { date, n: ts.length, done: ts.filter((t) => t.done).length }
     })
     const max = Math.max(1, ...days.map((d) => d.n))
+    if (this._progNow) this._progNow.week = days.map((d) => Math.round((d.done / max) * 100))
     const total = days.reduce((a, d) => a + d.done, 0)
     const all = days.reduce((a, d) => a + d.n, 0)
     const bar = (d, i) => {

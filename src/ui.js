@@ -1,7 +1,7 @@
 import { FocusTimer } from './ui/focus.js'
 import { BriefView } from './ui/brief.js'
 import { CaptureView } from './ui/capture.js'
-import { flipItems, noteTap, calmMotion } from './ui/motion.js'
+import { flipItems, noteTap, calmMotion, countUp } from './ui/motion.js'
 import { bindSwipe } from './ui/swipe.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
@@ -1421,7 +1421,10 @@ export class UI {
     const n = tasks.length
     const k = done.length
     const pct = n ? Math.round((k / n) * 100) : 0
-    $('#bloomPct').textContent = pct + '%'
+    // 百分比從上一次的數字走過去（圓環本身有 CSS 的轉場）
+    const pe = $('#bloomPct')
+    countUp(pe, pe._n, pct, { fmt: (v) => `${v}%` })
+    pe._n = pct
     $('#bloomArc').style.strokeDashoffset = 100.5 * (1 - pct / 100)
     const isToday = s.selectedDate === s.today
     const label = isToday ? '今天' : s.selectedDate > s.today ? '這天' : '那天'

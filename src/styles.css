@@ -204,6 +204,8 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .tab.active small { color: var(--sakura); }
 /* 六個分頁：窄的面板上假名縮小、不留字距，「しゅうかん」才放得下 */
 @media (max-width: 1100px) { .tab span { letter-spacing: .04em; } }
+/* 捲軸：沒有自己設的地方也用細細的、半透明的（Windows 的瀏覽器預設是白底加上下箭頭，夜晚很刺眼） */
+:root { scrollbar-color: rgba(120, 150, 190, .35) transparent; }
 .panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 22px; scrollbar-width: thin; scrollbar-color: rgba(120, 150, 190, .3) transparent; }
 .tab-page { display: none; animation: fadeUp .45s var(--ease); }
 .tab-page.active { display: block; }

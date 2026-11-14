@@ -668,7 +668,8 @@ test('檢視進度：總覽有這週每天做完幾件，點「看週報」到�
   await expect(week.locator('.td-pw-h')).toContainText('這週做完 1')
   await expect(week.locator('.td-pw-d')).toHaveCount(7)
   await expect(week.locator('.td-pw-d.now')).toHaveCount(1)
-  expect(await week.locator('.td-pw-d.now b').evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(0)
+  // 長條第一次畫時從 0 長上來：等它長好
+  await expect.poll(() => week.locator('.td-pw-d.now b').evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(0)
 
   // 分頁各自記住捲到哪裡：總覽往下捲，換到任務是從頭開始，回來還在原地；再點一次總覽回到最上面
   const body = page.locator('.panel-body')
@@ -825,11 +826,19 @@ test('打勾的手感：列表不會整串重播淡入，做完的那件滑到�
   const fadeUps = () => page.evaluate(() => document.getAnimations().filter((a) => a.animationName === 'fadeUp' && a.effect?.target?.closest?.('#taskList')).length)
   await expect.poll(fadeUps).toBe(3)
 
+  // 特效放完一兩秒就拿掉：先請頁面記下出現過的（機器很忙時，測試可能來不及在它還在的時候看到）
+  await page.evaluate(() => {
+    window.__fx = []
+    new MutationObserver((list) => {
+      for (const m of list) for (const n of m.addedNodes) if (n.classList?.contains('mo-burst') || n.classList?.contains('mo-float')) window.__fx.push(`${n.className}|${n.textContent}`)
+    }).observe(document.body, { childList: true })
+  })
+  const fx = () => page.evaluate(() => window.__fx)
   const title = await items.first().locator('.item-title').textContent()
   await items.first().locator('.check').click()
   // 花瓣從勾爆開、經驗值冒出來
-  await expect(page.locator('.mo-burst')).toHaveCount(1)
-  await expect(page.locator('.mo-float').first()).toHaveText(/^\+\d+ XP$/)
+  await expect.poll(async () => (await fx()).filter((x) => x.startsWith('mo-burst')).length).toBe(1)
+  await expect.poll(async () => (await fx()).some((x) => /^mo-float[^|]*\|\+\d+ XP$/.test(x))).toBe(true)
   // 打勾前就在的三件都不再重播淡入，做完的那件排到最後
   await expect(page.locator('#taskList .item.settled')).toHaveCount(3)
   expect(await fadeUps()).toBe(0)
@@ -932,10 +941,16 @@ test.describe('手機的觸控', () => {
     const task = (title) => page.evaluate((title) => window.hiyori.store.state.tasks.find((t) => t.title === title), title)
     const today = await page.evaluate(() => window.hiyori.store.today)
 
-    // 往右滑：完成，花瓣從那一列的勾爆開
+    // 往右滑：完成，花瓣從那一列的勾爆開（花瓣一秒就拿掉：請頁面記下出現過的）
+    await page.evaluate(() => {
+      window.__bursts = 0
+      new MutationObserver((list) => {
+        for (const m of list) for (const n of m.addedNodes) if (n.classList?.contains('mo-burst')) window.__bursts++
+      }).observe(document.body, { childList: true })
+    })
     await swipe('寫信給老師', 170)
     await expect.poll(async () => (await task('寫信給老師')).done).toBe(true)
-    await expect(page.locator('.mo-burst')).toHaveCount(1)
+    await expect.poll(() => page.evaluate(() => window.__bursts)).toBe(1)
     await expect(page.locator('.item.sw')).toHaveCount(0)
 
     // 滑一點點：彈回去，什麼都不做；彈回去之後馬上點勾照樣算數（不會被當成滑動補的那一下吃掉）
@@ -1078,4 +1093,41 @@ test('分頁列選到的那一格墊的膠囊會滑過去、停在選到的那�
   await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('')
   await page.locator('#prevDay').click()
   expect(await page.evaluate(() => document.querySelector('.panel-body').style.getPropertyValue('--enter-x'))).toBe('-22px')
+})
+test('今日總覽的進度：做完幾件時百分比從原本的數字一路走到新的', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+    for (const title of ['一', '二', '三', '四']) s.addTask({ title, date: s.today })
+    window.hiyori.ui.setTab('today')
+  })
+  const pct = page.locator('.td-ring b')
+  await expect(pct).toHaveText('0%')
+  // 每一格畫面記下百分比：要看到中間的數字，不是一下子跳到 50%
+  const seen = page.evaluate(
+    () =>
+      new Promise((done) => {
+        const vals = new Set()
+        const t0 = performance.now()
+        const tick = () => {
+          vals.add(document.querySelector('.td-ring b')?.textContent)
+          if (performance.now() - t0 < 1500) requestAnimationFrame(tick)
+          else done([...vals])
+        }
+        tick()
+      }),
+  )
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const [a, b] = s.tasksOn(s.today)
+    s.toggleTask(a.id)
+    s.toggleTask(b.id)
+  })
+  const vals = await seen
+  expect(vals).toContain('50%')
+  expect(vals.filter((v) => v !== '0%' && v !== '50%').length).toBeGreaterThan(1)
+  await expect(pct).toHaveText('50%')
 })

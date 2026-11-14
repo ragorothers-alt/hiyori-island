@@ -94,6 +94,22 @@ export function tapPoint(now = performance.now()) {
   }
   return tap.c || (tap.x != null ? { x: tap.x, y: tap.y } : null)
 }
+// ── 數字從 from 走到 to（先快後慢）；fmt 回傳要放進去的 HTML。減少動態效果、沒變、還沒有上一次的數字：直接放結果 ──
+export function countUp(el, from, to, { dur = 700, fmt = String } = {}) {
+  if (!el) return
+  cancelAnimationFrame(el._count)
+  const put = (n) => (el.innerHTML = fmt(n))
+  if (from == null || from === to || !Number.isFinite(from) || !Number.isFinite(to) || calmMotion()) return put(to)
+  const t0 = performance.now()
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / dur)
+    put(Math.round(from + (to - from) * (1 - (1 - k) ** 3)))
+    if (k < 1) el._count = requestAnimationFrame(step)
+  }
+  put(from)
+  el._count = requestAnimationFrame(step)
+}
+
 const layer = (cls) => {
   const el = document.createElement('div')
   el.className = cls
