@@ -1,7 +1,8 @@
 // 手機上任務列左右滑：往右滑完成（做完的往右滑是「還沒做完」）、往左滑明天再做（逾期的是移到今天）。
 // 只認手指（滑鼠和觸控筆照常用按鈕）；上下捲動交給瀏覽器（.item 設了 touch-action: pan-y）。
-// 滑過去的地方露出顏色和字，拉過門檻時字變亮（Android 輕震一下），放開就做
+// 滑過去的地方露出顏色和字，拉過門檻時字變亮（手機輕震一下），放開就做
 import { calmMotion } from './motion.js'
+import { haptic } from './haptics.js'
 
 const SLOP = 12 // 手指移動多少才開始判斷是左右滑還是上下捲
 
@@ -29,8 +30,8 @@ export function bindSwipe(box, actions) {
     if (armed !== s.armed) {
       s.armed = armed
       s.li.classList.toggle('armed', armed)
-      // 拉過門檻的那一下：Android 輕震一下（iPhone 的瀏覽器不支援，沒有反應）
-      if (armed) navigator.vibrate?.(8)
+      // 拉過門檻的那一下：輕震一下（haptics.js；iPhone 在滑的時候不算使用者點的那一下，不會震）
+      if (armed) haptic('tick')
     }
   }
   const end = (commit) => {

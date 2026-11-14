@@ -19,7 +19,7 @@
 .le-bars button:nth-child(4) i { height: 20px; }
 .le-bars button:nth-child(5) i { height: 24px; }
 .le-bars button.lit i { background: var(--ec); box-shadow: 0 1px 5px color-mix(in srgb, var(--ec) 40%, transparent); }
-.le-bars button:hover i { transform: scaleY(1.12); transform-origin: bottom; }
+@media (hover: hover) { .le-bars button:hover i { transform: scaleY(1.12); transform-origin: bottom; } }
 .le-text { margin-left: auto; font-family: var(--font-display); font-size: 14px; letter-spacing: .08em; white-space: nowrap; }
 .le-text.none { font-family: var(--font-body); font-size: 11.5px; color: var(--ink-faint); letter-spacing: .02em; }
 
@@ -160,7 +160,7 @@ body.night .slp-band { background: rgba(185, 167, 230, .1); }
   transition: transform .3s var(--ease);
 }
 .slp-col.short .slp-bar { background: linear-gradient(180deg, #f6c08e, #f19bb2); box-shadow: 0 3px 10px rgba(240, 160, 150, .35); }
-.slp-col:hover .slp-bar { transform: scaleX(1.15); }
+@media (hover: hover) { .slp-col:hover .slp-bar { transform: scaleX(1.15); } }
 .slp-bar small { position: absolute; left: 50%; transform: translateX(-50%); font-family: var(--font-num); font-size: 9.5px; font-weight: 600; color: var(--ink-soft); line-height: 1; white-space: nowrap; }
 .slp-bar small.b { bottom: calc(100% + 3px); }
 .slp-bar small.w { top: calc(100% + 3px); }
@@ -217,7 +217,7 @@ body.night .sf-dur.short { color: #ffb59a; }
   width: 32px; height: 32px; border-radius: 50%; font-family: var(--font-num); font-size: 12.5px; font-weight: 600; color: var(--ink-faint);
   border: 1.5px dashed rgba(169, 154, 224, .5); transition: background .2s, color .2s, transform .2s var(--ease);
 }
-.sf-q button:hover { transform: translateY(-1px); color: var(--ink); }
+@media (hover: hover) { .sf-q button:hover { transform: translateY(-1px); color: var(--ink); } }
 .sf-q button.on { border-style: solid; border-color: transparent; color: #fff; background: linear-gradient(135deg, #b9a7e6, #8cc6ea); }
 .sf-qtext { font-size: 12px; color: var(--ink); font-family: var(--font-display); letter-spacing: .06em; }
 .sf-qtext.none { font-family: var(--font-body); color: var(--ink-faint); font-size: 11px; }

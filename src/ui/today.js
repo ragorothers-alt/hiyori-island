@@ -232,6 +232,8 @@ export class TodayView {
     const now = new Date()
     const nowMin = now.getHours() * 60 + now.getMinutes()
     const tasks = s.tasksOn(today)
+    // 進度圈和長條現在在畫面上的樣子（動畫走到一半的話是走到的地方）：重畫後從這裡接著走
+    const live = this._liveProg()
     this.root.innerHTML = `<div class="td${this._drawn ? '' : ' td-enter'}">
       ${this._heroHTML(today, tasks, now)}
       <div class="td-grid">
@@ -246,7 +248,7 @@ export class TodayView {
       </div>
     </div>`
     this._drawn = true
-    this._animateProg()
+    this._animateProg(live)
     for (const [sel, top, left] of scroll) {
       const el = $(sel, this.root)
       if (el && top != null) Object.assign(el, { scrollTop: top, scrollLeft: left })
@@ -264,19 +266,40 @@ export class TodayView {
     if (to === nt && caret) nt.setSelectionRange(...caret)
   }
 
-  // 進度變了：圓環和百分比從上一次的數字走到新的，件數輕輕跳一下，這週的長條長上去或縮下來。
-  // 第一次畫：圓環從 0 轉到現在、長條一根一根長上來。換分頁回來、數字沒變就不動
-  _animateProg() {
+  // 畫面上現在的進度圈（換算成百分比）和這週每根長條的高度（%）；還沒畫過是 null。
+  // 動畫走到一半時量到的是走到的地方（藏著的分頁量不到高度的長條，用設定的百分比）
+  _liveProg() {
+    const fg = $('.td-ring .fg', this.root)
+    if (!fg) return null
+    const C = 2 * Math.PI * 52
+    const off = parseFloat(getComputedStyle(fg).strokeDashoffset)
+    const bars = $$('.td-pw-d b', this.root).map((b) => {
+      const h = getComputedStyle(b).height
+      if (h.endsWith('%')) return parseFloat(h)
+      const box = b.parentElement?.clientHeight
+      return box ? (parseFloat(h) / box) * 100 : null
+    })
+    return { pct: Number.isFinite(off) ? (1 - off / C) * 100 : null, bars }
+  }
+
+  // 進度變了：圓環和百分比從畫面上現在的樣子走到新的，件數輕輕跳一下，這週的長條長上去或縮下來。
+  // 第一次畫：圓環從 0 轉到現在、長條一根一根長上來。走到一半又重畫（接著又做完一件、別的地方更新了）：
+  // 從走到的地方接著走，不會先跳到終點。換分頁回來、數字沒變就不動
+  _animateProg(live) {
     const now = this._progNow
     const prev = this._progPrev
     this._progPrev = now
-    if (!now || calmMotion()) return
-    const was = prev || { pct: 0, week: null }
+    if (!now) return
     const ring = $('.td-ring', this.root)
-    if (ring && was.pct !== now.pct) {
+    // 百分比的數字：元素每次重畫都換掉，記著走到哪的 state 留在這個畫面上
+    this._pctTw ||= {}
+    countUp(ring?.querySelector('b'), prev ? prev.pct : 0, now.pct, { dur: 900, fmt: (n) => `${n}<i>%</i>`, state: this._pctTw })
+    if (calmMotion()) return
+    const EASE = 'cubic-bezier(.2, .8, .2, 1)'
+    const from = live ? live.pct : 0
+    if (ring && from != null && Math.abs(from - now.pct) > 0.3) {
       const C = 2 * Math.PI * 52
-      ring.querySelector('.fg')?.animate([{ strokeDashoffset: C * (1 - was.pct / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], { duration: 900, easing: 'cubic-bezier(.2, .8, .2, 1)' })
-      countUp(ring.querySelector('b'), was.pct, now.pct, { fmt: (n) => `${n}<i>%</i>` })
+      ring.querySelector('.fg')?.animate([{ strokeDashoffset: C * (1 - from / 100) }, { strokeDashoffset: C * (1 - now.pct / 100) }], { duration: 900, easing: EASE })
     }
     if (prev) {
       for (const [k, cls] of [['done', 'c-done'], ['going', 'c-going'], ['left', 'c-left']]) {
@@ -284,12 +307,11 @@ export class TodayView {
         $(`.td-counts .${cls} b`, this.root)?.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.4)', color: '#e0638a' }, { transform: 'scale(1)' }], { duration: 460, easing: 'ease-out' })
       }
     }
-    const bars = $$('.td-pw-d b', this.root)
-    bars.forEach((b, i) => {
-      const from = was.week ? was.week[i] : 0
+    $$('.td-pw-d b', this.root).forEach((b, i) => {
+      const was = live ? live.bars[i] : 0
       const to = now.week?.[i] ?? 0
-      if (from === to) return
-      b.animate([{ height: `${from}%` }, { height: `${to}%` }], { duration: 700, delay: was.week ? 0 : 120 + i * 45, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: 'backwards' })
+      if (was == null || Math.abs(was - to) < 0.5) return
+      b.animate([{ height: `${was}%` }, { height: `${to}%` }], { duration: 700, delay: live ? 0 : 120 + i * 45, easing: EASE, fill: 'backwards' })
     })
   }
 

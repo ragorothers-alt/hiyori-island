@@ -13,6 +13,7 @@ import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
 import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf } from './theme.js'
 import { burst, floatText, petalRain, tapPoint, trackTaps } from './ui/motion.js'
+import { haptic } from './ui/haptics.js'
 import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
 import { taskDur } from './planner.js'
@@ -206,6 +207,7 @@ async function boot() {
         // 休息完自動接下一輪的不收：「休息結束，第 N 輪開始了」那一張才剛放上去
         if (info.ext || !(info.round > 1)) ui.dropToasts('focus')
         sfx.chime()
+        haptic('tick')
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
         const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
         // 加時：倒數到點了還沒做完，接著做
@@ -240,6 +242,7 @@ async function boot() {
           return
         }
         sfx.temple()
+        haptic('end')
         if (info.at) timerNotify({ at: info.at, mode: 'focus', up: true, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
         scene?.focusFinished(taskId, info.projectId)
         talk('focusEnd')
@@ -250,6 +253,7 @@ async function boot() {
       // 同一輪另一個分頁已經記過了：這邊不再記、也不再放天燈
       if (store.completePomodoro(minutes, taskId, info.projectId, info.sid) === false) return scene?.focusStopped()
       sfx.temple()
+      haptic('end')
       timerNotify({ at: info.at, mode: 'focus', up: info.free, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
       // 兩人出屋、天燈從小木屋屋頂升起；目標是專案的話，那棟房子泛起一圈光
       scene?.focusFinished(taskId, info.projectId)
@@ -274,6 +278,7 @@ async function boot() {
     // next：還有下一輪時是 { next, rounds }，計時器接著會自己開始下一輪（台詞交給 focusStarted）
     breakFinished: (next, at = null) => {
       sfx.chime()
+      haptic('end')
       timerNotify({ at, mode: 'break', round: next ? next.next - 1 : 1, rounds: next ? next.rounds : 1 })
       if (next) {
         ui.toast({ icon: '風', title: '休息結束', sub: `第 ${next.next}/${next.rounds} 輪開始了`, tag: 'focus' })
@@ -351,7 +356,10 @@ async function boot() {
   // 打勾的那一下：花瓣從剛按的那顆勾爆開（本命和高優先度大一點）。
   // App 模式看不到小島，經驗值也從剛按的地方冒出來（小島模式在島上冒，islandScene.js）
   trackTaps()
+  // iPhone 的 Safari：頁面上要有 touchstart 的監聽，手指按著按鈕時 :active 的樣子（縮一下）才會出來
+  document.addEventListener('touchstart', () => {}, { passive: true })
   store.on('taskDone', (t) => {
+    haptic(t.star ? 'star' : 'done')
     const c = tagOf(t.tag).color
     burst(tapPoint(), t.star ? ['#ffd76e', '#fff3c4', c, '#ffffff'] : [c, '#ffe1ea', '#ffffff', c], { big: t.star || t.priority === 3 })
   })
@@ -447,15 +455,18 @@ async function boot() {
   // ── 本命 ──
   store.on('starPicked', (t) => {
     sfx.chime()
+    haptic('tick')
     talk('starPick', { task: short(t.title) }, undefined, `「${short(t.title)}」是今天的本命。`)
   })
   store.on('starFull', () => {
+    haptic('warn')
     ui.toast({ icon: '★', title: `本命已經選滿 ${MAX_STARS} 件`, sub: '先取消其中一件，再選這件' })
     talk('starFull', {}, undefined, '三件就好，太多會累的。')
   })
   store.on('starAll', () => {
     setTimeout(() => {
       sfx.fanfare()
+      haptic('party')
       if (ui.appMode) petalRain({ count: 22, colors: ['#ffd76e', '#fff3c4', '#f6c453', '#ffe9a8', '#ffffff'] })
       ui.toast({ icon: '★', title: '本命全清', sub: `最重要的三件事都完成了・+${XP.starAll} XP` })
       talk('starAll', {}, 4200, '最重要的三件，全部完成了。')
@@ -467,6 +478,7 @@ async function boot() {
   })
   store.on('taskUndone', (t) => {
     sfx.undo()
+    haptic('soft')
     // 長期任務取消完成：從那天的任務回到專案裡，說一聲它去哪了（在專案頁上看得到就不用說）
     if (t?.ongoing && ui.tab !== 'projects') {
       const p = store.state.projects.find((x) => x.id === t.project)
@@ -487,6 +499,7 @@ async function boot() {
   store.on('allDone', () => {
     setTimeout(() => {
       sfx.fanfare()
+      haptic('party')
       // 小島上兩人會出來慶祝；App 模式看不到小島，飄一陣花瓣
       if (ui.appMode) petalRain()
       if (!duet('allDone')) talk('allDone', {}, 4200)
@@ -494,15 +507,18 @@ async function boot() {
   })
   store.on('eventDone', () => {
     sfx.chime()
+    haptic('done')
     talk('eventDone')
   })
   store.on('milestoneDone', ({ project }) => {
     sfx.build()
+    haptic('done')
     talk('milestone', { project: short(project.name) })
   })
   store.on('projectDone', (p) => {
     setTimeout(() => {
       sfx.fanfare()
+      haptic('party')
       talk('projectDone', { project: short(p.name) }, 4500)
       // 小島還沒建的話看資料：分到已開放的地，就有房子
       const house = scene ? scene.hasHouse(p.id) : p.slot >= 0 && p.slot < lotsAt(store.state.town.plevel)
@@ -513,6 +529,7 @@ async function boot() {
     const unlock = UNLOCKS.find((u) => u.level === level)
     setTimeout(() => {
       sfx.levelUp()
+      haptic('party')
       if (!duet('levelUp', { level })) talk('levelUp', { level }, 4200)
       ui.showLevelUp(level, unlock)
     }, 1200)
@@ -558,17 +575,20 @@ async function boot() {
   })
   store.on('habitDone', ({ habit, streak }) => {
     sfx.bloom(2)
+    haptic('done')
     talk('habitDone', { habit: short(habit.name), streak }, 3800)
   })
   store.on('habitAll', () => {
     setTimeout(() => {
       sfx.fanfare()
+      haptic('party')
       ui.toast({ icon: '習', title: '今天的養成習慣全部完成', sub: `+${XP.habitAll} XP・一起收好今天的小累積` })
       if (!duet('habitAll')) talk('habitAll', {}, 4200)
     }, 900)
   })
   store.on('urgeResisted', ({ habit, days }) => {
     sfx.pop()
+    haptic('tick')
     talk('urgeResisted', { habit: short(habit.name), days }, 3800)
   })
   store.on('habitSlip', ({ habit, days }) => talk('habitSlip', { habit: short(habit.name), days }, 5200, '沒關係，我會陪你慢慢來。'))

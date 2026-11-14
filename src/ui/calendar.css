@@ -181,7 +181,7 @@ body.night .cw-chip.h { color: #a6e3c8; }
   background: color-mix(in srgb, var(--c) 45%, var(--glass-strong)); border-left: 3px solid var(--c);
   box-shadow: 0 1px 4px rgba(70, 110, 160, .12); transition: box-shadow .2s, transform .2s var(--ease);
 }
-button.cw-blk:hover { z-index: 3; transform: translateY(-1px); box-shadow: 0 5px 14px rgba(70, 110, 160, .22); }
+@media (hover: hover) { button.cw-blk:hover { z-index: 3; transform: translateY(-1px); box-shadow: 0 5px 14px rgba(70, 110, 160, .22); } }
 .cw-blk b { display: block; max-width: 100%; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cw-blk small { font-family: var(--font-num); font-size: 10px; color: var(--ink-soft); white-space: nowrap; }
 /* 不到 45 分鐘的區塊只放得下一行：只留標題（時間在 title 提示裡） */

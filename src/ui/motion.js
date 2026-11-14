@@ -95,19 +95,26 @@ export function tapPoint(now = performance.now()) {
   return tap.c || (tap.x != null ? { x: tap.x, y: tap.y } : null)
 }
 // ── 數字從 from 走到 to（先快後慢）；fmt 回傳要放進去的 HTML。減少動態效果、沒變、還沒有上一次的數字：直接放結果 ──
-export function countUp(el, from, to, { dur = 700, fmt = String } = {}) {
+// 走到一半又被呼叫（接著又做完一件、整塊重畫了）：從畫面上現在的數字接著走，不會先跳到上一次的終點。
+// state 記著畫面上現在的數字：元素每次重畫都會換掉的話，傳一個留在畫面物件上的 {}（預設記在元素自己身上）
+export function countUp(el, from, to, { dur = 700, fmt = String, state = el } = {}) {
   if (!el) return
-  cancelAnimationFrame(el._count)
-  const put = (n) => (el.innerHTML = fmt(n))
-  if (from == null || from === to || !Number.isFinite(from) || !Number.isFinite(to) || calmMotion()) return put(to)
+  const start = state._count ? state._v : from
+  cancelAnimationFrame(state._count)
+  state._count = 0
+  const put = (n) => {
+    state._v = n
+    el.innerHTML = fmt(n)
+  }
+  if (start == null || start === to || !Number.isFinite(start) || !Number.isFinite(to) || calmMotion()) return put(to)
   const t0 = performance.now()
   const step = (t) => {
     const k = Math.min(1, (t - t0) / dur)
-    put(Math.round(from + (to - from) * (1 - (1 - k) ** 3)))
-    if (k < 1) el._count = requestAnimationFrame(step)
+    put(Math.round(start + (to - start) * (1 - (1 - k) ** 3)))
+    state._count = k < 1 ? requestAnimationFrame(step) : 0
   }
-  put(from)
-  el._count = requestAnimationFrame(step)
+  put(start)
+  state._count = requestAnimationFrame(step)
 }
 
 const layer = (cls) => {

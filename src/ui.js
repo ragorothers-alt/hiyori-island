@@ -3,6 +3,7 @@ import { BriefView } from './ui/brief.js'
 import { CaptureView } from './ui/capture.js'
 import { flipItems, noteTap, calmMotion, countUp } from './ui/motion.js'
 import { bindSwipe } from './ui/swipe.js'
+import { canHaptics, hapticsOn, setHaptics, haptic, IOS } from './ui/haptics.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
@@ -2176,6 +2177,14 @@ export class UI {
     $('#layoutInfo').textContent = this.appMode ? '面板撐滿畫面、小島先休息，像一般 App 一樣用（只改這台裝置）' : '任務在島上開花、兩人在島上陪你（只改這台裝置）'
     const fs = this.store.state.settings.fontScale
     pickOne($$('#fontPick button'), (b) => +b.dataset.v === fs)
+    // 震動回饋：手指操作、震得動的裝置才有這一列（每台裝置自己記）
+    $('#hapticRow').hidden = !canHaptics()
+    const buzz = hapticsOn()
+    setOn($('#hapticBtn'), buzz)
+    $('#hapticBtn').textContent = buzz ? '開' : '關'
+    $('#hapticInfo').textContent = IOS
+      ? '打勾、選本命、開始專注時輕輕震一下（iPhone 只有部分 iOS 版本震得動・只改這台裝置）'
+      : '打勾、選本命、全部完成、番茄鐘到點時手機輕輕震一下（只改這台裝置）'
     const stuck = this.store.state.settings.stuckNudge
     setOn($('#stuckBtn'), stuck)
     $('#stuckBtn').textContent = stuck ? '開' : '關'
@@ -2625,6 +2634,12 @@ export class UI {
       this.store.setSetting('glass', +e.target.value)
       requestAnimationFrame(() => document.body.classList.remove('glass-adjusting'))
     })
+    $('#hapticBtn').onclick = () => {
+      setHaptics(!hapticsOn())
+      // 打開時馬上震一下：知道現在是什麼感覺
+      haptic('done')
+      this.renderSettings()
+    }
     $('#stuckBtn').onclick = () => {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()
@@ -3012,8 +3027,10 @@ export class UI {
   // 有按鈕的提示卡：游標停在上面、手指按著（按在按鈕上也算）、鍵盤焦點在裡面時先不倒數（看清楚再按），
   // 這些都沒有了才接著倒數（剩下的至少 1.2 秒）。手機上可以往左右滑掉
   _holdToast(el, ms) {
+    // left：還剩多久收掉；frac：倒數細線在 at 那時還剩幾成（停過之後從停住的地方，照真的剩下的時間縮到 0）
     let left = ms
     let at = 0
+    let frac = 1
     // 現在為什麼停著：hover／touch／focus，空的就在倒數
     const why = new Set()
     const sync = () => {
@@ -3021,9 +3038,19 @@ export class UI {
       const held = el.classList.contains('held')
       if (why.size && !held) {
         clearTimeout(el._life)
-        left = Math.max(1200, left - (performance.now() - at))
+        const gone = performance.now() - at
+        frac *= Math.max(0, 1 - gone / left)
+        left = Math.max(1200, left - gone)
         el.classList.add('held')
       } else if (!why.size && (held || !at)) {
+        // 剩下不到 1.2 秒時停過：細線也照多給的時間慢慢縮，不會先縮完、卡片還在
+        if (held && el.classList.contains('timed')) {
+          el.style.setProperty('--from', frac.toFixed(3))
+          el.style.setProperty('--life', `${Math.round(left)}ms`)
+          el.classList.remove('timed')
+          void el.offsetWidth
+          el.classList.add('timed')
+        }
         at = performance.now()
         el._life = setTimeout(() => this._dropToast(el), left)
         el.classList.remove('held')
@@ -3037,9 +3064,14 @@ export class UI {
     // 手機沒有「停在上面」：手指另外算（放開時 :hover 還會黏著，不能拿來判斷）
     el.addEventListener('pointerenter', (e) => e.pointerType !== 'touch' && hold('hover', true))
     el.addEventListener('pointerleave', (e) => e.pointerType !== 'touch' && hold('hover', false))
-    // 用鍵盤移進來的焦點才算：滑鼠點過按鈕留下的焦點不算（不然游標移開了也一直不收）
-    el.addEventListener('focusin', (e) => e.target.matches?.(':focus-visible') && hold('focus', true))
-    el.addEventListener('focusout', () => setTimeout(() => el.contains(document.activeElement) || hold('focus', false), 0))
+    // 焦點在裡面、而且是用鍵盤移進來的才算：滑鼠點過按鈕留下的焦點不算（不然游標移開了也一直不收）。
+    // 每次焦點換了都重新看一次（先用 Tab 移進來、再用滑鼠按另一顆，就不再算）
+    const focusCheck = () => {
+      const a = document.activeElement
+      hold('focus', !!a && el.contains(a) && !!a.matches?.(':focus-visible'))
+    }
+    el.addEventListener('focusin', focusCheck)
+    el.addEventListener('focusout', () => setTimeout(focusCheck, 0))
     // 手指：按著的時候不倒數，放開、或被瀏覽器拿去捲動（pointercancel）就接著倒數。
     // 從字上（不是按鈕）開始往左右滑：跟著走，放開時滑夠遠就收掉，不夠就彈回來；被取消的不算滑掉。
     // 放開的事件在 document 上接：手指滑出提示卡外、按下去的那個元素不見了，也收得到

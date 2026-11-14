@@ -4,6 +4,7 @@ import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
 import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
 import { taskMilestone } from '../projects.js'
+import { haptic } from './haptics.js'
 
 // 日程分頁：週條、早晨的睡眠小卡、排程列、還沒排時段的任務、可拖曳的一日時間軸、作息設定與編輯面板
 
@@ -723,7 +724,7 @@ export class ScheduleView {
         if (!this.drag || this.drag.moved) return
         this.drag.armed = true
         d.el?.classList.add('lift')
-        navigator.vibrate?.(8)
+        haptic('tick')
       }, 320)
     }
   }

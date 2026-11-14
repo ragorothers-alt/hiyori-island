@@ -187,7 +187,7 @@ body.night .wr-pj-tp em.up { color: #9fe0c5; }
   flex: none; width: 138px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 11px 12px; border-radius: 18px; text-align: left; scroll-snap-align: start;
   background: linear-gradient(150deg, color-mix(in srgb, #e9ef7a 22%, var(--field)), color-mix(in srgb, #f6c6d4 28%, var(--field))); border: 1px solid var(--glass-border); transition: transform .2s;
 }
-.wr-album-card:hover { transform: translateY(-2px); }
+@media (hover: hover) { .wr-album-card:hover { transform: translateY(-2px); } }
 .wr-album-card.cur { box-shadow: inset 0 0 0 1.5px #b9a7e6; }
 .wr-album-card > small { font-size: 10.5px; color: var(--ink-faint); }
 .wr-ar { font-family: var(--font-num); font-size: 12.5px; font-weight: 700; }

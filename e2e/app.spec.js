@@ -998,6 +998,57 @@ test.describe('手機的觸控', () => {
     await swipe('讀一章小說', 170)
     await expect.poll(async () => (await task('讀一章小說')).done).toBe(true)
   })
+  test('觸感回饋：打勾時手機輕震一下、選滿本命時震兩下；設定裡可以關掉（只改這台裝置），打開時震一下', async ({ page, context, site }) => {
+    await useAppMode(context)
+    // 記下叫了幾次 vibrate、用什麼節奏（測試的瀏覽器不會真的震）
+    await page.addInitScript(() => {
+      window.__buzz = []
+      Object.defineProperty(Navigator.prototype, 'vibrate', { value: (p) => (window.__buzz.push(p), true), configurable: true })
+    })
+    await page.goto(site.url)
+    await bootReady(page)
+    await page.evaluate(() => {
+      const s = window.hiyori.store
+      for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+      for (const title of ['一', '二', '三', '四', '五']) s.addTask({ title, date: s.today })
+      window.hiyori.ui.setTab('tasks')
+    })
+    await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').contains(document.elementFromPoint(200, 420)))).toBe(true)
+    const buzz = () => page.evaluate(() => window.__buzz)
+    const row = (title) => page.locator('#taskList .item', { hasText: title }).first()
+    await row('一').locator('.check').tap()
+    await expect.poll(buzz).toEqual([14])
+    // 本命已經選滿三件：再選第四件時震兩下（選到的那三下各輕震一下）
+    await page.evaluate(() => {
+      const s = window.hiyori.store
+      window.__buzz.length = 0
+      for (const t of s.tasksOn(s.today).filter((x) => !x.done).slice(0, 3)) s.toggleStar(t.id)
+    })
+    await row('五').locator('[data-act="star"]').tap()
+    await expect.poll(buzz).toEqual([8, 8, 8, [24, 50, 24]])
+
+    // 設定裡關掉：打勾不再震；這台裝置記住了，重新整理也一樣
+    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    const btn = page.locator('#hapticBtn')
+    await expect(page.locator('#hapticRow')).toBeVisible()
+    await expect(btn).toHaveText('開')
+    await btn.tap()
+    await expect(btn).toHaveText('關')
+    await page.evaluate(() => (window.__buzz.length = 0))
+    await page.reload()
+    await bootReady(page)
+    await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+    await expect.poll(() => page.evaluate(() => document.querySelector('.panel-body').contains(document.elementFromPoint(200, 420)))).toBe(true)
+    await row('二').locator('.check').tap()
+    await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '二').done)).toBe(true)
+    await page.waitForTimeout(300)
+    expect(await buzz()).toEqual([])
+    // 再打開：馬上震一下
+    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await btn.tap()
+    await expect(btn).toHaveText('開')
+    await expect.poll(buzz).toEqual([14])
+  })
   test('提示卡：手指從按鈕上按下去、往下滑（瀏覽器拿去捲動）再放開，照樣接著倒數、時間到就收', async ({ page, context, site }) => {
     await useAppMode(context)
     await page.goto(site.url)
@@ -1163,4 +1214,70 @@ test('今日總覽的進度：做完幾件時百分比從原本的數字一路�
   expect(vals).toContain('50%')
   expect(vals.filter((v) => v !== '0%' && v !== '50%').length).toBeGreaterThan(1)
   await expect(pct).toHaveText('50%')
+
+  // 走到一半整頁又重畫了（接著又有變動）：從走到的數字接著走，不會先跳到終點
+  const mid = await page.evaluate(async () => {
+    const s = window.hiyori.store
+    const num = () => parseInt(document.querySelector('.td-ring b').textContent, 10)
+    s.toggleTask(s.tasksOn(s.today).find((t) => !t.done).id)
+    await new Promise((r) => setTimeout(r, 150))
+    const before = num()
+    window.hiyori.ui.today.render()
+    return { before, after: num() }
+  })
+  expect(mid.before).toBeGreaterThan(50)
+  expect(mid.before).toBeLessThan(75)
+  expect(mid.after).toBe(mid.before)
+  await expect(pct).toHaveText('75%')
+})
+test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出去放開，照樣接著倒數；停過的倒數細線從停住的地方接著縮', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await expect(page.locator('#toasts .toast')).toHaveCount(0, { timeout: 15000 })
+  // 開場畫面完全收掉了才開始（不然滑鼠移過去碰不到提示卡，提示卡先到時間）
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const l = document.getElementById('loader')
+        return !l || getComputedStyle(l).visibility === 'hidden'
+      }),
+    )
+    .toBe(true)
+  await page.evaluate(() =>
+    window.hiyori.ui.toast({ icon: '試', title: '兩顆按鈕', ms: 6000, actions: [{ label: '甲', run: () => (window.__ran = 1) }, { label: '乙', run: () => (window.__ran = 2) }] }),
+  )
+  const card = page.locator('#toasts .toast', { hasText: '兩顆按鈕' })
+  const second = card.locator('.toast-act', { hasText: '乙' })
+  const b = await second.boundingBox()
+  const x = b.x + b.width / 2
+  const y = b.y + b.height / 2
+  // 用鍵盤移進來：停住
+  await page.keyboard.press('Shift')
+  await card.locator('.toast-act', { hasText: '甲' }).focus()
+  expect(await card.evaluate((el) => !!el.querySelector(':focus-visible'))).toBe(true)
+  await expect(card).toHaveClass(/held/)
+  // 滑鼠按另一顆、拖出去放開（不算按到）：焦點換成滑鼠的、游標也離開了，接著倒數
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  await page.mouse.move(x, y + 300, { steps: 6 })
+  await page.mouse.up()
+  await expect(card).not.toHaveClass(/held/)
+  await expect(card).toHaveCount(0, { timeout: 8000 })
+  expect(await page.evaluate(() => window.__ran)).toBeFalsy()
+
+  // 有倒數細線的：停一下再走，細線從停住的地方、照剩下的時間縮到 0
+  const bar = await page.evaluate(async () => {
+    window.hiyori.ui.toast({ icon: '試', title: '有細線', ms: 30000, actions: [{ label: '好', run: () => {} }] })
+    const el = [...document.querySelectorAll('#toasts .toast')].find((x) => x.textContent.includes('有細線'))
+    await new Promise((r) => setTimeout(r, 300))
+    el.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }))
+    el.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }))
+    return { timed: el.classList.contains('timed'), from: +el.style.getPropertyValue('--from'), life: parseInt(el.style.getPropertyValue('--life'), 10) }
+  })
+  expect(bar.timed).toBe(true)
+  expect(bar.from).toBeGreaterThan(0.95)
+  expect(bar.from).toBeLessThan(1)
+  expect(bar.life).toBeGreaterThan(28000)
+  expect(bar.life).toBeLessThan(29800)
 })
