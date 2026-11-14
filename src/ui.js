@@ -390,6 +390,7 @@ export class UI {
     })
     this._bindFold()
     this._bindSheet()
+    this._bindTuck()
 
     this._bindLayers()
     addEventListener('keydown', (e) => {
@@ -612,7 +613,12 @@ export class UI {
     if (tab === 'habits') this.habits.render()
     if (tab === 'coach') this._use(this._coach, (c) => c.render())
     if (tab === 'today') this.today.render()
-    if (from !== tab) body.scrollTop = this._tabScroll?.[tab] || 0
+    if (from !== tab) {
+      // 還原這一頁捲到的位置：這一下的捲動不算使用者往下捲，Dock 不讓開
+      this._tuckHold = performance.now() + 250
+      body.scrollTop = this._tabScroll?.[tab] || 0
+    }
+    this.tuckDock(false)
   }
 
   togglePanel(force) {
@@ -633,6 +639,37 @@ export class UI {
     const off = panel.classList.contains('collapsed') && getComputedStyle(panel).pointerEvents === 'none'
     if (off && panel.contains(document.activeElement)) $('#panelBtn')?.focus({ preventScroll: true })
     panel.inert = off
+  }
+
+  // 手機的 App 模式：往下捲時右下角的番茄鐘膠囊和兩人的對話框先讓開（不擋住列表右邊的按鈕），
+  // 往上捲一點、回到最上面、換分頁就回來。程式自己捲的（換分頁還原位置）不算
+  _bindTuck() {
+    const body = $('.panel-body')
+    const narrow = typeof matchMedia === 'function' ? matchMedia('(max-width: 860px)') : { matches: false }
+    let last = body.scrollTop
+    let acc = 0
+    body.addEventListener(
+      'scroll',
+      () => {
+        const top = body.scrollTop
+        const d = top - last
+        last = top
+        if (!this.appMode || !narrow.matches || performance.now() < (this._tuckHold || 0)) return this.tuckDock(false)
+        // 同一個方向累積一段才算（手指放上去的小抖動、慣性快停下來的那一點點不算）
+        acc = Math.sign(d) === Math.sign(acc) ? acc + d : d
+        if (top < 48) this.tuckDock(false)
+        else if (acc > 28) this.tuckDock(true)
+        else if (acc < -18) this.tuckDock(false)
+      },
+      { passive: true },
+    )
+  }
+  tuckDock(on) {
+    // 正在用番茄鐘的小視窗、焦點在 Dock 裡（鍵盤）：不藏
+    if (on && (!$('#focusSet').hidden || !$('#focusPick').hidden || $('.dock')?.contains(document.activeElement))) on = false
+    if (on === !!this._tucked) return
+    this._tucked = on
+    document.body.classList.toggle('dock-tuck', on)
   }
 
   // 手機直式：在分頁列上往上滑展開面板（收起 → 半開 → 全螢幕），往下滑收回
@@ -833,13 +870,17 @@ export class UI {
     const fuji = who === 'fuji'
     el.innerHTML = `<span class="stamp-k ${fuji ? 'coach-k' : 'mochi-k'}">${fuji ? '藤' : 'も'}</span><p><b>${fuji ? 'ふじ' : 'もち'}</b>${esc(text)}</p>`
     el.hidden = false
-    el.classList.remove('show')
+    el.classList.remove('show', 'bye')
     void el.offsetWidth
     el.classList.add('show')
     const live = $('#chatLive')
     if (live) live.textContent = `${fuji ? 'ふじ' : 'もち'}：${text}`
     clearTimeout(this._chatT)
-    this._chatT = setTimeout(() => (el.hidden = true), Math.max(3000, ms || 0) + 600)
+    // 時間到了先淡出，再藏起來（一下子消失看起來像當掉）
+    this._chatT = setTimeout(() => {
+      el.classList.add('bye')
+      this._chatT = setTimeout(() => (el.hidden = true), 260)
+    }, Math.max(3000, ms || 0) + 600)
   }
 
   // ── 白天／夜晚 ──
