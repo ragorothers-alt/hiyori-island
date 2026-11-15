@@ -1,6 +1,6 @@
 // 打開 App 時貓咪說的今日摘要：資料 → 幾句話和清單（src/brief.js）
 import { describe, expect, it } from 'vitest'
-import { buildBrief } from '../src/brief.js'
+import { buildBrief, nextStep } from '../src/brief.js'
 
 const at = (h, m = 0) => new Date(2026, 10, 11, h, m)
 const task = (title, o = {}) => ({ id: title, title, done: false, star: false, priority: 2, at: null, ...o })
@@ -53,6 +53,22 @@ describe('今日摘要', () => {
     // 正在進行的日程
     expect(buildBrief(base({ now: at(10, 30), events: [ev('設計週會', '10:00', '11:00')] })).today[0].sub).toBe('進行中，到 11:00')
     expect(buildBrief(base({ now: at(9, 35), events: [ev('設計週會', '10:00', '11:00')] })).today[0].sub).toBe('還有 25 分鐘')
+  })
+
+  it('下一步：第一個還沒勾的子任務；沒有子任務、都勾完了、資料怪怪的是 null', () => {
+    const subs = [{ id: 's1', title: '找資料', done: true }, { id: 's2', title: '寫大綱', done: false }, { id: 's3', title: '寫初稿', done: false }]
+    expect(nextStep(task('寫報告', { subs }))).toEqual(subs[1])
+    expect(nextStep(task('寫報告', { subs: subs.map((x) => ({ ...x, done: true })) }))).toBeNull()
+    expect(nextStep(task('寫報告', { subs: [] }))).toBeNull()
+    expect(nextStep(task('寫報告'))).toBeNull()
+    expect(nextStep(task('寫報告', { subs: [null, { id: 'x', title: 'x', done: false }] }))).toEqual({ id: 'x', title: 'x', done: false })
+    expect(nextStep(null)).toBeNull()
+  })
+
+  it('最先做的那一件拆成了小步驟：摘要上寫著下一步（只寫第一件的）', () => {
+    const subs = [{ id: 's1', title: '找三篇參考資料', done: true }, { id: 's2', title: '把三篇的重點各寫一句話就好了吧', done: false }]
+    const tasks = [task('寫報告', { star: true, subs }), task('回信', { subs: [{ id: 'r1', title: '打開信箱', done: false }] })]
+    expect(buildBrief(base({ tasks })).today.map((x) => `${x.icon}|${x.text}|${x.sub}`)).toEqual(['命|寫報告|本命・下一步：把三篇的重點各寫一句話就好…', '花|回信|'])
   })
 
   it('前一晚挑好先做的那一件排在本命前面，「專注第一件」就是它；做完了就照原本的順序', () => {

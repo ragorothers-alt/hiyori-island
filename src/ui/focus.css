@@ -17,6 +17,8 @@
   transition: --ff-a .8s ease, --ff-b .8s ease, --ff-ink .8s ease;
   animation: fadeIn .3s var(--ease);
 }
+/* 焦點所在的那一顆收起來時，焦點交給專注頁本身（tabindex="-1"）：整頁不畫外框 */
+.focus-full:focus { outline: none; }
 .focus-full.break { --ff-a: #86cdb0; --ff-b: #8cc6ea; --ff-ink: #2f7d5c; }
 .focus-full.ext { --ff-a: #f0c36a; --ff-b: #f19bb2; --ff-ink: #94660f; }
 .focus-full.paused { --ff-ink: var(--ink-faint); }
@@ -116,7 +118,23 @@ body.night .ff-knob i { background: #1c1a2e; }
 .fs-park { width: auto; margin: 4px 0 0; }
 .ff-park-n { margin: -6px 0 0; font-size: 12px; color: var(--ink-faint); letter-spacing: .04em; }
 .ff-park-n[hidden] { display: none; }
-
+/* 下一步：第一個還沒勾的子任務，做完了直接勾（換下一個）；還沒寫的話寫下最小的那一步 */
+.ff-step { display: flex; align-items: center; gap: 10px; width: min(360px, 100%); min-height: 46px; padding: 5px 6px 5px 14px; border-radius: 18px; background: var(--field); border: 1px solid var(--line); text-align: left; }
+.ff-step[hidden] { display: none; }
+.ff-step-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ff-step-t small { font-size: 11px; letter-spacing: .12em; color: var(--ink-faint); }
+.ff-step-t b { font-weight: 500; font-size: 14.5px; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.ff-step-n { flex: none; font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ff-step-check { flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--ff-a) 65%, var(--line)); background: none; color: var(--ff-a); cursor: pointer; transition: background .2s; }
+.ff-step-check svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.ff-step-check:hover { background: color-mix(in srgb, var(--ff-a) 14%, transparent); }
+.ff-step.add { min-height: 0; padding: 0; border: 0; background: none; }
+.ff-step-open { margin: 0 auto; height: 32px; padding: 0 16px; border-radius: 999px; border: 1px dashed var(--line); background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; letter-spacing: .04em; cursor: pointer; transition: color .2s, border-color .2s; }
+.ff-step-open:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ff-a) 55%, var(--line)); }
+.ff-step-add { display: flex; gap: 6px; width: 100%; }
+.ff-step-add input { flex: 1; min-width: 0; height: 38px; padding: 0 14px; border-radius: 999px; border: 1px dashed var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 13.5px; }
+.ff-step-add input::placeholder { color: var(--ink-faint); }
+.ff-step-add button { flex: none; height: 38px; margin: 0; padding: 0 14px; border-radius: 999px; font-size: 13px; }
 @keyframes ffIn { from { opacity: 0; transform: scale(.96); } }
 @keyframes ffBreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.07); opacity: .72; } }
 @keyframes ffHold { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }

@@ -8,7 +8,7 @@ import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
 import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
 import { planKey, pauseOf, pauseText, pauseUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet } from './mottos.js'
-import { order as doFirst } from './brief.js'
+import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
@@ -126,7 +126,11 @@ async function boot() {
   const mottoExternal = () => (mottoPush ? mottoPush.ready() : nativeMottos() && notifyOn())
   // 現在該做的那一件：今天還沒做完的任務裡，本命、重要的、排了時間早的在前（跟今日摘要一樣）
   const nowTask = () => doFirst(store.tasksOn(store.today))[0] || null
-  const mottoBody = (text, task) => (task ? `${text}\n現在該做：${task.title}` : text)
+  // 拆成了小步驟的話，下一步也寫上去（通知上一眼就知道從哪裡開始）
+  const mottoBody = (text, task) => {
+    const step = task && nextStep(task)
+    return task ? `${text}\n現在該做：${task.title}${step ? `\n下一步：${step.title}` : ''}` : text
+  }
   // 日程中先不提醒（開會、上課）：從今天到交給手機的那一串排到的那天（就寢在午夜後的話是後天凌晨），
   // 有時段的日程變成那幾段時間。設定裡可以關
   const eventsQuiet = (now = Date.now()) => {
@@ -285,6 +289,13 @@ async function boot() {
     goCabin: () => ui.setAppMode(false),
     // 專注頁的貓咪被摸了
     catPoke: () => sfx.squish(),
+    // 專注頁上勾掉了一小步（還有下一步；最後一步勾完任務就完成了，照完成任務的慶祝）、寫下了下一小步
+    stepDone: (step, next) => {
+      sfx.pop()
+      haptic('tick')
+      talk('stepDone', { step: short(step, 14), next: short(next, 14) }, 4200, `接著是「${short(next, 14)}」。`)
+    },
+    stepSet: (step) => talk('stepSet', { step: short(step, 16) }, 4200, `先從「${short(step, 16)}」開始就好。`),
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => scene?.modalClosed(),
     setSound: (on) => sfx.setEnabled(on),
@@ -331,6 +342,8 @@ async function boot() {
         else if (info.round > 1) talk('focusRound', { round: info.round, rounds: info.rounds })
         // 只做 5 分鐘：開個頭就好
         else if (info.small) talk('focusSmall', { task: short(t ? t.title : p ? p.name : '這件事') }, undefined, '先做 5 分鐘就好，我陪你。')
+        // 拆成了小步驟：從下一步說起（專注頁上也寫著）
+        else if (t && nextStep(t)) talk('focusStep', { task: short(t.title), step: short(nextStep(t).title, 16) }, undefined, `先從「${short(nextStep(t).title, 16)}」開始。`)
         else if (t || p) talk('focusTask', { task: short(t ? t.title : p.name) })
         else if (info.free) talk('focusFree', {}, undefined, '', 'fuji')
         else if (!duet('focusStart')) talk('focusStart')
@@ -951,7 +964,7 @@ async function boot() {
       ui.toast({
         icon: '戒',
         title: e.text,
-        sub: next ? `現在該做：${next.title}` : '寫給自己的警語',
+        sub: next ? `現在該做：${next.title}${nextStep(next) ? `・下一步：${short(nextStep(next).title, 16)}` : ''}` : '寫給自己的警語',
         ms: 12000,
         tag: 'motto',
         actions: [
@@ -1013,8 +1026,10 @@ async function boot() {
         store.updateTask(cur.id, { at: minToHHMM(to) })
         ui.toast({ icon: '時', title: `「${short(cur.title, 12)}」改到 ${minToHHMM(to)}`, sub: '到時候再提醒你', ms: 4200 })
       }
+      // 拆成了小步驟：寫著從哪一步開始
+      const step = nextStep(t)
       ui.toast({
-        icon: '時', title: t.title, sub: `排在 ${e.start}・${busy ? '現在正在專注別件' : '現在開始吧'}`, ms: 15000, tag: `start-${t.id}`,
+        icon: '時', title: t.title, sub: `排在 ${e.start}・${busy ? '現在正在專注別件' : step ? `先做「${short(step.title, 16)}」` : '現在開始吧'}`, ms: 15000, tag: `start-${t.id}`,
         actions: [
           ...(busy
             ? [{ label: '換成這件', run: startTask(e.id, (id) => ui.focus.startWith(id)) }]
@@ -1157,7 +1172,7 @@ async function boot() {
     trackAway(away() || leaving)
     const back = on ? backItem() : null
     const quiet = on ? eventsQuiet(now) : []
-    const sig = (on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, pause: pauseOf(s.settings), quiet, task: task?.title, now }) : 'off') + (back ? `|back:${back.at}:${back.body}` : '')
+    const sig = (on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, pause: pauseOf(s.settings), quiet, task: task ? `${task.title}\n${nextStep(task)?.title || ''}` : '', now }) : 'off') + (back ? `|back:${back.at}:${back.body}` : '')
     if (sig !== mottoSig) {
       const since = Math.max(now - MOTTO_LATE, mottoPush ? mottoPush.done : nativeMottoHandled())
       const max = mottoPush ? MOTTO_PUSH_MAX : undefined

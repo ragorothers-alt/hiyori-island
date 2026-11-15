@@ -92,6 +92,24 @@ export const COACH_FUJI = {
     '先想好第一件，{when}就不用再猶豫了。',
     '「{task}」排在最前面，{when}見。',
   ],
+  // 專注頁上勾掉了下一步（還有下一個）：{step} 剛做完的、{next} 接著的那一步
+  stepDone: [
+    '「{step}」好了，接著是「{next}」。',
+    '一步一步來：下一步「{next}」。',
+    '「{step}」完成，往「{next}」前進。',
+  ],
+  // 專注頁上寫下了第一步：{step}
+  stepSet: [
+    '好，先從「{step}」開始就好。',
+    '第一步「{step}」，小小的就好。',
+    '記下了，先做「{step}」。',
+  ],
+  // 開始專注一件拆成了小步驟的任務：{task}、{step} 下一步
+  focusStep: [
+    '先從「{step}」開始，其他的等一下再說。',
+    '「{task}」的下一步是「{step}」，就做這一步。',
+    '眼前只有「{step}」，慢慢來。',
+  ],
   coachHello: {
     morning: [
       '早安，從下面的標籤挑件事吧。',
@@ -443,6 +461,20 @@ export const COACH_MOCHI = {
     '{when}先做「{task}」！我會記得的～',
     'よし，第一件是「{task}」！',
     '挑好了～{when}一起從「{task}」開始吧！',
+  ],
+  stepDone: [
+    '「{step}」做完了！下一個是「{next}」～',
+    'よし，接著「{next}」！',
+    '又前進一步了，「{next}」加油！',
+  ],
+  stepSet: [
+    '先做「{step}」，我在旁邊陪你～',
+    'よし，從「{step}」開始！',
+  ],
+  focusStep: [
+    '先做「{step}」就好，我陪你～',
+    'よし，「{step}」開始！',
+    '一步就好，「{step}」衝呀～',
   ],
   coachApplied: [
     'ふじ排好 {count} 段，我陪你出發囉。',

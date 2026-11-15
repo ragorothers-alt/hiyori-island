@@ -954,6 +954,109 @@ test('先記下來：專注時腦中冒出別的事，在專注頁（或計時�
   expect(await parked()).toEqual([])
 })
 
+test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下一步，做完直接勾、換下一步，最後一步勾完任務也完成；還沒拆的可以當場寫下第一小步', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const subsOf = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).subs.map((x) => `${x.done ? '✓' : '・'}${x.title}`), id)
+  const id = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    const t = s.addTask({ title: '寫期末報告', date: s.today })
+    s.addSub(t.id, '找三篇參考資料')
+    s.addSub(t.id, '寫大綱')
+    window.hiyori.ui.focus.startWith(t.id)
+    return t.id
+  })
+  const step = page.locator('#ffStep')
+  await expect(step).toBeVisible()
+  await expect(step.locator('.ff-step-t b')).toHaveText('找三篇參考資料')
+  await expect(step.locator('.ff-step-n')).toHaveText('1/2')
+  // 勾掉：換下一步，焦點留在勾勾上；每秒重畫也不會把它換掉。連按兩下只勾掉一步（第二下落在換上來的勾勾上，不算）
+  await step.locator('[data-step]').dblclick()
+  await expect(step.locator('.ff-step-t b')).toHaveText('寫大綱')
+  await expect(step.locator('.ff-step-n')).toHaveText('2/2')
+  await expect(step.locator('[data-step]')).toBeFocused()
+  expect(await subsOf(id)).toEqual(['✓找三篇參考資料', '・寫大綱'])
+  await page.waitForTimeout(1300)
+  await expect(step.locator('[data-step]')).toBeFocused()
+  // 最後一步：任務跟著完成，這一行收起來，專注照常
+  await step.locator('[data-step]').click()
+  await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).done, id)).toBe(true)
+  await expect(step).toBeHidden()
+  expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  // 還沒拆的任務：「＋ 拆出第一小步」，打到一半每秒重畫也不會洗掉；Enter 寫下，變成下一步
+  const id2 = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = s.addTask({ title: '整理房間', date: s.today })
+    window.hiyori.ui.focus.setTarget(`t:${t.id}`)
+    return t.id
+  })
+  await step.locator('[data-step-open]').click()
+  const input = page.locator('#ffStepText')
+  await expect(input).toBeFocused()
+  await input.fill('把桌上的杯子')
+  await page.waitForTimeout(1300)
+  await expect(input).toHaveValue('把桌上的杯子')
+  await input.fill('把桌上的杯子拿去洗')
+  await input.press('Enter')
+  await expect(step.locator('.ff-step-t b')).toHaveText('把桌上的杯子拿去洗')
+  await expect(step.locator('[data-step]')).toBeFocused()
+  expect(await subsOf(id2)).toEqual(['・把桌上的杯子拿去洗'])
+  // Esc：只收起寫的那一行，專注頁還開著；輸入法選字中的 Esc（取消選字）不收
+  const id3 = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = s.addTask({ title: '回信', date: s.today })
+    window.hiyori.ui.focus.setTarget(`t:${t.id}`)
+    return t.id
+  })
+  await step.locator('[data-step-open]').click()
+  await input.fill('打開信箱')
+  await input.evaluate((el) => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })))
+  await expect(input).toHaveValue('打開信箱')
+  await input.press('Escape')
+  await expect(input).toHaveCount(0)
+  await expect(step.locator('[data-step-open]')).toBeFocused()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  // 寫到一半，另一個分頁（或同步）剛好替這件加了一步：這一行不收起來，字還在；寫下後兩步都在
+  await step.locator('[data-step-open]').click()
+  await input.fill('先回第一封')
+  await page.evaluate((id) => window.hiyori.store.addSub(id, '找到老師的信'), id3)
+  await page.waitForTimeout(600)
+  await expect(input).toHaveValue('先回第一封')
+  await expect(input).toBeFocused()
+  await input.press('Enter')
+  await expect(step.locator('.ff-step-t b')).toHaveText('找到老師的信')
+  expect(await subsOf(id3)).toEqual(['・找到老師的信', '・先回第一封'])
+  // 寫到一半時到點進入休息：這一行收起來，焦點交給專注頁本身（不會掉到看不見的地方、也不會落在一按就動的按鈕上）
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    window.hiyori.ui.focus.setTarget(`t:${s.addTask({ title: '洗衣服', date: s.today }).id}`)
+  })
+  await step.locator('[data-step-open]').click()
+  await input.fill('把衣服丟進洗衣機')
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.endAt -= 26 * 60000
+    f._save()
+  })
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  await expect(step).toBeHidden()
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe('focusFull')
+  // 下一輪：剛才打到一半的字還在
+  await page.evaluate(() => window.hiyori.ui.focus.addRound?.())
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    if (f.mode === 'break') {
+      f.endAt = Date.now() - 1000
+      f._save()
+    }
+  })
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await expect(input).toHaveValue('把衣服丟進洗衣機')
+})
+
 test('打勾的手感：列表不會整串重播淡入，做完的那件滑到後面；花瓣從勾爆開、App 模式冒出經驗值；今天全部做完時飄花瓣', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
@@ -1886,7 +1989,8 @@ test('排定的任務到點：提示卡上直接開始專注、只做 5 分鐘�
   await context.addInitScript(({ ymd }) => {
     if (!localStorage.getItem('hiyori-daily-v1')) {
       const tasks = [
-        { id: 'e2e-a', title: '寫期末報告', priority: 3, date: ymd, at: '10:30', dur: 50 },
+        // 拆成了小步驟：到點的提示卡寫著從哪一步開始
+        { id: 'e2e-a', title: '寫期末報告', priority: 3, date: ymd, at: '10:30', dur: 50, subs: [{ id: 'e2e-a1', title: '列出三個重點', done: false }] },
         { id: 'e2e-b', title: '回覆老師的信', priority: 2, date: ymd, at: '10:55', dur: 15 },
       ]
       localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: { remindLead: 10 } }))
@@ -1905,7 +2009,7 @@ test('排定的任務到點：提示卡上直接開始專注、只做 5 分鐘�
   // 10:30：到了開始的時間，提示卡上直接開始專注、只做 5 分鐘，或晚 15 分鐘
   await page.clock.setFixedTime(min(10))
   const start = page.locator('#toasts .toast', { hasText: '排在 10:30' })
-  await expect(start).toContainText('現在開始吧')
+  await expect(start).toContainText('先做「列出三個重點」')
   await expect(start.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '晚 15 分鐘'])
   // 卡片留到 10:33 才按「晚 15 分鐘」：從現在起再過 15 分鐘（10:48），不會改到已經過去的 10:45
   await page.clock.setFixedTime(min(13))

@@ -75,6 +75,9 @@ function awayOf(d, today, mins) {
   return items.length ? { label: `離開了 ${gone(now - a.since)}`, items } : null
 }
 
+// 一件任務的下一步：第一個還沒勾的子任務（專注頁、到點和警語的提示卡上寫「下一步」）；沒有子任務、都勾完了是 null
+export const nextStep = (t) => (Array.isArray(t?.subs) ? t.subs.find((x) => x && !x.done) : null) || null
+
 // 還沒做的任務照「先做哪一件」排：前一晚挑好先做的那一件、本命、重要的、排了時間早的（警語提醒時的「現在該做」也照這個）
 export function order(tasks) {
   return tasks
@@ -116,8 +119,11 @@ export function buildBrief(d) {
   if (allDay.length) {
     today.push({ icon: '日', text: allDay.slice(0, 2).map((e) => e.title).join('、'), sub: allDay.length > 2 ? `整天・還有 ${allDay.length - 2} 個` : '整天', go: ['tab', 'schedule'] })
   }
-  for (const t of todo.slice(0, 3)) {
-    today.push({ icon: t.first ? '先' : t.star ? '命' : '花', text: t.title, sub: [t.first ? '昨晚挑好先做這件' : '', t.star ? '本命' : '', t.at || ''].filter(Boolean).join('・'), go: ['tab', 'tasks'] })
+  // 最先做的那一件拆成了小步驟：寫著下一步（從哪裡開始）
+  for (const [i, t] of todo.slice(0, 3).entries()) {
+    const step = i === 0 ? nextStep(t) : null
+    const sub = [t.first ? '昨晚挑好先做這件' : '', t.star ? '本命' : '', t.at || '', step ? `下一步：${clip(step.title, 14)}` : '']
+    today.push({ icon: t.first ? '先' : t.star ? '命' : '花', text: t.title, sub: sub.filter(Boolean).join('・'), go: ['tab', 'tasks'] })
   }
   if (todo.length > 3) today.push({ icon: '…', text: `還有 ${todo.length - 3} 件任務`, sub: '', go: ['tab', 'tasks'] })
   const habits = d.habits || { total: 0, done: 0 }
