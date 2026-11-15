@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
 import { MOTTO_MAX, MOTTO_LEN, MOTTO_ROTATE, MOTTO_EVERY, MOTTO_LATE, PLAN_MAX, PAUSE_MAX, activeMottos, awake, mottoAt, nextMotto, windowEnd, planMottos, planUntil, planKey, pauseText, pauseUntil, pausedUntil } from '../src/mottos.js'
-import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeAway } from '../src/native.js'
+import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway } from '../src/native.js'
 
 const at = (h, m = 0, d = 25) => new Date(2026, 9, d, h, m)
 let store
@@ -283,6 +283,35 @@ describe('定時提醒', () => {
     expect(mottoCalls(cb).map((c) => c[0].text)).toEqual(['三', '一'])
   })
 
+  it('改成不提醒（或警語全部收著）一陣子後再打開：從打開的時候開始算，不會接著以前的時間、一打開就響', () => {
+    const m = store.addMotto('一')
+    store.setSetting('mottoEvery', 60)
+    const cb = vi.fn()
+    const r = new Reminders(store, cb)
+    r.check(at(9))
+    r.check(at(10))
+    expect(mottoCalls(cb)).toHaveLength(1)
+    // 10:05 改成不提醒，15:20 再打開：不補 15:00 那一則，16:20 才提醒
+    store.setSetting('mottoEvery', 0)
+    r.check(at(10, 5))
+    expect(r.mottoState().off).toBe(true)
+    store.setSetting('mottoEvery', 60)
+    r.check(at(15, 20))
+    r.check(at(16, 19))
+    expect(mottoCalls(cb)).toHaveLength(1)
+    r.check(at(16, 20))
+    expect(mottoCalls(cb)).toHaveLength(2)
+    // 全部收著再拿出來（另一個分頁重新整理也一樣）
+    store.toggleMotto(m.id)
+    new Reminders(store, cb).check(at(16, 30))
+    store.toggleMotto(m.id)
+    const again = new Reminders(store, cb)
+    again.check(at(18, 45))
+    expect(mottoCalls(cb)).toHaveLength(2)
+    again.check(at(19, 45))
+    expect(mottoCalls(cb)).toHaveLength(3)
+  })
+
   it('好幾天沒打開：從現在重新算，不一打開就響', () => {
     store.addMotto('一')
     const cb = vi.fn()
@@ -314,21 +343,29 @@ describe('先停一下', () => {
 
   it('停著的時候到點的不排；停的那段跳過了一則，停完那一刻補一則，之後從那裡照間隔接下去', () => {
     // 9:30 念完 A，9:30:05 按「先停 1 小時」：10:00（B）、10:30（C）跳過，10:30:05 補一則（輪到 A），之後 11:00:05…
-    const pause = sec(10, 30, 5)
-    const plan = planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, sec(9, 30, 5), { pause })
-    expect(plan.slice(0, 3)).toEqual([{ at: pause, text: 'A' }, { at: sec(11, 0, 5), text: 'B' }, { at: sec(11, 30, 5), text: 'C' }])
+    const from = sec(9, 30, 5)
+    const until = sec(10, 30, 5)
+    const pause = { from, until }
+    const plan = planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, from, { pause })
+    expect(plan.slice(0, 3)).toEqual([{ at: until, text: 'A' }, { at: sec(11, 0, 5), text: 'B' }, { at: sec(11, 30, 5), text: 'C' }])
     // 每 3 小時：停的那一小時本來就沒有要提醒的，照原本的 12:30（不會因為停了反而提早）
-    expect(planMottos(list, 180, r, { at: +at(9, 30), i: 1 }, sec(9, 30, 5), { pause })[0]).toEqual({ at: +at(12, 30), text: 'B' })
+    expect(planMottos(list, 180, r, { at: +at(9, 30), i: 1 }, from, { pause })[0]).toEqual({ at: +at(12, 30), text: 'B' })
     // 停到就寢（今天先停）：停完的那一刻在睡覺，不補，明天起床後一個間隔照常
-    expect(planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, sec(9, 30, 5), { pause: +at(23, 30) })[0].at).toBe(+at(7, 30, 26))
+    expect(planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, from, { pause: { from, until: +at(23, 30) } })[0].at).toBe(+at(7, 30, 26))
     // 停到的那一刻剛好就是到點的時間：那一則照常，不重複補
-    expect(planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, sec(9, 30, 5), { pause: +at(10, 30) }).slice(0, 2).map((p) => p.at)).toEqual([+at(10, 30), +at(11)])
+    expect(planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, from, { pause: { from, until: +at(10, 30) } }).slice(0, 2).map((p) => p.at)).toEqual([+at(10, 30), +at(11)])
     // 上一則就是停著時跳過的（頁面記著 skip）：從那裡接著算，補的還是同一個時間
-    expect(planMottos(list, 30, r, { at: +at(10, 30), i: 3, skip: true }, sec(10, 30, 1), { pause })[0]).toEqual({ at: pause, text: 'A' })
-    // 重排的時機也看停到幾點、是不是提早恢復的
-    const key = (p, cut) => planKey({ every: 30, rhythm: r, mottos: list, last: { at: +at(9, 30), i: 1 }, pause: p, cut, now: +at(9, 31) })
-    expect(key(pause)).not.toBe(key(0))
-    expect(key(pause, true)).not.toBe(key(pause))
+    expect(planMottos(list, 30, r, { at: +at(10, 30), i: 3, skip: true }, sec(10, 30, 1), { pause })[0]).toEqual({ at: until, text: 'A' })
+    // 開始停之前到點的照常（還沒跟上的那幾則不算跳過）：從 7:00 那一則算起，9:00 開始停到 10:00 → 8:00 照常、9:30 跳過、10:00 補
+    const early = planMottos([list[0]], 30, r, { at: +at(7), i: 0 }, +at(7, 40), { pause: { from: +at(9), until: +at(10) }, since: +at(7) })
+    expect(early.slice(0, 5).map((p) => p.at)).toEqual([+at(7, 30), +at(8), +at(8, 30), +at(10), +at(10, 30)])
+    // 剛加這個功能時存的（沒記從幾點開始停）：當成一直停著到 until
+    expect(planMottos(list, 30, r, { at: +at(9, 30), i: 1 }, from, { pause: { until } })[0]).toEqual({ at: until, text: 'A' })
+    // 重排的時機也看從幾點開始停、停到幾點、是不是提早恢復的
+    const key = (p) => planKey({ every: 30, rhythm: r, mottos: list, last: { at: +at(9, 30), i: 1 }, pause: p, now: +at(9, 31) })
+    expect(key(pause)).not.toBe(key(null))
+    expect(key({ ...pause, cut: true })).not.toBe(key(pause))
+    expect(key({ ...pause, from: from + 1 })).not.toBe(key(pause))
   })
 
   it('頁面一直開著：停著的時候不念，停完那一刻念一則；念的時間、句子跟按下去那時交出去的那一串一樣（中途重新整理也一樣）', () => {
@@ -407,8 +444,10 @@ describe('先停一下', () => {
     expect(mottoCalls(cb).map((c) => c[0].text)).toEqual(['一'])
     // 提早恢復的也照這樣排（同步到別台時也一樣）：停的那段跳過了也不補
     const list2 = [{ id: 'a', text: 'A', on: true }]
-    expect(planMottos(list2, 30, r, { at: +at(9), i: 0 }, +at(10, 5), { pause: +at(10, 5), cut: true, since: +at(10, 5) - MOTTO_LATE })[0].at).toBe(+at(10, 30))
-    expect(planMottos(list2, 30, r, { at: +at(9), i: 0 }, +at(10, 5), { pause: +at(10, 5), since: +at(10, 5) - MOTTO_LATE })[0].at).toBe(+at(10, 5))
+    const stop = { from: +at(9, 10), until: +at(10, 5) }
+    expect(planMottos(list2, 30, r, { at: +at(9), i: 0 }, +at(10, 5), { pause: { ...stop, cut: true }, since: +at(10, 5) - MOTTO_LATE })[0].at).toBe(+at(10, 30))
+    expect(planMottos(list2, 30, r, { at: +at(9), i: 0 }, +at(10, 5), { pause: stop, since: +at(10, 5) - MOTTO_LATE })[0].at).toBe(+at(10, 5))
+    expect(store.state.settings.mottoPauseFrom).toBe(+at(9, 10))
   })
 
   it('跟著存檔：發 mottoPause、太遠的截到一天多；匯出匯入後還在；壞掉的、遠在以後的當成沒停，已經過了的留著', () => {
@@ -429,6 +468,14 @@ describe('先停一下', () => {
     expect(load('x')).toBe(0)
     expect(load(-5)).toBe(0)
     expect(load(+at(8))).toBe(+at(8))
+    // 從幾點開始停：跟著存檔；比停到的時間還晚的（壞掉的）當成沒記
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { mottoPause: +at(11), mottoPauseFrom: +at(9, 30) } }))
+    expect(store.state.settings).toMatchObject({ mottoPause: +at(11), mottoPauseFrom: +at(9, 30) })
+    store.importJSON(store.exportJSON())
+    expect(store.state.settings.mottoPauseFrom).toBe(+at(9, 30))
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { mottoPause: +at(11), mottoPauseFrom: +at(12) } }))
+    expect(store.state.settings.mottoPauseFrom).toBe(0)
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { mottoPause: +at(8) } }))
     // 停到的時間已經過了：恢復不用存、也不發
     got.mockClear()
     expect(store.pauseMottos(0)).toBe(false)
@@ -678,6 +725,30 @@ describe('警語交給手機排（Android 殼）', () => {
     expect(() => nativeMottoSeen({ mottoSeen: () => { throw new Error('x') } })).not.toThrow() // prettier-ignore
   })
 
+  it('手機通知過了、頁面還沒跟上，從通知上按「先停 1 小時」：那一則不算跳過；停的那段沒有要提醒的，照原本的時間（不會提早補）', () => {
+    store.addMotto('一')
+    store.setSetting('mottoEvery', 180)
+    const shell = makeShell()
+    const cb = vi.fn()
+    const r = new Reminders(store, cb, { external: () => true, hidden: () => !shell.fg, handled: () => shell.get(Date.now()), claim: (t) => shell.claim(t, Date.now()) })
+    vi.setSystemTime(at(7))
+    r.check(at(7))
+    send(r, shell, +at(7))
+    // App 不在前面（頁面睡著）：10:00 手機通知
+    shell.fg = false
+    shell.check(+at(10))
+    expect(shell.posted).toEqual([+at(10)])
+    // 10:01 從通知上按「先停 1 小時」：App 打開，頁面先停到 11:01，才跟上
+    vi.setSystemTime(at(10, 1))
+    shell.fg = true
+    store.pauseMottos(Date.now() + 3600000)
+    r.check(at(10, 1))
+    expect(mottoCalls(cb)).toHaveLength(0)
+    expect(r.mottoState()).toEqual({ at: +at(10), i: 1 })
+    send(r, shell, Date.now())
+    expect(shell.items.slice(0, 2).map((x) => x.at)).toEqual([+at(13), +at(16)])
+  })
+
   it('先停一下：交給手機的那一串不排停著的時間，停完那一刻手機補一則；頁面在前面、在背景都不念停著時到點的', () => {
     const shell = makeShell()
     const { cb, r } = setup(shell)
@@ -852,5 +923,16 @@ describe('警語交給手機排（Android 殼）', () => {
     expect(nativeAway({ foreground: () => true })).toBe(false)
     expect(nativeAway({ foreground: fail })).toBe(false)
     expect(nativeAway(null)).toBe(false)
+  })
+
+  it('按了手機通知上的哪一顆按鈕：只認開始專注、先停 1 小時；舊版的殼、問不到時是沒有', () => {
+    expect(nativeTakeAct({ takeAct: () => 'pause' })).toBe('pause')
+    expect(nativeTakeAct({ takeAct: () => 'focus' })).toBe('focus')
+    expect(nativeTakeAct({ takeAct: () => '' })).toBe('')
+    expect(nativeTakeAct({ takeAct: () => 'rm -rf' })).toBe('')
+    expect(nativeTakeAct({ takeAct: () => null })).toBe('')
+    expect(nativeTakeAct({ takeAct: () => { throw new Error('gone') } })).toBe('') // prettier-ignore
+    expect(nativeTakeAct({})).toBe('')
+    expect(nativeTakeAct(null)).toBe('')
   })
 })

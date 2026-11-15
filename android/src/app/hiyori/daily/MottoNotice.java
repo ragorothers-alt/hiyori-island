@@ -8,9 +8,12 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Icon;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import java.util.UUID;
 
 // 警語的定時提醒：網頁排好接下來的每一則（幾點、標題、內容），交給手機的鬧鐘一則一則發。
 // App 被收掉、手機鎖著也照時間通知。每一則只由一邊念：這裡記著「念到哪一則了」（handled，手機通知過、
@@ -33,6 +36,12 @@ final class MottoNotice {
     private static final long LATE = 10 * 60_000L;
     // 最多收幾則（網頁最多排 300 則）
     private static final int MAX = 320;
+    // 通知上的按鈕（開始專注、先停 1 小時）：打開 App，交給網頁去做（MainActivity 收到後網頁用 takeAct 拿走）
+    static final String ACT = "app.hiyori.daily.MOTTO_ACT";
+    private static final String EXTRA_ACT = "act";
+    private static final String EXTRA_KEY = "key";
+    // 按鈕帶的暗號：MainActivity 是啟動畫面，別的 App 也叫得到它；暗號對不上的不算
+    private static final String KEY_SECRET = "actKey";
 
     private MottoNotice() {
     }
@@ -98,7 +107,7 @@ final class MottoNotice {
         return Math.max(handled, now - LATE);
     }
 
-    // 網頁交來的：{ items: [{ at, title, body }] }，空字串是不提醒了（排著的取消）。內容當成資料看，只收需要的欄位
+    // 網頁交來的：{ items: [{ at, title, body, focus }] }，空字串是不提醒了（排著的取消）。內容當成資料看，只收需要的欄位
     static synchronized void plan(Context c, String json) {
         JSONArray items = new JSONArray();
         try {
@@ -109,7 +118,8 @@ final class MottoNotice {
                 long at = o.optLong("at", 0);
                 String title = o.optString("title");
                 if (at <= 0 || title.isEmpty()) continue;
-                items.put(new JSONObject().put("at", at).put("title", clip(title, 80)).put("body", clip(o.optString("body"), 300)));
+                // focus：有現在該做的那一件（通知上多一顆「開始專注」）
+                items.put(new JSONObject().put("at", at).put("title", clip(title, 80)).put("body", clip(o.optString("body"), 300)).put("focus", o.optBoolean("focus")));
             }
         } catch (Exception ignored) {
         }
@@ -133,7 +143,7 @@ final class MottoNotice {
                 handled = due.optLong("at");
                 SharedPreferences.Editor e = prefs(c).edit().putLong(KEY_HANDLED, handled);
                 if (now - handled < LATE) {
-                    show(c, due.optString("title"), due.optString("body"));
+                    show(c, due);
                     e.putLong(KEY_POSTED, now);
                 }
                 e.apply();
@@ -159,7 +169,7 @@ final class MottoNotice {
             JSONObject o = new JSONObject(s);
             long now = System.currentTimeMillis();
             if (now - o.optLong("wall") < CLAIM_GRACE && now - o.optLong("at") < LATE) {
-                show(c, o.optString("title"), o.optString("body"));
+                show(c, o);
                 e.putLong(KEY_POSTED, now);
             }
         } catch (Exception ignored) {
@@ -209,19 +219,55 @@ final class MottoNotice {
         keep(c, load(c), cutoff(handled(c, now), now), now);
     }
 
-    private static void show(Context c, String title, String body) {
+    // o：{ title, body, focus }。下面兩顆按鈕：有現在該做的那一件才有「開始專注」；「先停 1 小時」都有
+    private static void show(Context c, JSONObject o) {
+        String title = o.optString("title");
+        String body = o.optString("body");
         NotificationManager m = c.getSystemService(NotificationManager.class);
         m.createNotificationChannel(new NotificationChannel(CH, c.getString(R.string.ch_motto), NotificationManager.IMPORTANCE_HIGH));
-        // 同一個 tag：新的一則換掉上一則，不會在通知欄疊一長串
-        m.notify(TAG, ID, new Notification.Builder(c, CH)
+        Icon icon = Icon.createWithResource(c, R.drawable.ic_stat_timer);
+        Notification.Builder b = new Notification.Builder(c, CH)
                 .setSmallIcon(R.drawable.ic_stat_timer)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(new Notification.BigTextStyle().bigText(body))
                 .setCategory(Notification.CATEGORY_REMINDER)
                 .setAutoCancel(true)
-                .setContentIntent(TimerNotice.open(c))
-                .build());
+                .setContentIntent(TimerNotice.open(c));
+        if (o.optBoolean("focus")) b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_focus), act(c, "focus", 30)).build());
+        b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_pause), act(c, "pause", 31)).build());
+        // 同一個 tag：新的一則換掉上一則，不會在通知欄疊一長串
+        m.notify(TAG, ID, b.build());
+    }
+
+    // 按鈕帶的暗號（第一次用時產生，存著）
+    private static synchronized String secret(Context c) {
+        String s = prefs(c).getString(KEY_SECRET, null);
+        if (s == null) {
+            s = UUID.randomUUID().toString();
+            prefs(c).edit().putString(KEY_SECRET, s).apply();
+        }
+        return s;
+    }
+
+    private static PendingIntent act(Context c, String act, int code) {
+        Intent i = new Intent(c, MainActivity.class).setAction(ACT + "." + act).putExtra(EXTRA_ACT, act).putExtra(EXTRA_KEY, secret(c))
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return PendingIntent.getActivity(c, code, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    // MainActivity 收到的是不是通知上的按鈕（暗號對得上）：是的話回傳 "focus"／"pause"，不是回傳 null
+    static String actOf(Context c, Intent i) {
+        String action = i == null ? null : i.getAction();
+        if (action == null || !action.startsWith(ACT + ".")) return null;
+        if (!secret(c).equals(i.getStringExtra(EXTRA_KEY))) return null;
+        String act = i.getStringExtra(EXTRA_ACT);
+        return "focus".equals(act) || "pause".equals(act) ? act : null;
+    }
+
+    // 按了通知上的按鈕：那一則收掉（按鈕不會自己收）
+    static void dismiss(Context c) {
+        c.getSystemService(NotificationManager.class).cancel(TAG, ID);
     }
 
     // 回到 App：上一則警語看到了，收掉。剛發出來的（10 秒內）留著：可能剛好在打開 App 的那一刻到點，還沒看到

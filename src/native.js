@@ -90,6 +90,16 @@ export function nativeMottoSeen(bridge = native) {
     if (typeof bridge?.mottoSeen === 'function') bridge.mottoSeen()
   } catch {}
 }
+// 按了手機上警語通知的哪一顆按鈕：'focus'（開始專注）、'pause'（先停 1 小時），沒有是 ''。拿走就清掉（不會做兩次）。
+// 舊版的殼沒有按鈕，也沒有這個
+export function nativeTakeAct(bridge = native) {
+  try {
+    const a = typeof bridge?.takeAct === 'function' ? String(bridge.takeAct() || '') : ''
+    return a === 'focus' || a === 'pause' ? a : ''
+  } catch {
+    return ''
+  }
+}
 // App 不在前面嗎：App 在背景時，頁面的 JavaScript 可能還在跑，看頁面自己的 document.hidden 不一定準
 export function nativeAway(bridge = native) {
   try {

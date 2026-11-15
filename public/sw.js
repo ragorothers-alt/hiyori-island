@@ -16,6 +16,8 @@ const LOG_FILE = '__push-log'
 const MOTTO_FILE = '__motto-plan'
 const MOTTO_DONE = '__motto-done'
 const MOTTO_LOG = '__motto-log'
+// 按了警語通知上的哪一顆按鈕 { id, act, at }：頁面開好了拿走（src/push.js 的 takeNoticeAct）
+const ACT_FILE = '__act'
 // 到點晚了這麼久的警語就不顯示了（src/mottos.js 的 MOTTO_LATE，兩邊要一樣）
 const MOTTO_LATE = 10 * 60000
 // 計時器到點多久以內的字還對得上（推播最晚 10 分鐘後送到）
@@ -196,6 +198,11 @@ async function readJSON(cache, name) {
 }
 const putJSON = (cache, name, v) => cache.put(fileUrl(name), new Response(JSON.stringify(v), { headers: { 'Content-Type': 'application/json' } }))
 
+// 警語通知上的按鈕：字裡寫著現在該做的那一件（頁面排的時候 focus 是 true）才有「開始專注」；「先停 1 小時」都有。
+// 按了打開 App，由頁面去做（看不到按鈕的瀏覽器，例如 iPhone，就只是一般的通知）
+const ACTS = ['focus', 'pause']
+const mottoActions = (p) => [...(p.focus ? [{ action: 'focus', title: '▶ 開始專注' }] : []), { action: 'pause', title: '先停 1 小時' }]
+
 // 清單裡已經到點（推播早幾秒到、兩邊時鐘差一點也算）、而且還沒晚太久的最後一則
 function latestDue(list, now, late) {
   let best = null
@@ -289,8 +296,9 @@ async function showPush() {
   const out = []
   for (const s of shows) {
     try {
-      // data.at：收掉的時候認得出是不是這一則（同一個 tag 的新通知不會被舊的那一次收掉）
-      await reg.showNotification(s.title, { body: typeof s.body === 'string' ? s.body : '', tag: s.tag, icon, badge: icon, renotify: !s.silent, silent: !!s.silent, data: { at: s.at } })
+      // data.at：收掉的時候認得出是不是這一則（同一個 tag 的新通知不會被舊的那一次收掉）。警語的通知下面有兩顆按鈕
+      const actions = s.tag === 'motto' ? mottoActions(s) : undefined
+      await reg.showNotification(s.title, { body: typeof s.body === 'string' ? s.body : '', tag: s.tag, icon, badge: icon, renotify: !s.silent, silent: !!s.silent, data: { at: s.at }, ...(actions ? { actions } : {}) })
       out.push(s)
     } catch (e) {
       // 沒顯示出來：「顯示過了」的記號還原（還是我們寫的那一個才還原），頁面或下一則推播還能顯示
@@ -339,17 +347,31 @@ self.addEventListener('push', (event) => {
   )
 })
 
-// 點通知：回到已開啟的視窗，沒有就開新的
+// 點通知：回到已開啟的視窗，沒有就開新的。
+// 點的是警語通知上的按鈕（開始專注、先停 1 小時）：先把按了哪一顆留在快取裡（ACT_FILE，頁面開好了拿走），
+// 叫出開著的視窗的話也直接傳過去（同一個 id，頁面只做一次；src/main.js 的 doAct）。
+// 不放在網址上：網址誰都能連，別的網站就能替你按
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
+  const act = ACTS.includes(event.action) ? event.action : ''
   event.waitUntil(
     (async () => {
+      const id = act ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` : ''
+      if (act) {
+        try {
+          await putJSON(await caches.open(PLAN_CACHE), ACT_FILE, { id, act, at: Date.now() })
+        } catch {}
+      }
       // 同一個網域下可能還有別的網站（github.io）：只把這個 App 範圍裡的視窗叫到前面
       const scope = self.registration.scope
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       const mine = all.find((c) => c.url.startsWith(scope))
-      if (mine) return mine.focus()
-      return self.clients.openWindow(scope)
+      if (!mine) return self.clients.openWindow(scope)
+      // 有的瀏覽器不讓叫到前面（例如按得太晚）：照樣叫它做
+      try {
+        await mine.focus()
+      } catch {}
+      if (act) mine.postMessage({ type: 'hiyori-act', act, id })
     })(),
   )
 })

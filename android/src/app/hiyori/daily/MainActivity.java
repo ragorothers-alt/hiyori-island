@@ -36,6 +36,9 @@ public class MainActivity extends Activity {
     private volatile boolean trusted;
     // App 在前面嗎：警語的鬧鐘響時在前面就不發通知（網頁自己會念）
     static volatile boolean foreground;
+    // 按了警語通知上的按鈕（"focus"／"pause"）：網頁用 takeAct 拿走、照著做
+    private String act;
+    private static final String KEY_ACT = "hiyoriAct";
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -97,8 +100,34 @@ public class MainActivity extends Activity {
             }
         });
         if (saved == null || web.restoreState(saved) == null) web.loadUrl(HOME);
+        // 從通知上的按鈕打開的（App 原本沒在跑）。系統收回後重建、從最近使用的 App 叫回來的，帶的還是當初那個，不算；
+        // 那時網頁還沒來拿的那一次存在 saved 裡，接著交給網頁
+        if (saved != null) {
+            synchronized (this) {
+                act = saved.getString(KEY_ACT);
+            }
+        } else if ((getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) takeIntent(getIntent());
         // 第一次打開先問通知權限：沒有它，倒數和到點的通知都出不來
         if (!canNotify() && saved == null) requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, ASK_NOTIFY);
+    }
+
+    // App 已經開著時按了通知上的按鈕（singleTask：送到這裡）
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (takeIntent(intent)) web.evaluateJavascript("window.dispatchEvent(new Event('hiyori-native-act'))", null);
+    }
+
+    // 是警語通知上的按鈕的話記下來（網頁開好了會來拿）、那一則通知收掉，回傳 true
+    private boolean takeIntent(Intent intent) {
+        String a = MottoNotice.actOf(this, intent);
+        if (a == null) return false;
+        synchronized (this) {
+            act = a;
+        }
+        MottoNotice.dismiss(this);
+        return true;
     }
 
     @Override
@@ -122,6 +151,10 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         web.saveState(out);
+        // 按了通知上的按鈕、網頁還沒來拿：系統收回後重建時接著交給網頁
+        synchronized (this) {
+            if (act != null) out.putString(KEY_ACT, act);
+        }
     }
 
     @Override
@@ -151,10 +184,21 @@ public class MainActivity extends Activity {
 
     // 網頁叫得到的東西。這些方法在另一條執行緒被叫到；只收字串，內容當成資料看
     class Bridge {
-        // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen
+        // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）
         @JavascriptInterface
         public int version() {
             return 3;
+        }
+
+        // 按了警語通知上的哪一顆按鈕："focus"（開始專注現在該做的那一件）、"pause"（先停 1 小時），沒有是空字串。拿走就清掉
+        @JavascriptInterface
+        public String takeAct() {
+            if (!trusted) return "";
+            synchronized (MainActivity.this) {
+                String a = act;
+                act = null;
+                return a == null ? "" : a;
+            }
         }
 
         @JavascriptInterface

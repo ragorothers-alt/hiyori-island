@@ -622,6 +622,9 @@ function migrate(s) {
   // 停完那一刻補的那一則照它算（剛停完就重新整理也還是同一個時間）
   const pause = ts(settings.mottoPause)
   settings.mottoPause = pause && pause <= Date.now() + PAUSE_MAX ? Math.round(pause) : 0
+  // 從幾點開始停：比停到的時間還晚的（壞掉的資料）當成沒記（從很久以前就停著）
+  const pauseFrom = ts(settings.mottoPauseFrom)
+  settings.mottoPauseFrom = pauseFrom && pauseFrom <= settings.mottoPause ? Math.round(pauseFrom) : 0
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 

@@ -1600,7 +1600,7 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   // 固定在台北今天上午 10 點（醒著的時間）；上一則警語排在 9:45，打開時剛好輪到 10:00 那一則
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = Date.parse(`${ymd}T10:00:00+08:00`)
-  await context.addInitScript((t) => {
+  await context.addInitScript(({ t, ymd }) => {
     // 假的 Android 殼：記下每一次交給手機的那一串
     window.__mottos = []
     window.__handled = 0
@@ -1612,27 +1612,28 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
       mottoClaim: (at) => (at > window.__handled ? ((window.__handled = at), true) : false),
       foreground: () => true,
     }
+    // 打開之前就有一句警語（每 15 分鐘）、今天的本命「寫期末報告」，開著系統通知；上一則排在 9:45。
+    // 開機時就要有警語：沒有的話，記著的「上一則」會被當成停過，加了警語才從那時開始算
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [{ id: 'e2e-t1', title: '寫期末報告', priority: 3, date: ymd, star: true }]
+      const mottos = [{ id: 'e2e-m1', text: '先做最重要的那一件', on: true, createdAt: t - 86400000 }]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, mottos, settings: { notify: true, mottoEvery: 15 } }))
+    }
     if (!localStorage.getItem('hiyori-motto-at')) localStorage.setItem('hiyori-motto-at', JSON.stringify({ at: t - 15 * 60000, i: 0 }))
-  }, T)
+  }, { t: T, ymd })
   // 打開通知時順便訂閱推播：不連到真的伺服器
   await context.route('**/v1/push/**', (route) => route.fulfill({ json: { key: 'BAAA', ok: true }, headers: { 'Access-Control-Allow-Origin': '*' } }))
   await useAppMode(context)
   await page.clock.setFixedTime(new Date(T))
   await page.goto(site.url)
   await bootReady(page)
-  await page.evaluate(() => {
-    const s = window.hiyori.store
-    s.setSetting('notify', true)
-    s.setSetting('mottoEvery', 15)
-    // 本命排在最前面（範例資料裡今天也有高優先的任務）
-    s.toggleStar(s.addTask({ title: '寫期末報告', priority: 3, date: s.today }).id)
-    s.addMotto('先做最重要的那一件')
-  })
   // 看著 App：頁面自己念（手機那時在前面不發），提示卡上寫現在該做的那一件，按一下就開始專注
   const toast = page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })
   await expect(toast).toBeVisible()
   await expect(toast).toContainText('現在該做：寫期末報告')
   await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '先停 1 小時'])
+  // 焦點放在「先停 1 小時」上：提示卡先不收（下面先檢查交給手機的那一串，機器忙的時候會超過提示卡的 9 秒）
+  await toast.locator('.toast-act', { hasText: '先停 1 小時' }).focus()
   // 頁面念之前跟手機說了：10:00 那一則手機不會再發
   expect(await page.evaluate(() => window.__handled)).toBe(T)
   // 交給手機的那一串：從 10:15 起每 15 分鐘一則，排到明天就寢；通知上也寫著現在該做的那一件
@@ -1644,7 +1645,8 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   const items = await plan()
   expect(items[1].at - items[0].at).toBe(15 * 60000)
   expect(items.length).toBeGreaterThan(60)
-  expect(items[0]).toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告' })
+  // focus：有現在該做的那一件，手機的通知上多一顆「▶ 開始專注」
+  expect(items[0]).toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告', focus: true })
   // 開會、吃飯時：提示卡上按「先停 1 小時」。停著的那一小時手機上也不排，11:00 起照常
   await toast.locator('.toast-act', { hasText: '先停 1 小時' }).click()
   const paused = page.locator('#toasts .toast', { hasText: '警語先停到 11:00' })
@@ -1671,11 +1673,101 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   await expect.poll(async () => (await plan())?.length ?? 0).toBeGreaterThan(60)
 })
 
+// 通知本身（Android 的 MottoNotice、Service Worker 的 notificationclick）在 tests/sw.test.js 測；這裡是打開 App 之後頁面照著做
+test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶ 開始專注」打開後照著做；瀏覽器照 Service Worker 留在快取裡的、傳過來的做，網址上的 ?act= 不算', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  // 假的 Android 殼：記著按了哪一顆按鈕（開機時就按了的放在 sessionStorage，重新整理也帶得到）
+  await context.addInitScript(() => {
+    if (sessionStorage.getItem('native') !== '1') return
+    window.__acts = JSON.parse(sessionStorage.getItem('acts') || '[]')
+    sessionStorage.removeItem('acts')
+    window.HiyoriNative = {
+      version: () => 3, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify() {},
+      mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => true, mottoSeen() {},
+      takeAct: () => window.__acts.shift() || '',
+    }
+  })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await page.evaluate(() => sessionStorage.setItem('native', '1'))
+  await page.reload()
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('notify', true)
+    s.setSetting('mottoEvery', 15)
+    s.toggleStar(s.addTask({ title: '寫期末報告', priority: 3, date: s.today }).id)
+    s.addMotto('先做最重要的那一件')
+  })
+  // App 開著時按了「先停 1 小時」：殼叫網頁來拿
+  await page.evaluate(() => {
+    window.__acts.push('pause')
+    window.dispatchEvent(new Event('hiyori-native-act'))
+  })
+  await expect(page.locator('#toasts .toast', { hasText: '警語先停到 11:00' })).toBeVisible()
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.mottoPause)).toBe(T + 3600000)
+  // 「▶ 開始專注」：開始專注現在該做的那一件
+  await page.evaluate(() => {
+    window.__acts.push('focus')
+    window.dispatchEvent(new Event('hiyori-native-act'))
+  })
+  await expect.poll(() => page.evaluate(() => [window.hiyori.ui.focus.mode, window.hiyori.ui.focus.task?.title])).toEqual(['focus', '寫期末報告'])
+  // 已經在專注了：不換掉，說一聲
+  await page.evaluate(() => {
+    window.__acts.push('focus')
+    window.dispatchEvent(new Event('hiyori-native-act'))
+  })
+  await expect(page.locator('#toasts .toast', { hasText: '已經在專注了' })).toBeVisible()
+  // App 沒在跑、從按鈕打開：開機時照著做。今天還沒看過今日摘要也不出來蓋住專注頁
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.stop()
+    sessionStorage.setItem('acts', JSON.stringify(['focus']))
+    localStorage.setItem('hiyori-brief-day', JSON.stringify('2000-01-01'))
+  })
+  await page.reload()
+  await bootReady(page)
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await page.waitForTimeout(1500)
+  await expect(page.locator('#brief')).toBeHidden()
+  expect(await page.evaluate(() => localStorage.getItem('hiyori-brief-day'))).toBe('"2000-01-01"')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+
+  // 瀏覽器（沒有殼）：別的網站連過來帶 ?act=pause 不算（不然誰都能替你按）
+  await page.evaluate(() => {
+    sessionStorage.removeItem('native')
+    window.hiyori.store.pauseMottos(0)
+  })
+  await page.goto(`${site.url}?act=pause`)
+  await bootReady(page)
+  await swReady(page)
+  await page.waitForTimeout(500)
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.mottoPause)).toBe(T)
+  // Service Worker 開新視窗前把按了哪一顆留在快取裡：開機時拿走、照著做，拿了就刪掉
+  const actFile = () =>
+    page.evaluate(async () => {
+      const url = new URL('__act', (await navigator.serviceWorker.getRegistration()).scope).href
+      return (await (await caches.open('hiyoripush')).match(url))?.json() ?? null
+    })
+  await page.evaluate(async (t) => {
+    const url = new URL('__act', (await navigator.serviceWorker.getRegistration()).scope).href
+    await (await caches.open('hiyoripush')).put(url, new Response(JSON.stringify({ id: 'x1', act: 'pause', at: t })))
+  }, T)
+  await page.reload()
+  await bootReady(page)
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.settings.mottoPause)).toBe(T + 3600000)
+  expect(await actFile()).toBeNull()
+  // 叫出開著的視窗：Service Worker 直接傳過來
+  await page.evaluate(() => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'hiyori-act', act: 'focus', id: 'x2' } })))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+})
+
 // 收到推播後顯示什麼、頁面和 Service Worker 怎麼分「念到哪」在 tests/sw.test.js、tests/mottoPush.test.js 測
 test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面時把接下來的時間交給伺服器，回來後下一則快到了才取消；關掉通知就取消', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = Date.parse(`${ymd}T10:00:00+08:00`)
-  await context.addInitScript((t) => {
+  await context.addInitScript(({ t, ymd }) => {
     // 測試用的瀏覽器不給通知權限、也連不到推播服務：權限當成允許、這台本來就訂閱過（假的）
     Object.defineProperty(Notification, 'permission', { get: () => 'granted' })
     let cur = { endpoint: 'https://fcm.googleapis.com/fcm/send/e2e', options: {}, unsubscribe: async () => ((cur = null), true) }
@@ -1684,8 +1776,17 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
     // 切到別的分頁、鎖螢幕：window.__hidden 換掉「頁面看不看得到」
     Object.defineProperty(Document.prototype, 'hidden', { get: () => !!window.__hidden, configurable: true })
     Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
-    if (!localStorage.getItem('hiyori-motto-at')) localStorage.setItem('hiyori-motto-at', JSON.stringify({ at: t - 15 * 60000, i: 0 }))
-  }, T)
+    // 用了一陣子的這台：Service Worker 第一次打開時就裝好了；存檔裡有一句警語（每 15 分鐘）、今天的本命「寫期末報告」，
+    // 開著系統通知，上一則排在 9:45（見上一個測試）。第一次打開、裝好之後才放進去（sessionStorage 的 seed）
+    if (sessionStorage.getItem('seed') === '1') {
+      sessionStorage.removeItem('seed')
+      const tasks = [{ id: 'e2e-t1', title: '寫期末報告', priority: 3, date: ymd, star: true }]
+      const mottos = [{ id: 'e2e-m1', text: '先做最重要的那一件', on: true, createdAt: t - 86400000 }]
+      localStorage.removeItem('hiyori-daily-rev')
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, mottos, settings: { notify: true, mottoEvery: 15 } }))
+      localStorage.setItem('hiyori-motto-at', JSON.stringify({ at: t - 15 * 60000, i: 0 }))
+    }
+  }, { t: T, ymd })
   const calls = []
   await context.route('**/v1/push/**', (route) => {
     const req = route.request()
@@ -1699,6 +1800,10 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await page.goto(site.url)
   await bootReady(page)
   await swReady(page)
+  await page.evaluate(() => sessionStorage.setItem('seed', '1'))
+  await page.reload()
+  await bootReady(page)
+  await swReady(page)
   const file = (name) =>
     page.evaluate(async (n) => {
       const hit = await (await caches.open('hiyoripush')).match(new URL(n, (await navigator.serviceWorker.ready).scope).href)
@@ -1709,21 +1814,15 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
       window.__hidden = h
       document.dispatchEvent(new Event('visibilitychange'))
     }, hidden)
-  await page.evaluate(() => {
-    const s = window.hiyori.store
-    s.setSetting('notify', true)
-    s.setSetting('mottoEvery', 15)
-    s.toggleStar(s.addTask({ title: '寫期末報告', priority: 3, date: s.today }).id)
-    s.addMotto('先做最重要的那一件')
-  })
   // 看著頁面：10:00 那一則頁面自己念，念之前記下「念到這一則了」（推播晚到的話 Service Worker 就不再顯示）
   await expect(page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })).toContainText('現在該做：寫期末報告')
   await expect.poll(() => file('__motto-done')).toEqual({ at: T })
-  // 接下來的字留在這台的快取裡（剛念完的 10:00 那一則也留著：推播晚到時認得出念過了）；看著頁面時不交給伺服器
+  // 接下來的字留在這台的快取裡；看著頁面時不交給伺服器。
+  // （開機時先排好、後念的話，剛念完的 10:00 那一則也留著，見 tests/mottoPush.test.js；推播晚到時靠 __motto-done 認得出念過了）
   await expect
     .poll(async () => (await file('__motto-plan'))?.find((x) => x.at === T + 15 * 60000))
-    .toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告' })
-  expect((await file('__motto-plan'))[0].at).toBe(T)
+    .toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告', focus: true })
+  expect((await file('__motto-plan')).every((x) => x.at >= T)).toBe(true)
   expect(mottoCalls()).toEqual([])
   await page.evaluate(() => window.hiyori.ui.setTab('records'))
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('頁面關掉、手機鎖著也會照時間通知')

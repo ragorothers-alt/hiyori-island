@@ -72,6 +72,33 @@ describe('Service Worker', () => {
     await run(on.notificationclick, event)
     expect(opened).toEqual([SCOPE])
   })
+
+  it('點警語通知上的按鈕：按了哪一顆留在快取裡（頁面開好了拿走），叫出開著的視窗時也直接傳過去；網址上不帶（別的網站連不出來）；不認得的按鈕只是打開', async () => {
+    const said = []
+    const opened = []
+    let list = []
+    // 有的瀏覽器不讓叫到前面：照樣叫它做
+    const win = (url, focus = async () => {}) => ({ url, focus, postMessage: (m) => said.push([url, m]) })
+    const clients = { matchAll: async () => list, openWindow: async (u) => opened.push(u) }
+    const caches = new FakeCaches()
+    const on = loadSW({ caches, clients })
+    const click = (action) => run(on.notificationclick, { action, notification: { close() {} } })
+    const left = async () => (await (await caches.open('hiyoripush')).match(SCOPE + '__act'))?.json()
+    list = [win(SCOPE, async () => { throw new Error('not allowed') })] // prettier-ignore
+    await click('pause')
+    const first = await left()
+    expect(first).toMatchObject({ act: 'pause', id: expect.any(String), at: expect.any(Number) })
+    await click('focus')
+    await click('steal')
+    expect(said).toEqual([[SCOPE, { type: 'hiyori-act', act: 'pause', id: first.id }], [SCOPE, expect.objectContaining({ type: 'hiyori-act', act: 'focus' })]])
+    expect((await left()).act).toBe('focus')
+    list = []
+    await click('pause')
+    expect((await left()).act).toBe('pause')
+    await click('')
+    await click('x?y')
+    expect(opened).toEqual([SCOPE, SCOPE, SCOPE])
+  })
 })
 
 const NOW = Date.UTC(2026, 10, 10, 4)
@@ -294,6 +321,27 @@ describe('Service Worker：計時器到點的推播', () => {
 describe('Service Worker：警語的推播', () => {
   const m = (min, text = `第 ${min} 分的那一句`) => ({ at: NOW + min * MIN, title: 'ひより · 給自己的警語', body: `${text}\n現在該做：寫報告` })
   const focus = { at: NOW - 800, title: 'ひより · 專注結束', body: '25 分鐘完成，休息一下吧' }
+
+  it('通知下面的按鈕：字裡寫著現在該做的那一件才有「開始專注」，「先停 1 小時」都有；不出聲地再放一次的也有。計時器的沒有', () =>
+    withClock(async () => {
+      const s = setup({ mottos: [{ ...m(0), focus: true }] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      expect(s.shown()[0].actions).toEqual([{ action: 'focus', title: '▶ 開始專注' }, { action: 'pause', title: '先停 1 小時' }])
+      vi.setSystemTime(NOW + 3000)
+      await run(s.on.push, { data: null })
+      expect(s.shown()[0]).toMatchObject({ silent: true, actions: [{ action: 'focus' }, { action: 'pause' }] })
+
+      const plain = setup({ mottos: [m(0)] })
+      await plain.ready
+      await run(plain.on.push, { data: null })
+      expect(plain.shown()[0].actions).toEqual([{ action: 'pause', title: '先停 1 小時' }])
+
+      const timer = setup({ plans: [focus] })
+      await timer.ready
+      await run(timer.on.push, { data: null })
+      expect(timer.shown()[0].actions).toBeUndefined()
+    }))
 
   it('到點：顯示那一句（tag 是 motto，跟頁面自己發的一樣），記下念到這一則，也跟開著的頁面說一聲', () =>
     withClock(async () => {

@@ -1,13 +1,14 @@
 // 提醒：日程與排進時段的任務開始前 N 分鐘提醒一次、就寢前 30 分鐘提醒準備睡覺（App 內 + 系統通知）。
 // 已提醒過的記錄在 localStorage，重新整理不會重複提醒；改了開始時間會再提醒一次。
 import { addDays, dateStr, toMin } from './store.js'
-import { activeMottos, awake, mottoOf, planMottos, stepMotto } from './mottos.js'
+import { activeMottos, awake, mottoOf, pauseOf, planMottos, stepMotto } from './mottos.js'
 import { native, nativeAskNotify, nativeCanNotify } from './native.js'
 
 const KEY = 'hiyori-reminded'
 // 訂閱：每個訂閱最近提醒過的那次扣款日 { 訂閱 id: 'YYYY-MM-DD' }
 const SUB_KEY = 'hiyori-sub-reminded'
-// 警語：上次提醒排在幾點（時間照 stepMotto 一則一則往後排）、下一則輪到第幾句、那一則是不是先停著沒念 { at, i, skip? }
+// 警語：上次提醒排在幾點（時間照 stepMotto 一則一則往後排）、下一則輪到第幾句、那一則是不是先停著沒念、
+// 之後是不是不提醒了（再打開時從那時開始算）{ at, i, skip?, off? }
 const MOTTO_KEY = 'hiyori-motto-at'
 // 上次提醒是好幾天前（很久沒打開）：從現在重新算，不一打開就響
 const MOTTO_STALE = 3 * 86400000
@@ -130,14 +131,14 @@ export class Reminders {
     const s = this.store.state
     const every = s.settings.mottoEvery
     const on = activeMottos(s.mottos)
-    if (!(every > 0) || !on.length) return
+    if (!(every > 0) || !on.length) return this._mottoOff()
+    this._off = false
     if (this.startMotto(now)) return
     const last = this.mottoState()
     if (!awake(s.rhythm, mins)) return
     const ext = this.external()
     const handled = ext ? this.handled() : 0
-    const pause = Number(s.settings.mottoPause) || 0
-    const cut = !!s.settings.mottoPauseCut
+    const pause = pauseOf(s.settings)
     let t = last.at
     let skip = !!last.skip
     let i = Number(last.i) || 0
@@ -145,7 +146,7 @@ export class Reminders {
     // 手機已經通知到的最後一則（頁面在背景時先往後記到這裡）
     let seen = null
     for (let k = 0; k < 2000; k++) {
-      const next = stepMotto(t, skip, every, s.rhythm, pause, cut)
+      const next = stepMotto(t, skip, every, s.rhythm, pause)
       if (next.at > +now) break
       t = next.at
       skip = next.skip
@@ -166,13 +167,21 @@ export class Reminders {
     this._saveMotto({ at: t, i, skip })
     this.onRemind(mottoOf(on, due), 0, 'motto')
   }
-  // 沒記過（剛寫下第一句、剛打開提醒）、記的時間在未來（時鐘被往回調）、或好幾天沒打開：從現在開始算，回傳 true。
+  // 不提醒了（間隔改成不提醒、警語全部收著或刪光）：記著「停過」（off），之後再打開時從那時開始算——
+  // 不然會接著很久以前排到的時間，一打開就補念一則。每個分頁只記一次
+  _mottoOff() {
+    if (this._off) return
+    this._off = true
+    const last = this.mottoState()
+    if (last && !last.off) this._saveMotto({ ...last, off: true })
+  }
+  // 沒記過、停過（剛寫下第一句、剛打開提醒）、記的時間在未來（時鐘被往回調）、或好幾天沒打開：從現在開始算，回傳 true。
   // 交給手機之前也先叫一次：剛寫下第一句就離開 App 的話，等不到下一秒的檢查
   startMotto(now = Date.now()) {
     const s = this.store.state
     if (!(s.settings.mottoEvery > 0) || !activeMottos(s.mottos).length) return false
     const last = this.mottoState()
-    if (last?.at > 0 && last.at <= +now + 60000 && now - last.at <= MOTTO_STALE) return false
+    if (last?.at > 0 && !last.off && last.at <= +now + 60000 && now - last.at <= MOTTO_STALE) return false
     this._saveMotto({ at: +now, i: Number(last?.i) || 0 })
     return true
   }
@@ -190,11 +199,11 @@ export class Reminders {
   // since：這個時間以前的不排（預設是現在；交給手機時留著剛到點、還沒處理的那一則）。先停著的那段照設定不排
   mottoPlan(now = Date.now(), opts) {
     const s = this.store.state
-    return planMottos(s.mottos, s.settings.mottoEvery, s.rhythm, this.mottoState(), +now, { pause: Number(s.settings.mottoPause) || 0, cut: !!s.settings.mottoPauseCut, ...opts })
+    return planMottos(s.mottos, s.settings.mottoEvery, s.rhythm, this.mottoState(), +now, { pause: pauseOf(s.settings), ...opts })
   }
-  // skip 只在是 true 時記（停著時跳過的那一則）
-  _saveMotto({ at, i, skip }) {
-    const v = skip ? { at, i, skip: true } : { at, i }
+  // skip（停著時跳過的那一則）、off（之後不提醒了）只在是 true 時記
+  _saveMotto({ at, i, skip, off }) {
+    const v = { at, i, ...(skip ? { skip: true } : {}), ...(off ? { off: true } : {}) }
     this.mottoLast = v
     try {
       localStorage.setItem(MOTTO_KEY, JSON.stringify(v))
@@ -283,7 +292,9 @@ export class Reminders {
 }
 
 // 系統通知：有 Service Worker 時用 showNotification（手機必需），否則用 Notification
-export async function systemNotify(title, body, tag) {
+// extra：交給 Service Worker 顯示時多帶的（例如警語通知上的按鈕 actions、data）。
+// 沒有 Service Worker 時用的 new Notification 不能有按鈕，就不帶
+export async function systemNotify(title, body, tag, extra = null) {
   if (notifyPermission() !== 'granted') return false
   if (native) {
     try {
@@ -298,7 +309,7 @@ export async function systemNotify(title, body, tag) {
   try {
     const reg = await navigator.serviceWorker?.getRegistration()
     if (reg) {
-      await reg.showNotification(title, opts)
+      await reg.showNotification(title, { ...opts, ...extra })
       return true
     }
     const n = new Notification(title, opts)

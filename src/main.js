@@ -5,9 +5,9 @@ import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
-import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking } from './push.js'
-import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeAway } from './native.js'
-import { planKey, pauseText, pauseUntil, MOTTO_LATE } from './mottos.js'
+import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
+import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway } from './native.js'
+import { planKey, pauseOf, pauseText, pauseUntil, MOTTO_LATE } from './mottos.js'
 import { order as doFirst } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
@@ -127,6 +127,9 @@ async function boot() {
   // 現在該做的那一件：今天還沒做完的任務裡，本命、重要的、排了時間早的在前（跟今日摘要一樣）
   const nowTask = () => doFirst(store.tasksOn(store.today))[0] || null
   const mottoBody = (text, task) => (task ? `${text}\n現在該做：${task.title}` : text)
+  // 警語通知上的按鈕（跟 public/sw.js 的 mottoActions、Android 殼的 MottoNotice 一樣）：有現在該做的那一件才有「開始專注」。
+  // 按了打開 App，由下面的 doAct 去做
+  const mottoActions = (task) => [...(task ? [{ action: 'focus', title: '▶ 開始專注' }] : []), { action: 'pause', title: '先停 1 小時' }]
   // 把警語的那一串交給手機／伺服器（下面「警語交給別人排」那一段接上）：改了設定、開始專注時馬上叫一次，
   // 不等下一秒的檢查（剛改完就離開 App 的話頁面會睡著，手機上留著的還是舊的那一串）
   let syncMottos = () => {}
@@ -167,6 +170,53 @@ async function boot() {
     mottoPush?.check()
     // 設定裡「上一則到點通知」、警語卡上的「上一則推播」：剛剛鎖著時可能送來了幾則
     ui.renderRemind()
+    // 是按了通知上的按鈕回來的（通常 hiyori-native-act、Service Worker 的訊息會先到，這裡是保險）
+    takeNativeAct()
+    takeSwAct()
+  })
+
+  // ── 按了警語通知上的按鈕：打開 App，照著做 ──
+  // focus：開始專注現在該做的那一件（通知上寫的那件已經做完的話，換成現在排在最前面的）；pause：先停 1 小時。
+  // 手機的 App：殼記著按了哪一顆（takeAct）；瀏覽器：Service Worker 把按了哪一顆留在快取裡（takeNoticeAct），
+  // 叫出開著的視窗時也直接傳過來。不認網址上的參數：別的網站連過來就能替你按，不行
+  const doAct = (act) => {
+    // 頁面凍住時過了午夜：先換到今天，才不會開始專注昨天的那一件
+    store.tick()
+    if (act === 'pause') {
+      if (store.state.settings.mottoEvery > 0) store.pauseMottos(pauseUntil('hour', store.state.rhythm, Date.now()))
+      return
+    }
+    if (act !== 'focus') return
+    if (ui.focus.mode === 'focus') return ui.toast({ icon: '戒', title: '已經在專注了', sub: '這一輪結束再說' })
+    const t = nowTask()
+    if (!t) return ui.toast({ icon: '戒', title: '今天的任務都做完了', sub: '想做什麼的話，再加一件吧' })
+    ui.focus.startWith(t.id)
+  }
+  // 開機還沒好之前按的先記著，開場時做
+  let booted = false
+  let bootAct = ''
+  const runAct = (act) => {
+    if (booted) doAct(act)
+    else bootAct = act
+  }
+  const takeNativeAct = () => {
+    const a = nativeTakeAct()
+    if (a) runAct(a)
+  }
+  // Service Worker 留下的：同一次按的（id）只做一次（傳過來的和快取裡的可能都拿得到）
+  const actsDone = new Set()
+  const swAct = (r) => {
+    if (!r || actsDone.has(r.id)) return
+    actsDone.add(r.id)
+    runAct(r.act)
+  }
+  const takeSwAct = () => takeNoticeAct().then(swAct)
+  addEventListener('hiyori-native-act', takeNativeAct)
+  navigator.serviceWorker?.addEventListener('message', (e) => {
+    if (e.data?.type !== 'hiyori-act') return
+    // 快取裡那一份也拿掉（之後開機不會再做一次）
+    takeNoticeAct(e.data.id)
+    swAct({ id: String(e.data.id || ''), act: String(e.data.act || '') })
   })
 
   // ── UI 掛鉤 ──
@@ -827,7 +877,7 @@ async function boot() {
       })
       // 交給手機排了（Android 殼）：App 不在前面時由手機發，這邊只在畫面上念。
       // 網頁交給伺服器推的時候，頁面會念的是看得到頁面時（沒看著這個視窗就跳通知）、或在背景卻沒交上伺服器時
-      if (!(native && mottoExternal()) && store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', mottoBody(e.text, next), 'motto')
+      if (!(native && mottoExternal()) && store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', mottoBody(e.text, next), 'motto', { actions: mottoActions(next) })
       return
     }
     if (kind === 'bed') {
@@ -870,12 +920,11 @@ async function boot() {
     // 剛寫下第一句、剛打開提醒：先定好從什麼時候開始算（不等下一秒的檢查），才排得出那一串
     if (on) reminders.startMotto(now)
     const task = on ? nowTask() : null
-    const pause = Number(s.settings.mottoPause) || 0
-    const sig = on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, pause, cut: s.settings.mottoPauseCut, task: task?.title, now }) : 'off'
+    const sig = on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, pause: pauseOf(s.settings), task: task?.title, now }) : 'off'
     if (sig !== mottoSig) {
       const since = Math.max(now - MOTTO_LATE, mottoPush ? mottoPush.done : nativeMottoHandled())
       const items = on
-        ? reminders.mottoPlan(now, { quietUntil, since, ...(mottoPush ? { max: MOTTO_PUSH_MAX } : {}) }).map((p) => ({ at: p.at, title: 'ひより · 給自己的警語', body: mottoBody(p.text, task) }))
+        ? reminders.mottoPlan(now, { quietUntil, since, ...(mottoPush ? { max: MOTTO_PUSH_MAX } : {}) }).map((p) => ({ at: p.at, title: 'ひより · 給自己的警語', body: mottoBody(p.text, task), ...(task ? { focus: true } : {}) }))
         : []
       if (mottoPush) {
         mottoItems = items
@@ -1097,6 +1146,17 @@ async function boot() {
     ui.focus.toggleBig(false)
     ui.openCapture()
   }
+  // 按了警語通知上的按鈕打開的（瀏覽器：Service Worker 留在快取裡；手機的 App：殼記著）、開機途中按的：現在照著做。
+  // 開始專注的話今日摘要就不出來（專注中不打擾；摘要等一下才出來，快取一下就讀到了）。
+  // 讀快取不擋開場：機器忙的時候不要讓載入畫面多停
+  takeNativeAct()
+  booted = true
+  if (bootAct) {
+    const a = bootAct
+    bootAct = ''
+    doAct(a)
+  }
+  takeSwAct()
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
       const loader = document.getElementById('loader')

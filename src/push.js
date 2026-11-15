@@ -40,6 +40,33 @@ export function answerLooking(sw = globalThis.navigator?.serviceWorker, now = ()
     } catch {}
   })
 }
+// 按了警語通知上的哪一顆按鈕 { id, act, at }：Service Worker 打開 App 之前留下，頁面開好了拿走（public/sw.js 的 notificationclick）
+export const ACT_FILE = '__act'
+const ACTS = ['focus', 'pause']
+// 按了多久以內的才算（打開 App 慢一點也沒關係；很久以前的就不做了）
+const ACT_FRESH = 2 * 60000
+
+// 拿走 Service Worker 留下的那一次按鈕（刪掉，不會做兩次），回傳 { id, act }；沒有、太舊、不認得的是 null。
+// id：只拿走這一次的（Service Worker 也直接傳過來了的那一次：快取裡那一份刪掉，之後開機不會再做一次）
+export async function takeNoticeAct(id = null, { now = Date.now(), storage = globalThis.caches, sw = globalThis.navigator?.serviceWorker } = {}) {
+  try {
+    const reg = await sw?.getRegistration()
+    if (!reg || !storage || !(await storage.has(PLAN_CACHE))) return null
+    const cache = await storage.open(PLAN_CACHE)
+    const url = new URL(ACT_FILE, reg.scope).href
+    const hit = await cache.match(url)
+    if (!hit) return null
+    const v = await hit.json().catch(() => null)
+    if (id != null && v?.id !== id) return null
+    // 拿了就刪（壞掉的、太舊的也刪，不留著）
+    await cache.delete(url)
+    const ok = !!v && ACTS.includes(v.act) && typeof v.id === 'string' && Number.isFinite(v.at) && now - v.at < ACT_FRESH && v.at <= now + 5000
+    return ok ? { id: v.id, act: v.act } : null
+  } catch {
+    return null
+  }
+}
+
 // 到點多久以內的字還留著（推播最晚 10 分鐘後送到）
 const KEEP = 15 * 60000
 // 上次成功排到伺服器的那一則的時間（這台的時鐘）。所有分頁共用：別的分頁排的，這個分頁停掉時也知道要取消。

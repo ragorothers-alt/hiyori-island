@@ -3,7 +3,7 @@
 // 後半段：真的 Worker（PushHub）、真的 Service Worker（public/sw.js）、頁面的提醒（reminders.js）接在一起模擬一天半
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../worker/src/index.js'
-import { MOTTO_DONE, MOTTO_FILE, MOTTO_GRACE, MOTTO_NEAR, MOTTO_PUSH_MAX, MottoPush, PLAN_CACHE, TimerPush } from '../src/push.js'
+import { MOTTO_DONE, MOTTO_FILE, MOTTO_GRACE, MOTTO_NEAR, MOTTO_PUSH_MAX, MottoPush, PLAN_CACHE, TimerPush, takeNoticeAct } from '../src/push.js'
 import { MOTTO_LATE, nextMotto, planKey } from '../src/mottos.js'
 import { Store } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
@@ -577,6 +577,33 @@ async function simulate({ seed: s0, second = false, slow = 0, dup = 0 }) {
   vi.useRealTimers()
   return { expected, spoken, swShown, notes, seen, until: END - 60000 }
 }
+
+describe('通知上的按鈕：Service Worker 留在快取裡的那一次', () => {
+  it('拿走就刪掉（不會做兩次）；太舊的、不認得的、壞掉的不算；只拿某一次時別次的留著；沒有快取時不建一個', async () => {
+    const caches = new FakeCaches()
+    const sw = { getRegistration: async () => ({ scope: SCOPE }) }
+    const T = 1_800_000_000_000
+    const take = (id = null, now = T, s = sw) => takeNoticeAct(id, { now, storage: caches, sw: s })
+    const put = (v) => caches.open(PLAN_CACHE).then((c) => c.put(SCOPE + '__act', new Response(JSON.stringify(v))))
+    expect(await take()).toBeNull()
+    expect(await caches.has(PLAN_CACHE)).toBe(false)
+    await put({ id: 'a', act: 'pause', at: T - 1000 })
+    expect(await take()).toEqual({ id: 'a', act: 'pause' })
+    expect(await take()).toBeNull()
+    for (const v of [{ id: 'b', act: 'pause', at: T - 3 * 60000 }, { id: 'c', act: 'rm', at: T }, { id: 5, act: 'focus', at: T }, 'oops', { id: 'd', act: 'focus', at: T + 60000 }]) {
+      await put(v)
+      expect(await take(), JSON.stringify(v)).toBeNull()
+      expect(await (await caches.open(PLAN_CACHE)).match(SCOPE + '__act'), JSON.stringify(v)).toBeUndefined()
+    }
+    await put({ id: 'e', act: 'focus', at: T })
+    expect(await take('x')).toBeNull()
+    expect(await take('e')).toEqual({ id: 'e', act: 'focus' })
+    expect(await take()).toBeNull()
+    // 沒有 Service Worker（開發時、不支援的瀏覽器）
+    await put({ id: 'f', act: 'focus', at: T })
+    expect(await take(null, T, null)).toBeNull()
+  })
+})
 
 describe('模擬一天半：真的 Worker、Service Worker 和頁面接在一起', () => {
   // 最後一分鐘內到點的不比（模擬剛好停在那一刻，可能還在路上）

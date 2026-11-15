@@ -140,6 +140,9 @@ export const extrasMethods = {
     if (Number.isFinite(until) && until > now) {
       const v = Math.round(Math.min(until, now + PAUSE_MAX))
       if (v === old && !st.mottoPauseCut) return false
+      // 從現在開始停（之前到點的照常：手機已經通知過、頁面還沒跟上的那一則不算跳過）；
+      // 停著時又按了一次（例如改成今天先停）：還是從原本開始停的那一刻算
+      st.mottoPauseFrom = old > now && st.mottoPauseFrom ? st.mottoPauseFrom : now
       st.mottoPause = v
       st.mottoPauseCut = false
       this._finish([['mottoPause', v]])

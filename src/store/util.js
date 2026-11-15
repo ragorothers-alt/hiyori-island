@@ -71,13 +71,14 @@ export const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 
 // fontScale：面板和對話框的字放大倍率；stuckNudge：任務卡住時ふじ提醒
 // glass：App 模式 Liquid Glass 的透明度（0 清透～100 著色）
 // mottoEvery：醒著的時候每隔幾分鐘提醒一句警語（0 = 不提醒）；mottoBar：面板上方輪流放一句；
-// mottoPause：警語的提醒先停到幾點（毫秒，0 = 沒停；跟著同步，在手機上按了電腦也一起停）；
+// mottoPause：警語的提醒先停到幾點（毫秒，0 = 沒停；跟著同步，在手機上按了電腦也一起停）；mottoPauseFrom：從幾點開始停
+// （之前到點的照常算，例如手機已經通知過、從通知上按了先停的那一則）；
 // mottoPauseCut：自己按了「現在就恢復」（停到的時間改成按下去的那一刻，停完不補那一則）
 // focusCat：App 模式的專注頁上有一隻貓咪散步；brief：每天第一次打開時貓咪出來說今日摘要
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
   focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true, glass: 50,
-  mottoEvery: 60, mottoPause: 0, mottoPauseCut: false, mottoBar: true, focusCat: true, brief: true,
+  mottoEvery: 60, mottoPause: 0, mottoPauseFrom: 0, mottoPauseCut: false, mottoBar: true, focusCat: true, brief: true,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 // 畫質：auto＝桌機高、觸控手機標準
