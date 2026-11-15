@@ -1659,3 +1659,94 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('App 關著、手機鎖著也會照時間通知')
   await expect.poll(async () => (await plan())?.length ?? 0).toBeGreaterThan(60)
 })
+
+// 收到推播後顯示什麼、頁面和 Service Worker 怎麼分「念到哪」在 tests/sw.test.js、tests/mottoPush.test.js 測
+test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面時把接下來的時間交給伺服器，回來後下一則快到了才取消；關掉通知就取消', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript((t) => {
+    // 測試用的瀏覽器不給通知權限、也連不到推播服務：權限當成允許、這台本來就訂閱過（假的）
+    Object.defineProperty(Notification, 'permission', { get: () => 'granted' })
+    let cur = { endpoint: 'https://fcm.googleapis.com/fcm/send/e2e', options: {}, unsubscribe: async () => ((cur = null), true) }
+    PushManager.prototype.getSubscription = async () => cur
+    PushManager.prototype.subscribe = async () => (cur = { endpoint: 'https://fcm.googleapis.com/fcm/send/e2e', options: {}, unsubscribe: async () => ((cur = null), true) })
+    // 切到別的分頁、鎖螢幕：window.__hidden 換掉「頁面看不看得到」
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => !!window.__hidden, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
+    if (!localStorage.getItem('hiyori-motto-at')) localStorage.setItem('hiyori-motto-at', JSON.stringify({ at: t - 15 * 60000, i: 0 }))
+  }, T)
+  const calls = []
+  await context.route('**/v1/push/**', (route) => {
+    const req = route.request()
+    const path = new URL(req.url()).pathname
+    calls.push({ path, body: req.postDataJSON(), type: req.headers()['content-type'] })
+    route.fulfill({ json: path.endsWith('/key') ? { key: 'BAAA' } : { ok: true }, headers: { 'Access-Control-Allow-Origin': '*' } })
+  })
+  const mottoCalls = () => calls.filter((c) => c.path === '/v1/push/mottos')
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await bootReady(page)
+  await swReady(page)
+  const file = (name) =>
+    page.evaluate(async (n) => {
+      const hit = await (await caches.open('hiyoripush')).match(new URL(n, (await navigator.serviceWorker.ready).scope).href)
+      return hit ? hit.json() : null
+    }, name)
+  const leave = (hidden) =>
+    page.evaluate((h) => {
+      window.__hidden = h
+      document.dispatchEvent(new Event('visibilitychange'))
+    }, hidden)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('notify', true)
+    s.setSetting('mottoEvery', 15)
+    s.toggleStar(s.addTask({ title: '寫期末報告', priority: 3, date: s.today }).id)
+    s.addMotto('先做最重要的那一件')
+  })
+  // 看著頁面：10:00 那一則頁面自己念，念之前記下「念到這一則了」（推播晚到的話 Service Worker 就不再顯示）
+  await expect(page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })).toContainText('現在該做：寫期末報告')
+  await expect.poll(() => file('__motto-done')).toEqual({ at: T })
+  // 接下來的字留在這台的快取裡（剛念完的 10:00 那一則也留著：推播晚到時認得出念過了）；看著頁面時不交給伺服器
+  await expect
+    .poll(async () => (await file('__motto-plan'))?.find((x) => x.at === T + 15 * 60000))
+    .toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告' })
+  expect((await file('__motto-plan'))[0].at).toBe(T)
+  expect(mottoCalls()).toEqual([])
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#mottoRoot .mt-reach')).toContainText('頁面關掉、手機鎖著也會照時間通知')
+
+  // 離開頁面：交出接下來的時間（只有網址、幾毫秒後、序號；離開時送的，用 text/plain）
+  await leave(true)
+  await expect.poll(() => mottoCalls().length).toBe(1)
+  const [arm] = mottoCalls()
+  expect(Object.keys(arm.body).sort()).toEqual(['after', 'endpoint', 'seq'])
+  expect(arm.body.endpoint).toBe('https://fcm.googleapis.com/fcm/send/e2e')
+  expect(arm.body.after.slice(0, 2)).toEqual([15 * 60000, 30 * 60000])
+  expect(arm.type).toContain('text/plain')
+  // 回到頁面：下一則還有 15 分鐘，先不取消（很快又切走也不用再交）
+  await leave(false)
+  await page.waitForTimeout(1500)
+  expect(mottoCalls()).toHaveLength(1)
+  // 下一則再 30 秒就到：取消，由頁面自己念
+  await page.clock.setFixedTime(new Date(T + 14.5 * 60000))
+  await expect.poll(() => mottoCalls().at(-1).body.after).toBeNull()
+  expect(mottoCalls().at(-1).body.seq).toBeGreaterThan(arm.body.seq)
+
+  // 10:05 又離開：再交一次；回來（下一則還久）關掉系統通知：伺服器上排著的取消、快取裡的字拿掉
+  await page.clock.setFixedTime(new Date(T + 5 * 60000))
+  await leave(true)
+  await expect.poll(() => mottoCalls().length).toBe(3)
+  expect(mottoCalls()[2].body.after[0]).toBe(10 * 60000)
+  await leave(false)
+  await page.waitForTimeout(1500)
+  expect(mottoCalls()).toHaveLength(3)
+  await page.evaluate(() => window.hiyori.ui.setTab('schedule'))
+  await page.locator('#notifyBtn').click()
+  await expect.poll(() => mottoCalls().length).toBe(4)
+  expect(mottoCalls()[3].body.after).toBeNull()
+  await expect.poll(() => file('__motto-plan')).toEqual([])
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#mottoRoot .mt-reach')).toContainText('現在只在看著這一頁時提醒')
+})

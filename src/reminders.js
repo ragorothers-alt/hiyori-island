@@ -31,10 +31,11 @@ export const notifyPermission = () => (native ? (nativeCanNotify() ? 'granted' :
 export const requestNotify = () => (native ? nativeAskNotify() : Notification.requestPermission())
 
 export class Reminders {
-  // 警語交給手機排的時候（Android 殼排好鬧鐘、開了系統通知）怎麼跟手機分工：
-  //   external()：現在交給手機排了嗎；hidden()：頁面在背景嗎（App 不在前面時頁面的 JavaScript 可能還在跑）
-  //   handled()：手機記著的「念到哪一則了」（手機通知過、或頁面念過的最後一則）；
-  //   claim(at)：頁面要念這一則，先跟手機說（手機剛好搶先通知了的話回 false）
+  // 警語交給別人排的時候（Android 殼排好鬧鐘、網頁交給伺服器推）怎麼分工：
+  //   external()：現在交給別人排了嗎；hidden(t)：到點的這一則（t）頁面先不念、留給另一邊嗎
+  //   （App 不在前面、頁面在背景時頁面的 JavaScript 可能還在跑）
+  //   handled()：另一邊記著的「念到哪一則了」（通知過、或頁面念過的最後一則）；
+  //   claim(at)：頁面要念這一則，先跟另一邊說（另一邊剛好搶先通知了的話回 false）
   constructor(store, onRemind, { external = () => false, hidden = () => typeof document !== 'undefined' && !!document.hidden, handled = () => 0, claim = () => true } = {}) {
     this.store = store
     this.onRemind = onRemind
@@ -121,9 +122,9 @@ export class Reminders {
   // 重新整理、另一個分頁都接著算（記憶體也留一份：存不進去時不會每秒響）。
   // 第一次（剛寫下第一句、剛打開提醒）從現在開始算，不馬上響；睡覺的時間不響，起床後第一次打開時接著提醒。
   // 頁面睡著時錯過了好幾則：只念最近的那一則，其他的跳過（照樣輪過那幾句）。
-  // 交給手機排的時候（external），每一則由手機或頁面其中一邊念，靠手機記的「念到哪一則」分：
-  //   手機已經通知過的：只往後記；頁面在背景：不念也不往後記（還沒通知的那一則留在交給手機的那一串裡，手機會發）；
-  //   看著 App：先跟手機說這一則頁面念（claim），手機就不發
+  // 交給別人排的時候（external），每一則由另一邊（手機、推播）或頁面其中一邊念，靠「念到哪一則」分：
+  //   另一邊已經通知過的：只往後記；頁面在背景（hidden）：不念也不往後記（還沒通知的那一則另一邊會發）；
+  //   看著 App：先跟另一邊說這一則頁面念（claim），另一邊就不發
   _motto(now, mins) {
     const s = this.store.state
     const every = s.settings.mottoEvery
@@ -149,7 +150,7 @@ export class Reminders {
     if (due === null) return
     if (ext) {
       if (t <= handled) return this._saveMotto({ at: t, i })
-      if (this.hidden()) {
+      if (this.hidden(t)) {
         if (seen && seen.at > last.at) this._saveMotto(seen)
         return
       }

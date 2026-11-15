@@ -8,10 +8,10 @@
 // 舊版前端不帶 auth：vault 還沒記下 auth 時照舊讓它寫，記下之後就要對得上（見 migrations/0003）；
 // 還沒記下的舊 vault 到 LEGACY_UNTIL 為止才收寫入，也不能只憑 id 刪除。
 // /v1/ai：ふじ的 AI，經過這裡呼叫 Claude（見 ai.js；金鑰和通行碼都是 Worker 的 secret）。
-// /v1/push/*：番茄鐘到點的推播（見 push.js；跟同步碼無關，沒開線上同步也能用）。
+// /v1/push/*：番茄鐘到點、警語定時提醒的推播（見 push.js；跟同步碼無關，沒開線上同步也能用）。
 import { HttpError } from './http.js'
 import { askAI, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
-import { pushKey, pushTimer } from './push.js'
+import { pushKey, pushTimer, pushMottos } from './push.js'
 
 export { PushHub } from './push.js'
 
@@ -59,9 +59,9 @@ export default {
           throw e
         }
       }
-      // 推播的請求只有一個網址和一個數字
+      // 推播的請求只有一個網址和幾個數字（警語最多 200 個）
       const small = pathname.startsWith('/v1/push/')
-      const text = await readBody(req, ai ? AI_MAX : small ? 4000 : MAX_DATA + 1000)
+      const text = await readBody(req, ai ? AI_MAX : small ? 8000 : MAX_DATA + 1000)
       let body
       try {
         body = JSON.parse(text || '{}')
@@ -79,6 +79,7 @@ export default {
       if (pathname === '/v1/delete') return json(await remove(env.DB, body))
       if (pathname === '/v1/push/key') return json(await pushKey(env))
       if (pathname === '/v1/push/timer') return json(await pushTimer(env, body, now, new URL(req.url).origin))
+      if (pathname === '/v1/push/mottos') return json(await pushMottos(env, body, now, new URL(req.url).origin))
       throw new HttpError(404, 'not found')
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message, ...e.extra }, e.status)

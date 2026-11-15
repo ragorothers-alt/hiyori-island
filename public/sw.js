@@ -12,6 +12,14 @@ const PLAN_FILE = '__timer-plan'
 const SHOWN_FILE = '__timer-shown'
 // 最近幾則推播是什麼時候送到這台的 [{ got, at, closed }]：設定裡的「上一則到點通知」讀這個
 const LOG_FILE = '__push-log'
+// 警語的定時提醒：接下來的那一串 [{ at, title, body }]、念到哪一則了 { at }（頁面念之前也會寫）、推播送到的紀錄
+const MOTTO_FILE = '__motto-plan'
+const MOTTO_DONE = '__motto-done'
+const MOTTO_LOG = '__motto-log'
+// 到點晚了這麼久的警語就不顯示了（src/mottos.js 的 MOTTO_LATE，兩邊要一樣）
+const MOTTO_LATE = 10 * 60000
+// 計時器到點多久以內的字還對得上（推播最晚 10 分鐘後送到）
+const TIMER_LATE = 15 * 60000
 // 推播送到時問頁面「正看著 App 嗎」，等它回答：問題的 id → 收到回答時叫的函式
 const asking = new Map()
 
@@ -141,9 +149,11 @@ self.addEventListener('message', (event) => {
   )
 })
 
-// 番茄鐘到點（專注結束、休息結束）：伺服器到點推一則沒有內容的推播過來，手機鎖著、App 被系統暫停時也收得到。
-// 要顯示的字是頁面排的時候留在快取裡的（最近幾則）。這一則是哪一次到點的：已經到點的裡面最近的那一筆——
-// 還沒到點的是下一段的（頁面醒著時，推播還沒到就已經排好下一則了）。找不到（取消沒送到伺服器）就顯示一般的字。
+// 到點的推播：番茄鐘到點（專注結束、休息結束）、警語的定時提醒。伺服器到點推一則沒有內容的推播過來，
+// 手機鎖著、App 被系統暫停、頁面整個關掉時也收得到。
+// 要顯示的字是頁面留在快取裡的。這一則是哪一次到點的：已經到點的裡面最近的那一筆——
+// 還沒到點的是下一段的（頁面醒著時，推播還沒到就已經排好下一則了）。計時器和警語剛好一起到點就兩則都顯示。
+// 都顯示過了（同一則推播送了兩次、頁面已經念過那一句）：不出聲地把最近那一則再放一次；什麼都對不上（取消沒送到伺服器）就顯示一般的字。
 // 每一則推播都一定要顯示通知：不顯示的話瀏覽器會自己補一則「網站在背景更新」，iPhone 還會取消這台的訂閱。
 // 所以顯示以外的事（讀快取、收掉舊通知、記下顯示過了）各自包起來，哪一步出錯都不擋顯示
 
@@ -175,58 +185,147 @@ async function looking(ms = 1500) {
   })
 }
 
-// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆
-async function note(cache, url, entry) {
+const fileUrl = (name) => new URL(name, self.registration.scope).href
+async function readJSON(cache, name) {
   try {
-    const old = await (await cache.match(url))?.json()
+    const hit = await cache.match(fileUrl(name))
+    return hit ? await hit.json() : null
+  } catch {
+    return null
+  }
+}
+const putJSON = (cache, name, v) => cache.put(fileUrl(name), new Response(JSON.stringify(v), { headers: { 'Content-Type': 'application/json' } }))
+
+// 清單裡已經到點（推播早幾秒到、兩邊時鐘差一點也算）、而且還沒晚太久的最後一則
+function latestDue(list, now, late) {
+  let best = null
+  for (const p of Array.isArray(list) ? list : []) {
+    const due = p && Number.isFinite(p.at) && typeof p.title === 'string' && p.at <= now + 5000 && now - p.at < late
+    if (due && (!best || p.at > best.at)) best = p
+  }
+  return best
+}
+
+// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆
+async function note(cache, name, entry) {
+  try {
+    const old = await readJSON(cache, name)
     const list = (Array.isArray(old) ? old : []).filter((x) => x && x.got !== entry.got)
     list.push(entry)
-    await cache.put(url, new Response(JSON.stringify(list.slice(-8)), { headers: { 'Content-Type': 'application/json' } }))
+    await putJSON(cache, name, list.slice(-8))
   } catch {}
 }
 
+// 好幾則推播同時送到（同一則送了兩次、計時器和警語前後腳）：一則一則來。不然兩邊都在對方記下「顯示過了」之前讀，
+// 同一句會響兩次。只排「挑、記、顯示」這一段，後面等著看要不要收掉的那幾秒不擋下一則；哪一則出錯也不擋後面的
+let pushQueue = Promise.resolve()
+
+// 挑出這則推播要顯示的、記下顯示過了、顯示出來；回傳 { cache, entries }。
+// 推播沒有內容，分不出是計時器還是警語的那一則：到點了、還沒顯示過的都顯示（伺服器剛好一起到點只送一則；
+// 計時器那一則晚太久伺服器沒送的話，下一則警語來時跟著出來，晚一點但不會漏）
+async function showPush() {
+  const reg = self.registration
+  const now = Date.now()
+  let cache = null
+  // 這次要顯示的：計時器、警語（各自只看還沒顯示過的）；都顯示過了的話，最近的那一則（again）
+  let timer = null
+  let motto = null
+  let again = null
+  const repeat = (x, tag, log) => {
+    if (!again || x.at > again.at) again = { ...x, tag, log }
+  }
+  // 記號原本是什麼（沒顯示出來時還原）
+  let shownBefore = null
+  let doneBefore = null
+  try {
+    cache = await caches.open(PLAN_CACHE)
+    timer = latestDue(await readJSON(cache, PLAN_FILE), now, TIMER_LATE)
+    shownBefore = await readJSON(cache, SHOWN_FILE)
+    if (timer && shownBefore?.at === timer.at) {
+      repeat(timer, `hiyori-focus-${timer.at}`, LOG_FILE)
+      timer = null
+    }
+    motto = latestDue(await readJSON(cache, MOTTO_FILE), now, MOTTO_LATE)
+    doneBefore = await readJSON(cache, MOTTO_DONE)
+    if (motto && motto.at <= (Number(doneBefore?.at) || 0)) {
+      repeat(motto, 'motto', MOTTO_LOG)
+      motto = null
+    }
+    // 先記下這一次通知過了，再顯示（頁面醒著的話，看了就不用自己再發一次）。
+    // 警語寫之前再讀一次：頁面剛好在這之間念了同一句，就改成不出聲地放（不會畫面上念一次、通知又響一次）
+    if (timer) await putJSON(cache, SHOWN_FILE, { at: timer.at })
+    if (motto) {
+      doneBefore = await readJSON(cache, MOTTO_DONE)
+      if (Number(doneBefore?.at) >= motto.at) {
+        repeat(motto, 'motto', MOTTO_LOG)
+        motto = null
+      } else await putJSON(cache, MOTTO_DONE, { at: motto.at })
+    }
+  } catch {}
+  const shows = []
+  // 同一次到點，頁面自己發的通知也用同一個 tag（計時器：hiyori-focus-到點的時間；警語：motto）
+  if (timer) shows.push({ ...timer, tag: `hiyori-focus-${timer.at}`, log: LOG_FILE, kind: 'timer' })
+  if (motto) shows.push({ ...motto, tag: 'motto', log: MOTTO_LOG, kind: 'motto', fresh: true })
+  if (!shows.length) shows.push(again ? { ...again, silent: true } : { at: null, title: 'ひより · 計時到了', body: '', tag: 'hiyori-focus', log: LOG_FILE })
+  // 上一次到點的通知還留著就收掉，只留最新的
+  const focusTag = shows.find((s) => s.tag.startsWith('hiyori-focus'))?.tag
+  if (focusTag) {
+    try {
+      for (const n of await reg.getNotifications()) if (n.tag !== focusTag && String(n.tag).startsWith('hiyori-focus')) n.close()
+    } catch {}
+  }
+  const icon = new URL('icons/icon-192.png', reg.scope).href
+  let failed = null
+  const out = []
+  for (const s of shows) {
+    try {
+      // data.at：收掉的時候認得出是不是這一則（同一個 tag 的新通知不會被舊的那一次收掉）
+      await reg.showNotification(s.title, { body: typeof s.body === 'string' ? s.body : '', tag: s.tag, icon, badge: icon, renotify: !s.silent, silent: !!s.silent, data: { at: s.at } })
+      out.push(s)
+    } catch (e) {
+      // 沒顯示出來：「顯示過了」的記號還原（還是我們寫的那一個才還原），頁面或下一則推播還能顯示
+      failed = e
+      try {
+        if (s.kind === 'timer' && (await readJSON(cache, SHOWN_FILE))?.at === s.at) await putJSON(cache, SHOWN_FILE, shownBefore || {})
+        if (s.kind === 'motto' && Number((await readJSON(cache, MOTTO_DONE))?.at) === s.at) await putJSON(cache, MOTTO_DONE, doneBefore || { at: 0 })
+      } catch {}
+    }
+  }
+  if (!out.length && failed) throw failed
+  // 開著的頁面（在背景、JavaScript 還在跑）馬上知道念到這一則了
+  const said = out.find((s) => s.kind === 'motto')
+  if (said) {
+    try {
+      for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'hiyori-motto-shown', at: said.at })
+    } catch {}
+  }
+  const entries = out.map((s) => [s, { got: now, at: s.at, closed: false, ...(s.silent ? { again: true } : {}) }])
+  if (cache) for (const [s, e] of entries) await note(cache, s.log, e)
+  return { cache, entries }
+}
+
 self.addEventListener('push', (event) => {
+  const shown = pushQueue.then(showPush)
+  pushQueue = shown.catch(() => {})
   event.waitUntil(
-    (async () => {
+    shown.then(async ({ cache, entries }) => {
       const reg = self.registration
-      const now = Date.now()
-      let cache = null
-      let plan = null
+      // 正看著 App：畫面上已經有提示卡和音效，計時器的這一則幾秒後自己收掉（那時已經沒在看就留著；有的瀏覽器不讓剛出來的通知馬上收，那就留著）。
+      // 新的警語不收：看著頁面時頁面會自己念，推播是取消沒送到才來的，收掉的話這一句就沒人念了。
+      // 只收這一次顯示的那一則（data.at 對得上）：等的這幾秒裡同一個 tag 又來了新的一則，那一則留著
+      const closable = entries.filter(([s]) => !s.fresh)
       try {
-        cache = await caches.open(PLAN_CACHE)
-        const hit = await cache.match(new URL(PLAN_FILE, reg.scope).href)
-        const list = hit ? await hit.json() : null
-        for (const p of Array.isArray(list) ? list : []) {
-          const due = p && Number.isFinite(p.at) && typeof p.title === 'string' && p.at <= now + 5000 && now - p.at < 15 * 60000
-          if (due && (!plan || p.at > plan.at)) plan = p
-        }
-      } catch {}
-      // 同一次到點，頁面自己發的通知也用這個 tag
-      const tag = plan ? `hiyori-focus-${plan.at}` : 'hiyori-focus'
-      // 上一次到點的通知還留著就收掉，只留最新的
-      try {
-        for (const n of await reg.getNotifications()) if (n.tag !== tag && String(n.tag).startsWith('hiyori-focus')) n.close()
-      } catch {}
-      const icon = new URL('icons/icon-192.png', reg.scope).href
-      await reg.showNotification(plan ? plan.title : 'ひより · 計時到了', { body: plan && typeof plan.body === 'string' ? plan.body : '', tag, icon, badge: icon, renotify: true })
-      // 記下這一次通知過了：頁面醒著的話，看了就不用自己再發一次
-      try {
-        if (plan) await cache.put(new URL(SHOWN_FILE, reg.scope).href, new Response(JSON.stringify({ at: plan.at })))
-      } catch {}
-      const entry = { got: now, at: plan ? plan.at : null, closed: false }
-      const logUrl = new URL(LOG_FILE, reg.scope).href
-      if (cache) await note(cache, logUrl, entry)
-      // 正看著 App：畫面上已經有提示卡和音效，這一則幾秒後自己收掉（那時已經沒在看就留著；有的瀏覽器不讓剛出來的通知馬上收，那就留著）
-      try {
-        if (await looking()) {
+        if (closable.length && (await looking())) {
           await new Promise((r) => setTimeout(r, 4000))
           if (await looking()) {
-            for (const n of await reg.getNotifications({ tag })) n.close()
-            if (cache) await note(cache, logUrl, { ...entry, closed: true })
+            for (const [s, e] of closable) {
+              for (const n of await reg.getNotifications({ tag: s.tag })) if ((n.data?.at ?? null) === s.at) n.close()
+              if (cache) await note(cache, s.log, { ...e, closed: true })
+            }
           }
         }
       } catch {}
-    })(),
+    }),
   )
 })
 

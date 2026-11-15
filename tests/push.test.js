@@ -1,48 +1,17 @@
 // 計時器到點的推播：伺服器（worker/src/push.js）排程和簽章、前端（src/push.js）什麼時候排、什麼時候取消
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import worker, { PushHub } from '../worker/src/index.js'
-import { MAX_AFTER, checkEndpoint } from '../worker/src/push.js'
+import { MAX_AFTER, MOTTO_AFTER, MOTTO_MAX, checkEndpoint } from '../worker/src/push.js'
 import { LOG_FILE, PLAN_CACHE, PLAN_FILE, SHOWN_FILE, TimerPush, answerLooking, timerNotice, timerTag } from '../src/push.js'
 import { FREE_MAX, focusStart, breakStart, nextEnd, pauseToggle } from '../src/focusClock.js'
 import { createD1 } from './helpers/d1.js'
+import { fakeEnv } from './helpers/push.js'
 
 const NOW = Date.UTC(2026, 10, 10, 4)
 const MIN = 60000
 const API = 'https://hiyori-sync.example.workers.dev'
 const ENDPOINT = 'https://web.push.apple.com/QOabc123'
 const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
-
-// 假的 Durable Object：每個名字一個 PushHub，各自的儲存和 alarm
-function fakeEnv(extra = {}) {
-  const objs = new Map()
-  const env = {
-    ...extra,
-    PUSH: {
-      idFromName: (name) => name,
-      get(name) {
-        if (!objs.has(name)) {
-          const map = new Map()
-          const state = {
-            alarm: null,
-            storage: {
-              get: async (k) => map.get(k),
-              put: async (k, v) => void map.set(k, v),
-              delete: async (k) => map.delete(k),
-              deleteAll: async () => map.clear(),
-              setAlarm: async (at) => void (state.alarm = at),
-              deleteAlarm: async () => void (state.alarm = null),
-            },
-          }
-          objs.set(name, { state, map, hub: new PushHub(state, env) })
-        }
-        return { fetch: (url, init) => objs.get(name).hub.fetch(new Request(url, init)) }
-      },
-    },
-  }
-  // 排著的計時器（不含保管金鑰的那一個）
-  const timers = () => [...objs.entries()].filter(([name, o]) => name !== 'vapid' && o.map.has('timer')).map(([, o]) => o)
-  return { env, objs, timers }
-}
 const post = async (env, path, body) => {
   const res = await worker.fetch(new Request(API + path, { method: 'POST', body: JSON.stringify(body) }), env)
   return { status: res.status, ...(await res.json()) }
@@ -190,6 +159,10 @@ describe('推播的伺服器', () => {
     await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: MIN })
     n = 0
     globalThis.fetch = async () => new Response(null, { status: (++n, 410) })
+    // 鬧鐘還沒到點就被叫（不會發生，但萬一）：不送
+    await t.hub.alarm()
+    expect(n).toBe(0)
+    vi.setSystemTime(t.state.alarm)
     await t.hub.alarm()
     expect(n).toBe(1)
     expect(t.map.size).toBe(0)
@@ -232,6 +205,216 @@ describe('推播的伺服器', () => {
   it('沒有設定 Durable Object 的部署：回 503，其他功能不受影響', async () => {
     expect((await post({}, '/v1/push/key', {})).status).toBe(503)
     expect((await post({}, '/v1/push/timer', { endpoint: ENDPOINT, after: MIN })).status).toBe(503)
+    expect((await post({}, '/v1/push/mottos', { endpoint: ENDPOINT, after: [MIN], seq: 1 })).status).toBe(503)
+  })
+})
+
+describe('警語的推播（伺服器）', () => {
+  let ctx
+  let sent
+  let seq
+  const hubOf = () => [...ctx.objs.entries()].find(([name]) => name !== 'vapid')?.[1]
+  const mottos = (after, extra = {}) => post(ctx.env, '/v1/push/mottos', { endpoint: ENDPOINT, after, seq: ++seq, ...extra })
+  // 鬧鐘響（跟 Cloudflare 一樣：到了排的時間才叫；排在過去的馬上響）
+  const ring = async () => {
+    const h = hubOf()
+    vi.setSystemTime(Math.max(h.state.alarm, Date.now()))
+    await h.hub.alarm()
+  }
+  const SEQ_KEEP = 60_000
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    ctx = fakeEnv()
+    sent = []
+    seq = 0
+    globalThis.fetch = async (url) => {
+      sent.push({ url, at: Date.now() })
+      return new Response(null, { status: 201 })
+    }
+    return () => vi.useRealTimers()
+  })
+
+  it('交一串時間：每一則到點送一則沒有內容的推播，送完排下一則；最後一則送完，紀錄過了收到後 1 分鐘就整個清掉', async () => {
+    const r = await mottos([15 * MIN, 30 * MIN, 45 * MIN])
+    expect(r).toMatchObject({ status: 200, ok: true })
+    expect(r.key).toBeTruthy()
+    const h = hubOf()
+    expect(h.state.alarm).toBe(NOW + 15 * MIN)
+    for (let i = 1; i <= 3; i++) await ring()
+    expect(sent.map((x) => x.at)).toEqual([NOW + 15 * MIN, NOW + 30 * MIN, NOW + 45 * MIN])
+    expect(sent.every((x) => x.url === ENDPOINT)).toBe(true)
+    expect(h.map.get('mottos').times).toEqual([])
+    // 收到那一串已經是 45 分鐘前：清掉的鬧鐘排在過去，馬上響
+    expect(h.state.alarm).toBe(NOW + SEQ_KEEP)
+    await ring()
+    expect(h.map.size).toBe(0)
+    expect(h.state.alarm).toBeNull()
+    expect(sent).toHaveLength(3)
+  })
+
+  it('換一串：新的換掉舊的；取消（null 或空的）後到點什麼都不送，取消的紀錄 1 分鐘後清掉', async () => {
+    await mottos([15 * MIN, 30 * MIN])
+    await mottos([20 * MIN])
+    const h = hubOf()
+    expect(h.state.alarm).toBe(NOW + 20 * MIN)
+    await mottos(null)
+    expect(h.state.alarm).toBe(NOW + SEQ_KEEP)
+    // 還沒到 1 分鐘（鬧鐘早一點點響）：留著
+    vi.setSystemTime(NOW + 30_000)
+    await h.hub.alarm()
+    expect(h.map.has('mottos')).toBe(true)
+    await mottos([MIN])
+    await mottos([])
+    expect(h.state.alarm).toBe(NOW + 30_000 + SEQ_KEEP)
+    vi.setSystemTime(NOW + 40 * MIN)
+    await h.hub.alarm()
+    expect(sent).toEqual([])
+    expect(h.map.size).toBe(0)
+    expect(h.state.alarm).toBeNull()
+  })
+
+  it('亂編的網址一直送取消：不扣每天的額度，但紀錄 1 分鐘後就清掉，不會一直留著', async () => {
+    ctx = fakeEnv({ DB: createD1(), PUSH_DAILY: '1' })
+    for (let i = 0; i < 3; i++) expect((await post(ctx.env, '/v1/push/mottos', { endpoint: `${ENDPOINT}${i}`, after: null, seq: 1 })).status).toBe(200)
+    const objs = [...ctx.objs.entries()].filter(([name]) => name !== 'vapid').map(([, o]) => o)
+    expect(objs).toHaveLength(3)
+    vi.setSystemTime(NOW + SEQ_KEEP)
+    for (const o of objs) await o.hub.alarm()
+    expect(objs.map((o) => o.map.size)).toEqual([0, 0, 0])
+    expect(objs.map((o) => o.state.alarm)).toEqual([null, null, null])
+  })
+
+  it('剛到點的一句警語不會把晚了很久的計時器一起送出去：那個計時器自己不送、清掉', async () => {
+    await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: MIN })
+    await mottos([12 * MIN])
+    const h = hubOf()
+    // 計時器的鬧鐘一直沒響（伺服器出狀況）：12 分鐘時一起看
+    vi.setSystemTime(NOW + 12 * MIN)
+    await h.hub.alarm()
+    expect(sent).toHaveLength(1)
+    expect(h.map.has('timer')).toBe(false)
+    // 只有晚了很久的計時器：不送
+    await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: MIN })
+    vi.setSystemTime(NOW + 25 * MIN)
+    await h.hub.alarm()
+    expect(sent).toHaveLength(1)
+    expect(h.map.has('timer')).toBe(false)
+  })
+
+  it('跟計時器各排各的：取消一邊不動另一邊；鬧鐘排在最早的那一個；剛好一起到點只送一則', async () => {
+    await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: 25 * MIN })
+    await mottos([15 * MIN, 25 * MIN, 40 * MIN])
+    const h = hubOf()
+    expect(h.state.alarm).toBe(NOW + 15 * MIN)
+    await ring()
+    expect(sent).toHaveLength(1)
+    expect(h.state.alarm).toBe(NOW + 25 * MIN)
+    // 25 分：計時器和警語一起到點
+    await ring()
+    expect(sent).toHaveLength(2)
+    expect(h.map.has('timer')).toBe(false)
+    expect(h.state.alarm).toBe(NOW + 40 * MIN)
+    // 再排一個計時器、取消警語：計時器留著（先響的是 1 分鐘後清掉取消紀錄的那一次）
+    await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: 30 * MIN })
+    await mottos(null)
+    expect(h.state.alarm).toBe(NOW + 25 * MIN + SEQ_KEEP)
+    await ring()
+    expect(h.map.has('mottos')).toBe(false)
+    expect(h.state.alarm).toBe(NOW + 55 * MIN)
+    expect(sent).toHaveLength(2)
+    // 取消計時器：警語留著
+    await mottos([20 * MIN])
+    await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: null })
+    expect(h.state.alarm).toBe(NOW + 46 * MIN)
+    expect(h.map.get('mottos').times).toEqual([NOW + 46 * MIN])
+  })
+
+  it('先後順序：比已經收到的舊的請求晚到，不理它（剛取消的不會被排回去）；一分鐘以前收到的就不比了', async () => {
+    await mottos([15 * MIN], { seq: 100 })
+    const r = await mottos(null, { seq: 50 })
+    expect(r.stale).toBe(true)
+    const h = hubOf()
+    expect(h.state.alarm).toBe(NOW + 15 * MIN)
+    await mottos(null, { seq: 101 })
+    expect(h.state.alarm).toBe(NOW + SEQ_KEEP)
+    expect((await mottos([5 * MIN], { seq: 99 })).stale).toBe(true)
+    expect(h.state.alarm).toBe(NOW + SEQ_KEEP)
+    // 前端的紀錄被清掉（序號從頭算）：過一分鐘就收
+    vi.setSystemTime(NOW + 61_000)
+    expect((await mottos([5 * MIN], { seq: 1 })).stale).toBeUndefined()
+    expect(h.state.alarm).toBe(NOW + 61_000 + 5 * MIN)
+  })
+
+  it('晚了 10 分鐘以上（Cloudflare 一直重試、伺服器忙）：那幾則不送，接著排下一則', async () => {
+    await mottos([MIN, 2 * MIN, 30 * MIN])
+    const h = hubOf()
+    vi.setSystemTime(NOW + 13 * MIN)
+    await h.hub.alarm()
+    expect(sent).toEqual([])
+    expect(h.state.alarm).toBe(NOW + 30 * MIN)
+    await ring()
+    expect(sent).toHaveLength(1)
+  })
+
+  it('訂閱失效（410、404、403）：整台的都清掉（亂編的網址第一則就停）；暫時出錯（503）留著等重試', async () => {
+    for (const status of [410, 404, 403]) {
+      ctx = fakeEnv()
+      vi.setSystemTime(NOW)
+      await post(ctx.env, '/v1/push/timer', { endpoint: ENDPOINT, after: 60 * MIN })
+      await mottos([MIN, 2 * MIN, 3 * MIN])
+      let n = 0
+      globalThis.fetch = async () => new Response(null, { status: (++n, status) })
+      await ring()
+      expect(n, String(status)).toBe(1)
+      expect(hubOf().map.size, String(status)).toBe(0)
+      expect(hubOf().state.alarm, String(status)).toBeNull()
+    }
+    ctx = fakeEnv()
+    vi.setSystemTime(NOW)
+    await mottos([MIN, 2 * MIN])
+    globalThis.fetch = async () => new Response(null, { status: 503 })
+    await expect(ring()).rejects.toThrow()
+    expect(hubOf().map.get('mottos').times).toHaveLength(2)
+    // 429（推播服務叫這邊慢一點）：這一則算了，接下來的照排
+    globalThis.fetch = async () => new Response(null, { status: 429 })
+    await hubOf().hub.alarm()
+    expect(hubOf().map.get('mottos').times).toEqual([NOW + 2 * MIN])
+  })
+
+  it('送到一半換成新的一串：送完不會把新的清掉', async () => {
+    await mottos([MIN, 20 * MIN])
+    const h = hubOf()
+    globalThis.fetch = async () => {
+      await mottos([5 * MIN, 6 * MIN])
+      return new Response(null, { status: 201 })
+    }
+    await ring()
+    expect(h.map.get('mottos').times).toEqual([NOW + 6 * MIN, NOW + 7 * MIN])
+    expect(h.state.alarm).toBe(NOW + 6 * MIN)
+  })
+
+  it('檢查：時間要是 1 秒到 48 小時的整數、最多 200 則、要帶序號；200 則加上很長的網址也收得下', async () => {
+    const bad = [{ after: 5 }, { after: [0] }, { after: [999] }, { after: [MOTTO_AFTER + 1] }, { after: [MIN + 0.5] }, { after: ['60000'] }, { after: { 0: MIN } }, { after: Array(MOTTO_MAX + 1).fill(MIN) }, { after: [MIN], seq: 0 }, { after: [MIN], seq: 'x' }, { after: [MIN], seq: null }]
+    for (const b of bad) expect((await post(ctx.env, '/v1/push/mottos', { endpoint: ENDPOINT, seq: 1, ...b })).status, JSON.stringify(b).slice(0, 60)).toBe(400)
+    expect((await post(ctx.env, '/v1/push/mottos', { endpoint: 'https://example.com/x', after: [MIN], seq: 1 })).status).toBe(400)
+    expect(hubOf()).toBeUndefined()
+    const many = Array.from({ length: MOTTO_MAX }, (_, i) => MOTTO_AFTER - i * 13 * MIN)
+    const long = `https://fcm.googleapis.com/fcm/send/${'x'.repeat(1900)}`
+    expect((await post(ctx.env, '/v1/push/mottos', { endpoint: long, after: many, seq: 1 })).status).toBe(200)
+    // 重複的時間只排一次，照時間先後
+    expect((await mottos([2 * MIN, MIN, 2 * MIN])).status).toBe(200)
+    const h = [...ctx.objs.entries()].filter(([name]) => name !== 'vapid').map(([, o]) => o).find((o) => o.map.get('mottos')?.endpoint === ENDPOINT)
+    expect(h.map.get('mottos').times).toEqual([NOW + MIN, NOW + 2 * MIN])
+  })
+
+  it('一天排的次數：一串算一次（不是一則一則算）；取消不算', async () => {
+    ctx = fakeEnv({ DB: createD1(), PUSH_DAILY: '2' })
+    expect((await mottos([MIN, 2 * MIN, 3 * MIN, 4 * MIN])).status).toBe(200)
+    expect((await mottos(null)).status).toBe(200)
+    expect((await mottos([MIN, 2 * MIN])).status).toBe(200)
+    expect((await mottos([MIN])).status).toBe(429)
+    expect((await mottos(null)).status).toBe(200)
   })
 })
 

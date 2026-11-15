@@ -1,6 +1,7 @@
 import './mottos.css'
 import { $, $$, esc, armConfirm, editing, inlineEdit, pickOne, setHTML } from './dom.js'
 import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, mottoAt } from '../mottos.js'
+import { dateStr } from '../store/util.js'
 
 // 警語：自己寫給自己的話。
 // MottosView：紀錄頁的那一張卡（寫、改、先收著、刪，多久提醒一次、要不要放在面板上方）
@@ -14,7 +15,9 @@ const REACH = {
   phone: ['App 關著、手機鎖著也會照時間通知', false],
   'phone-off': ['打開系統通知後，App 關著、手機鎖著也會通知', true],
   'old-app': ['現在要開著 App 才會提醒：重新安裝新版的 Android App，App 關著也會通知', false],
+  push: ['頁面關掉、手機鎖著也會照時間通知（要連得上網路）', false],
   page: ['這個頁面開著就會提醒（切到別的分頁、視窗也會跳通知）；整個關掉就不會', false],
+  home: ['iPhone／iPad 要收通知：先在 Safari 按「分享」→「加入主畫面」，從主畫面打開。現在只在看著這一頁時提醒', false],
   'page-off': ['現在只在看著這一頁時提醒。打開系統通知，切到別的分頁、視窗也會跳通知', true],
   'page-blocked': ['通知被瀏覽器封鎖了，只在看著這一頁時提醒（到瀏覽器的網站設定裡允許通知）', false],
   'page-only': ['這個瀏覽器只在看著這一頁時提醒', false],
@@ -130,14 +133,29 @@ export class MottosView {
       .join(''))
     const every = s.state.settings.mottoEvery
     const bar = s.state.settings.mottoBar
-    const [reach, ask] = (every && on && REACH[this.hooks.mottoReach?.()]) || []
+    const kind = every && on ? this.hooks.mottoReach?.() : null
+    const [reach, ask] = REACH[kind] || []
     setHTML(this.el.set, list.length
       ? `<div class="set-row theme-row"><div><b>多久提醒一次</b><small>${every ? `醒著的時候（作息的起床到就寢）每 ${EVERY_TEXT[every]}，もち或ふじ念一句，提示卡上寫著現在該做的那一件；專注中不打擾` : '不定時提醒，只放在面板上方'}</small></div>
           <div class="seg mt-every" role="group" aria-label="警語多久提醒一次">${MOTTO_EVERY.map((v) => `<button type="button" data-act="every" data-v="${v}" aria-pressed="${v === every}" class="${v === every ? 'on' : ''}">${EVERY_TEXT[v]}</button>`).join('')}</div>
-          ${reach ? `<div class="mt-reach"><small>${esc(reach)}</small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
+          ${reach ? `<div class="mt-reach"><small>${esc(reach)}<span class="mt-last" data-r="last" hidden></span></small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
         <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}">${bar ? '開' : '關'}</button></div>`
       : '')
     pickOne($$('[data-act="every"]', this.el.set), (x) => +x.dataset.v === every)
+    if (kind === 'push') this._renderLast()
+  }
+
+  // 「上一則推播幾點送到這台」：頁面關著時有沒有收到，看這一行就知道
+  async _renderLast() {
+    const e = await this.hooks.mottoLast?.()
+    const el = $('[data-r="last"]', this.el.set)
+    if (!el || !e) return
+    const d = new Date(e.got)
+    const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const day = dateStr(d) === this.store.today ? '今天' : `${d.getMonth() + 1}/${d.getDate()}`
+    const late = Number.isFinite(e.at) && e.got - e.at >= 60000 ? `，比到點晚了 ${Math.round((e.got - e.at) / 60000)} 分鐘` : ''
+    el.textContent = `・上一則推播：${day} ${hm} 送到這台${late}`
+    el.hidden = false
   }
 }
 

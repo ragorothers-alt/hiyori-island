@@ -232,6 +232,8 @@ export class UI {
       ...viewHooks,
       mottoBar: () => this.mottoBar.render(),
       mottoReach: () => this.mottoReach(),
+      // 上一則警語的推播幾點送到這台（網頁交給伺服器推的時候）
+      mottoLast: () => this.hooks.mottoPush?.last() ?? null,
       enableNotify: () => this.enableNotify(),
     })
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
@@ -1844,12 +1846,14 @@ export class UI {
 
   // 警語的定時提醒送得到哪裡（警語卡上的那一行說明）：
   // phone：手機照時間通知（App 關著也會）／phone-off：還沒開系統通知／old-app：舊版的 Android 殼，要開著 App 才提醒
-  // page：頁面開著時（切到別的分頁也會跳通知）／page-off：還沒開系統通知／page-blocked：被瀏覽器封鎖／page-only：這個瀏覽器沒有通知
+  // push：伺服器照時間推（頁面關掉也會）／page：頁面開著時（切到別的分頁也會跳通知）／page-off：還沒開系統通知／
+  // page-blocked：被瀏覽器封鎖／home：iPhone 要先加入主畫面／page-only：這個瀏覽器沒有通知
   mottoReach() {
     const on = this.store.state.settings.notify && notifyPermission() === 'granted'
     if (native) return nativeMottos() ? (on ? 'phone' : 'phone-off') : 'old-app'
-    if (!notifySupported()) return 'page-only'
-    return on ? 'page' : notifyPermission() === 'denied' ? 'page-blocked' : 'page-off'
+    if (!notifySupported()) return needsHomeScreen() ? 'home' : 'page-only'
+    if (!on) return notifyPermission() === 'denied' ? 'page-blocked' : 'page-off'
+    return this.hooks.mottoPush?.ready() ? 'push' : 'page'
   }
 
   renderRemind() {
