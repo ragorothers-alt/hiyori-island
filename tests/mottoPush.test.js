@@ -588,8 +588,13 @@ describe('通知上的按鈕：Service Worker 留在快取裡的那一次', () =
     expect(await take()).toBeNull()
     expect(await caches.has(PLAN_CACHE)).toBe(false)
     await put({ id: 'a', act: 'pause', at: T - 1000 })
-    expect(await take()).toEqual({ id: 'a', act: 'pause' })
+    expect(await take()).toEqual({ id: 'a', act: 'pause', slot: 0 })
     expect(await take()).toBeNull()
+    // slot：那一則提醒排在幾點（回神紀錄用）；壞掉的當成不知道
+    await put({ id: 'a2', act: 'focus', at: T - 1000, slot: T - 60000 })
+    expect(await take()).toEqual({ id: 'a2', act: 'focus', slot: T - 60000 })
+    await put({ id: 'a3', act: 'focus', at: T - 1000, slot: 'x' })
+    expect(await take()).toEqual({ id: 'a3', act: 'focus', slot: 0 })
     for (const v of [{ id: 'b', act: 'pause', at: T - 3 * 60000 }, { id: 'c', act: 'rm', at: T }, { id: 5, act: 'focus', at: T }, 'oops', { id: 'd', act: 'focus', at: T + 60000 }]) {
       await put(v)
       expect(await take(), JSON.stringify(v)).toBeNull()
@@ -597,7 +602,7 @@ describe('通知上的按鈕：Service Worker 留在快取裡的那一次', () =
     }
     await put({ id: 'e', act: 'focus', at: T })
     expect(await take('x')).toBeNull()
-    expect(await take('e')).toEqual({ id: 'e', act: 'focus' })
+    expect(await take('e')).toEqual({ id: 'e', act: 'focus', slot: 0 })
     expect(await take()).toBeNull()
     // 沒有 Service Worker（開發時、不支援的瀏覽器）
     await put({ id: 'f', act: 'focus', at: T })

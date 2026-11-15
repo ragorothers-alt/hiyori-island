@@ -34,6 +34,19 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
   .td-grid { grid-template-columns: 1.12fr .78fr 1.1fr; grid-template-areas: "now now sched" "prog quote sched" "top top sched" "quest habit habit" "ref ref ref"; }
   .td-sched { max-height: 760px; }
 }
+/* 先記下的事：專注時冒出來的（沒有就不放），在格子上面一整條 */
+.td-park { margin-bottom: 18px; }
+.td-park .td-h { margin-bottom: 6px; }
+.td-park-n { font-size: 12px; color: var(--ink-faint); letter-spacing: .06em; }
+.td-park-p { margin: 0 0 10px; font-size: 12px; color: var(--ink-faint); line-height: 1.5; }
+.td-park-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 280px; overflow-y: auto; }
+.td-park-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 8px 10px; border-radius: 14px; background: var(--field); border: 1px solid var(--glass-border); }
+.td-park-t { flex: 1 1 180px; min-width: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.td-park-list time { font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.td-park-acts { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.td-park-acts .btn-ghost { padding: 5px 12px; font-size: 12.5px; }
+.td-park-x { width: 30px; height: 30px; border: 0; border-radius: 50%; background: none; color: var(--ink-faint); font-size: 18px; line-height: 1; cursor: pointer; }
+.td-park-x:hover { background: var(--field); color: var(--ink); }
 .td-nowc { grid-area: now; }
 .td-ref { grid-area: ref; }
 .td-prog { grid-area: prog; }

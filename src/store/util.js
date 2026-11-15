@@ -21,7 +21,9 @@ const POMO_SIDS = 20
 // 6：數字進度可以換單位（task.tempo.unit）、任務範本（templates）：5 版會把單位拿掉、把速度範圍外的數字洗掉。
 //    從這一版開始，不認得的欄位讀進來原樣留著（keepExtra）：之後單純多一個欄位、舊版不看也不會出錯的，不必再往上加；
 //    舊版照舊的意思去用會出錯的（像 4 的長期任務）才加
-export const DATA_VERSION = 6
+// 7：每天的紀錄多了回神紀錄（history 的 nudges／backs／onTask）：6 版讀每天的紀錄時只留認得的欄位，存回去就整個洗掉。
+//    從這一版開始，每天的紀錄裡不認得的欄位也原樣留著
+export const DATA_VERSION = 7
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version) > DATA_VERSION

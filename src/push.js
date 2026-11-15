@@ -40,13 +40,14 @@ export function answerLooking(sw = globalThis.navigator?.serviceWorker, now = ()
     } catch {}
   })
 }
-// 按了警語通知上的哪一顆按鈕 { id, act, at }：Service Worker 打開 App 之前留下，頁面開好了拿走（public/sw.js 的 notificationclick）
+// 按了警語通知上的哪一顆按鈕 { id, act, at, slot }：Service Worker 打開 App 之前留下，頁面開好了拿走（public/sw.js 的 notificationclick）。
+// at 是按的時間，slot 是那一則提醒排在幾點（回神紀錄認同一則用；不知道是 0）
 export const ACT_FILE = '__act'
 const ACTS = ['focus', 'pause']
 // 按了多久以內的才算（打開 App 慢一點也沒關係；很久以前的就不做了）
 const ACT_FRESH = 2 * 60000
 
-// 拿走 Service Worker 留下的那一次按鈕（刪掉，不會做兩次），回傳 { id, act }；沒有、太舊、不認得的是 null。
+// 拿走 Service Worker 留下的那一次按鈕（刪掉，不會做兩次），回傳 { id, act, slot }；沒有、太舊、不認得的是 null。
 // id：只拿走這一次的（Service Worker 也直接傳過來了的那一次：快取裡那一份刪掉，之後開機不會再做一次）
 export async function takeNoticeAct(id = null, { now = Date.now(), storage = globalThis.caches, sw = globalThis.navigator?.serviceWorker } = {}) {
   try {
@@ -61,7 +62,8 @@ export async function takeNoticeAct(id = null, { now = Date.now(), storage = glo
     // 拿了就刪（壞掉的、太舊的也刪，不留著）
     await cache.delete(url)
     const ok = !!v && ACTS.includes(v.act) && typeof v.id === 'string' && Number.isFinite(v.at) && now - v.at < ACT_FRESH && v.at <= now + 5000
-    return ok ? { id: v.id, act: v.act } : null
+    const slot = Number.isFinite(v?.slot) && v.slot > 0 ? v.slot : 0
+    return ok ? { id: v.id, act: v.act, slot } : null
   } catch {
     return null
   }

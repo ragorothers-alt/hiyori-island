@@ -107,6 +107,15 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-more button { padding: 8px 15px; border-radius: 14px; font-size: 13px; line-height: 1.35; color: var(--ink); }
 .ff-more button small { display: block; font-size: 11px; color: var(--ink-faint); }
 .ff-cabin { font-size: 12.5px; }
+/* 先記下來：專注時腦中冒出別的事，一行字記下（專注頁和計時設定的小視窗） */
+.ff-park, .fs-park { display: flex; gap: 6px; width: min(320px, 100%); }
+.ff-park[hidden], .fs-park[hidden] { display: none; }
+.ff-park input, .fs-park input { flex: 1; min-width: 0; height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 13.5px; }
+.ff-park input::placeholder, .fs-park input::placeholder { color: var(--ink-faint); }
+.ff-park button, .fs-park button { flex: none; height: 38px; margin: 0; padding: 0 14px; border-radius: 999px; font-size: 13px; }
+.fs-park { width: auto; margin: 4px 0 0; }
+.ff-park-n { margin: -6px 0 0; font-size: 12px; color: var(--ink-faint); letter-spacing: .04em; }
+.ff-park-n[hidden] { display: none; }
 
 @keyframes ffIn { from { opacity: 0; transform: scale(.96); } }
 @keyframes ffBreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.07); opacity: .72; } }

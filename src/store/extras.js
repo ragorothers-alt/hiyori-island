@@ -1,8 +1,34 @@
-import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX } from './migrate.js'
-import { uid, addDays, daysBetween } from './util.js'
+import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PARK_MAX, parkText } from './migrate.js'
+import { uid, addDays, daysBetween, dateStr } from './util.js'
 import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS } from '../theme.js'
+
+// 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），只留最近的幾十則
+export const TALLY_KEY = 'hiyori-motto-tally'
+const TALLY_KEEP = 40
+const tallyKey = (at) => (Number.isFinite(at) && at > 0 ? String(Math.round(at)) : '')
+// 記在那一則的那一天；時間不知道、或怪怪的（未來、一週以前）就記在今天
+function tallyDate(at, today) {
+  if (!tallyKey(at)) return today
+  const d = dateStr(new Date(at))
+  return d <= today && daysBetween(d, today) <= 7 ? d : today
+}
+function readTally() {
+  try {
+    const v = JSON.parse(localStorage.getItem(TALLY_KEY) || '{}')
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  } catch {
+    return {}
+  }
+}
+function writeTally(t) {
+  try {
+    const keep = Object.entries(t).sort((a, b) => Number(b[0]) - Number(a[0])).slice(0, TALLY_KEEP)
+    localStorage.setItem(TALLY_KEY, JSON.stringify(Object.fromEntries(keep)))
+  } catch {}
+}
+
 export const extrasMethods = {
   // ── 訂閱服務 ──
   // 回傳新的訂閱；名稱、金額不對或已經到上限是 null
@@ -155,20 +181,55 @@ export const extrasMethods = {
     this._finish([['mottoPause', 0]])
     return true
   },
-  // 回神紀錄（週報看得到）：警語提醒了一次。是自動發生的，不算使用者改了資料（剛打開、資料還舊的裝置念了一句，
-  // 不會因此蓋掉雲端比較新的那一版）；不重畫畫面
-  mottoNudged() {
+  // 回神紀錄（週報看得到）：警語提醒了一次。at：那一則排在幾點（毫秒；不知道是 0）——
+  // 記在那一則的那一天（跨午夜才按的回應也算在那天），同一則在這台只算一次（提示卡、頁面自己發的系統通知都按得到）。
+  // 是自動發生的，不算使用者改了資料（剛打開、資料還舊的裝置念了一句，不會因此跟雲端比較新的那一版衝突）；
+  // 換成別台、別的分頁的那一版時取比較大的數字（見 replaceState 的 _keepTallies），不會被蓋掉。回傳有沒有算
+  mottoNudged(at = 0) {
+    const key = tallyKey(at)
+    const seen = readTally()
+    if (key && seen[key]) return false
     this._refreshToday()
-    this.day().nudges++
+    this.day(tallyDate(at, this.today)).nudges++
+    if (key) writeTally({ ...seen, [key]: 'n' })
     this.save(false)
+    return true
   },
-  // 提醒之後怎麼回應：'on' 本來就在做正事（按了「在做了」），其他是回到正事（開始專注、只做 5 分鐘）
-  mottoAnswered(kind) {
-    this._refreshToday()
-    const d = this.day()
+  // 提醒之後怎麼回應：'on' 本來就在做正事（按了「在做了」），其他是回到正事（開始專注、只做 5 分鐘）。
+  // 還沒算過這一則提醒的（App 關著時手機、推播發的通知）一起算；同一則只算一次回應
+  mottoAnswered(kind, at = 0) {
+    const key = tallyKey(at)
+    if (key && readTally()[key] === 'a') return false
+    this.mottoNudged(at)
+    const d = this.day(tallyDate(at, this.today))
     if (kind === 'on') d.onTask++
     else d.backs++
+    if (key) writeTally({ ...readTally(), [key]: 'a' })
     this.save()
+    return true
+  },
+
+  // ── 先記下來 ──
+  // 專注時腦中冒出別的事：一行字記下，不離開專注。發 parked（記下的那一筆）。滿了（PARK_MAX）回傳 null
+  park(text) {
+    const t = parkText(text)
+    if (!t || this.state.parked.length >= PARK_MAX) return null
+    const item = { id: uid(), text: t, at: Date.now() }
+    this.state.parked.push(item)
+    this._finish([['parked', item]])
+    return item
+  },
+  unpark(id) {
+    const n = this.state.parked.length
+    this.state.parked = this.state.parked.filter((x) => x.id !== id)
+    if (this.state.parked.length !== n) this._finish()
+  },
+  // 記下的那件變成 date 那天的任務（拿掉這一筆）；回傳新的任務
+  parkToTask(id, date) {
+    const item = this.state.parked.find((x) => x.id === id)
+    if (!item || !DATE_RE.test(date)) return null
+    this.state.parked = this.state.parked.filter((x) => x !== item)
+    return this.addTask({ title: item.text, date })
   },
 
   // ── 重要日子 ──

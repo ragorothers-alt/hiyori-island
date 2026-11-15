@@ -461,6 +461,11 @@ export class UI {
         e.preventDefault()
         return this.findProject()
       }
+      // 專注中按 N：腦中冒出別的事，先記下來（不離開專注；專注頁、計時設定的小視窗開著時也可以）
+      if ((e.key === 'n' || e.key === 'N') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && this.focus.mode === 'focus' && ['focusFull', 'focusSet', undefined].includes(this._topLayer()?.id)) {
+        e.preventDefault()
+        return this.focus.parkFocus()
+      }
       // 對話框、全螢幕計時或日曆蓋在上面時，快捷鍵先不作用：不然會動到底下看不到的面板
       if (typing || e.ctrlKey || e.metaKey || e.altKey || this._topLayer()) return
       if (e.key === 'n' || e.key === 'N') {
@@ -1109,6 +1114,17 @@ export class UI {
   }
 
   // ── 快速記錄（ui/capture.js）：不用先切到任務頁，Dock 的＋或 N 鍵叫出來 ──
+  // 先記下的事（專注時記的）：到今日總覽那一張卡片，焦點放在第一顆按鈕上（專注頁開著先縮小，計時照走）
+  openParked() {
+    this.focus.toggleBig(false)
+    this.setTab('today')
+    requestAnimationFrame(() => {
+      const card = $('#todayRoot .td-park')
+      if (!card) return
+      card.scrollIntoView({ block: 'start', behavior: scrollMode() })
+      card.querySelector('button')?.focus({ preventScroll: true })
+    })
+  }
   openCapture(mode) {
     // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去
     const top = this._topLayer()

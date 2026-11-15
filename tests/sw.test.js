@@ -82,15 +82,17 @@ describe('Service Worker', () => {
     const clients = { matchAll: async () => list, openWindow: async (u) => opened.push(u) }
     const caches = new FakeCaches()
     const on = loadSW({ caches, clients })
-    const click = (action) => run(on.notificationclick, { action, notification: { close() {} } })
+    // data.at：那一則提醒排在幾點（推播顯示的、頁面自己發的通知都帶著），留給頁面的回神紀錄認同一則（slot）
+    const click = (action, data) => run(on.notificationclick, { action, notification: { close() {}, data } })
     const left = async () => (await (await caches.open('hiyoripush')).match(SCOPE + '__act'))?.json()
     list = [win(SCOPE, async () => { throw new Error('not allowed') })] // prettier-ignore
-    await click('pause')
+    await click('pause', { at: 1_800_000_000_000 })
     const first = await left()
-    expect(first).toMatchObject({ act: 'pause', id: expect.any(String), at: expect.any(Number) })
+    expect(first).toMatchObject({ act: 'pause', id: expect.any(String), at: expect.any(Number), slot: 1_800_000_000_000 })
     await click('focus')
+    expect((await left()).slot).toBe(0)
     await click('steal')
-    expect(said).toEqual([[SCOPE, { type: 'hiyori-act', act: 'pause', id: first.id }], [SCOPE, expect.objectContaining({ type: 'hiyori-act', act: 'focus' })]])
+    expect(said).toEqual([[SCOPE, { type: 'hiyori-act', act: 'pause', id: first.id, slot: 1_800_000_000_000 }], [SCOPE, expect.objectContaining({ type: 'hiyori-act', act: 'focus', slot: 0 })]])
     expect((await left()).act).toBe('focus')
     list = []
     await click('pause')

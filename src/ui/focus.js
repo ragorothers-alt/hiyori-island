@@ -99,6 +99,7 @@ export class FocusTimer {
       if (!$('#focusSet').hidden && !e.target.closest('#focusSet, #focusTime')) this.toggleSet(false)
     })
     this._bindSet()
+    this._bindPark()
     setInterval(() => this.tick(), 250)
     this.render()
     if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
@@ -391,6 +392,47 @@ export class FocusTimer {
     }
   }
 
+  // ── 先記下來：專注時腦中冒出別的事，一行字記下、不離開專注（專注頁和計時設定的小視窗各一行）──
+  _bindPark() {
+    for (const [form, input] of [['#ffPark', '#ffParkText'], ['#fsPark', '#fsParkText']]) {
+      const el = $(input)
+      $(form).addEventListener('submit', (e) => {
+        e.preventDefault()
+        if (!el.value.trim()) return
+        const item = this.ui.store.park(el.value)
+        if (!item) return this.ui.toast({ icon: '記', title: '先記下的事已經滿了', sub: '先到今日總覽整理一下，再記新的' })
+        el.value = ''
+        this._renderPark()
+      })
+      // Esc：放開這一行就好（不要連專注頁、小視窗一起收起來）
+      el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return
+        e.stopPropagation()
+        el.blur()
+      })
+    }
+  }
+  // 專注中按 N（或自己點）：叫出記下的那一行。專注頁開著就用頁面上的，不然打開計時設定的小視窗
+  parkFocus() {
+    if (this.mode !== 'focus') return false
+    if (this.bigOpen) {
+      this._renderPark()
+      $('#ffParkText').focus()
+      return true
+    }
+    this.toggleSet(true)
+    $('#fsParkText').focus()
+    return true
+  }
+  // 記了幾件：專注頁上寫一行（專注完在今日總覽看）
+  _renderPark() {
+    const n = this.ui.store.state.parked.length
+    const on = this.mode === 'focus'
+    $('#ffPark').hidden = !on
+    $('#ffParkN').hidden = !n
+    put($('#ffParkN'), n ? `先記下了 ${n} 件・專注完在今日總覽看` : '')
+  }
+
   _setLength(v) {
     if (this.ui.store.state.settings.focusMin === v) return
     this._setOption('focusMin', v)
@@ -421,6 +463,8 @@ export class FocusTimer {
     $('#fsBreakRow').hidden = live
     $('#fsStart').hidden = live
     $('#fsSmall').hidden = live
+    // 專注中：腦中冒出別的事，在這裡先記下來
+    $('#fsPark').hidden = !(this.mode === 'focus' && !this._asking)
     this._renderMore($('#fsExtend'), $('#fsAddRound'))
     if (!live) $('#fsMore').hidden = true
     pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
@@ -771,6 +815,7 @@ export class FocusTimer {
     $('#ffStop').textContent = this.counting ? '做完了' : brk ? '跳過休息' : '結束'
     $('#ffCabin').hidden = this.mode !== 'focus'
     this._renderMore($('#ffExtend'), $('#ffAddRound'))
+    this._renderPark()
   }
 
   // 時間下面的一行小字：幾點結束、休息完接著什麼

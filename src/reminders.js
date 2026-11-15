@@ -165,7 +165,8 @@ export class Reminders {
       if (!this.claim(t)) return this._saveMotto({ at: t, i, skip })
     }
     this._saveMotto({ at: t, i, skip })
-    this.onRemind(mottoOf(on, due), 0, 'motto')
+    // at：這一則排在幾點（回神紀錄認同一則用）
+    this.onRemind({ ...mottoOf(on, due), at: t }, 0, 'motto')
   }
   // 不提醒了（間隔改成不提醒、警語全部收著或刪光）：記著「停過」（off），之後再打開時從那時開始算——
   // 不然會接著很久以前排到的時間，一打開就補念一則。每個分頁只記一次

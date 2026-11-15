@@ -354,12 +354,14 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const act = ACTS.includes(event.action) ? event.action : ''
+  // 那一則提醒排在幾點（通知的 data.at）：頁面的回神紀錄用它認出同一則（頁面的提示卡已經算過的不再算）
+  const slot = Number(event.notification.data?.at) > 0 ? Number(event.notification.data.at) : 0
   event.waitUntil(
     (async () => {
       const id = act ? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` : ''
       if (act) {
         try {
-          await putJSON(await caches.open(PLAN_CACHE), ACT_FILE, { id, act, at: Date.now() })
+          await putJSON(await caches.open(PLAN_CACHE), ACT_FILE, { id, act, at: Date.now(), slot })
         } catch {}
       }
       // 同一個網域下可能還有別的網站（github.io）：只把這個 App 範圍裡的視窗叫到前面
@@ -371,7 +373,7 @@ self.addEventListener('notificationclick', (event) => {
       try {
         await mine.focus()
       } catch {}
-      if (act) mine.postMessage({ type: 'hiyori-act', act, id })
+      if (act) mine.postMessage({ type: 'hiyori-act', act, id, slot })
     })(),
   )
 })

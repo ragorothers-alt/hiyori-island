@@ -139,6 +139,15 @@ export function weekKey(date) {
   const d = parseDate(date)
   return addDays(date, -((d.getDay() + 6) % 7))
 }
+// 回神紀錄的三個數字：from 那邊比較大的抄到 to（換成另一版時用，見 replaceState）
+const TALLIES = ['nudges', 'backs', 'onTask']
+function keepTallies(from, to) {
+  for (const [date, h] of Object.entries(from || {})) {
+    if (!h || !TALLIES.some((k) => h[k] > 0)) continue
+    const n = (to[date] ||= emptyDay())
+    for (const k of TALLIES) if ((h[k] || 0) > (n[k] || 0)) n[k] = h[k]
+  }
+}
 
 export class Store {
   constructor() {
@@ -1080,6 +1089,9 @@ export class Store {
     const next = migrate(obj)
     next.updatedAt = updatedAt
     next.rev = rev
+    // 同步拉回別台的、換成別的分頁的那一版：回神紀錄（自動記的、只會往上加）每天取比較大的那個，
+    // 這台還沒同步出去的提醒次數不會被蓋掉。匯入、還原備份不算（那是整份換掉）
+    if (soft) keepTallies(this.state?.history, next.history)
     // 匯入的舊檔沒有小鎮紀錄：照統計直接蓋好就好，不另外打招呼
     delete next.town.welcome
     this.state = next

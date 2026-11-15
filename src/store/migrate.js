@@ -110,6 +110,7 @@ function seed(samples = true) {
     dates: [],
     subscriptions: [],
     mottos: [],
+    parked: [],
     templates: [],
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
@@ -256,6 +257,16 @@ function cleanMotto(x) {
   return { id: str(x.id), text, on: x.on !== false, createdAt: ts(x.createdAt) || Date.now() }
 }
 const cleanMottos = (list) => cleanList(list, cleanMotto).slice(0, MOTTO_MAX)
+// 先記下來：專注時腦中冒出來的別的事（一行字），專注完再決定今天做、明天做還是丟掉。舊的在前
+export const PARK_MAX = 50
+export const PARK_LEN = 80
+export const parkText = (v) => str(v, PARK_LEN * 2).replace(/\s+/g, ' ').trim().slice(0, PARK_LEN)
+function cleanParked(list) {
+  return cleanList(list, (x) => {
+    const text = parkText(x.text)
+    return text ? { id: str(x.id), text, at: ts(x.at) || Date.now() } : null
+  }).slice(-PARK_MAX)
+}
 // 外幣匯率（1 單位外幣大約多少新台幣）：沒設或不合理的用預設
 function cleanRates(obj) {
   const out = {}
@@ -561,7 +572,8 @@ function migrate(s) {
       const h = emptyDay()
       for (const k of DAY_NUMS) h[k] = num(v[k], 0, 1e7, 0)
       for (const k of DAY_FLAGS) h[k] = !!v[k]
-      history[d] = h
+      // 之後的版本多加的每日欄位：原樣留著（存回去不會洗掉）
+      history[d] = keepExtra(v, h)
     }
   }
   // 花の圖鑑：{ 花的 key: { at: 第一次開出的日期, n: 開過幾朵 } }
@@ -702,6 +714,7 @@ function migrate(s) {
     version: newer ? Number(s.version) : DATA_VERSION, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
+    parked: cleanParked(s.parked),
     templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來

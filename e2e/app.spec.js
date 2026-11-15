@@ -768,10 +768,10 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await expect(page.locator('#ffRounds i.done')).toHaveCount(1)
   await expect(page.locator('#ffSub')).toHaveText(/^\d\d:\d\d 接著第 2 輪$/)
   await skip(6 * 60000)
+  // 自動接下一輪時說一聲（這張提示卡不會被「開始了」收掉）：先看提示卡，機器很忙時下面幾步就超過它留著的時間
+  await expect(page.locator('#toasts .toast', { hasText: '第 2/2 輪開始了' })).toBeVisible()
   await expect.poll(async () => (await state()).mode).toBe('focus')
   expect(await state()).toMatchObject({ round: 2, rounds: 2, ext: false, up: false })
-  // 自動接下一輪時說一聲（這張提示卡不會被「開始了」收掉）
-  await expect(page.locator('#toasts .toast', { hasText: '第 2/2 輪開始了' })).toBeVisible()
   await skip(26 * 60000)
   await expect.poll(async () => (await state()).mode).toBe('break')
   expect(await state()).toMatchObject({ pomos: 2, mins: 58 })
@@ -889,6 +889,69 @@ test('只做 5 分鐘：卡關小卡、計時設定上都能按；不動設定�
   // 中途按結束：不到點的不記
   await page.evaluate(() => window.hiyori.ui.focus.stop())
   expect(await state()).toMatchObject({ mode: 'idle', small: false, pomos: before.pomos + 1, mins: before.mins + 16 })
+})
+
+test('先記下來：專注時腦中冒出別的事，在專注頁（或計時設定的小視窗）一行記下、不離開專注，N 鍵也到這裡；專注完到今日總覽排進今天、明天或不用做了', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const parked = () => page.evaluate(() => window.hiyori.store.state.parked.map((x) => x.text))
+  await page.evaluate(() => {
+    window.hiyori.store.setSetting('focusRounds', 1)
+    window.hiyori.store.setSetting('focusUp', false)
+    window.hiyori.ui.focus.toggle()
+  })
+  // 專注頁：一行「腦中冒出別的事？先記下來」，Enter 記下、清空，下面寫記了幾件；還在專注
+  const input = page.locator('#ffParkText')
+  await expect(input).toBeVisible()
+  await input.fill('回小美的訊息')
+  await input.press('Enter')
+  await expect(input).toHaveValue('')
+  await expect(page.locator('#ffParkN')).toHaveText('先記下了 1 件・專注完在今日總覽看')
+  expect(await parked()).toEqual(['回小美的訊息'])
+  expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  // Esc：只放開這一行，專注頁還開著；N 鍵又回到這一行
+  await input.press('Escape')
+  await expect(input).not.toBeFocused()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  await page.keyboard.press('n')
+  await expect(input).toBeFocused()
+  await expect(page.locator('#capture')).toBeHidden()
+  // 縮小專注頁（小島模式也是這樣）：計時設定的小視窗裡也有這一行
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.toggleBig(false)
+    window.hiyori.ui.focus.toggleSet(true)
+  })
+  await page.locator('#fsParkText').fill('買牛奶')
+  await page.locator('#fsParkText').press('Enter')
+  expect(await parked()).toEqual(['回小美的訊息', '買牛奶'])
+  // 專注到點：提示卡上「看記下的 2 件」，按了到今日總覽那一張卡片（新記的在上面）
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.toggleSet(false)
+    f.endAt -= 26 * 60000
+    f._save()
+  })
+  const go = page.locator('#toasts .toast-act', { hasText: '看記下的 2 件' })
+  await go.click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('today')
+  const card = page.locator('#todayRoot .td-park')
+  await expect(card.locator('.td-park-t')).toHaveText(['買牛奶', '回小美的訊息'])
+  await expect(card.locator('button').first()).toBeFocused()
+  // 「明天做」：變成明天的任務；「×」：不用做了；都處理完卡片就收起來
+  await card.locator('li', { hasText: '回小美的訊息' }).locator('[data-act="park-tmr"]').click()
+  await expect(page.locator('#toasts .toast', { hasText: '「回小美的訊息」排進明天' })).toBeVisible()
+  const tmr = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return s.tasksOn(date).map((t) => t.title)
+  })
+  expect(tmr).toContain('回小美的訊息')
+  await card.locator('[data-act="park-drop"]').click()
+  await expect(card).toHaveCount(0)
+  expect(await parked()).toEqual([])
 })
 
 test('打勾的手感：列表不會整串重播淡入，做完的那件滑到後面；花瓣從勾爆開、App 模式冒出經驗值；今天全部做完時飄花瓣', async ({ page, context, site }) => {
@@ -1643,7 +1706,8 @@ test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出�
   // 用鍵盤移進來：停住（放上來和移進去在同一步，機器很忙時也不會先到時間）
   await page.keyboard.press('Shift')
   await page.evaluate(() => {
-    window.hiyori.ui.toast({ icon: '試', title: '兩顆按鈕', ms: 6000, actions: [{ label: '甲', run: () => (window.__ran = 1) }, { label: '乙', run: () => (window.__ran = 2) }] })
+    // 留久一點：機器很忙時，下面拖滑鼠的那幾步就要好幾秒（測的是停住、接著倒數，不是幾秒）
+    window.hiyori.ui.toast({ icon: '試', title: '兩顆按鈕', ms: 12000, actions: [{ label: '甲', run: () => (window.__ran = 1) }, { label: '乙', run: () => (window.__ran = 2) }] })
     const el = [...document.querySelectorAll('#toasts .toast')].find((x) => x.textContent.includes('兩顆按鈕'))
     el.querySelector('.toast-act').focus()
   })
@@ -1660,7 +1724,7 @@ test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出�
   await page.mouse.move(x, y + 300, { steps: 6 })
   await page.mouse.up()
   await expect(card).not.toHaveClass(/held/)
-  await expect(card).toHaveCount(0, { timeout: 8000 })
+  await expect(card).toHaveCount(0, { timeout: 16000 })
   expect(await page.evaluate(() => window.__ran)).toBeFalsy()
 
   // 有倒數細線的：停一下再走，細線從停住的地方、照剩下的時間縮到 0

@@ -44,6 +44,7 @@ const IC = {
   food: svg('<path d="M7 4v7a2 2 0 0 0 4 0V4M9 11v9M16 4c-1.7 1.3-2.5 3.3-2.5 6h2.5v10"/>'),
   play: svg('<path d="M8.5 6v12l9.5-6z"/>'),
   star: svg('<path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.7.9 5.1L12 16.4l-4.6 2.4.9-5.1-3.8-3.7 5.2-.8z"/>'),
+  pin: svg('<path d="M7.5 4.5h9v15l-4.5-3-4.5 3z"/><path d="M10 8.5h4"/>'),
   pen: svg('<path d="M5 19l1.2-4.2L15.6 5.4a2 2 0 0 1 2.9 0l.1.1a2 2 0 0 1 0 2.9l-9.4 9.4z"/><path d="M14 7l3 3M4.5 19.5h7"/>'),
   sakura: svg('<path d="M12 12c-1.2-2.8-1.7-5.2-.3-7.3.8.5 1.5.9 2.4.6.5 2.6-.4 4.6-2.1 6.7zM12 12c2.6-1.6 5-2.2 7.2-1.1-.4.9-.7 1.6-.3 2.5-2.5.9-4.6.2-6.9-1.4zM12 12c2.1 2.1 3.2 4.3 2.5 6.7-.9-.3-1.7-.4-2.4.2-1.7-2-1.8-4.3-.1-6.9zM12 12c-.3 3-1.3 5.2-3.6 6.3-.4-.9-.9-1.5-1.9-1.5.1-2.7 1.8-4.2 5.5-4.8zM12 12c-3 .6-5.4.3-7.1-1.5.7-.6 1.2-1.3 1.1-2.3 2.6-.3 4.4 1 6 3.8z"/><circle cx="12" cy="12" r="1"/>'),
 }
@@ -171,6 +172,16 @@ export class TodayView {
       case 'idle-snooze':
         this.hooks.snoozeIdle?.(id)
         return this.render()
+      // 先記下的事：變成今天、明天的任務，或不用做了
+      case 'park-today':
+      case 'park-tmr': {
+        s.tick()
+        const tmr = b.dataset.act === 'park-tmr'
+        const t = s.parkToTask(id, tmr ? addDays(s.today, 1) : s.today)
+        if (t) this.hooks.toast({ icon: '記', title: `「${t.title}」排進${tmr ? '明天' : '今天'}`, sub: tmr ? '明天的任務' : '今天的任務', ms: 3200 })
+        return
+      }
+      case 'park-drop': return s.unpark(id)
     }
   }
 
@@ -236,6 +247,7 @@ export class TodayView {
     const live = this._liveProg()
     this.root.innerHTML = `<div class="td${this._drawn ? '' : ' td-enter'}">
       ${this._heroHTML(today, tasks, now)}
+      ${this._parkHTML()}
       <div class="td-grid">
         ${this._nowHTML(today, tasks, nowMin)}
         ${this._progHTML(tasks, nowMin)}
@@ -594,6 +606,24 @@ export class TodayView {
   }
 
   // ── 每日任務（三個）＋每週挑戰 ──
+  // ── 先記下的事：專注時腦中冒出來的（store.park），現在決定今天做、明天做還是不用做了。沒有就不放 ──
+  _parkHTML() {
+    const list = this.store.state.parked
+    if (!list.length) return ''
+    const row = (x) => {
+      const d = new Date(x.at)
+      const k = esc(x.id)
+      return `<li><span class="td-park-t">${esc(x.text)}</span><time>${d.getMonth() + 1}/${d.getDate()} ${hhmm(d.getHours() * 60 + d.getMinutes())}</time>
+        <span class="td-park-acts"><button type="button" class="btn-ghost" data-act="park-today" data-id="${k}" data-fk="pk-${k}">今天做</button><button type="button" class="btn-ghost" data-act="park-tmr" data-id="${k}">明天做</button><button type="button" class="td-park-x" data-act="park-drop" data-id="${k}" aria-label="不用做了：${esc(x.text)}" title="不用做了">×</button></span></li>`
+    }
+    // 新記下的在上面
+    return `<section class="td-card td-park" aria-label="先記下的事">
+      <header class="td-h">${IC.pin}<h3>先記下的事<small>あとで</small></h3><span class="td-park-n">${list.length} 件</span></header>
+      <p class="td-park-p">專注時冒出來的事，現在決定什麼時候做；不用做了就按 ×</p>
+      <ul class="td-park-list">${[...list].reverse().map(row).join('')}</ul>
+    </section>`
+  }
+
   _questHTML() {
     const s = this.store
     const w = s.weekly()

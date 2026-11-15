@@ -179,28 +179,30 @@ async function boot() {
   // focus：開始專注現在該做的那一件（通知上寫的那件已經做完的話，換成現在排在最前面的）；pause：先停 1 小時。
   // 手機的 App：殼記著按了哪一顆（takeAct）；瀏覽器：Service Worker 把按了哪一顆留在快取裡（takeNoticeAct），
   // 叫出開著的視窗時也直接傳過來。不認網址上的參數：別的網站連過來就能替你按，不行
-  const doAct = (act) => {
+  // at：那一則提醒排在幾點（回神紀錄用它認出同一則、記在那一天；手機的 App 不知道是 0）
+  const doAct = (act, at = 0) => {
     // 頁面凍住時過了午夜：先換到今天，才不會開始專注昨天的那一件
     store.tick()
     if (act !== 'pause' && act !== 'focus') return
-    // 回神紀錄：按了通知上的按鈕，就是看到了這一則提醒
-    store.mottoNudged()
+    // 回神紀錄：按了通知上的按鈕，就是看到了這一則提醒（頁面的提示卡已經算過的那一則不再算）
     if (act === 'pause') {
+      store.mottoNudged(at)
       if (store.state.settings.mottoEvery > 0) store.pauseMottos(pauseUntil('hour', store.state.rhythm, Date.now()))
       return
     }
+    const t = ui.focus.mode === 'focus' ? null : nowTask()
+    if (!t) store.mottoNudged(at)
     if (ui.focus.mode === 'focus') return ui.toast({ icon: '戒', title: '已經在專注了', sub: '這一輪結束再說' })
-    const t = nowTask()
     if (!t) return ui.toast({ icon: '戒', title: '今天的任務都做完了', sub: '想做什麼的話，再加一件吧' })
-    store.mottoAnswered('back')
+    store.mottoAnswered('back', at)
     ui.focus.startWith(t.id)
   }
   // 開機還沒好之前按的先記著，開場時做
   let booted = false
-  let bootAct = ''
-  const runAct = (act) => {
-    if (booted) doAct(act)
-    else bootAct = act
+  let bootAct = null
+  const runAct = (act, at = 0) => {
+    if (booted) doAct(act, at)
+    else bootAct = { act, at }
   }
   const takeNativeAct = () => {
     const a = nativeTakeAct()
@@ -208,10 +210,11 @@ async function boot() {
   }
   // Service Worker 留下的：同一次按的（id）只做一次（傳過來的和快取裡的可能都拿得到）
   const actsDone = new Set()
+  // slot：那一則提醒排在幾點（通知帶著的；回神紀錄用）
   const swAct = (r) => {
     if (!r || actsDone.has(r.id)) return
     actsDone.add(r.id)
-    runAct(r.act)
+    runAct(r.act, r.slot)
   }
   const takeSwAct = () => takeNoticeAct().then(swAct)
   addEventListener('hiyori-native-act', takeNativeAct)
@@ -219,7 +222,7 @@ async function boot() {
     if (e.data?.type !== 'hiyori-act') return
     // 快取裡那一份也拿掉（之後開機不會再做一次）
     takeNoticeAct(e.data.id)
-    swAct({ id: String(e.data.id || ''), act: String(e.data.act || '') })
+    swAct({ id: String(e.data.id || ''), act: String(e.data.act || ''), slot: Number(e.data.slot) > 0 ? Number(e.data.slot) : 0 })
   })
 
   // ── UI 掛鉤 ──
@@ -321,14 +324,18 @@ async function boot() {
     },
     focusFinished: (minutes, taskId, info = {}) => {
       // 休息時可以按的：還沒做完就延長（從到點那時接著正計時）；設定的輪數都做完了，還想繼續就再加一輪
-      // 專注頁開著的時候頁面上就有這兩顆，提示卡只說一聲，不再放一次（不然會蓋住計時）
-      const more = () =>
-        ui.focus.bigOpen
+      // 專注頁開著的時候頁面上就有這兩顆，提示卡只說一聲，不再放一次（不然會蓋住計時）。
+      // 專注時先記下了別的事：「看記下的 N 件」到今日總覽決定什麼時候做
+      const parked = store.state.parked.length
+      const more = () => [
+        ...(ui.focus.bigOpen
           ? []
           : [
               ...(ui.focus.canExtend ? [{ label: '還沒做完，延長', run: () => ui.focus.extend() }] : []),
               ...(ui.focus.canAddRound ? [{ label: '再加一輪', soft: true, run: () => ui.focus.addRound() }] : []),
-            ]
+            ]),
+        ...(parked ? [{ label: `看記下的 ${parked} 件`, soft: true, run: () => ui.openParked() }] : []),
+      ]
       // 加時做完：多做的分鐘記進去（不多算一顆番茄）；不到 1 分鐘就不另外記
       if (info.ext) {
         if (minutes < 1 || store.completePomodoro(minutes, taskId, info.projectId, info.sid, { extra: true }) === false) {
@@ -361,7 +368,10 @@ async function boot() {
         const what = t ? `「${short(t.title, 10)}」` : p ? `「${short(p.name, 10)}」` : ''
         ui.toast({
           icon: '灯', title: `${minutes} 分鐘到了，開了頭就不難了`, sub: `${what}+${minutes} 分鐘・要接著做嗎？`, tag: 'focus', ms: 15000,
-          actions: ui.focus.bigOpen ? [] : [...(ui.focus.canExtend ? [{ label: '繼續做下去', run: () => ui.focus.extend() }] : []), { label: '休息一下', soft: true, run: () => {} }],
+          actions: [
+            ...(ui.focus.bigOpen ? [] : [...(ui.focus.canExtend ? [{ label: '繼續做下去', run: () => ui.focus.extend() }] : []), { label: '休息一下', soft: true, run: () => {} }]),
+            ...(parked ? [{ label: `看記下的 ${parked} 件`, soft: true, run: () => ui.openParked() }] : []),
+          ],
         })
         return
       }
@@ -725,6 +735,8 @@ async function boot() {
     talk('mottoResume', {}, 5000, '好，提醒回來了。', 'fuji')
     ui.toast({ icon: '戒', title: '警語的提醒回來了', sub: when || '照原本的間隔提醒', tag: 'motto' })
   })
+  // 專注時先記下了一件別的事：輕輕應一聲，回到正事
+  store.on('parked', () => talk('parked', {}, 3200, '記下了，等一下再看。回到正事吧。'))
   store.on('dateAdded', (d) => talk('dateAdded', { title: short(d.title), n: d.days }, 4600, '記好了，我陪你留意。', 'fuji'))
   store.on('sleepLogged', ({ date, min, first }) => {
     if (date !== store.today || !first) return
@@ -879,10 +891,11 @@ async function boot() {
         nativeMottoSeen()
         run()
       }
-      // 回神紀錄：提醒了一次；按了哪一顆也記下來（週報的「警語回神」）
-      store.mottoNudged()
+      // 回神紀錄：提醒了一次；按了哪一顆也記下來（週報的「警語回神」）。e.at 是這一則排在幾點：
+      // 頁面自己發的系統通知也帶著它，按了通知上的按鈕時認得出是同一則，不會再算一次
+      store.mottoNudged(e.at)
       const back = (run) => seen(() => {
-        store.mottoAnswered('back')
+        store.mottoAnswered('back', e.at)
         run()
       })
       ui.toast({
@@ -903,7 +916,7 @@ async function boot() {
           {
             label: '✓ 在做了', soft: true,
             run: seen(() => {
-              store.mottoAnswered('on')
+              store.mottoAnswered('on', e.at)
               talk('mottoOnTask', {}, 4200, '很好，就照這樣做下去。')
             }),
           },
@@ -913,7 +926,7 @@ async function boot() {
       })
       // 交給手機排了（Android 殼）：App 不在前面時由手機發，這邊只在畫面上念。
       // 網頁交給伺服器推的時候，頁面會念的是看得到頁面時（沒看著這個視窗就跳通知）、或在背景卻沒交上伺服器時
-      if (!(native && mottoExternal()) && store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', mottoBody(e.text, next), 'motto', { actions: mottoActions(next) })
+      if (!(native && mottoExternal()) && store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', mottoBody(e.text, next), 'motto', { actions: mottoActions(next), data: { at: e.at } })
       return
     }
     if (kind === 'bed') {
@@ -1190,9 +1203,9 @@ async function boot() {
   takeNativeAct()
   booted = true
   if (bootAct) {
-    const a = bootAct
-    bootAct = ''
-    doAct(a)
+    const { act, at } = bootAct
+    bootAct = null
+    doAct(act, at)
   }
   takeSwAct()
   requestAnimationFrame(() =>

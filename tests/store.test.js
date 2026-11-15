@@ -1938,6 +1938,39 @@ describe('ふじ的排程教練與重要日子', () => {
   })
 })
 
+describe('先記下來', () => {
+  it('專注時一行字記下（空白收掉、太長截掉、滿了不收）；變成今天或明天的任務、不用做了就拿掉；讀存檔時清洗', () => {
+    const seen = []
+    store.on('parked', (x) => seen.push(x.text))
+    expect(store.park('   ')).toBeNull()
+    const a = store.park('  回 小美 的訊息  ')
+    expect(a).toMatchObject({ text: '回 小美 的訊息', at: Date.now() })
+    expect(seen).toEqual(['回 小美 的訊息'])
+    expect(store.park('x'.repeat(200)).text).toHaveLength(80)
+    const c = store.park('買牛奶')
+    // 變成明天的任務：清單裡拿掉這一筆
+    const t = store.parkToTask(c.id, addDays(TODAY, 1))
+    expect(t).toMatchObject({ title: '買牛奶', date: addDays(TODAY, 1), done: false })
+    expect(store.state.parked.map((x) => x.text)).toEqual(['回 小美 的訊息', 'x'.repeat(80)])
+    // 日期壞掉、不存在的那一筆：不動
+    expect(store.parkToTask(a.id, '2026-13-01')).toBeNull()
+    expect(store.parkToTask('nope', TODAY)).toBeNull()
+    store.unpark(a.id)
+    expect(store.state.parked).toHaveLength(1)
+    // 滿了（50 件）不再收
+    for (let i = 0; i < 49; i++) store.park(`第 ${i} 件`)
+    expect(store.state.parked).toHaveLength(50)
+    expect(store.park('第 51 件')).toBeNull()
+    // 讀存檔：空的、不是字串的、太多的（留最新的 50 件）
+    const raw = JSON.parse(JSON.stringify(store.state))
+    raw.parked = [{ id: 'a1', text: '  ', at: 1 }, { id: 'a2', text: 5 }, ...Array.from({ length: 60 }, (_, i) => ({ id: `p${i}`, text: `第 ${i} 件`, at: 1000 + i }))]
+    const m = migrate(raw).parked
+    expect(m).toHaveLength(50)
+    expect(m[0]).toEqual({ id: 'p10', text: '第 10 件', at: 1010 })
+    expect(migrate({ ...raw, parked: 'x' }).parked).toEqual([])
+  })
+})
+
 describe('週報', () => {
   // TODAY（2026-10-25）是星期日；這週從 10-19 開始
   it('本週到目前：完成率用那幾天的任務算，專注、番茄、本命、習慣達成、有在用的日子', () => {
@@ -1956,27 +1989,58 @@ describe('週報', () => {
     expect(store.weekReport('2026-10-19', '2026-10-20').total).toBe(1)
   })
 
-  it('回神紀錄：警語提醒了幾次、之後回到正事幾次、本來就在做幾次；提醒不算使用者改了資料，回應才算；讀存檔後還在', () => {
+  it('回神紀錄：同一則提醒只算一次（提示卡、通知上的按鈕都按得到），回應記在那一則的那一天；提醒不算使用者改了資料，回應才算', () => {
+    const tally = (d) => {
+      const h = store.peekDay(d)
+      return [h.nudges, h.backs, h.onTask]
+    }
     setDate('2026-10-20')
-    store.mottoNudged()
-    store.mottoAnswered('back')
+    const a1 = Date.now()
+    expect(store.mottoNudged(a1)).toBe(true)
+    expect(store.mottoAnswered('back', a1)).toBe(true)
+    // 同一則：提示卡算過了，再按頁面自己發的通知上的按鈕不再算
+    expect(store.mottoNudged(a1)).toBe(false)
+    expect(store.mottoAnswered('on', a1)).toBe(false)
+    expect(tally('2026-10-20')).toEqual([1, 1, 0])
     setDate('2026-10-21')
     const rev = store.state.rev
-    store.mottoNudged()
-    // 自動發生的提醒：不換版本（剛打開、資料還舊的裝置不會因為念了一句就蓋掉雲端的新資料）
+    // 自動發生的提醒：不換版本（剛打開、資料還舊的裝置念了一句，不會跟雲端比較新的那一版衝突）
+    store.mottoNudged(Date.now())
     expect(store.state.rev).toBe(rev)
-    store.mottoAnswered('on')
+    store.mottoAnswered('on', Date.now())
     expect(store.state.rev).not.toBe(rev)
-    store.mottoNudged()
-    expect(store.peekDay('2026-10-21')).toMatchObject({ nudges: 2, backs: 0, onTask: 1 })
-    expect(store.weekReport()).toMatchObject({ nudges: 3, backs: 1, onTask: 1 })
-    expect(store.weekReport('2026-10-19', '2026-10-20')).toMatchObject({ nudges: 1, backs: 1, onTask: 0 })
-    const back = migrate(JSON.parse(JSON.stringify(store.state)))
-    expect(back.history['2026-10-21']).toMatchObject({ nudges: 2, backs: 0, onTask: 1 })
-    // 舊存檔沒有這幾個欄位：補成 0
+    // 23:59:55 的提醒、過了午夜才按「在做了」：記在提醒的那一天
+    setDate('2026-10-21', 23)
+    const late = Date.now() + 59 * 60000 + 55000
+    vi.setSystemTime(late)
+    store.mottoNudged(late)
+    vi.setSystemTime(late + 6000)
+    store.mottoAnswered('on', late)
+    expect(tally('2026-10-21')).toEqual([2, 0, 2])
+    expect(tally('2026-10-22')).toEqual([0, 0, 0])
+    // 不知道是哪一則（手機的 App 關著時發的通知）：按了就算看到一次、回到正事一次，記在今天
+    store.mottoAnswered('back')
+    expect(tally('2026-10-22')).toEqual([1, 1, 0])
+    expect(store.weekReport('2026-10-19', '2026-10-22')).toMatchObject({ nudges: 4, backs: 2, onTask: 2 })
+  })
+
+  it('回神紀錄：換成別台、別的分頁的那一版時每天取比較大的（還沒同步出去的不會被蓋掉）；讀存檔時補 0、之後的版本多的每日欄位留著', () => {
+    setDate('2026-10-21')
+    const remote = JSON.parse(JSON.stringify(store.state))
+    store.mottoNudged(Date.now())
+    store.mottoNudged(Date.now() + 1000)
+    remote.history['2026-10-21'] = { ...(remote.history['2026-10-21'] || {}), nudges: 1, backs: 1 }
+    remote.tasks.push({ id: 'from-pc', title: '別台加的', date: '2026-10-21' })
+    store.replaceState(remote, Date.now(), { soft: true, rev: 'r-remote' })
+    expect(store.state.tasks.some((t) => t.id === 'from-pc')).toBe(true)
+    expect(store.peekDay('2026-10-21')).toMatchObject({ nudges: 2, backs: 1, onTask: 0 })
+    // 匯入（整份換掉）不合併
+    store.replaceState(JSON.parse(JSON.stringify({ ...remote, history: {} })), Date.now())
+    expect(store.peekDay('2026-10-21').nudges).toBe(0)
+    // 舊存檔沒有這幾個欄位：補成 0；之後的版本加的每日欄位原樣留著
     const old = JSON.parse(JSON.stringify(store.state))
-    delete old.history['2026-10-21'].nudges
-    expect(migrate(old).history['2026-10-21'].nudges).toBe(0)
+    old.history['2026-10-20'] = { tasks: 2, later: 5 }
+    expect(migrate(old).history['2026-10-20']).toMatchObject({ tasks: 2, nudges: 0, later: 5 })
   })
 
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
