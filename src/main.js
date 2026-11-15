@@ -6,7 +6,7 @@ import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
-import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
+import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
 import { planKey, pauseOf, pauseText, pauseUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet } from './mottos.js'
 import { order as doFirst } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
@@ -133,7 +133,8 @@ async function boot() {
     if (store.state.settings.mottoEvents === false) return []
     const to = dateStr(new Date(planUntil(store.state.rhythm, now)))
     const out = []
-    for (let d = dateStr(new Date(now)), k = 0; d <= to && k < 4; d = addDays(d, 1), k++) out.push(...eventQuiet(store.eventsOn(d), d))
+    // 明天以後還沒生成的例行日程（每天的晨會）也算：timedEventsOn
+    for (let d = dateStr(new Date(now)), k = 0; d <= to && k < 4; d = addDays(d, 1), k++) out.push(...eventQuiet(store.timedEventsOn(d), d))
     return out
   }
   // 警語通知上的按鈕（跟 public/sw.js 的 mottoActions、Android 殼的 MottoNotice 一樣）：有現在該做的那一件才有「開始專注」。
@@ -184,13 +185,14 @@ async function boot() {
     // 是按了通知上的按鈕回來的（通常 hiyori-native-act、Service Worker 的訊息會先到，這裡是保險）
     takeNativeAct()
     takeSwAct()
+    countShown()
   })
 
   // ── 按了警語通知上的按鈕：打開 App，照著做 ──
   // focus：開始專注現在該做的那一件（通知上寫的那件已經做完的話，換成現在排在最前面的）；pause：先停 1 小時。
   // 手機的 App：殼記著按了哪一顆（takeAct）；瀏覽器：Service Worker 把按了哪一顆留在快取裡（takeNoticeAct），
   // 叫出開著的視窗時也直接傳過來。不認網址上的參數：別的網站連過來就能替你按，不行
-  // at：那一則提醒排在幾點（回神紀錄用它認出同一則、記在那一天；手機的 App 不知道是 0）
+  // at：那一則提醒排在幾點（回神紀錄用它認出同一則、記在那一天；舊版的手機 App〔殼 4 以前〕不知道是 0）
   const doAct = (act, at = 0) => {
     // 頁面凍住時過了午夜：先換到今天，才不會開始專注昨天的那一件
     store.tick()
@@ -217,7 +219,14 @@ async function boot() {
   }
   const takeNativeAct = () => {
     const a = nativeTakeAct()
-    if (a) runAct(a)
+    if (a) runAct(a, nativeActAt())
+  }
+  // App 不在、頁面看不到時手機（Android 的 App）、推播（Service Worker）發過的警語：回到 App 時算進回神紀錄的「提醒了幾次」
+  // （滑掉、只點通知本身的也算；頁面念過的、按了通知上按鈕的那一則同一個時間，不會重算）。
+  // 兩邊都只是讀最近幾十則、不清掉：存檔寫不進去時重新打開還拿得到（算過哪幾筆 store 記著）
+  const countShown = () => {
+    store.mottosShown('app', nativeShown())
+    mottoPush?.shown().then((list) => store.mottosShown('sw', list))
   }
   // Service Worker 留下的：同一次按的（id）只做一次（傳過來的和快取裡的可能都拿得到）
   const actsDone = new Set()
@@ -339,7 +348,7 @@ async function boot() {
       // 專注時先記下了別的事：「看記下的 N 件」到今日總覽決定什麼時候做
       const parked = store.state.parked.length
       // 這一輪中途切去用別的 App 幾次（Android 的 App 才分得出來；到點時還在別的 App 裡的也算一次）
-      const away = (info.away || 0) + (awayAtEnd(info.sid) ? 1 : 0)
+      const away = (info.away || 0) + (awayAtEnd(info.sid, info.at) ? 1 : 0)
       const awayNote = away ? `・中途離開 ${away} 次` : ''
       const more = () => [
         ...(ui.focus.bigOpen
@@ -1075,7 +1084,8 @@ async function boot() {
     if (focusing() && awaySid !== ui.focus.sid) setAway(Date.now(), ui.focus.sid)
   }
   // 這一輪中途切去用別的 App 了嗎（Android 的 App 才分得出來）
-  const leftApp = (since) => !!since && Date.now() - since >= AWAY_MIN && nativeAwayLocked() === false
+  // until：算到幾點（到點時還在外面的那一次算到本來到點的時間：頁面晚一點才醒來的話，到點之後的那段不算）
+  const leftApp = (since, until = Date.now()) => !!since && Math.min(until, Date.now()) - since >= AWAY_MIN && nativeAwayLocked() === false
   // 回到 App（頁面看得到了、重新打開）：離開 1 分鐘以上的說一聲還剩多久；切去用別的 App 的記一次中途離開
   const cameBack = () => {
     const since = awaySince
@@ -1104,11 +1114,13 @@ async function boot() {
   // 重新打開時（Android 在背景把 App 收掉了）：接著算剛才那一次
   if (!document.hidden) cameBack()
   // 一輪專注結束（sid 是那一輪）：那時還在別的 App 裡的算一次中途離開，回傳有沒有算
-  awayAtEnd = (sid) => {
+  // until：這一輪本來到點的時間（自己按「做完了」的沒有，算到現在）。算了的話也記進這一輪的次數（延長、重新整理後接得回來）
+  awayAtEnd = (sid, until) => {
     const since = awaySince
     const mine = !!since && awaySid === sid
     if (since) setAway(0)
-    if (!mine || !leftApp(since)) return false
+    if (!mine || !leftApp(since, until || Date.now())) return false
+    ui.focus.noteAway(sid)
     store.focusLeft()
     return true
   }
@@ -1391,6 +1403,7 @@ async function boot() {
     doAct(act, at)
   }
   takeSwAct()
+  countShown()
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
       const loader = document.getElementById('loader')

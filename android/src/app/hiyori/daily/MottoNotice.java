@@ -43,6 +43,11 @@ final class MottoNotice {
     static final String ACT = "app.hiyori.daily.MOTTO_ACT";
     private static final String EXTRA_ACT = "act";
     private static final String EXTRA_KEY = "key";
+    // 按鈕是哪一則警語通知上的（那一則排在幾點）：網頁的回神紀錄用它認出同一則、記在那一天
+    private static final String EXTRA_AT = "at";
+    // App 不在前面時這裡發過的警語（排在幾點，最近 SHOWN_MAX 則）：回到 App 時網頁讀（shown），算進「提醒了幾次」
+    private static final String KEY_SHOWN = "mottoShown";
+    private static final int SHOWN_MAX = 32;
     // 按鈕帶的暗號：MainActivity 是啟動畫面，別的 App 也叫得到它；暗號對不上的不算
     private static final String KEY_SECRET = "actKey";
 
@@ -248,12 +253,43 @@ final class MottoNotice {
                 .setCategory(Notification.CATEGORY_REMINDER)
                 .setAutoCancel(true)
                 .setContentIntent(TimerNotice.open(c));
+        long at = o.optLong("at", 0);
         if (!o.optBoolean("back")) {
-            if (o.optBoolean("focus")) b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_focus), act(c, "focus", 30)).build());
-            b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_pause), act(c, "pause", 31)).build());
+            if (o.optBoolean("focus")) b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_focus), act(c, "focus", 30, at)).build());
+            b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_pause), act(c, "pause", 31, at)).build());
         }
         // 同一個 tag：新的一則換掉上一則，不會在通知欄疊一長串
         m.notify(TAG, ID, b.build());
+        if (!o.optBoolean("back") && visible(m)) noteShown(c, at);
+    }
+
+    // 通知真的出得來嗎：整個 App 的通知被關掉、或只關了「警語提醒」這一類時沒顯示出來，不算提醒了一次
+    private static boolean visible(NotificationManager m) {
+        if (!m.areNotificationsEnabled()) return false;
+        NotificationChannel ch = m.getNotificationChannel(CH);
+        return ch == null || ch.getImportance() != NotificationManager.IMPORTANCE_NONE;
+    }
+
+    // 記下這一則發過了（同一則發兩次只記一次）
+    private static synchronized void noteShown(Context c, long at) {
+        if (at <= 0) return;
+        JSONArray old = new JSONArray();
+        try {
+            old = new JSONArray(prefs(c).getString(KEY_SHOWN, "[]"));
+        } catch (Exception ignored) {
+        }
+        JSONArray out = new JSONArray();
+        for (int i = Math.max(0, old.length() - SHOWN_MAX + 1); i < old.length(); i++) {
+            long x = old.optLong(i, 0);
+            if (x > 0 && x != at) out.put(x);
+        }
+        out.put(at);
+        prefs(c).edit().putString(KEY_SHOWN, out.toString()).apply();
+    }
+
+    // 發過的那幾則（JSON 陣列）：網頁只是讀，不清掉
+    static synchronized String shown(Context c) {
+        return prefs(c).getString(KEY_SHOWN, "[]");
     }
 
     // 按鈕帶的暗號（第一次用時產生，存著）
@@ -266,8 +302,8 @@ final class MottoNotice {
         return s;
     }
 
-    private static PendingIntent act(Context c, String act, int code) {
-        Intent i = new Intent(c, MainActivity.class).setAction(ACT + "." + act).putExtra(EXTRA_ACT, act).putExtra(EXTRA_KEY, secret(c))
+    private static PendingIntent act(Context c, String act, int code, long at) {
+        Intent i = new Intent(c, MainActivity.class).setAction(ACT + "." + act).putExtra(EXTRA_ACT, act).putExtra(EXTRA_KEY, secret(c)).putExtra(EXTRA_AT, at)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(c, code, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
@@ -279,6 +315,11 @@ final class MottoNotice {
         if (!secret(c).equals(i.getStringExtra(EXTRA_KEY))) return null;
         String act = i.getStringExtra(EXTRA_ACT);
         return "focus".equals(act) || "pause".equals(act) ? act : null;
+    }
+
+    // 那顆按鈕是哪一則警語通知上的（排在幾點）；不是通知上的按鈕、舊的通知沒帶是 0
+    static long atOf(Context c, Intent i) {
+        return actOf(c, i) == null ? 0 : Math.max(0, i.getLongExtra(EXTRA_AT, 0));
     }
 
     // 按了通知上的按鈕：那一則收掉（按鈕不會自己收）

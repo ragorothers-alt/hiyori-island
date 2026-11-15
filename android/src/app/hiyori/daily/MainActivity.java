@@ -42,6 +42,10 @@ public class MainActivity extends Activity {
     // 按了警語通知上的按鈕（"focus"／"pause"）：網頁用 takeAct 拿走、照著做
     private String act;
     private static final String KEY_ACT = "hiyoriAct";
+    // 那顆按鈕是哪一則警語通知上的（排在幾點）；takenAt：網頁剛拿走的那一顆的（網頁接著用 actAt 問）
+    private long actAt;
+    private long takenAt;
+    private static final String KEY_ACT_AT = "hiyoriActAt";
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -108,6 +112,7 @@ public class MainActivity extends Activity {
         if (saved != null) {
             synchronized (this) {
                 act = saved.getString(KEY_ACT);
+                actAt = saved.getLong(KEY_ACT_AT, 0);
             }
         } else if ((getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) takeIntent(getIntent());
         // 第一次打開先問通知權限：沒有它，倒數和到點的通知都出不來
@@ -128,6 +133,7 @@ public class MainActivity extends Activity {
         if (a == null) return false;
         synchronized (this) {
             act = a;
+            actAt = MottoNotice.atOf(this, intent);
         }
         MottoNotice.dismiss(this);
         return true;
@@ -168,7 +174,10 @@ public class MainActivity extends Activity {
         web.saveState(out);
         // 按了通知上的按鈕、網頁還沒來拿：系統收回後重建時接著交給網頁
         synchronized (this) {
-            if (act != null) out.putString(KEY_ACT, act);
+            if (act != null) {
+                out.putString(KEY_ACT, act);
+                out.putLong(KEY_ACT_AT, actAt);
+            }
         }
     }
 
@@ -200,10 +209,11 @@ public class MainActivity extends Activity {
     // 網頁叫得到的東西。這些方法在另一條執行緒被叫到；只收字串，內容當成資料看
     class Bridge {
         // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）；
-        // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）
+        // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）；
+        // 5：多了 actAt（按鈕是哪一則警語通知上的）、shown（App 不在前面時發過的警語）
         @JavascriptInterface
         public int version() {
-            return 4;
+            return 5;
         }
 
         // 按了警語通知上的哪一顆按鈕："focus"（開始專注現在該做的那一件）、"pause"（先停 1 小時），沒有是空字串。拿走就清掉
@@ -212,9 +222,27 @@ public class MainActivity extends Activity {
             if (!trusted) return "";
             synchronized (MainActivity.this) {
                 String a = act;
+                takenAt = a == null ? 0 : actAt;
                 act = null;
+                actAt = 0;
                 return a == null ? "" : a;
             }
+        }
+
+        // 剛用 takeAct 拿走的那一顆按鈕是哪一則警語通知上的（排在幾點）；不知道是 0
+        @JavascriptInterface
+        public long actAt() {
+            if (!trusted) return 0;
+            synchronized (MainActivity.this) {
+                return takenAt;
+            }
+        }
+
+        // App 不在前面時手機發過的警語（最近 32 則排在幾點的 JSON 陣列）：只是讀、不清掉，算過哪幾則網頁自己記著
+        // （網頁的存檔寫不進去時，重新打開還拿得到）
+        @JavascriptInterface
+        public String shown() {
+            return trusted ? MottoNotice.shown(getApplicationContext()) : "[]";
         }
 
         @JavascriptInterface

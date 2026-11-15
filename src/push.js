@@ -19,8 +19,10 @@ export const LOG_FILE = '__push-log'
 export const MOTTO_FILE = '__motto-plan'
 // 警語念到哪一則了 { at }：頁面念之前寫、Service Worker 照推播顯示之後寫。誰先寫就是誰念，另一邊跳過
 export const MOTTO_DONE = '__motto-done'
-// 最近幾則警語的推播送到這台的時間 [{ got, at }]（警語卡上顯示上一則）
+// 最近幾則警語的推播送到這台的時間 [{ got, at }]（警語卡上顯示上一則；回到頁面時算進回神紀錄，見 MottoPush.shown）。
+// Service Worker 留最近 MOTTO_LOG_KEEP 筆（public/sw.js 也寫了一份，要一起改）
 export const MOTTO_LOG = '__motto-log'
+export const MOTTO_LOG_KEEP = 24
 // 警語一次最多交給伺服器幾則（伺服器的上限也是 200）
 export const MOTTO_PUSH_MAX = 200
 // 看著頁面時，伺服器排著的下一則再過這麼久就到了：先取消，由頁面自己念（不然畫面上念一次、系統通知又跳一次）
@@ -705,5 +707,16 @@ export class MottoPush extends PushBase {
   // 上一則警語的推播 { got, at }（沒有是 null）：警語卡上寫「上一則推播幾點送到」
   last() {
     return this._lastLog(MOTTO_LOG)
+  }
+
+  // 推播送到、Service Worker 顯示出來的警語（最近 MOTTO_LOG_KEEP 筆）：[{ id, at }]（id 是那一次送到的代號，at 是排在幾點）。
+  // 回到頁面時算進回神紀錄的「提醒了幾次」（滑掉、只點通知本身的也算）；算過哪幾筆記在 store 那邊（見 mottosShown），
+  // 這裡不記、也不清，時鐘被往回調過也照樣認得新的那一筆。不出聲地再放一次的（同一則送了兩次）、「提醒的時間剛改過」的不算
+  async shown() {
+    const list = await this._read(MOTTO_LOG)
+    if (!Array.isArray(list)) return []
+    return list
+      .filter((x) => x && Number.isFinite(x.got) && !x.quiet && !x.again && Number.isFinite(x.at) && x.at > 0)
+      .map((x) => ({ id: `${x.got}:${x.at}`, at: x.at }))
   }
 }

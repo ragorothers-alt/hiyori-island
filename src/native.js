@@ -101,6 +101,28 @@ export function nativeTakeAct(bridge = native) {
     return ''
   }
 }
+// 剛拿走的那一顆按鈕，是哪一則警語通知上的（那一則排在幾點；回神紀錄用它認出同一則、記在那一天）。
+// 舊版的殼（4 以前）不知道，是 0
+export function nativeActAt(bridge = native) {
+  try {
+    const at = typeof bridge?.actAt === 'function' ? Number(bridge.actAt()) : 0
+    return Number.isFinite(at) && at > 0 ? at : 0
+  } catch {
+    return 0
+  }
+}
+// App 不在前面時手機發過的警語通知（殼留著最近 32 則，不會清掉）：[{ id, at }]（at 是那一則排在幾點，也當代號）。
+// 回到 App 時算進回神紀錄的「提醒了幾次」（滑掉、只點通知本身的也算；按了按鈕的那一則同一個時間，不會重算；
+// 算過哪幾筆記在 store 那邊，見 mottosShown）。舊版的殼（4 以前）沒有這個，是空的
+export function nativeShown(bridge = native) {
+  try {
+    if (typeof bridge?.shown !== 'function') return []
+    const list = JSON.parse(String(bridge.shown() || '[]'))
+    return Array.isArray(list) ? list.map(Number).filter((x) => Number.isFinite(x) && x > 0).map((at) => ({ id: String(at), at })) : []
+  } catch {
+    return []
+  }
+}
 // App 不在前面嗎：App 在背景時，頁面的 JavaScript 可能還在跑，看頁面自己的 document.hidden 不一定準
 export function nativeAway(bridge = native) {
   try {

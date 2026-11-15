@@ -18,6 +18,23 @@ function tallyDate(at, today) {
   const d = dateStr(new Date(at))
   return d <= today && daysBetween(d, today) <= 7 ? d : today
 }
+// 回到 App 時算進「提醒了幾次」的通知（手機的 App 'app'、推播 'sw' 發的）：來源那邊不清掉、各留最近幾十則，
+// 這台記著哪幾筆看過了（{ app: [代號], sw: [代號] }，各留最近 SHOWN_KEEP 筆，比來源留的多：還在來源裡的一定還記著）
+export const SHOWN_KEY = 'hiyori-motto-counted'
+const SHOWN_KEEP = 64
+function readShown() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SHOWN_KEY) || 'null')
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  } catch {
+    return {}
+  }
+}
+// 一週以前的通知：不知道是哪一天的數字了，不算（不能像頁面念的那樣記在今天）
+const tooOld = (at, today) => {
+  const d = dateStr(new Date(at))
+  return d < today && daysBetween(d, today) > 7
+}
 function readTally(gen) {
   try {
     let v = JSON.parse(localStorage.getItem(TALLY_KEY) || 'null')
@@ -191,9 +208,10 @@ export const extrasMethods = {
     const key = tallyKey(at)
     if (key && this._tallies().has(key)) return false
     this._diskTallies()
+    const before = this._tallyOnDisk(key)
     this._nudged(at, key)
     this.save(false)
-    this.flushSave()
+    this._tallyFlush(key, 'n', before)
     return true
   },
   _nudged(at, key) {
@@ -208,29 +226,90 @@ export const extrasMethods = {
     const was = key ? this._tallies().get(key) : null
     if (was === 'a') return false
     this._diskTallies()
+    const before = this._tallyOnDisk(key)
     if (!was) this._nudged(at, key)
     const d = this.day(tallyDate(at, this.today))
     if (kind === 'on') d.onTask++
     else d.backs++
     if (key) this._markTally(key, 'a')
     this.save()
-    this.flushSave()
+    this._tallyFlush(key, 'a', before)
     return true
   },
+  // 去重表上這一則現在存的是什麼（'n'、'a'；沒有是 null）
+  _tallyOnDisk(key) {
+    return key ? new Map(readTally(this.state.tallyGen || '')).get(key) || null : null
+  },
+  // 記了就馬上寫出去。主存檔沒寫進去（空間滿了；去重表很小，常常還寫得進去）：數字只在記憶體裡，
+  // 去重表上這一則先改回原本的樣子——不然重新打開後數字沒了、這一則卻再也算不進去。這個分頁記在 _tallyHold 裡，
+  // 同一則照樣不重算；之後存檔又寫進去了（數字跟著寫進去）再補回去（store.js 的 saveNow 叫 _releaseTally）
+  _tallyFlush(key, v, before) {
+    if (this.flushSave() !== false || !key) return
+    this._holdTally(key, v, before)
+  },
+  _holdTally(key, v, before) {
+    ;(this._tallyHold ||= new Map()).set(key, v)
+    // 去重表也寫不進去時記在 _tallyMem 的那一筆拿掉：不然去重表先恢復時，下一則會連這一則一起寫出去
+    this._tallyMem?.delete(key)
+    try {
+      const keys = readTally(this._tallyGen).filter(([k]) => k !== key)
+      const was = before && [key, before]
+      if (was) keys.push(was)
+      localStorage.setItem(TALLY_KEY, JSON.stringify({ gen: this._tallyGen, keys: keys.slice(-TALLY_KEEP) }))
+    } catch {}
+  },
+  // 頁面不在時手機（Android 的 App，src 是 'app'）、推播（Service Worker，'sw'）發過的那幾則：回到 App 時一次記、一次寫出去。
+  // list：[{ id, at }]（id 是那一筆通知的代號，at 是排在幾點）。來源那邊不清掉：這台記著哪幾筆看過了（SHOWN_KEY），
+  // 數字真的寫進存檔了才記——寫不進去的話，重新打開還拿得到、照樣算得到（去重表上也先不留，見 _holdTally）。
+  // 已經算過的（頁面念的、按了通知上按鈕的）不重算，一週以前的不算。回傳算了幾則
+  mottosShown(src, list) {
+    const all = readShown()
+    const seen = Array.isArray(all[src]) ? all[src].filter((x) => typeof x === 'string') : []
+    const items = (Array.isArray(list) ? list : []).filter((x) => x && typeof x.id === 'string' && x.id && !seen.includes(x.id))
+    if (!items.length) return 0
+    this._refreshToday()
+    const have = this._tallies()
+    const fresh = [...new Set(items.map((x) => tallyKey(x.at)))].filter((k) => k && !have.has(k) && !tooOld(Number(k), this.today))
+    if (fresh.length) {
+      this._diskTallies()
+      const before = new Map(fresh.map((k) => [k, this._tallyOnDisk(k)]))
+      for (const k of fresh) this._nudged(Number(k), k)
+      this.save(false)
+      if (this.flushSave() === false) for (const k of fresh) this._holdTally(k, 'n', before.get(k))
+    }
+    // 之前寫不進去、還等著的那幾則（_tallyHold）也一樣：等數字寫進去了再記成看過了
+    if (this.saved && !this.saveError && !this._tallyHold?.size) {
+      all[src] = [...new Set([...seen, ...items.map((x) => x.id)])].slice(-SHOWN_KEEP)
+      try {
+        localStorage.setItem(SHOWN_KEY, JSON.stringify(all))
+      } catch {}
+    }
+    return fresh.length
+  },
+  _releaseTally() {
+    const hold = this._tallyHold
+    if (!hold?.size) return
+    this._tallyHold = null
+    if (this._tallyGen !== (this.state.tallyGen || '')) return
+    const disk = new Map(readTally(this._tallyGen))
+    for (const [k, v] of hold) if (!(RANK[disk.get(k)] >= RANK[v])) this._markTally(k, v)
+  },
   // 這台算過的那幾則：存著的，加上寫不進去（localStorage 滿了、被封鎖）時記在記憶體裡的——同一則也不會一直重算。
-  // 寫進去了就只看存著的（記憶體裡舊的那幾則不會又排到最後面，把另一個分頁剛記的擠掉）。換了一份資料（gen 不一樣）就從頭記
-  _tallies() {
+  // 寫進去了就只看存著的（記憶體裡舊的那幾則不會又排到最後面，把另一個分頁剛記的擠掉）。換了一份資料（gen 不一樣）就從頭記。
+  // hold：主存檔還沒寫進去的那幾則也算（寫進去標記時不算：那幾則等數字寫進去了才寫）
+  _tallies(hold = true) {
     const gen = this.state.tallyGen || ''
     if (this._tallyGen !== gen) {
       this._tallyGen = gen
       this._tallyMem = new Map()
+      this._tallyHold = null
     }
     const m = new Map(readTally(gen))
-    for (const [k, v] of this._tallyMem) if (!(RANK[m.get(k)] >= RANK[v])) m.set(k, v)
+    for (const src of [this._tallyMem, (hold && this._tallyHold) || []]) for (const [k, v] of src) if (!(RANK[m.get(k)] >= RANK[v])) m.set(k, v)
     return m
   },
   _markTally(key, v) {
-    const m = this._tallies()
+    const m = this._tallies(false)
     m.delete(key)
     m.set(key, v)
     const keys = [...m].slice(-TALLY_KEEP)

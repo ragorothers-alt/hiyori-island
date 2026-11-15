@@ -26,6 +26,7 @@ afterEach(() => {
 
 describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調', () => {
   const TALLY = 'hiyori-motto-tally'
+  const SHOWN = 'hiyori-motto-counted'
   const day = (s) => s.peekDay(s.today)
   const disk = () => JSON.parse(localStorage.getItem(KEY)).history[store.today]
 
@@ -158,6 +159,139 @@ describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調'
       expect(store.mottoAnswered('on', at)).toBe(false)
       expect(store.mottoNudged(at)).toBe(false)
       expect(day(store)).toMatchObject({ nudges: 1, backs: 1, onTask: 0 })
+    } finally {
+      delete localStorage.setItem
+    }
+  })
+
+  it('頁面不在時手機、推播發過的那幾則：回到 App 時一次算進去（重複的、怪怪的時間不算）；頁面念過、按了通知按鈕的不重算', async () => {
+    const at = Date.now() - 3600000
+    store.mottoNudged(at)
+    const at2 = at + 1800000
+    const at3 = at + 2700000
+    const n = (x, id = String(x)) => ({ id, at: x })
+    expect(store.mottosShown('app', [n(at), n(at2), n(at2, 'again'), n(0, 'zero'), { id: 'x', at: 'x' }, n(-5, 'neg'), n(at3), null, { at: at3 }])).toBe(2)
+    expect(day(store).nudges).toBe(3)
+    expect(store.mottosShown('app', [n(at2), n(at3)])).toBe(0)
+    // 另一個來源（推播）送到同一則：照那一則的時間認，不重算
+    expect(store.mottosShown('sw', [n(at3, `9:${at3}`)])).toBe(0)
+    // 按了 at3 那一則通知上的按鈕：只記回應，不再算一次提醒
+    expect(store.mottoAnswered('back', at3)).toBe(true)
+    expect(day(store)).toMatchObject({ nudges: 3, backs: 1 })
+    expect(disk()).toMatchObject({ nudges: 3, backs: 1 })
+    expect(store.mottosShown('app', [])).toBe(0)
+    expect(store.mottosShown('app', null)).toBe(0)
+    // 一週以前的：不知道算哪一天，不算（也不記在今天）
+    expect(store.mottosShown('sw', [n(Date.now() - 9 * 86400000, 'old')])).toBe(0)
+    expect(day(store).nudges).toBe(3)
+  })
+
+  it('算過的那幾筆記著（來源不清掉）：去重表只留最近 40 則，還在來源裡的舊通知也不會重算', () => {
+    const base = Date.now() - 6 * 3600000
+    const first = { id: 'sw-1', at: base }
+    expect(store.mottosShown('sw', [first])).toBe(1)
+    // 之後頁面又念了 45 則：去重表上已經沒有 first 那一則了
+    for (let i = 1; i <= 45; i++) store.mottoNudged(base + i * 60000)
+    expect(JSON.parse(localStorage.getItem(TALLY)).keys.map((x) => x[0])).not.toContain(String(base))
+    // 推播那邊還留著 first：不重算
+    expect(store.mottosShown('sw', [first, { id: 'sw-2', at: base + 50 * 60000 }])).toBe(1)
+    expect(day(store).nudges).toBe(47)
+    expect(new Store().mottosShown('sw', [first])).toBe(0)
+  })
+
+  it('時鐘被往回調過：送到的時間比上一筆早的新通知照樣算得到（照代號認，不照時間）', () => {
+    const at = Date.now() - 3600000
+    expect(store.mottosShown('sw', [{ id: `2000:${at}`, at }])).toBe(1)
+    expect(store.mottosShown('sw', [{ id: `2000:${at}`, at }, { id: `1500:${at + 60000}`, at: at + 60000 }])).toBe(1)
+    expect(day(store).nudges).toBe(2)
+  })
+
+  it('拿到通知紀錄、主存檔卻寫不進去：重新打開後還拿得到、照樣算得到（寫進去了才記成看過了）', () => {
+    store.saveNow()
+    const real = localStorage.setItem
+    localStorage.setItem = function (k, v) {
+      if (k === KEY) throw new Error('QuotaExceededError')
+      return real.call(this, k, v)
+    }
+    const at = Date.now() - 1800000
+    const list = [{ id: `1:${at}`, at }]
+    try {
+      expect(store.mottosShown('sw', list)).toBe(1)
+      // 這個分頁裡不重算
+      expect(store.mottosShown('sw', list)).toBe(0)
+      expect(day(store).nudges).toBe(1)
+      expect(localStorage.getItem(SHOWN)).toBeNull()
+    } finally {
+      delete localStorage.setItem
+    }
+    // 重新打開（數字沒寫進去）：來源還留著那一筆，照樣算得到，算了才記成看過了
+    const b = new Store()
+    expect(b.peekDay(b.today).nudges || 0).toBe(0)
+    expect(b.mottosShown('sw', list)).toBe(1)
+    expect(disk()).toMatchObject({ nudges: 1 })
+    expect(JSON.parse(localStorage.getItem(SHOWN)).sw).toEqual([`1:${at}`])
+    expect(new Store().mottosShown('sw', list)).toBe(0)
+  })
+
+  it('主存檔、去重表都寫不進去，之後去重表先恢復：下一則寫去重表時不會連上一則（數字還沒寫進去）一起寫出去', () => {
+    store.saveNow()
+    const real = localStorage.setItem
+    let tallyFull = true
+    localStorage.setItem = function (k, v) {
+      if (k === KEY || (tallyFull && k === TALLY)) throw new Error('QuotaExceededError')
+      return real.call(this, k, v)
+    }
+    const at = Date.now() - 1800000
+    try {
+      expect(store.mottoNudged(at)).toBe(true)
+      tallyFull = false
+      expect(store.mottoNudged(at + 60000)).toBe(true)
+      expect(store.mottoNudged(at)).toBe(false)
+      const keys = JSON.parse(localStorage.getItem(TALLY) || '{"keys":[]}').keys.map((x) => x[0])
+      expect(keys).not.toContain(String(at))
+      expect(keys).not.toContain(String(at + 60000))
+    } finally {
+      delete localStorage.setItem
+    }
+    // 重新打開：兩則都沒寫進去，同一則還算得進去
+    expect(new Store().mottoNudged(at)).toBe(true)
+  })
+
+  it('主存檔寫不進去、去重表寫得進去（空間快滿）：重新打開後同一則還算得進去；之後又寫得進去時補回去，不會重算', () => {
+    store.saveNow()
+    const real = localStorage.setItem
+    let full = true
+    localStorage.setItem = function (k, v) {
+      if (full && k === KEY) throw new Error('QuotaExceededError')
+      return real.call(this, k, v)
+    }
+    try {
+      const at = Date.now()
+      const at2 = at + 60000
+      expect(store.mottoNudged(at)).toBe(true)
+      // 這個分頁裡同一則不重算
+      expect(store.mottoNudged(at)).toBe(false)
+      expect(day(store).nudges).toBe(1)
+      // 數字沒寫進去，去重表上也沒有這一則：重新打開（數字是 0）後同一則還算得進去
+      expect(JSON.parse(localStorage.getItem(TALLY) || '{"keys":[]}').keys.map((x) => x[0])).not.toContain(String(at))
+      expect(new Store().mottoNudged(at)).toBe(true)
+      // 回應也一樣：去重表上留著原本存著的那個樣子
+      store.mottoNudged(at2)
+      full = false
+      store.saveNow()
+      full = true
+      expect(JSON.parse(localStorage.getItem(TALLY)).keys).toContainEqual([String(at2), 'n'])
+      expect(store.mottoAnswered('back', at2)).toBe(true)
+      expect(JSON.parse(localStorage.getItem(TALLY)).keys).toContainEqual([String(at2), 'n'])
+      expect(store.mottoAnswered('on', at2)).toBe(false)
+      // 又寫得進去了：記憶體裡的數字跟著寫進去，等著的那幾則補回去去重表；之後再按同一則不會重算
+      full = false
+      store.addTask({ title: '寫得進去了' })
+      store.flushSave()
+      expect(JSON.parse(localStorage.getItem(TALLY)).keys).toEqual(expect.arrayContaining([[String(at), 'n'], [String(at2), 'a']]))
+      expect(new Store().peekDay(store.today)).toMatchObject({ backs: 1 })
+      expect(new Store().mottoAnswered('back', at2)).toBe(false)
+      expect(new Store().mottoNudged(at)).toBe(false)
     } finally {
       delete localStorage.setItem
     }

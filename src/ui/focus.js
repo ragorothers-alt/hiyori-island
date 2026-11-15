@@ -160,9 +160,10 @@ export class FocusTimer {
       localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away }))
     } catch {}
   }
-  // 這一輪專注中切去用別的 App 一陣子（main.js 量的）：記一次，到點的提示卡上寫中途離開了幾次
-  noteAway() {
-    if (this.mode !== 'focus') return
+  // 這一輪專注中切去用別的 App 一陣子（main.js 量的）：記一次，到點的提示卡上寫中途離開了幾次。
+  // sid：哪一輪——到點時還在外面的那一次，記在剛結束、正在休息的那一輪（延長是同一輪，接著算；重新整理也接得回來）
+  noteAway(sid = this.sid) {
+    if (this.mode === 'idle' || !sid || sid !== this.sid) return
     this.away = (this.away || 0) + 1
     this._persist()
   }

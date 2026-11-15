@@ -213,13 +213,13 @@ function latestDue(list, now, late) {
   return best
 }
 
-// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆
+// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆；警語留 24 筆（頁面回來時照它算回神紀錄的「提醒了幾次」，src/push.js 的 MOTTO_LOG_KEEP）
 async function note(cache, name, entry) {
   try {
     const old = await readJSON(cache, name)
     const list = (Array.isArray(old) ? old : []).filter((x) => x && x.got !== entry.got)
     list.push(entry)
-    await putJSON(cache, name, list.slice(-8))
+    await putJSON(cache, name, list.slice(name === MOTTO_LOG ? -24 : -8))
   } catch {}
 }
 

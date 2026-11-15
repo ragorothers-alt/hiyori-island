@@ -361,6 +361,8 @@ export class Store {
       }
       return false
     }
+    // 回神紀錄：主存檔之前沒寫進去時先不留在去重表上的那幾則，數字現在跟著寫進去了，補回去
+    this._releaseTally?.()
     if (this.saveError) {
       this.saveError = null
       this.emit('saveRecovered')

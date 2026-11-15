@@ -102,6 +102,10 @@ export const coachMethods = {
   _busyEvents(date) {
     return [...this.eventsOn(date).filter((e) => !e.allDay), ...this._routineEventsOn(date)]
   },
+  // 那天有時段的日程，還沒生成的例行日程也算（警語交給手機排到明天時，明天一早的例行會議也要先避開）
+  timedEventsOn(date) {
+    return this._busyEvents(date)
+  },
   coachContext(dates) {
     const set = new Set(dates)
     const n = new Date()

@@ -2099,7 +2099,8 @@ test('專注中離開 App：切走時交給手機一則「回來吧」；回來�
   await leave(false)
   await page.clock.setFixedTime(new Date(T + 25 * 60000 + 1000))
   await expect(page.locator('#toasts .toast', { hasText: '專注完成' })).toContainText('中途離開 3 次')
-  expect((await leaves())[0]).toBe(3)
+  // 到點那一次也記進這一輪的次數（延長、重新整理後接得回來）
+  expect(await leaves()).toEqual([3, 3])
   await back()
   // 設定裡關掉：切走時不排那一則（回來時照樣說一聲）。先縮小專注頁（休息中還開著）
   await page.evaluate(() => {
@@ -2114,6 +2115,16 @@ test('專注中離開 App：切走時交給手機一則「回來吧」；回來�
   await leave(false)
   await page.waitForTimeout(1500)
   expect(await plan()).toEqual([])
+  // 到點前 10 秒才切走、頁面到點後 2 分鐘才醒來：到點之後的那段不算，這一輪沒有中途離開
+  await back()
+  const end = await page.evaluate(() => window.hiyori.ui.focus.boundary.at)
+  await page.clock.setFixedTime(new Date(end - 10000))
+  await leave(false)
+  await page.clock.setFixedTime(new Date(end + 2 * 60000))
+  const done = page.locator('#toasts .toast[data-tag="focus"]', { hasText: '專注完成' })
+  await expect(done).toBeVisible()
+  await expect(done).not.toContainText('中途離開')
+  expect((await leaves())[0]).toBe(3)
 })
 
 // 通知本身（Android 的 MottoNotice、Service Worker 的 notificationclick）在 tests/sw.test.js 測；這裡是打開 App 之後頁面照著做
@@ -2134,6 +2145,9 @@ test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶
       version: () => 3, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify() {},
       mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => true, mottoSeen() {},
       takeAct: () => window.__acts.shift() || '',
+      // 新版的殼（5）：按鈕是哪一則警語通知上的、App 不在前面時發過哪幾則（只是讀，不清掉）
+      actAt: () => window.__actAt || 0,
+      shown: () => JSON.stringify(window.__shown || []),
     }
   })
   await useAppMode(context)
@@ -2181,6 +2195,30 @@ test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶
   await expect(page.locator('#brief')).toBeHidden()
   expect(await page.evaluate(() => localStorage.getItem('hiyori-brief-day'))).toBe('"2000-01-01"')
   await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 新版的殼（5）：App 不在前面時手機發過的那幾則，回到 App 時算進回神紀錄；按了其中一則通知上的按鈕，只記回應、不再多算一次提醒
+  const tally = () => page.evaluate(() => { const h = window.hiyori.store.peekDay(window.hiyori.store.today); return [h.nudges, h.backs] })
+  const [n0, b0] = await tally()
+  await page.evaluate((t) => {
+    window.__shown = [t - 30 * 60000, t - 15 * 60000]
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, T)
+  await expect.poll(tally).toEqual([n0 + 2, b0])
+  await page.evaluate((t) => {
+    window.__actAt = t - 15 * 60000
+    window.__acts.push('focus')
+    window.dispatchEvent(new Event('hiyori-native-act'))
+  }, T)
+  await expect.poll(tally).toEqual([n0 + 2, b0 + 1])
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 殼那邊留著那幾則（不清掉）：再回到 App 時不重算，多了一則才多算一次
+  await page.evaluate((t) => {
+    window.__shown.push(t - 5 * 60000)
+    document.dispatchEvent(new Event('visibilitychange'))
+  }, T)
+  await expect.poll(tally).toEqual([n0 + 3, b0 + 1])
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await page.waitForTimeout(300)
+  expect(await tally()).toEqual([n0 + 3, b0 + 1])
 
   // 瀏覽器（沒有殼）：別的網站連過來帶 ?act=pause 不算（不然誰都能替你按）
   await page.evaluate(() => {

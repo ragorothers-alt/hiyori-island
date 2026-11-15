@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
 import { MOTTO_MAX, MOTTO_LEN, MOTTO_ROTATE, MOTTO_EVERY, MOTTO_LATE, PLAN_MAX, PAUSE_MAX, activeMottos, awake, mottoAt, nextMotto, windowEnd, planMottos, planUntil, planKey, pauseText, pauseUntil, pausedUntil, eventQuiet, inQuiet } from '../src/mottos.js'
-import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway, nativeBack, nativeAwayLocked } from '../src/native.js'
+import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway, nativeBack, nativeAwayLocked, nativeActAt, nativeShown } from '../src/native.js'
 
 const at = (h, m = 0, d = 25) => new Date(2026, 9, d, h, m)
 let store
@@ -117,6 +117,20 @@ describe('提醒排在什麼時候', () => {
     const list = ['A', 'B', 'C', 'D'].map((t) => ({ id: t, text: t, on: true }))
     const plan = planMottos(list, 15, r, { at: +at(10), i: 0 }, +at(10), { quiet })
     expect(plan.slice(0, 3)).toEqual([{ at: +at(10, 15), text: 'A' }, { at: +at(11), text: 'D' }, { at: +at(11, 15), text: 'A' }])
+  })
+
+  it('明天的例行會議還沒生成：交給手機的那一串照樣避開（store.timedEventsOn 把還沒生成的例行日程也算進去；生成了不重複，整天的不算）', () => {
+    const tmr = '2026-10-26'
+    store.addRoutine({ kind: 'event', title: '晨會', repeat: { type: 'daily' }, start: '09:00', end: '10:00', date: '2026-10-25' })
+    store.addEvent({ title: '出遊', date: tmr, allDay: true })
+    store.addEvent({ title: '牙醫', date: tmr, start: '15:00', end: '16:00' })
+    const spans = () => store.timedEventsOn(tmr).map((e) => `${e.title} ${e.start}`).sort()
+    expect(spans()).toEqual(['晨會 09:00', '牙醫 15:00'])
+    const quiet = eventQuiet(store.timedEventsOn(tmr), tmr)
+    expect(inQuiet(quiet, +at(9, 15, 26))).toBe(true)
+    expect(inQuiet(quiet, +at(10, 15, 26))).toBe(false)
+    store.prepareRoutines(tmr)
+    expect(spans()).toEqual(['晨會 09:00', '牙醫 15:00'])
   })
 
   it('作息幾乎整天醒著、每 10 分鐘：一直排到明天就寢，不會被上限截掉', () => {
@@ -962,5 +976,23 @@ describe('警語交給手機排（Android 殼）', () => {
     expect(nativeAwayLocked({ awayLocked: () => { throw new Error('gone') } })).toBeNull() // prettier-ignore
     expect(nativeAwayLocked({})).toBeNull()
     expect(nativeAwayLocked(null)).toBeNull()
+  })
+
+  it('新版的殼（5 起）：按鈕是哪一則警語通知上的（排在幾點）、App 不在前面時手機發過哪幾則；舊版的殼、問不到、怪怪的值都當成沒有', () => {
+    expect(nativeActAt({ actAt: () => 1761350400000 })).toBe(1761350400000)
+    expect(nativeActAt({ actAt: () => 0 })).toBe(0)
+    expect(nativeActAt({ actAt: () => -5 })).toBe(0)
+    expect(nativeActAt({ actAt: () => { throw new Error('gone') } })).toBe(0) // prettier-ignore
+    expect(nativeActAt({})).toBe(0)
+    expect(nativeShown({ shown: () => '[1761350400000, 1761354000000]' })).toEqual([
+      { id: '1761350400000', at: 1761350400000 },
+      { id: '1761354000000', at: 1761354000000 },
+    ])
+    expect(nativeShown({ shown: () => '[0, "x", -1, 5]' })).toEqual([{ id: '5', at: 5 }])
+    expect(nativeShown({ shown: () => 'not json' })).toEqual([])
+    expect(nativeShown({ shown: () => '{"a":1}' })).toEqual([])
+    expect(nativeShown({ shown: () => { throw new Error('gone') } })).toEqual([]) // prettier-ignore
+    expect(nativeShown({})).toEqual([])
+    expect(nativeShown(null)).toEqual([])
   })
 })

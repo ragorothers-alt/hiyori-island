@@ -3,7 +3,7 @@
 // 後半段：真的 Worker（PushHub）、真的 Service Worker（public/sw.js）、頁面的提醒（reminders.js）接在一起模擬一天半
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../worker/src/index.js'
-import { MOTTO_DONE, MOTTO_FILE, MOTTO_GRACE, MOTTO_NEAR, MOTTO_PUSH_MAX, MottoPush, PLAN_CACHE, TimerPush, takeNoticeAct } from '../src/push.js'
+import { MOTTO_DONE, MOTTO_FILE, MOTTO_LOG, MOTTO_GRACE, MOTTO_NEAR, MOTTO_PUSH_MAX, MottoPush, PLAN_CACHE, TimerPush, takeNoticeAct } from '../src/push.js'
 import { MOTTO_LATE, nextMotto, planKey } from '../src/mottos.js'
 import { Store } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
@@ -121,6 +121,25 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
     expect(calls).toEqual([])
   })
 
+  it('推播送到、顯示出來的警語：回到頁面時讀出來（算進回神紀錄；算過哪幾筆 store 記著），不清掉；又放一次的、提醒時間剛改過的不算', async () => {
+    const p = await boot()
+    const log = async (list) => (await caches.open(PLAN_CACHE)).put(SCOPE + MOTTO_LOG, new Response(JSON.stringify(list)))
+    await log([
+      { got: NOW + 1000, at: NOW, closed: false },
+      { got: NOW + 2000, at: NOW, closed: false, again: true },
+      { got: NOW + 3000, at: NOW + 30 * MIN, closed: false, quiet: true },
+      { got: NOW + 60 * MIN, at: NOW + 60 * MIN, closed: true },
+      { got: NOW + 61 * MIN, at: 0 },
+      null,
+    ])
+    const first = [{ id: `${NOW + 1000}:${NOW}`, at: NOW }, { id: `${NOW + 60 * MIN}:${NOW + 60 * MIN}`, at: NOW + 60 * MIN }]
+    expect(await p.shown()).toEqual(first)
+    // 不清掉：再讀還是一樣（另一個分頁也讀得到）
+    expect(await (await boot()).shown()).toEqual(first)
+    // 時鐘被往回調過：新的那一筆送到的時間比較早，照樣讀得到
+    await log([{ got: NOW + 60 * MIN, at: NOW + 60 * MIN }, { got: NOW - 5 * MIN, at: NOW + 90 * MIN }])
+    expect(await p.shown()).toEqual([{ id: `${NOW + 60 * MIN}:${NOW + 60 * MIN}`, at: NOW + 60 * MIN }, { id: `${NOW - 5 * MIN}:${NOW + 90 * MIN}`, at: NOW + 90 * MIN }])
+  })
   it('看著頁面時只把字存進快取；離開頁面時才交（keepalive，幾毫秒後），沒變就不再交', async () => {
     const p = await boot()
     const list = items(15, 30, 45)
