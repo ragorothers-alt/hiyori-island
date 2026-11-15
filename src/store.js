@@ -7,7 +7,7 @@
 import { uid, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS } from './store/util.js'
 import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM } from './theme.js'
 import { isEvent } from './events.js'
-import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj } from './store/migrate.js'
+import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE } from './store/migrate.js'
 import { projectProgress, progressAll } from './projects.js'
 import { bondLevel, BOND_POINTS, actLevel, outfitOf, outfitLevel } from './data/bond.js'
 import { townOf, townChanges } from './data/town.js'
@@ -139,15 +139,26 @@ export function weekKey(date) {
   const d = parseDate(date)
   return addDays(date, -((d.getDay() + 6) % 7))
 }
-// 回神紀錄的三個數字：from 那邊比較大的抄到 to（換成另一版時用，見 replaceState）
-const TALLIES = ['nudges', 'backs', 'onTask']
+// 回神紀錄的幾個數字（自動記的、只會往上加）：from 那邊比較大的抄到 to（換成另一版時用，見 replaceState）。
+// from 可能是還沒清洗過的存檔（另一個分頁剛寫的）：日期、數字不對的不抄。回傳 to 有沒有哪個數字變大
+const TALLIES = ['nudges', 'backs', 'onTask', 'leaves']
 function keepTallies(from, to) {
-  for (const [date, h] of Object.entries(from || {})) {
-    if (!h || !TALLIES.some((k) => h[k] > 0)) continue
-    const n = (to[date] ||= emptyDay())
-    for (const k of TALLIES) if ((h[k] || 0) > (n[k] || 0)) n[k] = h[k]
+  if (!isObj(from) || !isObj(to)) return false
+  let raised = false
+  for (const [date, h] of Object.entries(from)) {
+    if (!DATE_RE.test(date) || !isObj(h)) continue
+    for (const k of TALLIES) {
+      const v = Math.min(1e7, Math.floor(h[k]))
+      if (!(v > (to[date]?.[k] || 0))) continue
+      ;(to[date] ||= emptyDay())[k] = v
+      raised = true
+    }
   }
+  return raised
 }
+// 回神紀錄跟著哪一份資料（gen）：匯入、還原備份、重置換了一整份資料時換一個，
+// 之後別的分頁、別台裝置拿到這一份時，舊的數字不會再被取比較大的加回來
+const sameGen = (a, b) => (a?.tallyGen || '') === (b?.tallyGen || '')
 
 export class Store {
   constructor() {
@@ -197,6 +208,8 @@ export class Store {
     }
     if (obj.rev === this.state.rev) {
       this._diskRev = obj.rev
+      // 同一版，但另一個分頁自動記了回神紀錄（不換 rev）：數字併過來，這邊之後存檔時才不會用舊的數字蓋掉
+      if (sameGen(obj, this.state) && keepTallies(obj.history, this.state.history)) this.emit('change')
       return false
     }
     try {
@@ -206,6 +219,13 @@ export class Store {
       console.warn('[hiyori] 讀取另一個分頁的存檔失敗', err)
       return false
     }
+  }
+  // 記回神紀錄之前：存檔裡另一個分頁剛記的先併進來（存檔事件還在路上、這個分頁剛從凍住醒來的時候）
+  _diskTallies() {
+    try {
+      const obj = JSON.parse(localStorage.getItem(KEY) || 'null')
+      if (isObj(obj) && sameGen(obj, this.state)) keepTallies(obj.history, this.state.history)
+    } catch {}
   }
   // 存檔是新版 App 寫的（另一個分頁已經更新了）：這邊不讀它、也不再寫，請使用者重新整理
   _newer() {
@@ -500,8 +520,8 @@ export class Store {
     for (let d = wk; d <= end; d = addDays(d, 1)) days.push(d)
     const set = new Set(days)
     const tasks = this.state.tasks.filter((t) => set.has(t.date) && !floating(t))
-    // nudges／backs／onTask：警語提醒了幾次、之後回到正事幾次、本來就在做正事幾次（回神紀錄）
-    const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null, nudges: 0, backs: 0, onTask: 0 }
+    // nudges／backs／onTask：警語提醒了幾次、之後回到正事幾次、本來就在做正事幾次（回神紀錄）；leaves：專注中切去用別的 App 幾次
+    const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null, nudges: 0, backs: 0, onTask: 0, leaves: 0 }
     // 本命：完成的和總數都從同一批任務算（以前完成數看每天的紀錄，刪掉或改日期的本命會算出「1 / 0」）
     for (const t of tasks) {
       if (t.done) r.done++
@@ -518,6 +538,7 @@ export class Store {
       r.nudges += h.nudges || 0
       r.backs += h.backs || 0
       r.onTask += h.onTask || 0
+      r.leaves += h.leaves || 0
       if (h.tasks || h.focus || h.habits) r.active++
     }
     // 習慣：那幾天該做的次數裡做到了幾次（今天還沒做的不算進去）
@@ -1090,8 +1111,15 @@ export class Store {
     next.updatedAt = updatedAt
     next.rev = rev
     // 同步拉回別台的、換成別的分頁的那一版：回神紀錄（自動記的、只會往上加）每天取比較大的那個，
-    // 這台還沒同步出去的提醒次數不會被蓋掉。匯入、還原備份不算（那是整份換掉）
-    if (soft) keepTallies(this.state?.history, next.history)
+    // 這台還沒同步出去的提醒次數不會被蓋掉。匯入、還原備份是整份換掉：換一個 gen，之後誰拿到這一份都照它的數字
+    let raised = false
+    if (soft && sameGen(this.state, next)) raised = keepTallies(this.state?.history, next.history)
+    else if (!soft && !peer) next.tallyGen = uid()
+    // 同步拉回的那一版數字比這台少：算成這台改過一次（換 rev），下一輪同步推上去，別台才拿得到這台多記的
+    if (raised && !peer) {
+      next.rev = newRev()
+      next.updatedAt = Math.max(Date.now(), updatedAt + 1)
+    }
     // 匯入的舊檔沒有小鎮紀錄：照統計直接蓋好就好，不另外打招呼
     delete next.town.welcome
     this.state = next
@@ -1110,8 +1138,11 @@ export class Store {
       this._quitMilestones(this._pending)
     }
     let saved = true
-    if (peer) this._diskRev = rev
-    else saved = this.saveNow()
+    if (peer) {
+      this._diskRev = rev
+      // 這個分頁多記的回神紀錄：寫回存檔（同一版、不算改了資料；那個分頁讀到同一版時會把數字併過去）
+      if (raised) this.save(false)
+    } else saved = this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready
     if (!peer) this.emit('dirty')

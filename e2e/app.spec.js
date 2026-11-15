@@ -1744,6 +1744,8 @@ test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出�
 })
 
 test('Android 殼：警語排好整串交給手機（App 關著也照時間通知）；看著 App 時頁面自己念，提示卡寫現在該做', async ({ page, context, site }) => {
+  // 步驟多：機器忙（好幾個測試一起用軟體算圖）的時候會超過一分鐘
+  test.setTimeout(120000)
   // 台北今天上午 9:59:30 打開 App（醒著的時間）；上一則警語排在 9:45，開好之後到了 10:00 輪到下一則。
   // （開場還沒好時不提醒：機器忙的時候開場很久，提示卡在測試看到之前就收掉了）
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
@@ -1822,6 +1824,84 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   await page.locator('#mottoRoot .mt-reach [data-act="notify"]').click()
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('App 關著、手機鎖著也會照時間通知')
   await expect.poll(async () => (await plan())?.length ?? 0).toBeGreaterThan(60)
+})
+
+// 專注中切去用別的 App：Android 的 App 分得出鎖著手機和切走（awayLocked），鎖著手機專心的不算中途離開。
+// 叫你回來的那一則交給手機排（到點時手機鎖著就不發，在 MottoNotice 裡）
+test('專注中離開 App：切走時交給手機一則「回來吧」；回來時說還剩幾分鐘、記一次中途離開（鎖著手機的不算）；到點的提示卡寫中途離開幾次；設定裡可以關', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    // 假的 Android 殼（4 起有 awayLocked）：記下每一次交給手機的那一串；__fg：App 在不在前面，__locked：離開時手機鎖著嗎
+    window.__mottos = []
+    window.__fg = true
+    window.__locked = false
+    window.HiyoriNative = {
+      version: () => 4, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify() {},
+      mottos: (json) => window.__mottos.push(json), mottoHandled: () => 0, mottoClaim: () => true, mottoSeen() {}, takeAct: () => '',
+      foreground: () => window.__fg,
+      awayLocked: () => window.__locked,
+    }
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => !!window.__hidden, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [{ id: 'e2e-t1', title: '寫期末報告', priority: 3, date: ymd, star: true }]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: { notify: true } }))
+    }
+  }, { ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await bootReady(page)
+  const plan = async () => {
+    const last = await page.evaluate(() => window.__mottos.at(-1))
+    return last ? JSON.parse(last).items : []
+  }
+  const leave = (locked) => page.evaluate((l) => Object.assign(window, { __fg: false, __locked: l, __hidden: true }) && document.dispatchEvent(new Event('visibilitychange')), locked)
+  const back = () => page.evaluate(() => Object.assign(window, { __fg: true, __hidden: false }) && document.dispatchEvent(new Event('visibilitychange')))
+  const leaves = () => page.evaluate(() => [window.hiyori.store.peekDay(window.hiyori.store.today).leaves, window.hiyori.ui.focus.away])
+  await page.evaluate(() => window.hiyori.ui.focus.startWith('e2e-t1'))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  // 切去用別的 App：3 分鐘後叫你回來的那一則交給手機（通知上沒有警語的按鈕）
+  await leave(false)
+  await expect.poll(plan).toEqual([{ at: T + 3 * 60000, title: 'ひより · 專注中', body: '「寫期末報告」還在專注中，還剩 22 分鐘。回來吧', back: true }])
+  // 2 分鐘後回來：說一聲還剩幾分鐘、記一次中途離開；排著的那一則取消
+  await page.clock.setFixedTime(new Date(T + 2 * 60000))
+  await back()
+  await expect(page.locator('#appChat')).toContainText('23 分鐘')
+  expect(await leaves()).toEqual([1, 1])
+  await expect.poll(plan).toEqual([])
+  // 鎖著手機專心做事：回來時照樣說一聲，但不算中途離開
+  await leave(true)
+  await page.clock.setFixedTime(new Date(T + 5 * 60000))
+  await back()
+  await expect(page.locator('#appChat')).toContainText('20 分鐘')
+  expect(await leaves()).toEqual([1, 1])
+  // 看一眼訊息就回來（不到 1 分鐘）：不吵、不算
+  await page.evaluate(() => window.hiyori.ui.chatter('mochi', '（測試）', 9000))
+  await leave(false)
+  await page.clock.setFixedTime(new Date(T + 5 * 60000 + 30000))
+  await back()
+  await page.waitForTimeout(300)
+  await expect(page.locator('#appChat')).toContainText('（測試）')
+  expect(await leaves()).toEqual([1, 1])
+  // 到點：提示卡寫這一輪中途離開了幾次
+  await page.clock.setFixedTime(new Date(T + 25 * 60000 + 1000))
+  await expect(page.locator('#toasts .toast', { hasText: '專注完成' })).toContainText('中途離開 1 次')
+  // 設定裡關掉：切走時不排那一則（回來時照樣說一聲）。先縮小專注頁（休息中還開著）
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.toggleBig(false)
+    window.hiyori.ui.setTab('records')
+  })
+  await expect(page.locator('#awayRow')).toBeVisible()
+  await page.locator('#awayBtn').click()
+  await expect(page.locator('#awayBtn')).toHaveText('關')
+  await page.evaluate(() => window.hiyori.ui.focus.startWith('e2e-t1'))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await leave(false)
+  await page.waitForTimeout(1500)
+  expect(await plan()).toEqual([])
 })
 
 // 通知本身（Android 的 MottoNotice、Service Worker 的 notificationclick）在 tests/sw.test.js 測；這裡是打開 App 之後頁面照著做

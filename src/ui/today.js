@@ -172,16 +172,20 @@ export class TodayView {
       case 'idle-snooze':
         this.hooks.snoozeIdle?.(id)
         return this.render()
-      // 先記下的事：變成今天、明天的任務，或不用做了
+      // 先記下的事：變成今天、明天的任務，或不用做了。這一筆拿掉之後，鍵盤焦點接到旁邊那一筆的同一顆按鈕
       case 'park-today':
-      case 'park-tmr': {
+      case 'park-tmr':
+      case 'park-drop': {
+        const li = b.closest('li')
+        const near = (li?.nextElementSibling || li?.previousElementSibling)?.querySelector('[data-id]')?.dataset.id
+        this._fkNear = near ? `${b.dataset.fk.slice(0, 3)}${near}` : null
+        if (b.dataset.act === 'park-drop') return s.unpark(id)
         s.tick()
         const tmr = b.dataset.act === 'park-tmr'
         const t = s.parkToTask(id, tmr ? addDays(s.today, 1) : s.today)
         if (t) this.hooks.toast({ icon: '記', title: `「${t.title}」排進${tmr ? '明天' : '今天'}`, sub: tmr ? '明天的任務' : '今天的任務', ms: 3200 })
         return
       }
-      case 'park-drop': return s.unpark(id)
     }
   }
 
@@ -270,10 +274,12 @@ export class TodayView {
       nt.value = draft
       this._syncRefBtn()
     }
+    const near = this._fkNear
+    this._fkNear = null
     if (!fk) return
     const id = fk.replace(/^[a-z]+-/, '')
     const by = (k) => $(`[data-fk="${CSS.escape(k)}"]:not(:disabled)`, this.root)
-    const to = by(fk) || by(`tg-${id}`) || by(`fc-${id}`) || (card && ($(`.${card} :is(li, .td-hr) button:not(:disabled)`, this.root) || $(`.${card} button:not(:disabled)`, this.root)))
+    const to = by(fk) || by(`tg-${id}`) || by(`fc-${id}`) || (near && by(near)) || (card && ($(`.${card} :is(li, .td-hr) button:not(:disabled)`, this.root) || $(`.${card} button:not(:disabled)`, this.root)))
     to?.focus({ preventScroll: true })
     if (to === nt && caret) nt.setSelectionRange(...caret)
   }
@@ -614,7 +620,7 @@ export class TodayView {
       const d = new Date(x.at)
       const k = esc(x.id)
       return `<li><span class="td-park-t">${esc(x.text)}</span><time>${d.getMonth() + 1}/${d.getDate()} ${hhmm(d.getHours() * 60 + d.getMinutes())}</time>
-        <span class="td-park-acts"><button type="button" class="btn-ghost" data-act="park-today" data-id="${k}" data-fk="pk-${k}">今天做</button><button type="button" class="btn-ghost" data-act="park-tmr" data-id="${k}">明天做</button><button type="button" class="td-park-x" data-act="park-drop" data-id="${k}" aria-label="不用做了：${esc(x.text)}" title="不用做了">×</button></span></li>`
+        <span class="td-park-acts"><button type="button" class="btn-ghost" data-act="park-today" data-id="${k}" data-fk="pk-${k}">今天做</button><button type="button" class="btn-ghost" data-act="park-tmr" data-id="${k}" data-fk="pt-${k}">明天做</button><button type="button" class="td-park-x" data-act="park-drop" data-id="${k}" data-fk="px-${k}" aria-label="不用做了：${esc(x.text)}" title="不用做了">×</button></span></li>`
     }
     // 新記下的在上面
     return `<section class="td-card td-park" aria-label="先記下的事">

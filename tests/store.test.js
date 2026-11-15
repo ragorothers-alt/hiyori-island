@@ -2043,6 +2043,42 @@ describe('週報', () => {
     expect(migrate(old).history['2026-10-20']).toMatchObject({ tasks: 2, nudges: 0, later: 5 })
   })
 
+  it('回神紀錄跟著哪一份資料（gen）：同步拉回、另一個分頁的照舊；匯入、還原備份換一個；讀存檔時壞掉的是空字串', () => {
+    setDate('2026-10-21')
+    const gen = store.state.tallyGen
+    expect(gen).toMatch(/^[\w-]+$/)
+    const remote = JSON.parse(JSON.stringify(store.state))
+    store.replaceState(remote, Date.now(), { soft: true, rev: 'r-remote' })
+    expect(store.state.tallyGen).toBe(gen)
+    // 拉回的那一版數字沒比這台少：rev 照那一版（不推回去）
+    expect(store.state.rev).toBe('r-remote')
+    // 這台多記了：合併後換 rev（算成這台改過一次，下一輪同步推上去）
+    store.mottoNudged(Date.now())
+    store.replaceState(JSON.parse(JSON.stringify(remote)), Date.now(), { soft: true, rev: 'r-remote-2' })
+    expect(store.state.rev).not.toBe('r-remote-2')
+    expect(store.peekDay('2026-10-21').nudges).toBe(1)
+    // 匯入：整份換掉、換一個 gen
+    store.replaceState(JSON.parse(JSON.stringify(remote)), Date.now())
+    expect(store.state.tallyGen).not.toBe(gen)
+    expect(migrate({ ...remote, tallyGen: '<x>' }).tallyGen).toBe('')
+    expect(migrate({ ...remote, tallyGen: undefined }).tallyGen).toBe('')
+    // gen 不一樣（別台匯入過）：照那一版的數字，不取比較大的
+    store.mottoNudged(Date.now() + 5000)
+    store.replaceState({ ...JSON.parse(JSON.stringify(remote)), tallyGen: 'other' }, Date.now(), { soft: true, rev: 'r-remote-3' })
+    expect(store.peekDay('2026-10-21').nudges).toBe(0)
+    expect(store.state.rev).toBe('r-remote-3')
+  })
+
+  it('專注中切去用別的 App：記在今天、不算使用者改了資料；週報加起來', () => {
+    setDate('2026-10-21')
+    const rev = store.state.rev
+    store.focusLeft()
+    store.focusLeft()
+    expect(store.state.rev).toBe(rev)
+    expect(store.weekReport()).toMatchObject({ leaves: 2 })
+    expect(store.peekDay('2026-10-21').leaves).toBe(2)
+  })
+
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
     setDate('2026-10-21')
     const s1 = store.addTask({ title: '本命一', date: '2026-10-21' })

@@ -2,7 +2,8 @@
 //   timer(json)：專注、休息中的即時倒數（Android 16 的 Live Updates，三星手機上是 Now Bar）和到點的鬧鐘
 //   notify(title, body, tag)：一般的提醒；canNotify()／askNotify()：通知權限
 //   mottos(json)：警語的定時提醒，排好接下來的每一則交給手機的鬧鐘（App 關著、鎖著也照時間通知；新版的殼才有）；
-//   mottoHandled()／mottoClaim(at)：手機記的「念到哪一則了」、頁面要念某一則時先說一聲；foreground()：App 在前面嗎
+//   mottoHandled()／mottoClaim(at)：手機記的「念到哪一則了」、頁面要念某一則時先說一聲；foreground()：App 在前面嗎；
+//   awayLocked()：上一次離開 App 時手機是不是鎖著
 // 不在殼裡（瀏覽器、PWA）native 是 null，這個檔案什麼都不做。
 export const native = typeof window !== 'undefined' && window.HiyoriNative ? window.HiyoriNative : null
 
@@ -106,6 +107,18 @@ export function nativeAway(bridge = native) {
     return typeof bridge?.foreground === 'function' && !bridge.foreground()
   } catch {
     return false
+  }
+}
+
+// 專注中離開太久叫你回來：新版的殼（4 起）分得出「鎖著手機」和「切去用別的 App」，警語的那一串收得下這一則（back）。
+// 舊版的殼沒有：不排這一則（舊版會把它當成一般的警語、手機鎖著也發）
+export const nativeBack = (bridge = native) => typeof bridge?.awayLocked === 'function'
+// 上一次離開 App 時手機是不是鎖著（螢幕關了、停在鎖定畫面）：鎖著手機專心做事不算中途離開。問不到是 null
+export function nativeAwayLocked(bridge = native) {
+  try {
+    return nativeBack(bridge) ? !!bridge.awayLocked() : null
+  } catch {
+    return null
   }
 }
 

@@ -37,10 +37,11 @@ const DAYS = [
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
 const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)}<small>時</small>${m % 60 ? `${m % 60}<small>分</small>` : ''}` : `${m}<small>分</small>`)
 // 跟上週比：↑ 多了、↓ 少了（數字一樣或上週沒有就不標）
-const delta = (now, before, unit = '') => {
+// less：越少越好的數字（例如專注中切走幾次）：變少是好的顏色
+const delta = (now, before, unit = '', less = false) => {
   if (before == null || now === before) return ''
   const d = now - before
-  return `<i class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'}${Math.abs(Math.round(d))}${unit}</i>`
+  return `<i class="${(d > 0) !== less ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'}${Math.abs(Math.round(d))}${unit}</i>`
 }
 const CLOCK = '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v3.2h3.2"/><path d="M12 8v4.2l2.8 1.8"/></svg>'
 // ふじ的週報洞察：最近一週的那一份存在這台裝置（{ week, at, out }）
@@ -645,6 +646,8 @@ export class CoachView {
     // 回神紀錄：警語提醒之後回到正事（含本來就在做的）幾次。這兩週都沒有提醒過就不放
     const back = (r) => Math.min(r.nudges, r.backs + r.onTask)
     if (w.nudges || p.nudges) rows.push(['警語回神', `${back(w)}<small> / ${w.nudges} 次</small>`, delta(back(w), p.nudges ? back(p) : null, ' 次')])
+    // 專注中切去用別的 App（Android 的 App 才記得到）：這兩週都沒有就不放
+    if (w.leaves || p.leaves) rows.push(['專注中切走', `${w.leaves}<small> 次</small>`, delta(w.leaves, p.leaves || null, ' 次', true)])
     parts.push(`<section class="wr-card">
       <h3>本週表現分析<small>跟上週同一段比</small></h3>
       <div class="wr-perf">

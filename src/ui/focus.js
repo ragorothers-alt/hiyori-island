@@ -148,13 +148,23 @@ export class FocusTimer {
   }
 
   _save() {
-    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small } = this
-    try {
-      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small }))
-    } catch {}
+    this._persist()
     // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排，Android 殼裡的即時倒數跟著換
     this.hooks.focusPlan?.(this.boundary)
     this.hooks.focusLive?.(this.live, this.boundary)
+  }
+  // 只寫進 localStorage（重新整理、另一個分頁接得回來），不重排通知
+  _persist() {
+    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away } = this
+    try {
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away }))
+    } catch {}
+  }
+  // 這一輪專注中切去用別的 App 一陣子（main.js 量的）：記一次，到點的提示卡上寫中途離開了幾次
+  noteAway() {
+    if (this.mode !== 'focus') return
+    this.away = (this.away || 0) + 1
+    this._persist()
   }
 
   // 現在計時的樣子（Android 殼的即時倒數通知用）：沒在計時是 null。
@@ -216,9 +226,9 @@ export class FocusTimer {
   get counting() {
     return clock.counting(this)
   }
-  // small：這一組是「只做 5 分鐘」（加時的 ext 也是 true 時，是到點後接著做下去）
+  // small：這一組是「只做 5 分鐘」（加時的 ext 也是 true 時，是到點後接著做下去）；away：這一輪中途離開了幾次
   get info() {
-    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, small: !!this.small, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
+    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, small: !!this.small, away: this.away || 0, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
   }
   // 可以選的目標：今天還沒做完的任務、專案裡的長期任務（收藏起來的專案不列）、進行中的專案（暫停的也可以）
   _targets() {
@@ -568,6 +578,8 @@ export class FocusTimer {
     Object.assign(this, clock.focusStart(this, Date.now()))
     // 這一輪的 id：記專注時用來認出「同一輪」（兩個分頁同時到點只記一次）
     this.sid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    // 這一輪中途離開了幾次（新的一輪從 0 開始；延長是同一輪，接著算）
+    this.away = 0
     if (!this.task) this.taskId = null
     if (this.taskId || !this.project) this.projectId = null
     this.togglePicker(false)
@@ -588,6 +600,9 @@ export class FocusTimer {
       this.ui.tuckDock?.(false)
       return this._catSync()
     }
+    // 專注頁蓋住整個畫面：開著的計時設定、目標選單先收起來（不然它們在後面還接著鍵盤，Tab 會跑到看不到的地方）
+    this.toggleSet(false)
+    this.togglePicker(false)
     this._fillTargets($('#ffTarget'))
     this.render()
   }

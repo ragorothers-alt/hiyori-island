@@ -4,9 +4,13 @@ import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS } from '../theme.js'
 
-// 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），只留最近的幾十則
+// 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），照記下的先後只留最近的幾十則
+// （不照提醒的時間排：時鐘被往回調過的話，剛記的那一則會被當成最舊的丟掉）。
+// 存成 { gen, keys }，keys 的每一筆是「時間、'n' 或 'a'」兩個值的陣列；gen 是這份紀錄跟著哪一份資料
+// （匯入、還原備份換了一份就不算數，見 store.js 的 sameGen）
 export const TALLY_KEY = 'hiyori-motto-tally'
 const TALLY_KEEP = 40
+const RANK = { n: 1, a: 2 }
 const tallyKey = (at) => (Number.isFinite(at) && at > 0 ? String(Math.round(at)) : '')
 // 記在那一則的那一天；時間不知道、或怪怪的（未來、一週以前）就記在今天
 function tallyDate(at, today) {
@@ -14,19 +18,16 @@ function tallyDate(at, today) {
   const d = dateStr(new Date(at))
   return d <= today && daysBetween(d, today) <= 7 ? d : today
 }
-function readTally() {
+function readTally(gen) {
   try {
-    const v = JSON.parse(localStorage.getItem(TALLY_KEY) || '{}')
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+    let v = JSON.parse(localStorage.getItem(TALLY_KEY) || 'null')
+    // 舊的格式（{ 時間: 'n' }）：跟著還沒有 gen 的資料
+    if (v && typeof v === 'object' && !Array.isArray(v) && !Array.isArray(v.keys)) v = { gen: '', keys: Object.entries(v) }
+    if (!v || v.gen !== gen || !Array.isArray(v.keys)) return []
+    return v.keys.filter((x) => Array.isArray(x) && typeof x[0] === 'string' && RANK[x[1]])
   } catch {
-    return {}
+    return []
   }
-}
-function writeTally(t) {
-  try {
-    const keep = Object.entries(t).sort((a, b) => Number(b[0]) - Number(a[0])).slice(0, TALLY_KEEP)
-    localStorage.setItem(TALLY_KEY, JSON.stringify(Object.fromEntries(keep)))
-  } catch {}
 }
 
 export const extrasMethods = {
@@ -187,26 +188,61 @@ export const extrasMethods = {
   // 換成別台、別的分頁的那一版時取比較大的數字（見 replaceState 的 _keepTallies），不會被蓋掉。回傳有沒有算
   mottoNudged(at = 0) {
     const key = tallyKey(at)
-    const seen = readTally()
-    if (key && seen[key]) return false
-    this._refreshToday()
-    this.day(tallyDate(at, this.today)).nudges++
-    if (key) writeTally({ ...seen, [key]: 'n' })
+    if (key && this._tallies().has(key)) return false
+    this._diskTallies()
+    this._nudged(at, key)
     this.save(false)
     return true
+  },
+  _nudged(at, key) {
+    this._refreshToday()
+    this.day(tallyDate(at, this.today)).nudges++
+    if (key) this._markTally(key, 'n')
   },
   // 提醒之後怎麼回應：'on' 本來就在做正事（按了「在做了」），其他是回到正事（開始專注、只做 5 分鐘）。
   // 還沒算過這一則提醒的（App 關著時手機、推播發的通知）一起算；同一則只算一次回應
   mottoAnswered(kind, at = 0) {
     const key = tallyKey(at)
-    if (key && readTally()[key] === 'a') return false
-    this.mottoNudged(at)
+    const was = key ? this._tallies().get(key) : null
+    if (was === 'a') return false
+    this._diskTallies()
+    if (!was) this._nudged(at, key)
     const d = this.day(tallyDate(at, this.today))
     if (kind === 'on') d.onTask++
     else d.backs++
-    if (key) writeTally({ ...readTally(), [key]: 'a' })
+    if (key) this._markTally(key, 'a')
     this.save()
     return true
+  },
+  // 這台算過的那幾則：存著的加上記憶體裡的（localStorage 寫不進去時，同一則也不會一直重算）。
+  // 換了一份資料（gen 不一樣）就從頭記
+  _tallies() {
+    const gen = this.state.tallyGen || ''
+    if (this._tallyGen !== gen) {
+      this._tallyGen = gen
+      this._tallyMem = new Map()
+    }
+    const m = new Map(readTally(gen))
+    for (const [k, v] of this._tallyMem) if (!(RANK[m.get(k)] >= RANK[v])) m.set(k, v)
+    return m
+  },
+  _markTally(key, v) {
+    const m = this._tallies()
+    m.delete(key)
+    m.set(key, v)
+    const keys = [...m].slice(-TALLY_KEEP)
+    this._tallyMem = new Map(keys)
+    try {
+      localStorage.setItem(TALLY_KEY, JSON.stringify({ gen: this._tallyGen, keys }))
+    } catch {}
+  },
+
+  // 專注中切去用別的 App 一陣子（週報看得到）。自動記的：不算使用者改了資料（跟 mottoNudged 一樣，換版時取比較大的）
+  focusLeft() {
+    this._diskTallies()
+    this._refreshToday()
+    this.day().leaves++
+    this.save(false)
   },
 
   // ── 先記下來 ──

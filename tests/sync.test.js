@@ -145,6 +145,45 @@ describe('雲端資料夾同步', () => {
     expect(titles(JSON.parse(a.mem.getItem('hiyori-daily-v1')))).toContain('還在排隊的')
   })
 
+  it('回神紀錄：這台自動記的次數比拉回來的那一版多，合併後算成這台改過一次，下一輪推上去，別台也拿得到', async () => {
+    const a = device()
+    await link(a, file)
+    later()
+    const b = device()
+    await link(b, file)
+    // A 念了兩則警語（自動記的：不換 rev、不推）
+    later()
+    await a.run((s) => {
+      s.mottoNudged(Date.now())
+      s.mottoNudged(Date.now() + 1000)
+    })
+    // B 改了資料、推上去
+    later()
+    await b.run(async (s, sync) => {
+      s.addTask({ title: 'B 的任務' })
+      await sync.sync()
+    })
+    later()
+    await a.run(async (s, sync) => {
+      await sync.sync()
+      expect(titles(s)).toContain('B 的任務')
+      expect(s.peekDay(s.today).nudges).toBe(2)
+      expect(sync.dirty).toBe(true)
+      await sync.sync()
+      expect(sync.dirty).toBe(false)
+      expect(sync.state).toBe('linked')
+    })
+    expect(JSON.parse(file.content).state.history['2026-10-25'].nudges).toBe(2)
+    // B 再同步一次就拿到了，不會兩邊推來推去
+    later()
+    await b.run(async (s, sync) => {
+      await sync.sync()
+      expect(s.peekDay(s.today).nudges).toBe(2)
+      expect(sync.dirty).toBe(false)
+      expect(titles(s)).toContain('B 的任務')
+    })
+  })
+
   it('全新裝置連結既有檔案會直接載入，不會問衝突', async () => {
     const a = device()
     await a.run((s) => s.addTask({ title: 'A 的任務' }))

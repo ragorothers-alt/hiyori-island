@@ -103,6 +103,8 @@ export function restoreState(saved, dflt = {}) {
     ext,
     // 只做 5 分鐘是倒數的（接著做下去時是加時）
     small: saved?.small === true && (!up || ext),
+    // 這一輪中途離開了幾次
+    away: Math.round(n(saved?.away, 0, 999, 0)),
     doneAt: saved?.mode === 'break' && Number.isFinite(saved?.doneAt) && saved.doneAt > 0 ? saved.doneAt : null,
     focusMin: n(saved?.focusMin, 0.05, FREE_MAX, dflt.focusMin ?? 25),
     breakMin: n(saved?.breakMin, 0.05, 60, dflt.breakMin ?? 5),

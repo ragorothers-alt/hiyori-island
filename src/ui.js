@@ -10,7 +10,7 @@ import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
-import { native, nativeMottos } from './native.js'
+import { native, nativeMottos, nativeBack } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
 import { parseQuick, describeQuick, parseSpend } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -2345,6 +2345,11 @@ export class UI {
     const stuck = this.store.state.settings.stuckNudge
     setOn($('#stuckBtn'), stuck)
     $('#stuckBtn').textContent = stuck ? '開' : '關'
+    // 專注中叫我回來：只有 Android 的 App 分得出鎖著手機和切去別的 App（網頁沒有這一列）
+    $('#awayRow').hidden = !nativeBack()
+    const awayOn = this.store.state.settings.awayNudge !== false
+    setOn($('#awayBtn'), awayOn)
+    $('#awayBtn').textContent = awayOn ? '開' : '關'
     const brief = this.store.state.settings.brief !== false
     setOn($('#briefBtn'), brief)
     $('#briefBtn').textContent = brief ? '開' : '關'
@@ -2801,6 +2806,10 @@ export class UI {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()
       this.renderTasks()
+    }
+    $('#awayBtn').onclick = () => {
+      this.store.setSetting('awayNudge', this.store.state.settings.awayNudge === false)
+      this.renderSettings()
     }
     $('#briefBtn').onclick = () => {
       this.store.setSetting('brief', this.store.state.settings.brief === false)

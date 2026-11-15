@@ -156,7 +156,12 @@ describe('時間到了還沒做完：加時；輪數做完了還想繼續：再�
 describe('重新整理後接回計時', () => {
   it('好好的存檔照原樣接回來', () => {
     const saved = { mode: 'focus', endAt: 1_000_000, paused: null, taskId: 't1', projectId: 'p1', up: false, focusMin: 50, breakMin: 10, round: 2, rounds: 3, sid: 'abc-123' }
-    expect(restoreState(saved)).toEqual({ ...saved, projectId: null, ext: false, doneAt: null, small: false })
+    expect(restoreState(saved)).toEqual({ ...saved, projectId: null, ext: false, doneAt: null, small: false, away: 0 })
+    // 中途離開了幾次：接著算（壞掉的是 0，取整數、最多 999）
+    expect(restoreState({ ...saved, away: 2 }).away).toBe(2)
+    expect(restoreState({ ...saved, away: 'x' }).away).toBe(0)
+    expect(restoreState({ ...saved, away: 1.6 }).away).toBe(2)
+    expect(restoreState({ ...saved, away: 5000 }).away).toBe(999)
     // 加時中、休息中記著上一段幾點結束的：也接得回來
     expect(restoreState({ ...saved, up: true, ext: true })).toMatchObject({ up: true, ext: true })
     expect(restoreState({ ...saved, mode: 'break', doneAt: 990_000 })).toMatchObject({ mode: 'break', doneAt: 990_000, ext: false })
@@ -166,7 +171,7 @@ describe('重新整理後接回計時', () => {
 
   it('壞掉的欄位換成安全的值：長度用現在的、輪數夾在範圍裡、id 不是字串就不要', () => {
     const r = restoreState({ mode: 'break', endAt: 'x', paused: -5, taskId: 5, projectId: 'p2', up: 'yes', focusMin: NaN, breakMin: 999, round: 9, rounds: 7, sid: '<script>' }, { focusMin: 30, breakMin: 5 })
-    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, ext: false, small: false, doneAt: null, focusMin: 30, breakMin: 60, round: 7, rounds: 7, sid: null })
+    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, ext: false, small: false, away: 0, doneAt: null, focusMin: 30, breakMin: 60, round: 7, rounds: 7, sid: null })
     expect(restoreState({ rounds: 99, round: 50 })).toMatchObject({ rounds: MAX_ROUNDS, round: MAX_ROUNDS })
     // 加時的標記對不上（不是往上數、不是專注中）就不算；doneAt 壞掉也不要
     expect(restoreState({ mode: 'focus', up: false, ext: true }).ext).toBe(false)

@@ -1,6 +1,7 @@
 package app.hiyori.daily;
 
 import android.app.AlarmManager;
+import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.drawable.Icon;
+import android.os.PowerManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -20,7 +22,8 @@ import java.util.UUID;
 // 或網頁念過的最後一則的時間），兩邊都照它分——
 //   App 不在前面：到點的由這裡通知，記下來（網頁醒著也不會再念）
 //   App 在前面：這裡不發，網頁念之前先 claim（記下來）；網頁還沒念就離開 App 的話，離開時（away）補發
-// 排好的存在 SharedPreferences：開機、App 更新後鬧鐘被清掉時照它重排（MottoBoot）
+// 排好的存在 SharedPreferences：開機、App 更新後鬧鐘被清掉時照它重排（MottoBoot）。
+// 專注中離開 App 太久的那一則（back）也排在這裡：到點時手機鎖著（螢幕關了、停在鎖定畫面）就不發——那是鎖著手機在專心
 final class MottoNotice {
     private static final String CH = "motto";
     private static final String PREFS = "hiyori";
@@ -107,7 +110,14 @@ final class MottoNotice {
         return Math.max(handled, now - LATE);
     }
 
-    // 網頁交來的：{ items: [{ at, title, body, focus }] }，空字串是不提醒了（排著的取消）。內容當成資料看，只收需要的欄位
+    // 手機鎖著嗎：螢幕關了，或亮著但停在鎖定畫面（按一下電源鍵看時間）
+    static boolean locked(Context c) {
+        PowerManager pm = c.getSystemService(PowerManager.class);
+        KeyguardManager km = c.getSystemService(KeyguardManager.class);
+        return (pm != null && !pm.isInteractive()) || (km != null && km.isKeyguardLocked());
+    }
+
+    // 網頁交來的：{ items: [{ at, title, body, focus, back }] }，空字串是不提醒了（排著的取消）。內容當成資料看，只收需要的欄位
     static synchronized void plan(Context c, String json) {
         JSONArray items = new JSONArray();
         try {
@@ -118,8 +128,10 @@ final class MottoNotice {
                 long at = o.optLong("at", 0);
                 String title = o.optString("title");
                 if (at <= 0 || title.isEmpty()) continue;
-                // focus：有現在該做的那一件（通知上多一顆「開始專注」）
-                items.put(new JSONObject().put("at", at).put("title", clip(title, 80)).put("body", clip(o.optString("body"), 300)).put("focus", o.optBoolean("focus")));
+                // focus：有現在該做的那一件（通知上多一顆「開始專注」）；back：專注中離開太久、叫你回來的那一則
+                JSONObject item = new JSONObject().put("at", at).put("title", clip(title, 80)).put("body", clip(o.optString("body"), 300)).put("focus", o.optBoolean("focus"));
+                if (o.optBoolean("back")) item.put("back", true);
+                items.put(item);
             }
         } catch (Exception ignored) {
         }
@@ -142,7 +154,8 @@ final class MottoNotice {
             if (due != null) {
                 handled = due.optLong("at");
                 SharedPreferences.Editor e = prefs(c).edit().putLong(KEY_HANDLED, handled);
-                if (now - handled < LATE) {
+                // 叫你回來的那一則：手機鎖著就不發（只記成處理過）
+                if (now - handled < LATE && !(due.optBoolean("back") && locked(c))) {
                     show(c, due);
                     e.putLong(KEY_POSTED, now);
                 }
@@ -219,7 +232,8 @@ final class MottoNotice {
         keep(c, load(c), cutoff(handled(c, now), now), now);
     }
 
-    // o：{ title, body, focus }。下面兩顆按鈕：有現在該做的那一件才有「開始專注」；「先停 1 小時」都有
+    // o：{ title, body, focus, back }。下面兩顆按鈕：有現在該做的那一件才有「開始專注」；「先停 1 小時」都有。
+    // 叫你回來的那一則（back）沒有按鈕：點一下回到 App
     private static void show(Context c, JSONObject o) {
         String title = o.optString("title");
         String body = o.optString("body");
@@ -234,8 +248,10 @@ final class MottoNotice {
                 .setCategory(Notification.CATEGORY_REMINDER)
                 .setAutoCancel(true)
                 .setContentIntent(TimerNotice.open(c));
-        if (o.optBoolean("focus")) b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_focus), act(c, "focus", 30)).build());
-        b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_pause), act(c, "pause", 31)).build());
+        if (!o.optBoolean("back")) {
+            if (o.optBoolean("focus")) b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_focus), act(c, "focus", 30)).build());
+            b.addAction(new Notification.Action.Builder(icon, c.getString(R.string.act_pause), act(c, "pause", 31)).build());
+        }
         // 同一個 tag：新的一則換掉上一則，不會在通知欄疊一長串
         m.notify(TAG, ID, b.build());
     }

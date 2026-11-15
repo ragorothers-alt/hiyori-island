@@ -32,10 +32,11 @@ const emptyStats = () => ({
 // focusAm／Pm／Eve／Late：專注分鐘落在早上（5–12 點）、下午（12–18）、晚上（18–24）、深夜（0–5）；
 // plogs：今天寫了進度的專案數（每個專案一天算一次）；
 // 回神紀錄：nudges 警語提醒了幾次（畫面上的提示卡、按了通知上的按鈕），backs 提醒之後回到正事（開始專注、只做 5 分鐘），
-// onTask 提醒時本來就在做正事（按了「在做了」）
+// onTask 提醒時本來就在做正事（按了「在做了」）；leaves 專注中切去用別的 App 1 分鐘以上幾次（Android 的 App 才記得到：
+// 鎖著手機專心的不算）
 const DAY_NUMS = [
   'tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox',
-  'focusAm', 'focusPm', 'focusEve', 'focusLate', 'plogs', 'nudges', 'backs', 'onTask',
+  'focusAm', 'focusPm', 'focusEve', 'focusLate', 'plogs', 'nudges', 'backs', 'onTask', 'leaves',
 ]
 // sleep：那天的睡眠已經給過獎勵
 const DAY_FLAGS = ['perfect', 'starAll', 'habitAll', 'sleep']
@@ -111,6 +112,8 @@ function seed(samples = true) {
     subscriptions: [],
     mottos: [],
     parked: [],
+    // 回神紀錄跟著哪一份資料（見 store.js 的 sameGen）
+    tallyGen: uid(),
     templates: [],
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
@@ -715,6 +718,8 @@ function migrate(s) {
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
     parked: cleanParked(s.parked),
+    // 舊存檔沒有：空字串（每台都一樣，照常取比較大的）
+    tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來

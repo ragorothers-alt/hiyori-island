@@ -36,6 +36,8 @@ public class MainActivity extends Activity {
     private volatile boolean trusted;
     // App 在前面嗎：警語的鬧鐘響時在前面就不發通知（網頁自己會念）
     static volatile boolean foreground;
+    // 上一次離開 App 時手機是不是鎖著（按電源鍵、螢幕自己關掉）：鎖著手機專心做事不算「中途離開」
+    static volatile boolean awayLocked;
     // 按了警語通知上的按鈕（"focus"／"pause"）：網頁用 takeAct 拿走、照著做
     private String act;
     private static final String KEY_ACT = "hiyoriAct";
@@ -143,8 +145,16 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         foreground = false;
+        awayLocked = MottoNotice.locked(this);
         // 到點了、網頁還沒念的警語：離開 App 的這一刻由手機補發
         MottoNotice.away(getApplicationContext());
+    }
+
+    // 按電源鍵時，螢幕關掉、鎖定畫面出來可能比 onPause 晚一點：完全離開時再看一次
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (!foreground && MottoNotice.locked(this)) awayLocked = true;
     }
 
     @Override
@@ -184,10 +194,11 @@ public class MainActivity extends Activity {
 
     // 網頁叫得到的東西。這些方法在另一條執行緒被叫到；只收字串，內容當成資料看
     class Bridge {
-        // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）
+        // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）；
+        // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）
         @JavascriptInterface
         public int version() {
-            return 3;
+            return 4;
         }
 
         // 按了警語通知上的哪一顆按鈕："focus"（開始專注現在該做的那一件）、"pause"（先停 1 小時），沒有是空字串。拿走就清掉
@@ -263,6 +274,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean foreground() {
             return foreground;
+        }
+
+        // 上一次離開 App 時手機是不是鎖著（是的話不算「切去用別的 App」）
+        @JavascriptInterface
+        public boolean awayLocked() {
+            return awayLocked;
         }
     }
 }

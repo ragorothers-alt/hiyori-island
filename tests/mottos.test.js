@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
 import { MOTTO_MAX, MOTTO_LEN, MOTTO_ROTATE, MOTTO_EVERY, MOTTO_LATE, PLAN_MAX, PAUSE_MAX, activeMottos, awake, mottoAt, nextMotto, windowEnd, planMottos, planUntil, planKey, pauseText, pauseUntil, pausedUntil } from '../src/mottos.js'
-import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway } from '../src/native.js'
+import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway, nativeBack, nativeAwayLocked } from '../src/native.js'
 
 const at = (h, m = 0, d = 25) => new Date(2026, 9, d, h, m)
 let store
@@ -934,5 +934,16 @@ describe('警語交給手機排（Android 殼）', () => {
     expect(nativeTakeAct({ takeAct: () => { throw new Error('gone') } })).toBe('') // prettier-ignore
     expect(nativeTakeAct({})).toBe('')
     expect(nativeTakeAct(null)).toBe('')
+  })
+
+  it('上一次離開 App 時手機鎖著嗎：新版的殼（4 起）才分得出來；舊版的殼、問不到時是 null（不算中途離開、也不排叫你回來的那一則）', () => {
+    expect(nativeBack({ awayLocked: () => false })).toBe(true)
+    expect(nativeBack({ foreground: () => true })).toBe(false)
+    expect(nativeBack(null)).toBe(false)
+    expect(nativeAwayLocked({ awayLocked: () => true })).toBe(true)
+    expect(nativeAwayLocked({ awayLocked: () => false })).toBe(false)
+    expect(nativeAwayLocked({ awayLocked: () => { throw new Error('gone') } })).toBeNull() // prettier-ignore
+    expect(nativeAwayLocked({})).toBeNull()
+    expect(nativeAwayLocked(null)).toBeNull()
   })
 })

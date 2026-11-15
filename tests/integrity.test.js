@@ -24,6 +24,112 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調', () => {
+  const TALLY = 'hiyori-motto-tally'
+  const day = (s) => s.peekDay(s.today)
+  const disk = () => JSON.parse(localStorage.getItem(KEY)).history[store.today]
+
+  it('另一個分頁自動記的提醒（不換 rev）：收到存檔事件就併過來，在這邊按回應不會把提醒次數蓋掉；事件還沒到時記之前先讀存檔', async () => {
+    store.saveNow()
+    const b = new Store()
+    const at = Date.now()
+    store.mottoNudged(at)
+    await Promise.resolve()
+    b._otherTabSaved({ key: KEY })
+    expect(day(b).nudges).toBe(1)
+    b.mottoAnswered('back', at)
+    await Promise.resolve()
+    expect(day(b)).toMatchObject({ nudges: 1, backs: 1 })
+    expect(disk()).toMatchObject({ nudges: 1, backs: 1 })
+    // A 跟上 B 的那一版後又念了一則；B 還沒收到事件（剛從凍住醒來）就按了回應
+    store._otherTabSaved({ key: KEY })
+    const at2 = at + 60000
+    store.mottoNudged(at2)
+    await Promise.resolve()
+    b.mottoAnswered('on', at2)
+    await Promise.resolve()
+    expect(day(b)).toMatchObject({ nudges: 2, backs: 1, onTask: 1 })
+    expect(disk()).toMatchObject({ nudges: 2, backs: 1, onTask: 1 })
+  })
+
+  it('換成另一個分頁的那一版時，這邊多記的次數寫回存檔（同一版、不算改了資料），那邊再併過去', async () => {
+    store.saveNow()
+    const b = new Store()
+    b.mottoNudged(Date.now())
+    await Promise.resolve()
+    // A 還沒收到 B 的事件就改了資料：A 寫出去的那一版沒有 B 記的提醒
+    store.addTask({ title: 'A 的任務' })
+    await Promise.resolve()
+    expect(disk()?.nudges || 0).toBe(0)
+    b._otherTabSaved({ key: KEY })
+    await Promise.resolve()
+    expect(b.state.tasks.map((t) => t.title)).toContain('A 的任務')
+    expect(b.state.rev).toBe(store.state.rev)
+    expect(disk().nudges).toBe(1)
+    store._otherTabSaved({ key: KEY })
+    expect(day(store).nudges).toBe(1)
+  })
+
+  it('匯入、還原備份（整份換掉）：另一個分頁不會用取比較大的把舊的次數加回來；去重表也跟著換一份', async () => {
+    const at = Date.now()
+    store.mottoNudged(at)
+    store.mottoAnswered('back', at)
+    await Promise.resolve()
+    const b = new Store()
+    expect(day(b)).toMatchObject({ nudges: 1, backs: 1 })
+    store.importJSON(JSON.stringify({ tasks: [], player: { xp: 0, coins: 0 } }))
+    b._otherTabSaved({ key: KEY })
+    expect(day(b)).toMatchObject({ nudges: 0, backs: 0 })
+    b.addTask({ title: 'B 加的' })
+    await Promise.resolve()
+    expect(new Store().peekDay(store.today)).toMatchObject({ nudges: 0, backs: 0 })
+    // 匯入的那一份沒有這一則：再按同一則通知上的按鈕，照匯入的那一份重新算
+    store._otherTabSaved({ key: KEY })
+    expect(store.mottoAnswered('back', at)).toBe(true)
+    expect(day(store)).toMatchObject({ nudges: 1, backs: 1 })
+  })
+
+  it('localStorage 寫不進去：同一則在這個分頁也只算一次', () => {
+    const real = localStorage.setItem
+    localStorage.setItem = function (k, v) {
+      if (k === TALLY) throw new Error('QuotaExceededError')
+      return real.call(this, k, v)
+    }
+    try {
+      const at = Date.now()
+      expect(store.mottoNudged(at)).toBe(true)
+      expect(store.mottoAnswered('back', at)).toBe(true)
+      expect(store.mottoAnswered('on', at)).toBe(false)
+      expect(store.mottoNudged(at)).toBe(false)
+      expect(day(store)).toMatchObject({ nudges: 1, backs: 1, onTask: 0 })
+    } finally {
+      delete localStorage.setItem
+    }
+  })
+
+  it('時鐘被往回調過：剛記的那一則不會被當成最舊的丟掉（照記下的先後留最近 40 則）；舊格式的去重表還認得', () => {
+    const base = Date.now()
+    for (let i = 0; i < 40; i++) store.mottoNudged(base + 86400000 + i * 60000)
+    const at = base - 3600000
+    expect(store.mottoNudged(at)).toBe(true)
+    expect(store.mottoAnswered('back', at)).toBe(true)
+    expect(store.mottoNudged(at)).toBe(false)
+    expect(store.mottoAnswered('on', at)).toBe(false)
+    expect(JSON.parse(localStorage.getItem(TALLY)).keys).toHaveLength(40)
+    // 重新打開也認得
+    expect(new Store().mottoAnswered('on', at)).toBe(false)
+    // 上一版存的格式（{ 時間: 'n' }）：跟著還沒有 gen 的資料
+    const old = { ...JSON.parse(localStorage.getItem(KEY)) }
+    delete old.tallyGen
+    localStorage.setItem(KEY, JSON.stringify(old))
+    localStorage.setItem(TALLY, JSON.stringify({ [String(at)]: 'a' }))
+    const c = new Store()
+    expect(c.state.tallyGen).toBe('')
+    expect(c.mottoAnswered('back', at)).toBe(false)
+    expect(c.mottoNudged(at + 1)).toBe(true)
+  })
+})
+
 describe('同一個瀏覽器開兩個分頁', () => {
   it('另一個分頁存檔後，這邊換成那一版，下次存檔不會把它蓋掉', () => {
     store.saveNow()
