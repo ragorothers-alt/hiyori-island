@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf } from '../src/planner.js'
+import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf, firstPickIn } from '../src/planner.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 0 }
 const MON = '2026-10-26'
@@ -152,6 +152,18 @@ describe('今日總覽的「現在」（nowGuide）', () => {
     expect(g.bed).toBe(60)
     expect(g.toBed).toBe(30)
     expect(nowGuide({ rhythm: r, date: MON, nowMin: m('23:00'), events: [], tasks: [] }).toBed).toBe(120)
+  })
+
+  it('明天先做哪一件（firstPickIn）：就寢前 4 小時起、晚上 9 點以後、過了就寢都算；過了午夜還沒到起床時間挑的是今天這個日期', () => {
+    const pick = (r, s) => firstPickIn(r, MON, m(s))
+    // 23:30 就寢、07:00 起床
+    expect(['18:00', '19:30', '21:00', '23:45', '00:30', '06:00'].map((s) => pick(R, s))).toEqual([null, 1, 1, 1, 0, null])
+    // 02:00 才睡：晚上 9 點以後就算，午夜到就寢那段還是前一晚（挑的是今天這個日期）
+    const owl = { ...R, sleep: '02:00' }
+    expect(['20:30', '21:30', '01:00', '03:00', '08:00'].map((s) => pick(owl, s))).toEqual([null, 1, 0, 0, null])
+    // 05:00 才睡、12:00 起床：晚上 9 點起一路到就寢都問，過了午夜不會斷掉；就寢後 4 小時內還沒睡也問，再晚就當成早起
+    const late = { ...R, sleep: '05:00', wake: '12:00' }
+    expect(['20:00', '21:00', '23:30', '00:00', '00:30', '01:00', '06:00', '10:00', '13:00'].map((s) => pick(late, s))).toEqual([null, 1, 1, 0, 0, 0, 0, null, null])
   })
 })
 

@@ -19,6 +19,7 @@ export const EVENTS = {
   taskSplit: '任務拆成三小步',
   taskScheduled: '任務排進時段',
   starPicked: '選了本命',
+  firstPicked: '挑好那天先做的那一件',
   starFull: '本命已經選滿',
   starDone: '本命完成',
   starAll: '本命全清',

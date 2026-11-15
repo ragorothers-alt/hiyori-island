@@ -297,6 +297,102 @@ describe('本命與每日上限', () => {
     expect(store.stats.starDays).toBe(1)
   })
 
+  it('那天先做的那一件（前一晚挑的）：一天一件、挑別件就換過去、再按一次取消；做完的、過去的、長期任務不能挑', () => {
+    const tmr = '2026-10-26'
+    const a = store.addTask({ title: '回信', date: tmr })
+    const b = store.addTask({ title: '寫報告', date: tmr })
+    const today = store.addTask({ title: '今天的', date: TODAY })
+    const onPick = vi.fn()
+    store.on('firstPicked', onPick)
+    expect(store.setFirst(a.id)).toBe(true)
+    expect(store.firstOn(tmr)).toBe(a)
+    expect(store.setFirst(b.id)).toBe(true)
+    expect([a.first, b.first]).toEqual([false, true])
+    expect(store.firstOn(tmr)).toBe(b)
+    // 另一天的不受影響
+    store.setFirst(today.id)
+    expect(store.firstOn(TODAY)).toBe(today)
+    expect(store.firstOn(tmr)).toBe(b)
+    expect(onPick.mock.calls.map((c) => c[0].title)).toEqual(['回信', '寫報告', '今天的'])
+    // 已經是了：不再發一次
+    expect(store.setFirst(b.id)).toBe(true)
+    expect(onPick).toHaveBeenCalledTimes(3)
+    // 取消
+    expect(store.setFirst(b.id, false)).toBe(true)
+    expect(store.firstOn(tmr)).toBeNull()
+    expect(store.setFirst(b.id, false)).toBe(false)
+    // 做完的、過去的不能挑；做完了就不算那天「還沒做的那一件」
+    const done = completeTask('做完的', { date: tmr })
+    expect(store.setFirst(done.id)).toBe(false)
+    const past = store.addTask({ title: '昨天的', date: '2026-10-24' })
+    expect(store.setFirst(past.id)).toBe(false)
+    store.setFirst(a.id)
+    store.toggleTask(a.id)
+    expect(store.firstOn(tmr)).toBeNull()
+    // 長期任務（還沒做完、不屬於哪一天）不能挑；改成長期時拿掉
+    const p = store.addProject({ name: '作品集' })
+    const long = store.addTask({ title: '練習曲', project: p.id, ongoing: true })
+    expect(store.setFirst(long.id)).toBe(false)
+    store.setFirst(b.id)
+    store.updateTask(b.id, { project: p.id, ongoing: true })
+    expect(b.first).toBe(false)
+  })
+
+  it('先做的那一件搬到別天：那天已經挑好別件就不再是；那天還沒挑的照樣是。存檔、匯入後還在', () => {
+    const tmr = '2026-10-26'
+    const a = store.addTask({ title: '回信', date: tmr })
+    const b = store.addTask({ title: '寫報告', date: '2026-10-27' })
+    store.setFirst(a.id)
+    store.setFirst(b.id)
+    store.updateTask(b.id, { date: tmr })
+    expect([a.first, b.first]).toEqual([true, false])
+    store.updateTask(a.id, { date: '2026-10-28' })
+    expect(a.first).toBe(true)
+    expect(store.firstOn('2026-10-28')).toBe(a)
+    const again = new Store()
+    again.importJSON(store.exportJSON())
+    expect(again.firstOn('2026-10-28')?.title).toBe('回信')
+    expect(migrate({ tasks: [{ id: 'x', title: 'x', first: 'yes' }] }).tasks[0].first).toBe(true)
+    expect(blankTask().first).toBe(false)
+  })
+
+  it('先做的那一件：匯入的資料同一天有兩件時只留一件（還沒做完的優先），再挑也換得過去；拆成三小步留在第一步；復原往後挪時放回去', () => {
+    const tmr = '2026-10-26'
+    const m = migrate({ tasks: [
+      { id: 'd', title: '做完的', date: tmr, first: true, done: true },
+      { id: 'a', title: 'A', date: tmr, first: true },
+      { id: 'b', title: 'B', date: tmr, first: true },
+    ] })
+    expect(m.tasks.map((t) => [t.id, t.first])).toEqual([['d', false], ['a', true], ['b', false]])
+    // 存檔裡同一天兩件（手改的存檔）：挑其中已經標著的那一件，另一件也拿掉
+    const a = store.addTask({ title: 'A', date: tmr })
+    const b = store.addTask({ title: 'B', date: tmr })
+    a.first = b.first = true
+    expect(store.setFirst(b.id)).toBe(true)
+    expect([a.first, b.first]).toEqual([false, true])
+    expect(store.firstOn(tmr)).toBe(b)
+    // 拆成三小步：第一步接著是先做的那一件
+    const parts = store.splitTask(b.id)
+    expect(parts.map((p) => p.first)).toEqual([true, false, false])
+    expect(store.firstOn(tmr)).toBe(parts[0])
+    // 往後挪到已經挑好別件的那天：不再是；復原時放回去
+    const today = store.addTask({ title: '今天的', date: TODAY })
+    store.setFirst(today.id)
+    const undo = store.postponeTask(today.id, tmr)
+    expect(today.first).toBe(false)
+    expect(store.firstOn(tmr)).toBe(parts[0])
+    expect(store.undoPostpone(undo)).toBe(true)
+    expect(today.first).toBe(true)
+    expect(store.firstOn(TODAY)).toBe(today)
+    // 挪走之後原本那天另外挑了別件：復原時不搶回來
+    const undo2 = store.postponeTask(today.id, tmr)
+    const other = store.addTask({ title: '另外挑的', date: TODAY })
+    store.setFirst(other.id)
+    store.undoPostpone(undo2)
+    expect(store.firstOn(TODAY)).toBe(other)
+    expect(today.first).toBe(false)
+  })
+
   it('中午前選滿 3 件本命會記下「有計畫」', () => {
     vi.setSystemTime(new Date(2026, 9, 25, 9))
     const tasks = ['甲', '乙', '丙'].map((title) => store.addTask({ title }))
@@ -1936,6 +2032,7 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(ctx.tasks.map((x) => x.id)).toEqual([t.id])
     expect(ctx.rhythm).toBe(store.state.rhythm)
   })
+
 })
 
 describe('先記下來', () => {

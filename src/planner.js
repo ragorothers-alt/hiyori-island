@@ -286,6 +286,23 @@ export function nowGuide({ rhythm, date, nowMin, events = [], tasks = [] }) {
   }
 }
 
+// ── 明天先做哪一件 ──
+// 晚上挑好下一次起床後先做的那一件（今日總覽的卡片、晚間回顧記下之後、就寢提醒）：就寢前 4 小時起、
+// 晚上 9 點以後、過了就寢時間都算。回傳要挑的是幾天後的那天：下一次起床的那天，過了午夜、還沒到起床時間時是 0（今天這個日期），
+// 平常是 1；不是晚上（起床前的清晨也不算）是 null
+export const FIRST_EVE = 240
+export function firstPickIn(rhythm, date, nowMin) {
+  const g = nowGuide({ rhythm, date, nowMin })
+  const wake = toM(rhythm.wake)
+  const bed = bedAt(rhythm)
+  // 就寢在午夜後、現在是午夜到就寢之間：還是前一晚（晚上 9 點起一路接著算，不會過了午夜就斷掉）
+  const late = bed > 1440 && nowMin < bed - 1440
+  // 過了就寢還沒睡：就寢後 4 小時內、還沒到起床時間（就寢在午夜後的，nowGuide 把就寢之後當成起床前）
+  const past = g.phase === 'over' || ((nowMin - bed + 2880) % 1440 < 240 && nowMin < wake)
+  if (!late && !past && (g.phase === 'early' || (g.toBed > FIRST_EVE && nowMin < 21 * 60))) return null
+  return nowMin < wake ? 0 : 1
+}
+
 // ── 睡眠 ──
 // 一筆睡眠紀錄記在「醒來那天」：{ bed: '23:40', wake: '07:10', q: 1–5 }
 export function sleepMinutes(e) {

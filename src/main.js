@@ -617,6 +617,13 @@ async function boot() {
     haptic('tick')
     talk('starPick', { task: short(t.title) }, undefined, `「${short(t.title)}」是今天的本命。`)
   })
+  // 明天先做的那一件挑好了（今日總覽的卡片）：ふじ記下來
+  store.on('firstPicked', (t) => {
+    sfx.chime()
+    haptic('tick')
+    const when = t.date === store.today ? '起床後' : t.date === addDays(store.today, 1) ? '明天' : '那天'
+    talk('firstPick', { task: short(t.title), when }, undefined, `記下了：${when}先從「${short(t.title)}」開始。`, 'fuji')
+  })
   store.on('starFull', () => {
     haptic('warn')
     ui.toast({ icon: '★', title: `本命已經選滿 ${MAX_STARS} 件`, sub: '先取消其中一件，再選這件' })
@@ -966,7 +973,14 @@ async function boot() {
     if (kind === 'bed') {
       sfx.chime()
       talk('bedtime', { time: e.start }, 6000, '就寢時間快到了，今天辛苦了。')
-      ui.toast({ icon: '眠', title: '就寢時間快到了', sub: `預定 ${e.start} 就寢・今天辛苦了`, ms: 9000 })
+      // 明天先做的那一件：挑好了就提一下，還沒挑的話提示卡上可以去挑
+      const day = ui.firstPickDay()
+      const first = day && store.firstOn(day)
+      const word = day === store.today ? '起床後' : '明天'
+      ui.toast({
+        icon: '眠', title: '就寢時間快到了', sub: first ? `預定 ${e.start} 就寢・${word}先做「${short(first.title, 10)}」` : `預定 ${e.start} 就寢・今天辛苦了`, ms: day && !first ? 12000 : 9000,
+        ...(day && !first ? { actions: [{ label: `挑${word}的第一件`, soft: true, run: () => ui.openFirst() }] } : {}),
+      })
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 就寢提醒', `預定 ${e.start} 就寢`, 'bedtime')
       return
     }
@@ -1195,6 +1209,9 @@ async function boot() {
       if (store.selectedDate === store.today && ui.tab === 'schedule') ui.renderSchedule(false)
       if (!scene?.placing && ui.focus.mode !== 'focus') ui.maybeAskReview()
       ui.markSeen()
+      // 晚上要挑明天先做的那一件：明天的例行公事先生成出來，才挑得到（例行公事只能刪不能改，刪的時候還沒做的會一起拿掉）
+      const pickDay = ui.firstPickDay()
+      if (pickDay && pickDay > store.today) store.prepareRoutines(pickDay)
     }
   }, 1000)
   ui.tickClock()

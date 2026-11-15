@@ -85,6 +85,13 @@ export const COACH_FUJI = {
     '照排好的來：現在是「{task}」。',
     '「{task}」的時間到了，先做一點也好。',
   ],
+  // 晚上挑好下一次起床後先做的那一件：{task} 是那一件、{when} 是「明天」「起床後」
+  firstPick: [
+    '記下了：{when}先從「{task}」開始。',
+    '好，{when}第一件是「{task}」，照著走就好。',
+    '先想好第一件，{when}就不用再猶豫了。',
+    '「{task}」排在最前面，{when}見。',
+  ],
   coachHello: {
     morning: [
       '早安，從下面的標籤挑件事吧。',
@@ -431,6 +438,11 @@ export const COACH_MOCHI = {
     '「{task}」的時間到囉！一起開始吧！',
     '叮咚，現在是「{task}」時間！',
     'よし，「{task}」出發！',
+  ],
+  firstPick: [
+    '{when}先做「{task}」！我會記得的～',
+    'よし，第一件是「{task}」！',
+    '挑好了～{when}一起從「{task}」開始吧！',
   ],
   coachApplied: [
     'ふじ排好 {count} 段，我陪你出發囉。',

@@ -55,6 +55,15 @@ describe('今日摘要', () => {
     expect(buildBrief(base({ now: at(9, 35), events: [ev('設計週會', '10:00', '11:00')] })).today[0].sub).toBe('還有 25 分鐘')
   })
 
+  it('前一晚挑好先做的那一件排在本命前面，「專注第一件」就是它；做完了就照原本的順序', () => {
+    const tasks = [task('本命', { star: true, priority: 3 }), task('回信', { first: true, priority: 1 }), task('買菜')]
+    const b = buildBrief(base({ tasks }))
+    expect(b.today.map((x) => `${x.icon}|${x.text}|${x.sub}`)).toEqual(['先|回信|昨晚挑好先做這件', '命|本命|本命', '花|買菜|'])
+    expect(b.first).toEqual({ id: '回信', title: '回信' })
+    const later = buildBrief(base({ tasks: tasks.map((t) => (t.id === '回信' ? { ...t, done: true } : t)) }))
+    expect(later.first).toEqual({ id: '本命', title: '本命' })
+  })
+
   it('提醒：逾期、三天內的重要日子和期限、扣款、一直往後挪的、好久沒碰的', () => {
     const b = buildBrief(
       base({

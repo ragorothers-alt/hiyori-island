@@ -341,7 +341,7 @@ const newTempo = (unit = '') => ({ unit: unitOf(unit), goal: null, log: [], met:
 // 讀存檔時（migrate）每個欄位也都要清洗到：加了新欄位只改這裡和 migrate，tests/store.test.js 會對兩邊的欄位是不是一樣
 export const blankTask = (o = {}) => ({
   id: uid(), title: '', date: dateStr(), priority: 2, tag: 'life', done: false, rewarded: false, createdAt: Date.now(), doneAt: null,
-  routineId: null, pomos: 0, star: false, flower: null, dur: null, at: null, coach: null, moved: 0,
+  routineId: null, pomos: 0, star: false, first: false, flower: null, dur: null, at: null, coach: null, moved: 0,
   project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null,
   ...o,
 })
@@ -378,6 +378,8 @@ function migrate(s) {
       routineId: ID_RE.test(t.routineId) ? t.routineId : null,
       pomos: num(t.pomos, 0, 99, 0),
       star: !!t.star,
+      // first：那天先做的那一件（前一晚挑好的；一天一件）
+      first: !!t.first,
       flower: flowerOf(t.flower) ? t.flower : null,
       // 時段安排：預估分鐘數、排進時間軸的開始時間
       dur: t.dur ? num(t.dur, 5, 600, 30) : null,
@@ -506,11 +508,18 @@ function migrate(s) {
       t.ongoing = false
       if (!t.done) t.date = today
     }
-    // 還沒完成的長期任務不排在哪一天：沒有時段、不當本命
+    // 還沒完成的長期任務不排在哪一天：沒有時段、不當本命、不當那天先做的那一件
     if (floating(t)) {
       t.at = null
       t.star = false
+      t.first = false
     }
+  }
+  // 那天先做的那一件一天只有一件（匯入的舊資料、手改過的存檔可能有兩件）：還沒做完的優先，再來是排在前面的
+  const firstOf = new Set()
+  for (const t of [...tasks.filter((x) => x.first && !x.done), ...tasks.filter((x) => x.first && x.done)]) {
+    if (firstOf.has(t.date)) t.first = false
+    else firstOf.add(t.date)
   }
   // 重新分配塔位：重複的換到空地，空地不夠就先不上島；進行中的專案超過上限的改為收藏
   const used = new Set()

@@ -35,6 +35,40 @@ export const tasksMethods = {
   // 本命搬到別天：那天已經有 MAX_STARS 件本命了，這件就不再是本命（不然一天變四件，「全清」永遠湊不齊）
   _fitStar(t) {
     if (t.star && !t.done && this.starsOn(t.date).filter((x) => x !== t).length >= MAX_STARS) t.star = false
+    // 那天先做的那一件也只有一件：搬過去的那天已經挑好別件了，就留那天挑的
+    if (t.first && this.tasksOn(t.date).some((x) => x !== t && x.first)) t.first = false
+  },
+  // 那天先做的那一件（前一晚挑好，早上起來不用再想先做什麼）：一天一件，挑了別件就換過去；on=false 取消。
+  // 做完的、還沒排在哪一天的長期任務、過去的日子都不能挑。回傳有沒有改
+  setFirst(id, on = true) {
+    const t = this._find('tasks', id)
+    if (!t) return false
+    this._refreshToday()
+    if (!on) {
+      if (!t.first) return false
+      t.first = false
+      this._finish()
+      return true
+    }
+    if (t.done || floating(t) || t.date < this.today) return false
+    // 那天別件也標著的話一起拿掉（匯入的舊資料可能有兩件）
+    let others = false
+    for (const x of this.tasksOn(t.date)) {
+      if (x === t || !x.first) continue
+      x.first = false
+      others = true
+    }
+    if (t.first) {
+      if (others) this._finish()
+      return true
+    }
+    t.first = true
+    this._finish([['firstPicked', t]])
+    return true
+  },
+  // 那天挑好先做、還沒做完的那一件
+  firstOn(date) {
+    return this.tasksOn(date).find((t) => t.first && !t.done) || null
   },
   toggleStar(id) {
     const t = this._find('tasks', id)
@@ -68,6 +102,7 @@ export const tasksMethods = {
     if (floating(t)) {
       t.at = null
       t.star = false
+      t.first = false
     }
     // 沒自己選里程碑的專案任務：記下完成這一刻歸到哪個里程碑
     t.msAuto = null
@@ -178,10 +213,11 @@ export const tasksMethods = {
     // 原本歸的專案和（換過去的）新專案都算動到了
     this._editedTask(t)
     Object.assign(t, patch)
-    // 還沒完成的長期任務不排在哪一天：沒有時段、不當本命
+    // 還沒完成的長期任務不排在哪一天：沒有時段、不當本命、不當那天先做的那一件
     if (floating(t)) {
       t.at = null
       t.star = false
+      t.first = false
     }
     // 換了專案或改了里程碑：做完的任務照新的歸屬重新記一次自動里程碑
     if ('ms' in patch) t.msAuto = t.done && t.project && !t.ms ? taskMilestone(this._find('projects', t.project), t)?.id || null : null
@@ -195,10 +231,10 @@ export const tasksMethods = {
   postponeTask(id, to) {
     const t = this._find('tasks', id)
     if (!t || t.done || !DATE_RE.test(to || '') || !(to > t.date)) return null
-    const undo = { id, date: t.date, at: t.at ?? null, moved: t.moved || 0, star: !!t.star, to }
+    const undo = { id, date: t.date, at: t.at ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first, to }
     this.updateTask(id, { date: to, at: null })
     if (t.date !== to) return null
-    undo.after = { at: t.at ?? null, moved: t.moved || 0, star: !!t.star }
+    undo.after = { at: t.at ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first }
     return undo
   },
   // 復原剛才的往後挪：日期、時段、往後挪的次數（卡關提醒用）、本命都回到原本的樣子。
@@ -213,6 +249,8 @@ export const tasksMethods = {
     t.at = u.at
     t.moved = Math.max(0, (t.moved || 0) - (u.after.moved - u.moved))
     if (u.star && t.star === u.after.star && !floating(t) && t.date >= this.today) t.star = true
+    // 那天先做的那一件也放回去（原本那天之間另外挑了別件的話，_fitStar 會拿掉）
+    if (u.first && t.first === !!u.after.first && !floating(t) && t.date >= this.today) t.first = true
     this._fitStar(t)
     this._editedTask(t)
     this._finish()
@@ -341,7 +379,7 @@ export const tasksMethods = {
       const p = blankTask({
         title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, rewarded: !!t.rewarded, createdAt: Date.now() + i,
         dur: Math.max(10, Math.round((total * share) / 5) * 5), coach: t.coach || null, project: t.project || null, ms: t.ms || null,
-        ...(i === 0 ? { star: !!t.star, pomos: t.pomos || 0, note: t.note || '', subs: t.subs || [], tempo: t.tempo || null } : {}),
+        ...(i === 0 ? { star: !!t.star, first: !!t.first, pomos: t.pomos || 0, note: t.note || '', subs: t.subs || [], tempo: t.tempo || null } : {}),
       })
       fx.push(['taskAdded', p])
       return p

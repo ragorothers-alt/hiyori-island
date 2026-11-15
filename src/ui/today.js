@@ -5,7 +5,8 @@ import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS } from '../theme.js'
 import { TODAY_QUOTES, TODAY_LEADS } from '../data/todayLines.js'
 import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
 import { applies, countOn, doneOn, streak } from '../habits.js'
-import { taskDur, nowGuide, toHHMM } from '../planner.js'
+import { taskDur, nowGuide, toHHMM, firstPickIn } from '../planner.js'
+import { order as doFirst } from '../brief.js'
 import heroDay from '../assets/today/hero-day.webp'
 import heroNight from '../assets/today/hero-night.webp'
 
@@ -45,6 +46,7 @@ const IC = {
   play: svg('<path d="M8.5 6v12l9.5-6z"/>'),
   star: svg('<path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.7.9 5.1L12 16.4l-4.6 2.4.9-5.1-3.8-3.7 5.2-.8z"/>'),
   pin: svg('<path d="M7.5 4.5h9v15l-4.5-3-4.5 3z"/><path d="M10 8.5h4"/>'),
+  sunrise: svg('<path d="M3.5 18h17M7 18a5 5 0 0 1 10 0"/><path d="M12 5.5V9M5.4 9.6l1.9 1.9M18.6 9.6l-1.9 1.9M3.5 14.5h2.2M18.3 14.5h2.2"/>'),
   pen: svg('<path d="M5 19l1.2-4.2L15.6 5.4a2 2 0 0 1 2.9 0l.1.1a2 2 0 0 1 0 2.9l-9.4 9.4z"/><path d="M14 7l3 3M4.5 19.5h7"/>'),
   sakura: svg('<path d="M12 12c-1.2-2.8-1.7-5.2-.3-7.3.8.5 1.5.9 2.4.6.5 2.6-.4 4.6-2.1 6.7zM12 12c2.6-1.6 5-2.2 7.2-1.1-.4.9-.7 1.6-.3 2.5-2.5.9-4.6.2-6.9-1.4zM12 12c2.1 2.1 3.2 4.3 2.5 6.7-.9-.3-1.7-.4-2.4.2-1.7-2-1.8-4.3-.1-6.9zM12 12c-.3 3-1.3 5.2-3.6 6.3-.4-.9-.9-1.5-1.9-1.5.1-2.7 1.8-4.2 5.5-4.8zM12 12c-3 .6-5.4.3-7.1-1.5.7-.6 1.2-1.3 1.1-2.3 2.6-.3 4.4 1 6 3.8z"/><circle cx="12" cy="12" r="1"/>'),
 }
@@ -114,6 +116,12 @@ export class TodayView {
     root.addEventListener('input', (e) => {
       if (e.target.matches?.('.td-ref-text')) this._syncRefBtn()
     })
+    // 明天先做的那一件：寫一件新的（Enter）
+    root.addEventListener('submit', (e) => {
+      if (!e.target.matches?.('.td-first-add')) return
+      e.preventDefault()
+      this._addFirst(e.target)
+    })
     root.addEventListener('compositionstart', () => (this._composing = true))
     root.addEventListener('compositionend', () => {
       this._composing = false
@@ -126,8 +134,8 @@ export class TodayView {
 
   _tick() {
     this._late = this._down
-    // 正在寫反思：只換時鐘的數字，其他的晚一點再重畫，不打斷打字
-    if (document.activeElement?.matches?.('.td-ref-text')) {
+    // 正在寫反思、寫明天先做的那一件：只換時鐘的數字，其他的晚一點再重畫，不打斷打字
+    if (document.activeElement?.matches?.('.td-ref-text, .td-first-in')) {
       const t = $('.tn-time', this.root)
       const n = new Date()
       if (t) t.textContent = hhmm(n.getHours() * 60 + n.getMinutes())
@@ -168,6 +176,24 @@ export class TodayView {
         this.refDate = s.today
         return this.render()
       case 'refSave': return this._saveRef()
+      // 明天先做的那一件：挑一件（再挑別件就換過去）、把今天沒做完的挪過去當成那一件、換一件、不挑了
+      case 'first':
+        this.firstEdit = false
+        this._dropFirstDraft()
+        return s.setFirst(id) || this.render()
+      case 'first-move':
+        this.firstEdit = false
+        this._dropFirstDraft()
+        if (s.postponeTask(id, b.dataset.day)) s.setFirst(id)
+        return this.render()
+      case 'first-edit':
+      case 'first-cancel':
+        this.firstEdit = b.dataset.act === 'first-edit'
+        if (!this.firstEdit) this._dropFirstDraft()
+        return this.render()
+      case 'first-clear':
+        this.firstEdit = false
+        return s.setFirst(id, false)
       case 'idle-open': return this.hooks.openTask?.(b.dataset.pid, id)
       case 'idle-snooze':
         this.hooks.snoozeIdle?.(id)
@@ -230,6 +256,10 @@ export class TodayView {
     const ta = $('.td-ref-text', this.root)
     let draft = !this._clean && ta && ta.value !== ta.defaultValue ? ta.value : null
     const caret = ta && ta === a ? [ta.selectionStart, ta.selectionEnd] : null
+    // 明天先做的那一件：打到一半的字（記在 firstDraft：同步換成「已經挑好」、卡片暫時不在時也留著）和游標也接回去
+    const fin = $('.td-first-in', this.root)
+    if (fin) this.firstDraft = fin.value
+    const firstCaret = fin && fin === a ? [fin.selectionStart, fin.selectionEnd] : null
     this._clean = false
     const s = this.store
     const today = s.today
@@ -252,6 +282,7 @@ export class TodayView {
     this.root.innerHTML = `<div class="td${this._drawn ? '' : ' td-enter'}">
       ${this._heroHTML(today, tasks, now)}
       ${this._parkHTML()}
+      ${this._firstHTML(today, tasks, nowMin)}
       <div class="td-grid">
         ${this._nowHTML(today, tasks, nowMin)}
         ${this._progHTML(tasks, nowMin)}
@@ -274,6 +305,8 @@ export class TodayView {
       nt.value = draft
       this._syncRefBtn()
     }
+    const nfin = $('.td-first-in', this.root)
+    if (nfin && this.firstDraft) nfin.value = this.firstDraft
     const near = this._fkNear
     this._fkNear = null
     if (!fk) return
@@ -281,7 +314,8 @@ export class TodayView {
     const by = (k) => $(`[data-fk="${CSS.escape(k)}"]:not(:disabled)`, this.root)
     const to = by(fk) || by(`tg-${id}`) || by(`fc-${id}`) || (near && by(near)) || (card && ($(`.${card} :is(li, .td-hr) button:not(:disabled)`, this.root) || $(`.${card} button:not(:disabled)`, this.root)))
     to?.focus({ preventScroll: true })
-    if (to === nt && caret) nt.setSelectionRange(...caret)
+    if (nt && to === nt && caret) nt.setSelectionRange(...caret)
+    if (nfin && to === nfin && firstCaret) nfin.setSelectionRange(...firstCaret)
   }
 
   // 畫面上現在的進度圈（換算成百分比）和這週每根長條的高度（%）；還沒畫過是 null。
@@ -554,7 +588,8 @@ export class TodayView {
       const subs = t.subs || []
       const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
       const on = t.id === focusId
-      const meta = `<span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${on ? '<em class="td-focusing">專注中</em>' : sug ? '<em>還不是本命</em>' : ''}</small>`
+      const first = t.first && !t.done ? '<em class="td-first-chip">先做這件</em>' : ''
+      const meta = `<span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${on ? '<em class="td-focusing">專注中</em>' : first || (sug ? '<em>還不是本命</em>' : '')}</small>`
       return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}${on ? ' on' : ''}">
         <b class="td-n">${i + 1}</b>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
@@ -601,7 +636,7 @@ export class TodayView {
     const row = (t) => {
       const k = esc(t.id)
       const on = t.id === focusId
-      const inner = `<i style="--c:${tagOf(t.tag).color}"></i><span>${esc(t.title)}</span>${on ? '<em class="td-focusing">專注中</em>' : ''}${t.at ? `<small>${t.at}</small>` : ''}<small>${dur(taskDur(t))}</small>`
+      const inner = `<i style="--c:${tagOf(t.tag).color}"></i><span>${esc(t.title)}</span>${on ? '<em class="td-focusing">專注中</em>' : t.first ? '<em class="td-first-chip">先做這件</em>' : ''}${t.at ? `<small>${t.at}</small>` : ''}<small>${dur(taskDur(t))}</small>`
       return `<li>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="false">${ICON.check}</button>
         ${this._focusName(t, inner, 'td-mo', `mo-${k}`)}
@@ -609,6 +644,64 @@ export class TodayView {
     }
     return `<button type="button" class="td-more-btn" data-act="more" data-fk="more" aria-expanded="${open}">${open ? '收起' : `其他今天的任務 ${rest.length} 件`}<i>${open ? '▴' : '▾'}</i></button>
       ${open ? `<ul class="td-mos">${rest.map(row).join('')}</ul>` : ''}`
+  }
+
+  // ── 明天先做哪一件：晚上（就寢前 4 小時起、晚上 9 點以後、過了就寢時間；planner.js 的 firstPickIn）挑好下一次起床後先做的那一件。
+  // 早上的今日摘要、警語的「現在該做」、「▶ 專注第一件」都從這件開始，起床後不用再想要從哪裡開始。
+  // 過了午夜、還沒到起床時間時，「明天」是今天這個日期。挑好了就只寫那一件（可以換、可以不挑了） ──
+  _firstHTML(today, tasks, nowMin) {
+    const s = this.store
+    const r = s.state.rhythm
+    const ahead = firstPickIn(r, today, nowMin)
+    if (ahead == null) return ''
+    const day = addDays(today, ahead)
+    const word = day === today ? '起床後' : '明天'
+    const picked = s.firstOn(day)
+    const head = (h) => `<header class="td-h">${IC.sunrise}<h3>${h}<small>いちばんはじめ</small></h3></header>`
+    // 打到一半的字還在（例如打字時別台同步過來已經挑好了）：先留在可以寫的樣子，不把字收掉
+    if (picked && !this.firstEdit && !this.firstDraft?.trim()) {
+      return `<section class="td-card td-first picked" aria-label="${word}先做的那一件">
+        ${head(`${word}先做這件`)}
+        <p class="td-first-now"><b>${esc(picked.title)}</b><small>${picked.at ? `排在 ${picked.at}・` : ''}起床後打開 App，今日摘要會先提這件</small></p>
+        <div class="td-first-acts"><button type="button" class="btn-ghost" data-act="first-edit" data-fk="first-edit">換一件</button><button type="button" class="btn-ghost" data-act="first-clear" data-id="${esc(picked.id)}" data-fk="first-clear">不挑了</button></div>
+      </section>`
+    }
+    // 那天的任務（本命、重要的在前），再加上今天沒做完的（還排在今晚的不算）：挑了就挪過去
+    const mine = doFirst(s.tasksOn(day)).slice(0, 4)
+    const carry = day === today ? [] : doFirst(tasks).filter((t) => !t.at || toMin(t.at) < nowMin).slice(0, 3)
+    const row = (t, move) => {
+      const k = esc(t.id)
+      const on = t.id === picked?.id
+      const sub = move ? '今天沒做完・挪到明天' : [t.star ? '本命' : '', t.at || ''].filter(Boolean).join('・')
+      return `<li><button type="button" class="td-first-pick${on ? ' on' : ''}" data-act="${move ? 'first-move' : 'first'}" data-id="${k}" data-day="${day}" data-fk="fp-${k}" aria-pressed="${on}"><i style="--c:${tagOf(t.tag).color}" aria-hidden="true"></i><span>${esc(t.title)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</button></li>`
+    }
+    const list = [...mine.map((t) => row(t, false)), ...carry.map((t) => row(t, true))]
+    return `<section class="td-card td-first" aria-label="${word}先做哪一件">
+      ${head(`${word}先做哪一件？`)}
+      <p class="td-first-p">現在挑好一件，${word}打開 App 就從這件開始，不用再想要先做什麼</p>
+      ${list.length ? `<ul class="td-first-list">${list.join('')}</ul>` : ''}
+      <form class="td-first-add" data-day="${day}"><input type="text" class="td-first-in" maxlength="80" enterkeyhint="done" autocomplete="off" data-fk="first-in"
+        placeholder="${list.length ? '或寫一件新的' : `${word}還沒有任務，寫一件`}，按 Enter" aria-label="${word}先做的事：寫一件新的"><button type="submit" class="btn-ghost" data-fk="first-add">挑這件</button></form>
+      ${picked ? '<button type="button" class="td-link td-first-keep" data-act="first-cancel" data-fk="first-cancel">先不換了</button>' : ''}
+    </section>`
+  }
+  // 挑好了、不換了：打到一半的字不要了（框裡的也清掉：重畫時會從框裡再讀一次）
+  _dropFirstDraft() {
+    this.firstDraft = ''
+    const fin = $('.td-first-in', this.root)
+    if (fin) fin.value = ''
+  }
+  // 寫一件新的：排進那一天，當成先做的那一件
+  _addFirst(form) {
+    const input = $('.td-first-in', form)
+    const title = input?.value.trim()
+    if (!title) return input?.focus()
+    const t = this.store.addTask({ title, date: form.dataset.day })
+    if (!t) return
+    input.value = ''
+    this.firstDraft = ''
+    this.firstEdit = false
+    this.store.setFirst(t.id)
   }
 
   // ── 每日任務（三個）＋每週挑戰 ──

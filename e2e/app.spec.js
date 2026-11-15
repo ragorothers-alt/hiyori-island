@@ -1933,6 +1933,100 @@ test('排定的任務到點：提示卡上直接開始專注、只做 5 分鐘�
   expect(await taskAt('e2e-b')).toBe('11:20')
 })
 
+test('明天先做哪一件：晚上在今日總覽挑一件（明天的、今天沒做完挪過去的、或寫一件新的），就寢提醒提一下；早上的今日摘要從這件開始', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const d = new Date(`${ymd}T12:00:00+08:00`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  const tmr = d.toISOString().slice(0, 10)
+  const at = (day, hm) => new Date(`${day}T${hm}:00+08:00`)
+  await context.addInitScript(({ ymd, tmr }) => {
+    // 晚上 9 點後的晚間回顧先當成今天問過了（不然對話框會蓋住今日總覽）
+    localStorage.setItem('hiyori-review-later', ymd)
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [
+        { id: 'e2e-a', title: '讀英文單字', priority: 2, date: tmr },
+        { id: 'e2e-b', title: '寫期末報告', priority: 3, date: tmr },
+        { id: 'e2e-c', title: '回覆老師的信', priority: 2, date: ymd },
+      ]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: {} }))
+    }
+  }, { ymd, tmr })
+  await useAppMode(context)
+  // 下午還不問
+  await page.clock.setFixedTime(at(ymd, '17:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  await expect(page.locator('#todayRoot .td-hero')).toBeVisible()
+  await expect(page.locator('#todayRoot .td-first')).toHaveCount(0)
+  // 20:30（就寢 23:30 前 3 小時）：問明天先做哪一件。明天的任務（重要的在前），再來是今天沒做完的
+  await page.clock.setFixedTime(at(ymd, '20:30'))
+  await page.evaluate(() => window.hiyori.ui.today.render())
+  const card = page.locator('#todayRoot .td-first')
+  await expect(card.locator('h3')).toContainText('明天先做哪一件？')
+  await expect(card.locator('.td-first-pick > span')).toHaveText(['寫期末報告', '讀英文單字', '回覆老師的信'])
+  await expect(card.locator('.td-first-pick').nth(2)).toContainText('今天沒做完・挪到明天')
+  const task = (id) => page.evaluate((id) => { const t = window.hiyori.store.state.tasks.find((x) => x.id === id); return t && { date: t.date, first: t.first } }, id)
+  // 字打到一半，別台同步過來已經挑好了：先留在可以寫的樣子，字不會不見；「先不換了」才收起來
+  await card.locator('.td-first-in').fill('打到一半')
+  await page.evaluate(() => window.hiyori.store.setFirst('e2e-b'))
+  await page.evaluate(() => window.hiyori.ui.today.render())
+  await expect(card.locator('.td-first-in')).toHaveValue('打到一半')
+  await expect(card.locator('.td-first-pick.on')).toContainText('寫期末報告')
+  await card.locator('[data-act="first-cancel"]').click()
+  await expect(card.locator('.td-first-now b')).toHaveText('寫期末報告')
+  await page.evaluate(() => window.hiyori.store.setFirst('e2e-b', false))
+  await expect(card.locator('.td-first-in')).toHaveValue('')
+  // 挑今天沒做完的那件：挪到明天，當成先做的那一件
+  await card.locator('.td-first-pick', { hasText: '回覆老師的信' }).click()
+  await expect.poll(() => task('e2e-c')).toEqual({ date: tmr, first: true })
+  await expect(card.locator('h3')).toContainText('明天先做這件')
+  await expect(card.locator('.td-first-now b')).toHaveText('回覆老師的信')
+  // 換一件：挑了別件就換過去（原本那件留在明天）
+  await card.locator('[data-act="first-edit"]').click()
+  await expect(card.locator('.td-first-pick.on')).toContainText('回覆老師的信')
+  await card.locator('.td-first-pick', { hasText: '讀英文單字' }).click()
+  await expect.poll(() => Promise.all([task('e2e-a'), task('e2e-c')])).toEqual([{ date: tmr, first: true }, { date: tmr, first: false }])
+  // 寫一件新的
+  await card.locator('[data-act="first-edit"]').click()
+  await card.locator('.td-first-in').fill('早上先散步十分鐘')
+  await card.locator('.td-first-in').press('Enter')
+  await expect(card.locator('.td-first-now b')).toHaveText('早上先散步十分鐘')
+  expect(await page.evaluate((tmr) => window.hiyori.store.firstOn(tmr)?.title, tmr)).toBe('早上先散步十分鐘')
+  expect((await task('e2e-a')).first).toBe(false)
+  // 不挑了 → 23:00 就寢提醒的提示卡上可以去挑；按了回到這張卡片
+  await card.locator('[data-act="first-clear"]').click()
+  await expect(card.locator('h3')).toContainText('明天先做哪一件？')
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await page.clock.setFixedTime(at(ymd, '23:00'))
+  const bed = page.locator('#toasts .toast', { hasText: '就寢時間快到了' })
+  await bed.locator('.toast-act', { hasText: '挑明天的第一件' }).click()
+  await expect(card).toBeVisible()
+  await expect(card.locator('.td-first-pick').first()).toBeFocused()
+  await card.locator('.td-first-pick', { hasText: '寫期末報告' }).click()
+  await expect(card.locator('.td-first-now b')).toHaveText('寫期末報告')
+  // 重新整理也還在
+  await page.reload()
+  await bootReady(page)
+  await expect(page.locator('#todayRoot .td-first .td-first-now b')).toHaveText('寫期末報告')
+  // 隔天早上：今日摘要第一項就是它，「專注第一件」專注它
+  await page.clock.setFixedTime(at(tmr, '08:00'))
+  await page.evaluate(() => { window.hiyori.store.tick(); window.hiyori.ui.brief.show() })
+  const brief = page.locator('#brief .bf-card')
+  await brief.click()
+  await expect(brief.locator('.bf-body')).toBeVisible({ timeout: 20000 })
+  await expect(brief.locator('.bf-list button').first()).toContainText('寫期末報告')
+  await expect(brief.locator('.bf-list button').first()).toContainText('昨晚挑好先做這件')
+  await brief.locator('[data-act="focus"]').click()
+  // 先打開計時設定（目標已經選好），按「開始專注」
+  await expect(page.locator('#focusSet')).toBeVisible()
+  expect(await page.evaluate(() => window.hiyori.ui.focus.task?.title)).toBe('寫期末報告')
+  await page.locator('#fsStart').click()
+  await expect.poll(() => page.evaluate(() => [window.hiyori.ui.focus.mode, window.hiyori.ui.focus.task?.title])).toEqual(['focus', '寫期末報告'])
+  // 早上不再問
+  await expect(page.locator('#todayRoot .td-first')).toHaveCount(0)
+})
+
 // 專注中切去用別的 App：Android 的 App 分得出鎖著手機和切走（awayLocked），鎖著手機專心的不算中途離開。
 // 叫你回來的那一則交給手機排（到點時手機鎖著就不發，在 MottoNotice 裡）
 test('專注中離開 App：切走時交給手機一則「回來吧」；回來時說還剩幾分鐘、記一次中途離開（鎖著手機的不算）；到點的提示卡寫中途離開幾次；設定裡可以關', async ({ page, context, site }) => {

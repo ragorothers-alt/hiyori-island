@@ -22,6 +22,7 @@ import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm, inlineEdit, editing, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
+import { firstPickIn } from './planner.js'
 import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -1125,6 +1126,31 @@ export class UI {
       card.querySelector('button')?.focus({ preventScroll: true })
     })
   }
+  // 明天先做哪一件（planner.js 的 firstPickIn）：晚上才問。要挑的那天（下一次起床的那天），不是晚上是 null
+  firstPickDay(now = new Date()) {
+    const s = this.store
+    const ahead = firstPickIn(s.state.rhythm, s.today, now.getHours() * 60 + now.getMinutes())
+    return ahead == null ? null : addDays(s.today, ahead)
+  }
+  // 到今日總覽「明天先做哪一件？」那一張卡片，焦點放在第一個可以挑的上面（專注頁開著先縮小）
+  openFirst() {
+    this.focus.toggleBig(false)
+    this.setTab('today')
+    requestAnimationFrame(() => {
+      const card = $('#todayRoot .td-first')
+      if (!card) return
+      card.scrollIntoView({ block: 'start', behavior: scrollMode() })
+      card.querySelector('.td-first-pick, .td-first-in, button')?.focus({ preventScroll: true })
+    })
+  }
+  // 晚間回顧記下之後：那天先做的那一件還沒挑的話，問一聲
+  askFirst() {
+    const day = this.firstPickDay()
+    if (!day || this.store.firstOn(day)) return false
+    const word = day === this.store.today ? '起床後' : '明天'
+    this.toast({ icon: '先', title: `${word}先做哪一件？`, sub: '現在挑好一件，起床後打開 App 就從它開始', ms: 9000, tag: 'first-ask', actions: [{ label: '挑一件', run: () => this.openFirst() }] })
+    return true
+  }
   openCapture(mode) {
     // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去
     const top = this._topLayer()
@@ -1287,6 +1313,8 @@ export class UI {
       const s = this.store
       if (act === 'toggle') s.toggleTask(id)
       else if (act === 'star') s.toggleStar(id)
+      // 那天挑好先做的那一件：再按一下就不挑了
+      else if (act === 'first') s.setFirst(id, false)
       else if (act === 'delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteTask(id))
       else if (act === 'edit') {
         const t = s.state.tasks.find((x) => x.id === id)
@@ -1506,6 +1534,8 @@ export class UI {
     ]
     if (t.star) meta.unshift(`<button class="star on" data-act="star" ${t.done ? 'disabled title="本命・已完成"' : 'title="取消本命"'}>★ 本命</button>`)
     else if (!t.done && t.date >= this.store.today) meta.unshift(`<button class="star" data-act="star" title="設為本命：完成給雙倍 XP（每天最多 ${MAX_STARS} 件）">☆</button>`)
+    // 前一晚挑好、那天先做的那一件
+    if (t.first && !t.done) meta.unshift(`<button class="first-tag" data-act="first" title="那天先做這件（晚上在今日總覽挑的）。按一下就不挑了">先做這件</button>`)
     if (t.pomos) meta.push(`<span class="pomo" title="已專注 ${t.pomos} 輪">◷ ${t.pomos}</span>`)
     const proj = t.project && this.store.state.projects.find((p) => p.id === t.project)
     if (proj) {
@@ -2693,6 +2723,8 @@ export class UI {
       if (!this.mood) return
       this.store.saveReview(this.reviewDate, this.mood, $('#reviewText').value)
       this.closeReview()
+      // 今天的回顧記下了：接著問明天先做哪一件（補記別天的不問）
+      if (this.reviewDate === this.store.today) this.askFirst()
     })
     // 跟以前的一行輸入框一樣 Enter 就記下來；要換行按 Shift＋Enter
     $('#reviewText').addEventListener('keydown', (e) => {

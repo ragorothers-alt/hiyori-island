@@ -75,11 +75,11 @@ function awayOf(d, today, mins) {
   return items.length ? { label: `離開了 ${gone(now - a.since)}`, items } : null
 }
 
-// 還沒做的任務照「先做哪一件」排：本命、重要的、排了時間早的（警語提醒時的「現在該做」也照這個）
+// 還沒做的任務照「先做哪一件」排：前一晚挑好先做的那一件、本命、重要的、排了時間早的（警語提醒時的「現在該做」也照這個）
 export function order(tasks) {
   return tasks
     .filter((t) => !t.done)
-    .sort((a, b) => !!b.star - !!a.star || (b.priority || 0) - (a.priority || 0) || (a.at || '99:99').localeCompare(b.at || '99:99'))
+    .sort((a, b) => !!b.first - !!a.first || !!b.star - !!a.star || (b.priority || 0) - (a.priority || 0) || (a.at || '99:99').localeCompare(b.at || '99:99'))
 }
 
 export function buildBrief(d) {
@@ -117,7 +117,7 @@ export function buildBrief(d) {
     today.push({ icon: '日', text: allDay.slice(0, 2).map((e) => e.title).join('、'), sub: allDay.length > 2 ? `整天・還有 ${allDay.length - 2} 個` : '整天', go: ['tab', 'schedule'] })
   }
   for (const t of todo.slice(0, 3)) {
-    today.push({ icon: t.star ? '命' : '花', text: t.title, sub: [t.star ? '本命' : '', t.at || ''].filter(Boolean).join('・'), go: ['tab', 'tasks'] })
+    today.push({ icon: t.first ? '先' : t.star ? '命' : '花', text: t.title, sub: [t.first ? '昨晚挑好先做這件' : '', t.star ? '本命' : '', t.at || ''].filter(Boolean).join('・'), go: ['tab', 'tasks'] })
   }
   if (todo.length > 3) today.push({ icon: '…', text: `還有 ${todo.length - 3} 件任務`, sub: '', go: ['tab', 'tasks'] })
   const habits = d.habits || { total: 0, done: 0 }
