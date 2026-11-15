@@ -4,6 +4,7 @@ import { TAGS, tagOf, PROJECT_COLORS, DUE_KINDS, moodOf } from '../theme.js'
 import { FUJI_LINES } from '../data/lines.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel, addDays } from '../coach.js'
 import { buildInsights } from '../insights.js'
+import { MOTTO_EVERY } from '../mottos.js'
 import { aiReady, askAI } from '../ai.js'
 import { PEAKS } from '../planner.js'
 import { daypart } from '../daylight.js'
@@ -362,6 +363,12 @@ export class CoachView {
     else if (act === 'peak') {
       this.store.setRhythm({ peak: b.dataset.v })
       this.hooks.toast?.({ icon: '時', title: `精神最好的時段改成${PEAKS[b.dataset.v].label}`, sub: '之後排程會把重要的事放在這時候' })
+    } else if (act === 'mottoEvery') {
+      // 警語的提醒間隔拉長（週報的回神紀錄看得出多半本來就在做正事時）
+      const v = +b.dataset.v
+      if (!MOTTO_EVERY.includes(v) || !v) return
+      this.store.setSetting('mottoEvery', v)
+      this.hooks.toast?.({ icon: '戒', title: `警語改成${v >= 60 ? `每 ${v / 60} 小時` : `每 ${v} 分鐘`}提醒一次`, sub: '紀錄頁的警語卡上可以再改' })
     } else return
     this.render()
   }
@@ -635,6 +642,9 @@ export class CoachView {
       ['專注', `${w.focus}<small> 分</small>`, delta(w.focus, p.focus || null, ' 分')],
       ['習慣達成', w.habitRate == null ? '<small>—</small>' : `${Math.round(w.habitRate * 100)}<small>%</small>`, ''],
     ]
+    // 回神紀錄：警語提醒之後回到正事（含本來就在做的）幾次。這兩週都沒有提醒過就不放
+    const back = (r) => Math.min(r.nudges, r.backs + r.onTask)
+    if (w.nudges || p.nudges) rows.push(['警語回神', `${back(w)}<small> / ${w.nudges} 次</small>`, delta(back(w), p.nudges ? back(p) : null, ' 次')])
     parts.push(`<section class="wr-card">
       <h3>本週表現分析<small>跟上週同一段比</small></h3>
       <div class="wr-perf">
@@ -647,14 +657,14 @@ export class CoachView {
     parts.push(this._aiWeekHTML(w.week))
 
     // 習慣洞察
-    const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today })
+    const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today, mottoEvery: s.state.settings.mottoEvery })
     const guess = list.some((x) => x.guess)
     parts.push(`<section class="wr-card">
       <h3>習慣洞察${guess ? '<em class="wr-badge">部分依作息推測</em>' : ''}</h3>
       <ul class="wr-ins">${list
         .map(
           (x) => `<li class="${x.guess ? 'guess' : ''}"><span class="wr-k">${x.kanji}</span><div><b>${esc(x.title)}</b><p>${esc(x.text)}</p>${
-            x.action ? `<button class="btn-ghost" data-act="peak" data-v="${x.action.value}">${esc(x.action.label)}</button>` : ''
+            x.action ? `<button class="btn-ghost" data-act="${x.action.kind}" data-v="${esc(String(x.action.value))}">${esc(x.action.label)}</button>` : ''
           }</div></li>`,
         )
         .join('')}</ul>
@@ -741,7 +751,7 @@ export class CoachView {
       rate: r2(r.rate), done: r.done, total: r.total, focus: r.focus, pomodoros: r.pomodoros,
       stars: r.stars, starTotal: r.starTotal, habitRate: r2(r.habitRate), activeDays: r.active, moods: r.moods,
     })
-    const ins = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today: s.today })
+    const ins = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today: s.today, mottoEvery: s.state.settings.mottoEvery })
     const data = {
       today: s.today, daysSoFar: w.days, streak: s.streak, usedDays: s.usedDays(),
       week: nums(w), prev: nums(p), insights: ins.map((x) => ({ title: x.title, text: x.text, guess: !!x.guess })),

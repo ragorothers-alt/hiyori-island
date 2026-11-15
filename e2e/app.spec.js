@@ -1716,7 +1716,9 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   const toast = page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })
   await expect(toast).toBeVisible()
   await expect(toast).toContainText('現在該做：寫期末報告')
-  await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '先停 1 小時'])
+  await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '✓ 在做了', '先停 1 小時'])
+  // 回神紀錄：提醒了一次
+  expect(await page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).nudges)).toBe(1)
   // 焦點放在「先停 1 小時」上：提示卡先不收（下面先檢查交給手機的那一串，機器忙的時候會超過提示卡的 9 秒）
   await toast.locator('.toast-act', { hasText: '先停 1 小時' }).focus()
   // 頁面念之前跟手機說了：10:00 那一則手機不會再發
@@ -1946,4 +1948,53 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await expect.poll(() => file('__motto-plan')).toEqual([])
   await page.evaluate(() => window.hiyori.ui.setTab('records'))
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('現在只在看著這一頁時提醒')
+})
+
+test('回神紀錄：警語提示卡上按「✓ 在做了」記一筆、誇一句；週報寫回神了幾次，提醒時多半本來就在做的話一鍵拉長間隔', async ({ page, context, site }) => {
+  // 9:59:30 打開，開好之後到了 10:00（見上面 Android 殼的測試）
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript(({ t, ymd }) => {
+    if (localStorage.getItem('hiyori-daily-v1')) return
+    const tasks = [{ id: 'e2e-t1', title: '寫期末報告', priority: 3, date: ymd, star: true }]
+    const mottos = [{ id: 'e2e-m1', text: '手機放遠一點', on: true, createdAt: t - 86400000 }]
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, mottos, settings: { mottoEvery: 15 } }))
+    localStorage.setItem('hiyori-motto-at', JSON.stringify({ at: t - 15 * 60000, i: 0 }))
+  }, { t: T, ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T - 30000))
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.clock.setFixedTime(new Date(T))
+  const toast = page.locator('#toasts .toast', { hasText: '手機放遠一點' })
+  await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '✓ 在做了', '先停 1 小時'])
+  await toast.locator('.toast-act', { hasText: '✓ 在做了' }).click()
+  await expect(toast).toHaveCount(0)
+  const today = () => page.evaluate(() => {
+    const s = window.hiyori.store
+    const d = s.peekDay(s.today)
+    return [d.nudges, d.backs, d.onTask]
+  })
+  // 提醒了一次、本來就在做正事一次；沒有開始專注
+  expect(await today()).toEqual([1, 0, 1])
+  expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('idle')
+
+  // 今天稍早也提醒了 10 次，8 次本來就在做：週報的表現分析寫「9 / 11 次」，洞察建議間隔從 15 分拉長到 20 分
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const d = s.day(s.today)
+    d.nudges += 10
+    d.onTask += 8
+    s.save()
+    window.hiyori.ui.setTab('coach')
+  })
+  await page.locator('#coachRoot [data-v="report"]').click()
+  await expect(page.locator('#coachRoot .wr-perf li', { hasText: '警語回神' })).toContainText('9 / 11 次')
+  const ins = page.locator('#coachRoot .wr-ins li', { hasText: '提醒的時候，你多半已經在做正事了' })
+  await expect(ins).toContainText('提醒了 11 次，有 9 次你本來就在做')
+  await ins.locator('[data-act="mottoEvery"]').click()
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.mottoEvery)).toBe(20)
+  await expect(page.locator('#toasts .toast', { hasText: '警語改成每 20 分鐘提醒一次' })).toBeVisible()
+  // 已經改成 20 分了：建議改成下一段（30 分）
+  await expect(page.locator('#coachRoot [data-act="mottoEvery"]')).toHaveText('改成每 30 分鐘提醒一次')
 })

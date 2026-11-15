@@ -182,14 +182,17 @@ async function boot() {
   const doAct = (act) => {
     // 頁面凍住時過了午夜：先換到今天，才不會開始專注昨天的那一件
     store.tick()
+    if (act !== 'pause' && act !== 'focus') return
+    // 回神紀錄：按了通知上的按鈕，就是看到了這一則提醒
+    store.mottoNudged()
     if (act === 'pause') {
       if (store.state.settings.mottoEvery > 0) store.pauseMottos(pauseUntil('hour', store.state.rhythm, Date.now()))
       return
     }
-    if (act !== 'focus') return
     if (ui.focus.mode === 'focus') return ui.toast({ icon: '戒', title: '已經在專注了', sub: '這一輪結束再說' })
     const t = nowTask()
     if (!t) return ui.toast({ icon: '戒', title: '今天的任務都做完了', sub: '想做什麼的話，再加一件吧' })
+    store.mottoAnswered('back')
     ui.focus.startWith(t.id)
   }
   // 開機還沒好之前按的先記著，開場時做
@@ -346,7 +349,8 @@ async function boot() {
       if (store.completePomodoro(minutes, taskId, info.projectId, info.sid) === false) return scene?.focusStopped()
       sfx.temple()
       haptic('end')
-      timerNotify({ at: info.at, mode: 'focus', up: info.free, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
+      // 推播沒排上、沒送到時頁面自己補發：跟伺服器那邊同一套字（只做 5 分鐘的寫「5 分鐘到了」）
+      timerNotify({ at: info.at, mode: 'focus', up: info.free, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target, small: !!info.small })
       // 兩人出屋、天燈從小木屋屋頂升起；目標是專案的話，那棟房子泛起一圈光
       scene?.focusFinished(taskId, info.projectId)
       const t = taskId && store.state.tasks.find((x) => x.id === taskId)
@@ -875,20 +879,34 @@ async function boot() {
         nativeMottoSeen()
         run()
       }
+      // 回神紀錄：提醒了一次；按了哪一顆也記下來（週報的「警語回神」）
+      store.mottoNudged()
+      const back = (run) => seen(() => {
+        store.mottoAnswered('back')
+        run()
+      })
       ui.toast({
         icon: '戒',
         title: e.text,
         sub: next ? `現在該做：${next.title}` : '寫給自己的警語',
-        ms: 9000,
+        ms: 12000,
         tag: 'motto',
         actions: [
           ...(next && ui.focus.mode !== 'focus'
             ? [
-                { label: '▶ 開始專注', run: seen(() => ui.focus.startWith(next.id)) },
+                { label: '▶ 開始專注', run: back(() => ui.focus.startWith(next.id)) },
                 // 提不起勁：先做 5 分鐘就好，到點時再決定要不要繼續
-                { label: '只做 5 分鐘', soft: true, run: seen(() => ui.focus.startSmall(next.id)) },
+                { label: '只做 5 分鐘', soft: true, run: back(() => ui.focus.startSmall(next.id)) },
               ]
             : []),
+          // 本來就在做正事：記一筆、誇一句
+          {
+            label: '✓ 在做了', soft: true,
+            run: seen(() => {
+              store.mottoAnswered('on')
+              talk('mottoOnTask', {}, 4200, '很好，就照這樣做下去。')
+            }),
+          },
           // 開會、吃飯時：先停一小時（停完那一刻再提醒一次）
           { label: '先停 1 小時', soft: true, run: seen(() => store.pauseMottos(pauseUntil('hour', store.state.rhythm, Date.now()))) },
         ],

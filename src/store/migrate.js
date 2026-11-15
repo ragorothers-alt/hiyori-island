@@ -30,10 +30,12 @@ const emptyStats = () => ({
 // plan：中午前選好 3 件本命；starAll：本命全清；review：寫了回顧；pets：摸摸次數；
 // habits：習慣完成數；life：生活記錄筆數；urges：忍住的衝動；timebox：排好了時段；habitAll：今天的習慣全做完；
 // focusAm／Pm／Eve／Late：專注分鐘落在早上（5–12 點）、下午（12–18）、晚上（18–24）、深夜（0–5）；
-// plogs：今天寫了進度的專案數（每個專案一天算一次）
+// plogs：今天寫了進度的專案數（每個專案一天算一次）；
+// 回神紀錄：nudges 警語提醒了幾次（畫面上的提示卡、按了通知上的按鈕），backs 提醒之後回到正事（開始專注、只做 5 分鐘），
+// onTask 提醒時本來就在做正事（按了「在做了」）
 const DAY_NUMS = [
   'tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox',
-  'focusAm', 'focusPm', 'focusEve', 'focusLate', 'plogs',
+  'focusAm', 'focusPm', 'focusEve', 'focusLate', 'plogs', 'nudges', 'backs', 'onTask',
 ]
 // sleep：那天的睡眠已經給過獎勵
 const DAY_FLAGS = ['perfect', 'starAll', 'habitAll', 'sleep']

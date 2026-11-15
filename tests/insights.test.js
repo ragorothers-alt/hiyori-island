@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
-import { taskHours, focusBuckets, weekdayRate, activeDays, buildInsights } from '../src/insights.js'
+import { taskHours, focusBuckets, weekdayRate, activeDays, buildInsights, mottoStats } from '../src/insights.js'
 
 const TODAY = '2026-11-01'
 const at = (date, h) => new Date(`${date}T${String(h).padStart(2, '0')}:10:00`).getTime()
@@ -67,5 +67,26 @@ describe('洞察', () => {
     const h = buildInsights({ tasks: [], history: {}, habits, rhythm: R, today: TODAY }).find((x) => x.id === 'habit')
     expect(h.title).toBe('最穩的習慣：喝水')
     expect(h.text).toMatch(/伸展/)
+  })
+
+  it('警語的回神紀錄：最近兩週提醒 8 次以上才說；多半本來就在做 → 建議拉長間隔；常常沒接住 → 試試只做 5 分鐘；其他照實說', () => {
+    const hist = (rows) => Object.fromEntries(rows.map(([date, o]) => [date, day(o)]))
+    const motto = (history, mottoEvery = 15) => buildInsights({ tasks: [], history, habits: [], rhythm: R, today: TODAY, mottoEvery }).find((x) => x.id === 'motto')
+    // 兩週以前的不算；不到 8 次不說
+    expect(mottoStats(hist([['2026-10-18', { nudges: 9 }], ['2026-10-19', { nudges: 3, backs: 1 }]]), TODAY)).toEqual({ nudges: 3, backs: 1, onTask: 0 })
+    expect(motto(hist([['2026-10-31', { nudges: 7, onTask: 7 }]]))).toBeUndefined()
+    // 10 次裡 7 次本來就在做：間隔從 15 分拉長到 20 分（已經最長了就不給按鈕）
+    const busy = hist([['2026-10-31', { nudges: 6, onTask: 4, backs: 1 }], ['2026-11-01', { nudges: 4, onTask: 3 }]])
+    expect(motto(busy)).toMatchObject({ title: '提醒的時候，你多半已經在做正事了', action: { kind: 'mottoEvery', value: 20, label: '改成每 20 分鐘提醒一次' } })
+    expect(motto(busy, 30).action.label).toBe('改成每 1 小時提醒一次')
+    expect(motto(busy, 180).action).toBeNull()
+    // 10 次只回神 2 次：建議只做 5 分鐘
+    const missed = hist([['2026-11-01', { nudges: 10, backs: 1, onTask: 1 }]])
+    expect(motto(missed).title).toBe('提醒常常沒接住')
+    expect(motto(missed).text).toMatch(/只做 5 分鐘/)
+    // 其他：照實說回神了幾次、幾成（回應比提醒多的時候不超過 100%）
+    const fine = hist([['2026-11-01', { nudges: 10, backs: 4, onTask: 2 }]])
+    expect(motto(fine)).toMatchObject({ title: '警語幫你回神了 6 次', text: expect.stringMatching(/60%.*其中 2 次本來就在做/) })
+    expect(motto(hist([['2026-11-01', { nudges: 8, backs: 12 }]])).title).toBe('警語幫你回神了 8 次')
   })
 })

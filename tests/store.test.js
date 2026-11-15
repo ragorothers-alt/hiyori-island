@@ -3,6 +3,7 @@ import {
   Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating, blankTask, DATA_VERSION,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
+import { migrate } from '../src/store/migrate.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
 import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS, MAX_STARS } from '../src/theme.js'
@@ -1953,6 +1954,29 @@ describe('週報', () => {
     expect(r.rate).toBeCloseTo(1 / 3)
     // 指定到哪天為止（跟上週同一段比用）
     expect(store.weekReport('2026-10-19', '2026-10-20').total).toBe(1)
+  })
+
+  it('回神紀錄：警語提醒了幾次、之後回到正事幾次、本來就在做幾次；提醒不算使用者改了資料，回應才算；讀存檔後還在', () => {
+    setDate('2026-10-20')
+    store.mottoNudged()
+    store.mottoAnswered('back')
+    setDate('2026-10-21')
+    const rev = store.state.rev
+    store.mottoNudged()
+    // 自動發生的提醒：不換版本（剛打開、資料還舊的裝置不會因為念了一句就蓋掉雲端的新資料）
+    expect(store.state.rev).toBe(rev)
+    store.mottoAnswered('on')
+    expect(store.state.rev).not.toBe(rev)
+    store.mottoNudged()
+    expect(store.peekDay('2026-10-21')).toMatchObject({ nudges: 2, backs: 0, onTask: 1 })
+    expect(store.weekReport()).toMatchObject({ nudges: 3, backs: 1, onTask: 1 })
+    expect(store.weekReport('2026-10-19', '2026-10-20')).toMatchObject({ nudges: 1, backs: 1, onTask: 0 })
+    const back = migrate(JSON.parse(JSON.stringify(store.state)))
+    expect(back.history['2026-10-21']).toMatchObject({ nudges: 2, backs: 0, onTask: 1 })
+    // 舊存檔沒有這幾個欄位：補成 0
+    const old = JSON.parse(JSON.stringify(store.state))
+    delete old.history['2026-10-21'].nudges
+    expect(migrate(old).history['2026-10-21'].nudges).toBe(0)
   })
 
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {

@@ -155,6 +155,21 @@ export const extrasMethods = {
     this._finish([['mottoPause', 0]])
     return true
   },
+  // 回神紀錄（週報看得到）：警語提醒了一次。是自動發生的，不算使用者改了資料（剛打開、資料還舊的裝置念了一句，
+  // 不會因此蓋掉雲端比較新的那一版）；不重畫畫面
+  mottoNudged() {
+    this._refreshToday()
+    this.day().nudges++
+    this.save(false)
+  },
+  // 提醒之後怎麼回應：'on' 本來就在做正事（按了「在做了」），其他是回到正事（開始專注、只做 5 分鐘）
+  mottoAnswered(kind) {
+    this._refreshToday()
+    const d = this.day()
+    if (kind === 'on') d.onTask++
+    else d.backs++
+    this.save()
+  },
 
   // ── 重要日子 ──
   addDate({ title, date, kind = 'exam' }) {

@@ -3,6 +3,7 @@
 import { rate, streak } from './habits.js'
 import { PEAKS } from './planner.js'
 import { WEEK_ZH } from './theme.js'
+import { MOTTO_EVERY } from './mottos.js'
 
 const pad = (n) => String(n).padStart(2, '0')
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -59,6 +60,16 @@ export function weekdayRate(history, today, weeks = 4) {
   return sum.map((s, i) => (n[i] ? s / n[i] : 0))
 }
 
+// 最近 days 天的回神紀錄：警語提醒了幾次、之後回到正事幾次、本來就在做正事幾次
+export function mottoStats(history, today, days = 14) {
+  const out = { nudges: 0, backs: 0, onTask: 0 }
+  for (let i = 0; i < days; i++) {
+    const h = history[addDays(today, -i)]
+    if (h) for (const k of Object.keys(out)) out[k] += h[k] || 0
+  }
+  return out
+}
+
 // 最近 days 天有在用（完成任務、專注或打卡）的日子
 export function activeDays(history, today, days = 28) {
   let n = 0
@@ -69,8 +80,9 @@ export function activeDays(history, today, days = 28) {
   return n
 }
 
-// 回傳 [{ id, kanji, title, text, guess?, action? }]；action：{ kind: 'peak', value, label } 一鍵把作息的精神時段改掉
-export function buildInsights({ tasks, history, habits, rhythm, today }) {
+// 回傳 [{ id, kanji, title, text, guess?, action? }]；action：{ kind: 'peak', value, label } 一鍵把作息的精神時段改掉、
+// { kind: 'mottoEvery', value, label } 一鍵把警語的提醒間隔拉長。mottoEvery：現在幾分鐘提醒一次（0 是不提醒）
+export function buildInsights({ tasks, history, habits, rhythm, today, mottoEvery = 0 }) {
   const out = []
   const guess = activeDays(history, today) < 5
   const peak = PEAKS[rhythm.peak]
@@ -140,6 +152,36 @@ export function buildInsights({ tasks, history, habits, rhythm, today }) {
   if (stuck.length) {
     out.push({ id: 'moved', kanji: '挪', title: `有 ${stuck.length} 件任務常被往後挪`, text: `像「${stuck[0].title}」已經挪了 ${stuck[0].moved} 次。拆成小一點的步驟，會比較好開始。` })
   }
+
+  // 6. 警語的回神紀錄（最近兩週提醒了 8 次以上才說）：多半本來就在做正事 → 間隔可以拉長；常常沒接住 → 試試只做 5 分鐘
+  const m = mottoStats(history, today)
+  if (m.nudges >= MOTTO_ENOUGH) {
+    const back = Math.min(m.nudges, m.backs + m.onTask)
+    const longer = mottoEvery > 0 ? MOTTO_EVERY.find((v) => v > mottoEvery) : null
+    const longerAction = longer ? { kind: 'mottoEvery', value: longer, label: `改成${everyText(longer)}提醒一次` } : null
+    if (m.onTask / m.nudges >= 0.6) {
+      out.push({
+        id: 'motto', kanji: '戒', title: '提醒的時候，你多半已經在做正事了',
+        text: `最近兩週提醒了 ${m.nudges} 次，有 ${m.onTask} 次你本來就在做。${longerAction ? '間隔可以拉長一點，少被打斷。' : '照這個節奏就好。'}`,
+        action: longerAction,
+      })
+    } else if (back / m.nudges < 0.3) {
+      out.push({
+        id: 'motto', kanji: '戒', title: '提醒常常沒接住',
+        text: `最近兩週提醒了 ${m.nudges} 次，回神 ${back} 次。下次提醒時試試「只做 5 分鐘」，先開個頭就好；覺得太吵的話，間隔拉長一點也沒關係。`,
+        action: longerAction,
+      })
+    } else {
+      out.push({
+        id: 'motto', kanji: '戒', title: `警語幫你回神了 ${back} 次`,
+        text: `最近兩週提醒了 ${m.nudges} 次，${pct(back / m.nudges)}% 的時候你回到了正事${m.onTask ? `（其中 ${m.onTask} 次本來就在做）` : ''}。照這個節奏就好。`,
+      })
+    }
+  }
   return out
 }
+
+// 回神紀錄要多少次提醒才看得出傾向
+export const MOTTO_ENOUGH = 8
+const everyText = (v) => (v >= 60 ? `每 ${v / 60} 小時` : `每 ${v} 分鐘`)
 
