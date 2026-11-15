@@ -210,6 +210,84 @@ describe('任務與就寢提醒', () => {
     expect(callback.mock.calls[0].slice(1)).toEqual([10, 'task'])
   })
 
+  it('排定的任務到了開始的那一刻再說一次（taskStart）；提前提醒是 0 分鐘、錯過了提前的那一次時只說一次；日程沒有這一次', () => {
+    const task = store.addTask({ title: '寫報告', date: TODAY, at: '14:00', dur: 60 })
+    const kinds = () => callback.mock.calls.filter((c) => c[0].id === task.id).map((c) => [c[1], c[2]])
+    reminders.check(at(13, 50))
+    reminders.check(at(13, 59, 59))
+    reminders.check(at(14, 0))
+    reminders.check(at(14, 0, 30))
+    expect(kinds()).toEqual([[10, 'task'], [0, 'taskStart']])
+    // 日程（09:00 的會議）：只有提前的那一次
+    reminders.check(at(9, 0))
+    expect(callback.mock.calls.filter((c) => c[0].id === event.id).map((c) => c[2])).toEqual(['event'])
+    // 提前提醒是 0 分鐘：開始的那一刻說一次
+    localStorage.clear()
+    callback.mockClear()
+    store.setSetting('remindLead', 0)
+    const r0 = new Reminders(store, callback)
+    r0.check(at(13, 59, 30))
+    r0.check(at(14, 0))
+    r0.check(at(14, 0, 30))
+    expect(kinds()).toEqual([[0, 'taskStart']])
+    // 電腦睡著、錯過了提前的那一次：醒來時已經開始了，說一次「開始了」
+    localStorage.clear()
+    callback.mockClear()
+    store.setSetting('remindLead', 10)
+    const slept = new Reminders(store, callback)
+    slept.check(at(13, 0))
+    slept.check(at(14, 3))
+    slept.check(at(14, 3, 30))
+    expect(kinds()).toEqual([[0, 'taskStart']])
+    // 做完了：不說
+    localStorage.clear()
+    callback.mockClear()
+    store.toggleTask(task.id)
+    const after = new Reminders(store, callback)
+    after.check(at(14, 0))
+    expect(kinds()).toEqual([])
+  })
+
+  it('兩個分頁同時遇到剛開始的任務：開始的那一次只有一邊說（搶到提前那一次、沒搶到開始那一次的分頁不說）', () => {
+    store.setSetting('remindLead', 0)
+    const task = store.addTask({ title: '寫報告', date: TODAY, at: '14:00', dur: 60 })
+    const a = vi.fn()
+    const b = vi.fn()
+    const tabA = new Reminders(store, a)
+    const tabB = new Reminders(store, b)
+    const claim = tabA._claim.bind(tabA)
+    // A 剛搶到第一個、還沒搶第二個的時候，B 剛好檢查了一輪
+    tabA._claim = (date, key) => {
+      const ok = claim(date, key)
+      if (ok && key === `${task.id}@14:00`) tabB.check(at(14, 0, 10))
+      return ok
+    }
+    tabA.check(at(14, 0, 10))
+    const starts = (fn) => fn.mock.calls.filter((c) => c[0].id === task.id && c[2] === 'taskStart').length
+    expect(starts(a) + starts(b)).toBe(1)
+    expect(a.mock.calls.length + b.mock.calls.filter((c) => c[0].id === task.id).length).toBe(1)
+  })
+
+  it('電腦睡著、過了午夜才醒來：昨天快午夜時開始的任務還在補提醒的 15 分鐘裡，照樣說開始了（記在昨天那份，不會再說一次）', () => {
+    const task = store.addTask({ title: '寫日記', date: TODAY, at: '23:58', dur: 15 })
+    const kinds = () => callback.mock.calls.filter((c) => c[0].id === task.id).map((c) => [c[1], c[2]])
+    reminders.check(at(23, 48))
+    reminders.check(at(23, 55))
+    // 23:55 之後睡著，隔天 00:03 醒來
+    reminders.check(new Date(2026, 9, 26, 0, 3))
+    reminders.check(new Date(2026, 9, 26, 0, 3, 30))
+    reminders.check(new Date(2026, 9, 26, 0, 20))
+    expect(kinds()).toEqual([[10, 'task'], [0, 'taskStart']])
+    // 一直醒著過了午夜：23:58 那時就說過了，不會補第二次
+    localStorage.clear()
+    callback.mockClear()
+    const awake = new Reminders(store, callback)
+    awake.check(at(23, 57, 30))
+    awake.check(at(23, 58))
+    awake.check(new Date(2026, 9, 26, 0, 0, 30))
+    expect(kinds()).toEqual([[1, 'task'], [0, 'taskStart']])
+  })
+
   it('兩個分頁幾乎同時檢查：另一邊在這邊讀完紀錄之後才記下的，這邊提醒前再看一次就不響', () => {
     const a = vi.fn()
     const tabA = new Reminders(store, a)

@@ -216,28 +216,37 @@ export class Reminders {
     const lead = this.store.state.settings.remindLead
     const today = dateStr(now)
     const tomorrow = addDays(today, 1)
+    const yesterday = addDays(today, -1)
     const mins = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60
     const sent = (this.sent[today] ||= [])
     let changed = false
-    // 明天一早的項目，提前提醒的時間落在今天晚上：也要跨過午夜提醒（記在明天那份，過了午夜不會再提醒一次）。
-    // 明天的例行日程平常要到明天才生成，這時先生成出來，才提醒得到
-    const early = lead >= 0 && mins + lead >= 1440
-    if (early) this.store.prepareRoutines?.(tomorrow)
-    const items = lead < 0 ? [] : [...this._items(today, 0), ...(early ? this._items(tomorrow, 1440) : [])]
     // 開始後 1 分鐘內打開 App 仍會補提醒；再晚就不吵了。
     // 不過上次檢查是很久以前（電腦睡著時開始了）：剛開始 15 分鐘內的照樣補提醒
     const slept = this.lastCheck != null && now - this.lastCheck > GAP
     this.lastCheck = +now
     const late = slept ? LATE : 1
+    // 明天一早的項目，提前提醒的時間落在今天晚上：也要跨過午夜提醒（記在明天那份，過了午夜不會再提醒一次）。
+    // 明天的例行日程平常要到明天才生成，這時先生成出來，才提醒得到
+    const early = lead >= 0 && mins + lead >= 1440
+    if (early) this.store.prepareRoutines?.(tomorrow)
+    // 睡著時跨過了午夜：昨天快午夜時開始的（23:58 那件）也還在補提醒的 15 分鐘裡（記在昨天那份）
+    const pastMidnight = slept && mins < LATE
+    const items = lead < 0 ? [] : [...(pastMidnight ? this._items(yesterday, -1440) : []), ...this._items(today, 0), ...(early ? this._items(tomorrow, 1440) : [])]
     for (const [item, at, kind, date, offset] of items) {
+      if (item.done) continue
       const key = `${item.id}@${at}`
       const done = (this.sent[date] ||= [])
-      if (item.done || done.includes(key)) continue
       const start = toMin(at) + offset
-      if (mins >= start - lead && mins < start + late) {
-        if (!this._claim(date, key)) continue
-        this.onRemind(kind === 'task' ? { ...item, start: at } : item, Math.max(0, Math.ceil(start - mins)), kind)
+      // 排定的任務到了開始的那一刻：另外說一次「現在開始吧」（kind 'taskStart'，提示卡上可以直接開始專注）。
+      // 提前提醒是 0 分鐘、或錯過了提前的那一次（現在已經開始了）時，那一次就是這一次，不說兩次
+      const begun = kind === 'task' && mins >= start && mins < start + late
+      if (!done.includes(key) && mins >= start - lead && mins < start + late && this._claim(date, key)) {
+        // 已經開始了：這一次就是開始的那一次，兩個都要搶到才說（另一個分頁剛好搶到開始的那一次，就由它說）
+        if (begun && !this._claim(date, `${key}!`)) continue
+        this.onRemind(kind === 'task' ? { ...item, start: at } : item, Math.max(0, Math.ceil(start - mins)), begun ? 'taskStart' : kind)
+        continue
       }
+      if (begun && !done.includes(`${key}!`) && this._claim(date, `${key}!`)) this.onRemind({ ...item, start: at }, 0, 'taskStart')
     }
     // 就寢前 30 分鐘（之後 10 分鐘內打開 App 也會補提醒）。照「過了幾分鐘」算，跨過午夜也對得上
     // （就寢 00:25 → 23:55 起的 10 分鐘）；記在這段開始的那一天，過了午夜不會再提醒一次
@@ -281,7 +290,6 @@ export class Reminders {
     }
     this._motto(now, mins)
     // 留昨天、今天、明天（跨過午夜的就寢提醒記在昨天那份）
-    const yesterday = addDays(today, -1)
     for (const d of Object.keys(this.sent)) {
       if (d !== yesterday && d !== today && d !== tomorrow) {
         delete this.sent[d]

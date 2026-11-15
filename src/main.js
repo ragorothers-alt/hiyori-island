@@ -841,6 +841,24 @@ async function boot() {
   })
 
   // ── 提醒：日程、排進時段的任務、就寢 ──
+  // 提示卡上的按鈕按下去時再找一次那件任務：卡片留著的時候可能做完了、刪掉了（不然會開始沒有目標的專注），
+  // 或在別的分頁改了時間（at 給了的話，日期和時段要跟卡片上的一樣）。對不上就說一聲、什麼都不改
+  const taskNow = (id, at = null) => {
+    const cur = store.state.tasks.find((x) => x.id === id)
+    if (!cur || cur.done) {
+      ui.toast({ icon: '時', title: '這件已經做完，或不在了', ms: 3600 })
+      return null
+    }
+    if (at && (cur.date !== at.date || cur.at !== at.start)) {
+      ui.toast({ icon: '時', title: `「${short(cur.title, 12)}」的時間已經改過了`, sub: cur.at ? `現在排在 ${cur.at}` : '現在沒排時段', ms: 4200 })
+      return null
+    }
+    return cur
+  }
+  const startTask = (id, fn) => () => {
+    const cur = taskNow(id)
+    if (cur) fn(cur.id)
+  }
   const reminders = new Reminders(store, (e, min, kind = 'event') => {
     // 重要日子：前一天ふじ提醒，當天もち也來打氣
     // 里程碑期限：一樣前一天ふじ提醒、當天もち打氣；說得出還差幾個細項
@@ -952,12 +970,49 @@ async function boot() {
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 就寢提醒', `預定 ${e.start} 就寢`, 'bedtime')
       return
     }
+    // 排定的任務到了開始的時間：提示卡上直接開始專注（提不起勁就只做 5 分鐘、還沒準備好就晚 15 分鐘再提醒）。
+    // 已經在專注這一件就不吵；正在專注別件的話可以換成這件
+    if (kind === 'taskStart') {
+      const t = store.state.tasks.find((x) => x.id === e.id)
+      if (!t || t.done || (ui.focus.mode === 'focus' && ui.focus.taskId === t.id)) return
+      sfx.reminder()
+      talk('taskStart', { task: short(t.title) }, 6000, `「${short(t.title)}」排在現在，開始吧。`, 'fuji')
+      const busy = ui.focus.mode === 'focus'
+      // 晚 15 分鐘：從排的時間、或（提示卡留了一陣子才按）從現在起再過 15 分鐘。過了今天就不挪，請你明天再排。
+      // 提示卡留著的時候時間在別的分頁改過了：不拿這張卡上的舊時間蓋回去
+      const later = () => {
+        const cur = taskNow(e.id, e)
+        if (!cur) return
+        const now = new Date()
+        const nowMin = dateStr(now) === cur.date ? now.getHours() * 60 + now.getMinutes() : 1440
+        const to = Math.max(toMin(cur.at), nowMin) + 15
+        if (to >= 1440) return ui.toast({ icon: '時', title: '今天已經很晚了', sub: '明天再排一次吧', ms: 4200 })
+        store.updateTask(cur.id, { at: minToHHMM(to) })
+        ui.toast({ icon: '時', title: `「${short(cur.title, 12)}」改到 ${minToHHMM(to)}`, sub: '到時候再提醒你', ms: 4200 })
+      }
+      ui.toast({
+        icon: '時', title: t.title, sub: `排在 ${e.start}・${busy ? '現在正在專注別件' : '現在開始吧'}`, ms: 15000, tag: `start-${t.id}`,
+        actions: [
+          ...(busy
+            ? [{ label: '換成這件', run: startTask(e.id, (id) => ui.focus.startWith(id)) }]
+            : [
+                { label: '▶ 開始專注', run: startTask(e.id, (id) => ui.focus.startWith(id)) },
+                { label: '只做 5 分鐘', soft: true, run: startTask(e.id, (id) => ui.focus.startSmall(id)) },
+              ]),
+          { label: '晚 15 分鐘', soft: true, run: later },
+        ],
+      })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${t.title}`, `排在 ${e.start}，現在開始吧`, t.id)
+      return
+    }
     sfx.reminder()
     const when = min > 0 ? `${min} 分鐘後開始（${e.start}）` : `現在開始（${e.start}）`
     // 看時間的是ふじ
     const text = min > 0 ? line('reminder', { event: short(e.title), min }, 'fuji') : `「${short(e.title)}」開始囉。`
     say('fuji', text || `${short(e.title)}，${when}`, 6000)
-    ui.toast({ icon: kind === 'task' ? '時' : '鐘', title: e.title, sub: kind === 'task' ? `排定的任務・${when}` : when, ms: 9000 })
+    // 排定的任務還沒到時間：想先開始也可以
+    const early = kind === 'task' && ui.focus.mode !== 'focus' ? [{ label: '▶ 現在就開始', soft: true, run: startTask(e.id, (id) => ui.focus.startWith(id)) }] : []
+    ui.toast({ icon: kind === 'task' ? '時' : '鐘', title: e.title, sub: kind === 'task' ? `排定的任務・${when}` : when, ms: early.length ? 12000 : 9000, ...(early.length ? { actions: early } : {}) })
     if (kind === 'event' && store.selectedDate === store.today) scene?.pulseEvent(e.id)
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
   }, {

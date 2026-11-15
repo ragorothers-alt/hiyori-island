@@ -78,6 +78,13 @@ export const COACH_FUJI = {
     '歡迎回來，已經累積 {mins} 分鐘了。',
     '{task}做了 {mins} 分鐘，繼續往上加吧。',
   ],
+  // 排定的任務到了開始的時間：{task} 是那一件（不含括號）
+  taskStart: [
+    '「{task}」排在現在，開始吧。',
+    '時間到了，「{task}」該上場了。',
+    '照排好的來：現在是「{task}」。',
+    '「{task}」的時間到了，先做一點也好。',
+  ],
   coachHello: {
     morning: [
       '早安，從下面的標籤挑件事吧。',
@@ -419,6 +426,11 @@ export const COACH_MOCHI = {
     '你回來了！已經做了 {mins} 分鐘耶！',
     '歡迎回來～{task}接著做吧！',
     'よし，{mins} 分鐘了，繼續加油！',
+  ],
+  taskStart: [
+    '「{task}」的時間到囉！一起開始吧！',
+    '叮咚，現在是「{task}」時間！',
+    'よし，「{task}」出發！',
   ],
   coachApplied: [
     'ふじ排好 {count} 段，我陪你出發囉。',

@@ -1878,6 +1878,61 @@ test('日程中先不提醒：開會那一段到點的警語不交給手機、�
   await expect.poll(async () => (await plan())[0]).toBe(45)
 })
 
+test('排定的任務到點：提示卡上直接開始專注、只做 5 分鐘或晚 15 分鐘（卡片留了一陣子才按，從現在算）；提前提醒時也可以先開始；專注別件時可以換成這件；時間在別處改過的卡片不蓋回去', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:20:00+08:00`)
+  const min = (n) => new Date(T + n * 60000)
+  await context.addInitScript(({ ymd }) => {
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [
+        { id: 'e2e-a', title: '寫期末報告', priority: 3, date: ymd, at: '10:30', dur: 50 },
+        { id: 'e2e-b', title: '回覆老師的信', priority: 2, date: ymd, at: '10:55', dur: 15 },
+      ]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: { remindLead: 10 } }))
+    }
+  }, { ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(min(-0.5))
+  await page.goto(site.url)
+  await bootReady(page)
+  const taskAt = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).at, id)
+  // 10:20：提前 10 分鐘的那一次，想先開始也可以
+  await page.clock.setFixedTime(min(0))
+  const early = page.locator('#toasts .toast', { hasText: '10 分鐘後開始（10:30）' })
+  await expect(early).toContainText('寫期末報告')
+  await expect(early.locator('.toast-act')).toHaveText(['▶ 現在就開始'])
+  // 10:30：到了開始的時間，提示卡上直接開始專注、只做 5 分鐘，或晚 15 分鐘
+  await page.clock.setFixedTime(min(10))
+  const start = page.locator('#toasts .toast', { hasText: '排在 10:30' })
+  await expect(start).toContainText('現在開始吧')
+  await expect(start.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '晚 15 分鐘'])
+  // 卡片留到 10:33 才按「晚 15 分鐘」：從現在起再過 15 分鐘（10:48），不會改到已經過去的 10:45
+  await page.clock.setFixedTime(min(13))
+  await start.locator('.toast-act', { hasText: '晚 15 分鐘' }).click()
+  await expect.poll(() => taskAt('e2e-a')).toBe('10:48')
+  await expect(page.locator('#toasts .toast', { hasText: '改到 10:48' })).toBeVisible()
+  // 10:38：新的時間也照樣提前提醒；按「▶ 現在就開始」
+  await page.clock.setFixedTime(min(18))
+  const again = page.locator('#toasts .toast', { hasText: '10 分鐘後開始（10:48）' })
+  await again.locator('.toast-act', { hasText: '▶ 現在就開始' }).click()
+  await expect.poll(() => page.evaluate(() => [window.hiyori.ui.focus.mode, window.hiyori.ui.focus.task?.title])).toEqual(['focus', '寫期末報告'])
+  // 10:48：已經在專注這一件，到了開始的時間也不吵（檢查過了：開始的那一次記下了，但沒有提示卡）
+  await page.clock.setFixedTime(min(28))
+  await expect.poll(() => page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('hiyori-reminded') || '{}')))).toContain('e2e-a@10:48!')
+  await expect(page.locator('#toasts .toast', { hasText: '排在 10:48' })).toHaveCount(0)
+  // 10:55：專注中到了另一件的時間：可以換成這件，或晚 15 分鐘再提醒
+  await page.clock.setFixedTime(min(35))
+  const next = page.locator('#toasts .toast', { hasText: '排在 10:55' })
+  await expect(next).toContainText('現在正在專注別件')
+  await expect(next.locator('.toast-act')).toHaveText(['換成這件', '晚 15 分鐘'])
+  // 卡片還在的時候，這件的時間在別處（另一個分頁）改成 11:20：按「晚 15 分鐘」不會拿卡片上的 10:55 蓋回去
+  await page.evaluate(() => window.hiyori.store.updateTask('e2e-b', { at: '11:20' }))
+  await next.locator('.toast-act', { hasText: '晚 15 分鐘' }).click()
+  await expect(page.locator('#toasts .toast', { hasText: '的時間已經改過了' })).toContainText('現在排在 11:20')
+  expect(await taskAt('e2e-b')).toBe('11:20')
+})
+
 // 專注中切去用別的 App：Android 的 App 分得出鎖著手機和切走（awayLocked），鎖著手機專心的不算中途離開。
 // 叫你回來的那一則交給手機排（到點時手機鎖著就不發，在 MottoNotice 裡）
 test('專注中離開 App：切走時交給手機一則「回來吧」；回來時說還剩幾分鐘、記一次中途離開（鎖著手機的不算）；到點的提示卡寫中途離開幾次；設定裡可以關', async ({ page, context, site }) => {
