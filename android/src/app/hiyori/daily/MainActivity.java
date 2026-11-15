@@ -151,10 +151,10 @@ public class MainActivity extends Activity {
 
     // 網頁叫得到的東西。這些方法在另一條執行緒被叫到；只收字串，內容當成資料看
     class Bridge {
-        // 2：多了 mottos（警語的定時提醒）
+        // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen
         @JavascriptInterface
         public int version() {
-            return 2;
+            return 3;
         }
 
         @JavascriptInterface
@@ -207,6 +207,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean mottoClaim(long at) {
             return trusted && MottoNotice.claim(getApplicationContext(), at);
+        }
+
+        // 使用者按了網頁念的那一則提示卡上的按鈕（先停、開始專注）：看到了，離開 App 時不用再用通知發一次
+        @JavascriptInterface
+        public void mottoSeen() {
+            if (trusted) MottoNotice.seen(getApplicationContext());
         }
 
         // App 在前面嗎（App 在背景時網頁的 JavaScript 可能還在跑）

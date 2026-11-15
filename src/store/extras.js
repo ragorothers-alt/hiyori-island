@@ -1,7 +1,7 @@
 import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX } from './migrate.js'
 import { uid, addDays, daysBetween } from './util.js'
 import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
-import { MOTTO_MAX } from '../mottos.js'
+import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS } from '../theme.js'
 export const extrasMethods = {
   // ── 訂閱服務 ──
@@ -128,6 +128,29 @@ export const extrasMethods = {
     const n = this.state.mottos.length
     this.state.mottos = this.state.mottos.filter((m) => m.id !== id)
     if (this.state.mottos.length !== n) this._finish()
+  },
+  // 定時提醒先停到 until（毫秒；0、已經過了的是現在就恢復）。發 mottoPause（停到幾點，0 是恢復）：
+  // ふじ說一聲、提示卡上可以馬上恢復。回傳有沒有變。
+  // 恢復不是清成 0：停到的時間改成現在、記下是提早恢復的（mottoPauseCut）——停著時到點的照樣算跳過
+  // （頁面睡著、還沒走過那幾則的話，恢復後不會補念出來；同步到別台也一樣），只是停完不補那一則
+  pauseMottos(until) {
+    const now = Date.now()
+    const st = this.state.settings
+    const old = Number(st.mottoPause) || 0
+    if (Number.isFinite(until) && until > now) {
+      const v = Math.round(Math.min(until, now + PAUSE_MAX))
+      if (v === old && !st.mottoPauseCut) return false
+      st.mottoPause = v
+      st.mottoPauseCut = false
+      this._finish([['mottoPause', v]])
+      return true
+    }
+    // 本來就沒停（停到的時間已經過了）又按恢復：不用存
+    if (!(old > now)) return false
+    st.mottoPause = now
+    st.mottoPauseCut = true
+    this._finish([['mottoPause', 0]])
+    return true
   },
 
   // ── 重要日子 ──

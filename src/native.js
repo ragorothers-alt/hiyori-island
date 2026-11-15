@@ -83,6 +83,13 @@ export function nativeMottoClaim(at, bridge = native) {
     return true
   }
 }
+// 使用者按了頁面念的那一則提示卡上的按鈕（先停、開始專注）：看到了，手機不用在離開 App 時再發一次。
+// 舊版的殼沒有這個（剛念完 2 秒內就離開 App 的話，手機照舊再發一次）
+export function nativeMottoSeen(bridge = native) {
+  try {
+    if (typeof bridge?.mottoSeen === 'function') bridge.mottoSeen()
+  } catch {}
+}
 // App 不在前面嗎：App 在背景時，頁面的 JavaScript 可能還在跑，看頁面自己的 document.hidden 不一定準
 export function nativeAway(bridge = native) {
   try {

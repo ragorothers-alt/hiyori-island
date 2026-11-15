@@ -194,6 +194,11 @@ final class MottoNotice {
         return true;
     }
 
+    // 網頁剛念的那一則，使用者按了提示卡上的按鈕（看到了）：離開 App 時不用再發一次
+    static synchronized void seen(Context c) {
+        prefs(c).edit().remove(KEY_CLAIMED).apply();
+    }
+
     static synchronized long handledAt(Context c) {
         return handled(c, System.currentTimeMillis());
     }

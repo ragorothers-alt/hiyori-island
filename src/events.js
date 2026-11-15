@@ -42,6 +42,7 @@ export const EVENTS = {
   subChanged: '訂閱改了（內容或重新訂閱）',
   subCancelled: '取消訂閱',
   mottoAdded: '新增一句警語',
+  mottoPause: '警語的提醒先停一下（停到幾點，0 是恢復）',
   sleepLogged: '記下睡眠',
 
   // ── 專注 ──

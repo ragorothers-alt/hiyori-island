@@ -166,15 +166,27 @@ describe('Service Worker：計時器到點的推播', () => {
       expect(await s.marker()).toEqual({ at: rest.at })
     }))
 
-  it('找不到對得上的字（沒留、只有還沒到的、太久以前的、內容壞掉）：還是一定顯示一則通知', () =>
+  it('找不到對得上的字：還是一定顯示一則通知。頁面留過字的（剛改了排法、取消還沒送到時晚到的）不出聲；連字都沒留（快取被清掉）才出聲', () =>
     withClock(async () => {
-      for (const plans of [undefined, [], [{ at: NOW + 5 * MIN, title: '還沒到', body: '' }], [{ at: NOW - 40 * MIN, title: '舊的', body: '' }], [{ at: 'x', title: 5 }, null], 'oops', { at: NOW, title: '不是清單' }]) {
+      for (const plans of [[], [{ at: NOW + 5 * MIN, title: '還沒到', body: '' }], [{ at: NOW - 40 * MIN, title: '舊的', body: '' }], [{ at: 'x', title: 5 }, null], 'oops', { at: NOW, title: '不是清單' }]) {
         const s = setup({ plans })
         await s.ready
         await run(s.on.push, { data: null })
-        expect(s.shown(), JSON.stringify(plans)).toEqual([expect.objectContaining({ title: 'ひより · 計時到了', body: '', tag: 'hiyori-focus' })])
+        expect(s.shown(), JSON.stringify(plans)).toEqual([expect.objectContaining({ title: 'ひより', tag: 'hiyori-quiet', silent: true, renotify: false })])
+        expect(s.alerts).toEqual([])
         expect(await s.marker()).toBeUndefined()
       }
+      // 只留了警語的字也算
+      const motto = setup({ mottos: [] })
+      await motto.ready
+      await run(motto.on.push, { data: null })
+      expect(motto.shown()).toEqual([expect.objectContaining({ tag: 'hiyori-quiet', silent: true })])
+      // 什麼都沒留：照一般的字出聲
+      const none = setup({})
+      await none.ready
+      await run(none.on.push, { data: null })
+      expect(none.shown()).toEqual([expect.objectContaining({ title: 'ひより · 計時到了', body: '', tag: 'hiyori-focus', renotify: true, silent: false })])
+      expect(none.alerts).toEqual(['ひより · 計時到了'])
     }))
 
   it('上一次到點的通知還留著就收掉，別的通知不動；查不到通知清單的瀏覽器照樣顯示', () =>
@@ -257,7 +269,7 @@ describe('Service Worker：計時器到點的推播', () => {
       const s = setup({ plans: [focus] })
       await s.ready
       await run(s.on.push, { data: null })
-      // 同一則又送來的（again）、對不上字的（at 是 null）也記
+      // 同一則又送來的（again）、對不上字的（at 是 null，不出聲的記成 quiet）也記
       for (let i = 1; i <= 9; i++) {
         vi.setSystemTime(NOW + i * 2 * MIN)
         await run(s.on.push, { data: null })
@@ -265,7 +277,7 @@ describe('Service Worker：計時器到點的推播', () => {
       const log = await s.log()
       expect(log).toHaveLength(8)
       expect(log.at(0)).toEqual({ got: NOW + 4 * MIN, at: focus.at, closed: false, again: true })
-      expect(log.at(-1)).toEqual({ got: NOW + 18 * MIN, at: null, closed: false })
+      expect(log.at(-1)).toEqual({ got: NOW + 18 * MIN, at: null, closed: false, quiet: true })
       expect(log.map((x) => x.got)).toEqual(Array.from({ length: 8 }, (_, i) => NOW + (i + 2) * 2 * MIN))
 
       vi.setSystemTime(NOW)
@@ -305,10 +317,12 @@ describe('Service Worker：警語的推播', () => {
       expect(s.shown().map((n) => n.body.split('\n')[0])).toEqual(['舊'])
       expect(await s.done()).toEqual({ at: NOW })
 
+      // 晚太久的：不出聲地放一則（不是那一句，也不記成念過）
       const late = setup({ mottos: [m(-12)] })
       await late.ready
       await run(late.on.push, { data: null })
-      expect(late.shown()).toEqual([expect.objectContaining({ title: 'ひより · 計時到了', tag: 'hiyori-focus' })])
+      expect(late.shown()).toEqual([expect.objectContaining({ tag: 'hiyori-quiet', silent: true })])
+      expect(late.alerts).toEqual([])
       expect(await late.done()).toBeUndefined()
     }))
 
@@ -423,13 +437,29 @@ describe('Service Worker：警語的推播', () => {
       expect(s.shown()).toEqual([expect.objectContaining({ tag: 'motto', body: m(0.1, '新的').body, silent: false })])
     }))
 
-  it('字壞掉、沒留：照樣顯示一則（一般的字）', () =>
+  it('字壞掉：照樣顯示一則（不出聲）', () =>
     withClock(async () => {
       for (const mottos of ['oops', [{ at: NOW, title: 3 }], [null]]) {
         const s = setup({ mottos })
         await s.ready
         await run(s.on.push, { data: null })
-        expect(s.shown(), JSON.stringify(mottos)).toEqual([expect.objectContaining({ title: 'ひより · 計時到了' })])
+        expect(s.shown(), JSON.stringify(mottos)).toEqual([expect.objectContaining({ tag: 'hiyori-quiet', silent: true })])
       }
+    }))
+
+  it('剛按了「先停一下」、取消還沒送到伺服器時，原本排著的那一則晚到：不出聲（不會在停著的時候響一般的「計時到了」）', () =>
+    withClock(async () => {
+      // 頁面在 10:00 前一秒停到 11:00：存好的那一串裡已經沒有 10:00（下一則是停完那一刻），10:00 的推播還是來了
+      const s = setup({ mottos: [m(60)], done: NOW - 30 * MIN })
+      await s.ready
+      vi.setSystemTime(NOW + 2000)
+      await run(s.on.push, { data: null })
+      expect(s.shown()).toEqual([expect.objectContaining({ tag: 'hiyori-quiet', silent: true, renotify: false })])
+      expect(s.alerts).toEqual([])
+      // 念到哪一則不動（之後停完那一則照常顯示）
+      expect(await s.done()).toEqual({ at: NOW - 30 * MIN })
+      vi.setSystemTime(NOW + 60 * MIN)
+      await run(s.on.push, { data: null })
+      expect(s.alerts).toEqual(['ひより · 給自己的警語'])
     }))
 })

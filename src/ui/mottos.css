@@ -33,6 +33,9 @@
 .set-row > .mt-reach { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 8px; border-top: 1px dashed var(--glass-border); }
 .mt-reach small { flex: 1 1 200px; font-size: 11.5px; line-height: 1.55; color: var(--ink-soft); }
 .mt-reach .chip-toggle { flex: none; }
+/* 先停一下：兩顆（先停 1 小時、今天先停），停著的時候換成一顆「現在就恢復」 */
+.mt-pause-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.mt-pause .chip-toggle { flex: none; white-space: nowrap; }
 body.night .mt-k { background: radial-gradient(circle, #4a3550, #3a2a45); color: #ffb8cb; }
 
 /* 面板上方那一句：捲動時黏在最上面 */

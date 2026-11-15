@@ -579,7 +579,8 @@ export class MottoPush extends PushBase {
   // 看得到頁面時，伺服器排著的下一則快到了、或排法變了就取消（由頁面自己念）。每秒叫一次也不會多打伺服器
   sync(items, hidden, now = this.now()) {
     if (hidden) this._away()
-    else this._beat(now)
+    // 「看著這一頁」的記號只在交給伺服器排時用得到：沒訂閱推播的不用每 5 秒寫一次
+    else if (this.sub) this._beat(now)
     // 那一串換了（main.js 只在排法變了時換一份新的）才重新比對
     const ready = this.ready()
     if (items !== this._items || ready !== this._ready) {

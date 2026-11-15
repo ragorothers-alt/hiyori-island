@@ -6,8 +6,8 @@ import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking } from './push.js'
-import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeAway } from './native.js'
-import { planKey, MOTTO_LATE } from './mottos.js'
+import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeAway } from './native.js'
+import { planKey, pauseText, pauseUntil, MOTTO_LATE } from './mottos.js'
 import { order as doFirst } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
@@ -637,6 +637,28 @@ async function boot() {
   })
   store.on('coachUndone', ({ count }) => talk('coachUndo', { count }, 4200, '撤銷了，想換個排法再告訴我。', 'fuji'))
   store.on('mottoAdded', (m) => talk('mottoAdded', { text: short(m.text, 24) }, 4600, '記下了，我會時不時提醒你。', 'fuji'))
+  // 警語先停一下／恢復：ふじ說一聲；提示卡上馬上可以恢復（按錯了也回得去）
+  store.on('mottoPause', (until) => {
+    const now = Date.now()
+    // 下一句幾點（停的那段跳過了一則的話，就是停完的那一刻）
+    const next = reminders.mottoPlan(now)[0]
+    const when = next ? `下一句 ${pauseText(next.at, now)}` : ''
+    if (until) {
+      const time = pauseText(until, now)
+      talk('mottoPause', { time }, 6000, `好，先停到 ${time}。`, 'fuji')
+      ui.toast({
+        icon: '戒',
+        title: `警語先停到 ${time}`,
+        sub: when ? `這段時間不提醒・${when}` : '這段時間不提醒',
+        ms: 7000,
+        tag: 'motto',
+        actions: [{ label: '現在就恢復', soft: true, run: () => store.pauseMottos(0) }],
+      })
+      return
+    }
+    talk('mottoResume', {}, 5000, '好，提醒回來了。', 'fuji')
+    ui.toast({ icon: '戒', title: '警語的提醒回來了', sub: when || '照原本的間隔提醒', tag: 'motto' })
+  })
   store.on('dateAdded', (d) => talk('dateAdded', { title: short(d.title), n: d.days }, 4600, '記好了，我陪你留意。', 'fuji'))
   store.on('sleepLogged', ({ date, min, first }) => {
     if (date !== store.today || !first) return
@@ -786,13 +808,22 @@ async function boot() {
       sfx.chime()
       // 頭上的泡泡放不下太長的句子：念前面一段，完整的在提示卡上
       talk('motto', { text: short(e.text, 28) }, 7000, `「${short(e.text, 28)}」`, pick(['mochi', 'fuji']))
+      // 按了提示卡上的按鈕就是看到了：Android 殼不用在離開 App 時再用通知發一次這一則
+      const seen = (run) => () => {
+        nativeMottoSeen()
+        run()
+      }
       ui.toast({
         icon: '戒',
         title: e.text,
         sub: next ? `現在該做：${next.title}` : '寫給自己的警語',
         ms: 9000,
         tag: 'motto',
-        actions: next && ui.focus.mode !== 'focus' ? [{ label: '▶ 開始專注', run: () => ui.focus.startWith(next.id) }] : null,
+        actions: [
+          ...(next && ui.focus.mode !== 'focus' ? [{ label: '▶ 開始專注', run: seen(() => ui.focus.startWith(next.id)) }] : []),
+          // 開會、吃飯時：先停一小時（停完那一刻再提醒一次）
+          { label: '先停 1 小時', soft: true, run: seen(() => store.pauseMottos(pauseUntil('hour', store.state.rhythm, Date.now()))) },
+        ],
       })
       // 交給手機排了（Android 殼）：App 不在前面時由手機發，這邊只在畫面上念。
       // 網頁交給伺服器推的時候，頁面會念的是看得到頁面時（沒看著這個視窗就跳通知）、或在背景卻沒交上伺服器時
@@ -839,7 +870,8 @@ async function boot() {
     // 剛寫下第一句、剛打開提醒：先定好從什麼時候開始算（不等下一秒的檢查），才排得出那一串
     if (on) reminders.startMotto(now)
     const task = on ? nowTask() : null
-    const sig = on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, task: task?.title, now }) : 'off'
+    const pause = Number(s.settings.mottoPause) || 0
+    const sig = on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, pause, cut: s.settings.mottoPauseCut, task: task?.title, now }) : 'off'
     if (sig !== mottoSig) {
       const since = Math.max(now - MOTTO_LATE, mottoPush ? mottoPush.done : nativeMottoHandled())
       const items = on

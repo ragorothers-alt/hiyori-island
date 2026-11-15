@@ -237,15 +237,21 @@ async function showPush() {
   // 記號原本是什麼（沒顯示出來時還原）
   let shownBefore = null
   let doneBefore = null
+  // 頁面留過要顯示的字嗎（快取裡有計時器或警語的那一份）：有的話，對不上的推播多半是剛改了排法（先停一下、停掉計時、
+  // 改了間隔）、取消還沒送到伺服器時晚到的那一則，不出聲地放；連那一份都沒有（快取被清掉了）才照一般的字出聲
+  let planned = false
   try {
     cache = await caches.open(PLAN_CACHE)
-    timer = latestDue(await readJSON(cache, PLAN_FILE), now, TIMER_LATE)
+    const timers = await readJSON(cache, PLAN_FILE)
+    const mottos = await readJSON(cache, MOTTO_FILE)
+    planned = timers != null || mottos != null
+    timer = latestDue(timers, now, TIMER_LATE)
     shownBefore = await readJSON(cache, SHOWN_FILE)
     if (timer && shownBefore?.at === timer.at) {
       repeat(timer, `hiyori-focus-${timer.at}`, LOG_FILE)
       timer = null
     }
-    motto = latestDue(await readJSON(cache, MOTTO_FILE), now, MOTTO_LATE)
+    motto = latestDue(mottos, now, MOTTO_LATE)
     doneBefore = await readJSON(cache, MOTTO_DONE)
     if (motto && motto.at <= (Number(doneBefore?.at) || 0)) {
       repeat(motto, 'motto', MOTTO_LOG)
@@ -266,7 +272,11 @@ async function showPush() {
   // 同一次到點，頁面自己發的通知也用同一個 tag（計時器：hiyori-focus-到點的時間；警語：motto）
   if (timer) shows.push({ ...timer, tag: `hiyori-focus-${timer.at}`, log: LOG_FILE, kind: 'timer' })
   if (motto) shows.push({ ...motto, tag: 'motto', log: MOTTO_LOG, kind: 'motto', fresh: true })
-  if (!shows.length) shows.push(again ? { ...again, silent: true } : { at: null, title: 'ひより · 計時到了', body: '', tag: 'hiyori-focus', log: LOG_FILE })
+  if (!shows.length) {
+    if (again) shows.push({ ...again, silent: true })
+    else if (planned) shows.push({ at: null, title: 'ひより', body: '提醒的時間剛改過，這一則可以略過', tag: 'hiyori-quiet', log: LOG_FILE, silent: true, quiet: true })
+    else shows.push({ at: null, title: 'ひより · 計時到了', body: '', tag: 'hiyori-focus', log: LOG_FILE })
+  }
   // 上一次到點的通知還留著就收掉，只留最新的
   const focusTag = shows.find((s) => s.tag.startsWith('hiyori-focus'))?.tag
   if (focusTag) {
@@ -299,7 +309,7 @@ async function showPush() {
       for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'hiyori-motto-shown', at: said.at })
     } catch {}
   }
-  const entries = out.map((s) => [s, { got: now, at: s.at, closed: false, ...(s.silent ? { again: true } : {}) }])
+  const entries = out.map((s) => [s, { got: now, at: s.at, closed: false, ...(s.quiet ? { quiet: true } : s.silent ? { again: true } : {}) }])
   if (cache) for (const [s, e] of entries) await note(cache, s.log, e)
   return { cache, entries }
 }

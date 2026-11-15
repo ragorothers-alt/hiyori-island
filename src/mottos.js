@@ -95,6 +95,39 @@ export function windowEnd(rhythm, t) {
   return upcoming(from, toMin(rhythm?.sleep || '23:00'), false)
 }
 
+// ── 先停一下：開會、吃飯、跟朋友在一起時先不提醒，時間到了自己恢復（settings.mottoPause 是停到幾點，0 是沒停）──
+// 停著的時候到點的那幾則不念、不通知（照樣輪過去），停完照原本的間隔接下去
+export const PAUSE_HOUR = 3600000
+// 停到幾點最晚是多久以後：「今天先停」最多停到這一段醒著的時間結束（不到一天），再多就是壞掉的資料
+export const PAUSE_MAX = 26 * 3600000
+// kind：'hour' 先停 1 小時、'today' 今天先停（停到就寢）。睡覺的時間裡本來就不提醒，「今天先停」回傳 null
+export function pauseUntil(kind, rhythm, now) {
+  if (kind === 'hour') return now + PAUSE_HOUR
+  if (kind === 'today') return awakeAt(rhythm, now) ? windowEnd(rhythm, now) : null
+  return null
+}
+// 「停到幾點」怎麼寫：今天的寫 HH:MM，日曆上的明天（就寢在午夜後）寫「明天 HH:MM」
+export function pauseText(until, now) {
+  const d = new Date(until)
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return new Date(now).toDateString() === d.toDateString() ? hm : `明天 ${hm}`
+}
+// 現在停著嗎：停到幾點（毫秒），沒停是 0
+export const pausedUntil = (settings, now) => {
+  const v = Number(settings?.mottoPause) || 0
+  return v > now ? v : 0
+}
+// 從 from 那一則往後的下一則：{ at, skip }。skip：停著（pause 是停到幾點，已經過了也照算）的時候到點的，不念、不通知。
+// skipped：from 那一則就是停著時跳過的。停的那段真的跳過了一則的話，停完的那一刻（醒著的話）補提醒一次，
+// 之後從那裡照間隔接下去——「先停 1 小時」就是一小時後再提醒；停的那段本來就沒有要提醒的，照原本的時間。
+// cut：自己按了「現在就恢復」（停到的時間改成按下去的那一刻）：停著時到點的照樣算跳過，但不補（正看著 App）
+export function stepMotto(from, skipped, every, rhythm, pause = 0, cut = false) {
+  const t = nextMotto(from, every, rhythm)
+  if (t < pause) return { at: t, skip: true }
+  if (skipped && !cut && from < pause && t > pause && awakeAt(rhythm, pause)) return { at: pause, skip: false }
+  return { at: t, skip: false }
+}
+
 // t 算在哪一天醒著的那一段，回傳那一段幾點結束：醒著就是這一段；睡覺的時間裡，前半段算剛結束的那一段
 // （過了就寢還沒睡），後半段算接下來那一段（快起床了）
 function dayEnd(rhythm, t) {
@@ -106,26 +139,29 @@ function dayEnd(rhythm, t) {
 // 交給手機的那一串排到幾點：明天就寢（「今天」照上面 dayEnd 算：過了就寢還沒睡的，明天是日曆上的下一天）
 export const planUntil = (rhythm, now) => windowEnd(rhythm, dayEnd(rhythm, now) + 60000)
 // 交給手機的那一串什麼時候要重排：會影響排法的東西都放進來（間隔、作息、拿出來的警語、上次念到哪、
-// 專注到幾點、現在該做的那件、排到幾點）。沒變就不用重送
-export const planKey = ({ every, rhythm, mottos, last, quietUntil = 0, task = '', now }) =>
-  JSON.stringify([every, rhythm?.wake, rhythm?.sleep, last?.at, last?.i, quietUntil, task, planUntil(rhythm, now), activeMottos(mottos).map((m) => m.text)])
+// 專注到幾點、先停到幾點、現在該做的那件、排到幾點）。沒變就不用重送
+export const planKey = ({ every, rhythm, mottos, last, quietUntil = 0, pause = 0, cut = false, task = '', now }) =>
+  JSON.stringify([every, rhythm?.wake, rhythm?.sleep, last?.at, last?.i, !!last?.skip, quietUntil, pause, !!cut, task, planUntil(rhythm, now), activeMottos(mottos).map((m) => m.text)])
 
-// 從上一次提醒（last：{ at, i }，i 是下一則輪到拿出來的第幾句）往後，排到明天就寢的提醒：[{ at, text }]。
-// since 以前的（已經過去、處理過的）、quietUntil 以前的（專注中不打擾）不排，但那一句照樣輪過去
-// （跟頁面開著時一樣，兩邊才對得上）。since 可以比現在早一點：到點了、還沒通知的那一則留著交給手機。
+// 從上一次提醒（last：{ at, i, skip }，i 是下一則輪到拿出來的第幾句，skip 是那一則停著沒念）往後，排到明天就寢的提醒：[{ at, text }]。
+// since 以前的（已經過去、處理過的）、quietUntil 以前的（專注中不打擾）、停著時到點的（pause、cut，見 stepMotto）不排，
+// 但那一句照樣輪過去（跟頁面開著時一樣，兩邊才對得上）。since 可以比現在早一點：到點了、還沒通知的那一則留著交給手機。
 // 只排到明天：兩天都沒打開 App 的話就不再提醒（不會一直響下去）
-export function planMottos(list, every, rhythm, last, now, { quietUntil = 0, since = now, max = PLAN_MAX } = {}) {
+export function planMottos(list, every, rhythm, last, now, { quietUntil = 0, pause = 0, cut = false, since = now, max = PLAN_MAX } = {}) {
   const on = activeMottos(list)
   if (!(every > 0) || !on.length || !(last?.at > 0)) return []
   const until = planUntil(rhythm, now)
   const out = []
   let t = last.at
+  let skip = !!last.skip
   let i = Number(last.i) || 0
   for (let k = 0; k < 2000 && out.length < max; k++) {
-    t = nextMotto(t, every, rhythm)
+    const n = stepMotto(t, skip, every, rhythm, pause, cut)
+    t = n.at
+    skip = n.skip
     if (t > until) break
     const m = mottoOf(on, i++)
-    if (t > since && t > quietUntil && awakeAt(rhythm, t)) out.push({ at: t, text: m.text })
+    if (!skip && t > since && t > quietUntil && awakeAt(rhythm, t)) out.push({ at: t, text: m.text })
   }
   return out
 }

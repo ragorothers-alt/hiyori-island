@@ -1,6 +1,6 @@
 import './mottos.css'
-import { $, $$, esc, armConfirm, editing, inlineEdit, pickOne, setHTML } from './dom.js'
-import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, mottoAt } from '../mottos.js'
+import { $, $$, esc, armConfirm, editing, inlineEdit, keepFocus, pickOne, setHTML } from './dom.js'
+import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, awakeAt, mottoAt, pauseText, pauseUntil, pausedUntil, windowEnd } from '../mottos.js'
 import { dateStr } from '../store/util.js'
 
 // 警語：自己寫給自己的話。
@@ -96,6 +96,17 @@ export class MottosView {
       case 'every':
         s.setSetting('mottoEvery', +b.dataset.v)
         return this.render()
+      // 先停一下／現在就恢復：按完焦點放在換上來的那一顆（鍵盤操作的人不會掉到頁面最上面）
+      case 'pause': {
+        const until = pauseUntil(b.dataset.v, s.state.rhythm, Date.now())
+        if (until) s.pauseMottos(until)
+        this.render()
+        return $('[data-act="resume"]', this.el.set)?.focus()
+      }
+      case 'resume':
+        s.pauseMottos(0)
+        this.render()
+        return $('[data-act="pause"]', this.el.set)?.focus()
       case 'notify':
         // 問權限的時候先不能再按；問完（就算被拒絕、畫面跟原本一樣）要按得回來
         b.disabled = true
@@ -139,10 +150,34 @@ export class MottosView {
       ? `<div class="set-row theme-row"><div><b>多久提醒一次</b><small>${every ? `醒著的時候（作息的起床到就寢）每 ${EVERY_TEXT[every]}，もち或ふじ念一句，提示卡上寫著現在該做的那一件；專注中不打擾` : '不定時提醒，只放在面板上方'}</small></div>
           <div class="seg mt-every" role="group" aria-label="警語多久提醒一次">${MOTTO_EVERY.map((v) => `<button type="button" data-act="every" data-v="${v}" aria-pressed="${v === every}" class="${v === every ? 'on' : ''}">${EVERY_TEXT[v]}</button>`).join('')}</div>
           ${reach ? `<div class="mt-reach"><small>${esc(reach)}<span class="mt-last" data-r="last" hidden></span></small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
+        ${every && on ? this._pauseRow() : ''}
         <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}">${bar ? '開' : '關'}</button></div>`
       : '')
     pickOne($$('[data-act="every"]', this.el.set), (x) => +x.dataset.v === every)
     if (kind === 'push') this._renderLast()
+  }
+
+  // 先停一下：開會、吃飯、跟朋友在一起時。停著的時候寫停到幾點、可以馬上恢復；停完自己換回來
+  _pauseRow() {
+    const s = this.store.state
+    const now = Date.now()
+    const until = pausedUntil(s.settings, now)
+    clearTimeout(this._pauseT)
+    if (until) {
+      // 停完自己換回來：焦點在這一區的話留在同一顆（「現在就恢復」不見了就換到「先停 1 小時」），鍵盤操作的人不會掉到頁面最上面
+      this._pauseT = setTimeout(() => {
+        const was = document.activeElement
+        const onResume = was?.dataset?.act === 'resume' && this.el.set.contains(was)
+        keepFocus(this.el.set, () => this.render())
+        if (onResume) $('[data-act="pause"]', this.el.set)?.focus({ preventScroll: true })
+      }, until - now + 500)
+      return `<div class="set-row mt-pause"><div><b>先停到 ${esc(pauseText(until, now))}</b><small>這段時間到點的不念、不通知，時間到了就回來提醒你</small></div>
+        <button type="button" class="chip-toggle on" data-act="resume">現在就恢復</button></div>`
+    }
+    // 睡覺的時間裡本來就不提醒：只給「先停 1 小時」
+    const today = awakeAt(s.rhythm, now) ? `<button type="button" class="chip-toggle" data-act="pause" data-v="today" title="停到今晚就寢（${esc(pauseText(windowEnd(s.rhythm, now), now))}）">今天先停</button>` : ''
+    return `<div class="set-row mt-pause"><div><b>先停一下</b><small>開會、吃飯、跟朋友在一起時先不提醒，時間到了自己恢復</small></div>
+      <div class="mt-pause-acts"><button type="button" class="chip-toggle" data-act="pause" data-v="hour">先停 1 小時</button>${today}</div></div>`
   }
 
   // 「上一則推播幾點送到這台」：頁面關著時有沒有收到，看這一行就知道

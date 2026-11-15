@@ -2,7 +2,7 @@ import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, pars
 import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
-import { MOTTO_LEN, MOTTO_MAX, MOTTO_EVERY } from '../mottos.js'
+import { MOTTO_LEN, MOTTO_MAX, MOTTO_EVERY, PAUSE_MAX } from '../mottos.js'
 import { flowerOf, COMMON_BY_TAG } from '../data/flowers.js'
 import { outfitOf } from '../data/bond.js'
 import { SHOP_ITEMS } from '../data/shop.js'
@@ -618,6 +618,10 @@ function migrate(s) {
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
   if (!MOTTO_EVERY.includes(settings.mottoEvery)) settings.mottoEvery = DEFAULT_SETTINGS.mottoEvery
+  // 先停到幾點：遠在一天多以後的（壞掉的資料，不然會一直停著）當成沒停。已經過了的留著：
+  // 停完那一刻補的那一則照它算（剛停完就重新整理也還是同一個時間）
+  const pause = ts(settings.mottoPause)
+  settings.mottoPause = pause && pause <= Date.now() + PAUSE_MAX ? Math.round(pause) : 0
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
 

@@ -1632,7 +1632,7 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   const toast = page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })
   await expect(toast).toBeVisible()
   await expect(toast).toContainText('現在該做：寫期末報告')
-  await expect(toast.locator('.toast-act')).toHaveText('▶ 開始專注')
+  await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '先停 1 小時'])
   // 頁面念之前跟手機說了：10:00 那一則手機不會再發
   expect(await page.evaluate(() => window.__handled)).toBe(T)
   // 交給手機的那一串：從 10:15 起每 15 分鐘一則，排到明天就寢；通知上也寫著現在該做的那一件
@@ -1645,9 +1645,20 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   expect(items[1].at - items[0].at).toBe(15 * 60000)
   expect(items.length).toBeGreaterThan(60)
   expect(items[0]).toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告' })
-  // 紀錄頁的警語卡：寫著 App 關著也會通知
+  // 開會、吃飯時：提示卡上按「先停 1 小時」。停著的那一小時手機上也不排，11:00 起照常
+  await toast.locator('.toast-act', { hasText: '先停 1 小時' }).click()
+  const paused = page.locator('#toasts .toast', { hasText: '警語先停到 11:00' })
+  await expect(paused).toBeVisible()
+  await expect(paused).toContainText('下一句 11:00')
+  await expect.poll(async () => (await plan())?.[0]?.at).toBe(T + 60 * 60000)
+  // 紀錄頁的警語卡：寫著 App 關著也會通知、停到幾點；按「現在就恢復」又照原本的間隔排回去
   await page.evaluate(() => window.hiyori.ui.setTab('records'))
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('App 關著、手機鎖著也會照時間通知')
+  await expect(page.locator('#mottoRoot .mt-pause')).toContainText('先停到 11:00')
+  await page.locator('#mottoRoot [data-act="resume"]').click()
+  await expect(page.locator('#mottoRoot .mt-pause')).toContainText('先停一下')
+  await expect(page.locator('#mottoRoot [data-act="pause"][data-v="hour"]')).toBeFocused()
+  await expect.poll(async () => (await plan())?.[0]?.at).toBe(T + 15 * 60000)
   // 到日程頁關掉系統通知：手機上排著的取消；回到紀錄頁，卡片上請你打開
   await page.evaluate(() => window.hiyori.ui.setTab('schedule'))
   await page.locator('#notifyBtn').click()

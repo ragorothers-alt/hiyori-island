@@ -1,13 +1,13 @@
 // 提醒：日程與排進時段的任務開始前 N 分鐘提醒一次、就寢前 30 分鐘提醒準備睡覺（App 內 + 系統通知）。
 // 已提醒過的記錄在 localStorage，重新整理不會重複提醒；改了開始時間會再提醒一次。
 import { addDays, dateStr, toMin } from './store.js'
-import { activeMottos, awake, mottoOf, nextMotto, planMottos } from './mottos.js'
+import { activeMottos, awake, mottoOf, planMottos, stepMotto } from './mottos.js'
 import { native, nativeAskNotify, nativeCanNotify } from './native.js'
 
 const KEY = 'hiyori-reminded'
 // 訂閱：每個訂閱最近提醒過的那次扣款日 { 訂閱 id: 'YYYY-MM-DD' }
 const SUB_KEY = 'hiyori-sub-reminded'
-// 警語：上次提醒排在幾點（時間照 nextMotto 一則一則往後排）和下一則輪到第幾句 { at, i }
+// 警語：上次提醒排在幾點（時間照 stepMotto 一則一則往後排）、下一則輪到第幾句、那一則是不是先停著沒念 { at, i, skip? }
 const MOTTO_KEY = 'hiyori-motto-at'
 // 上次提醒是好幾天前（很久沒打開）：從現在重新算，不一打開就響
 const MOTTO_STALE = 3 * 86400000
@@ -117,11 +117,12 @@ export class Reminders {
     return true
   }
 
-  // 警語：醒著的時候每隔 mottoEvery 分鐘提醒一句，一句一句輪流（幾點提醒照 mottos.js 的 nextMotto：
+  // 警語：醒著的時候每隔 mottoEvery 分鐘提醒一句，一句一句輪流（幾點提醒照 mottos.js 的 nextMotto、stepMotto：
   // 上一則過 every 分鐘，碰到睡覺的時間就等起床後 every 分鐘）。上次排到哪一則記在 MOTTO_KEY，
   // 重新整理、另一個分頁都接著算（記憶體也留一份：存不進去時不會每秒響）。
   // 第一次（剛寫下第一句、剛打開提醒）從現在開始算，不馬上響；睡覺的時間不響，起床後第一次打開時接著提醒。
   // 頁面睡著時錯過了好幾則：只念最近的那一則，其他的跳過（照樣輪過那幾句）。
+  // 先停一下（settings.mottoPause）的時候到點的：不念、不通知，照樣往後記（停完那一刻補一則，見 mottos.js 的 stepMotto）。
   // 交給別人排的時候（external），每一則由另一邊（手機、推播）或頁面其中一邊念，靠「念到哪一則」分：
   //   另一邊已經通知過的：只往後記；頁面在背景（hidden）：不念也不往後記（還沒通知的那一則另一邊會發）；
   //   看著 App：先跟另一邊說這一則頁面念（claim），另一邊就不發
@@ -135,28 +136,34 @@ export class Reminders {
     if (!awake(s.rhythm, mins)) return
     const ext = this.external()
     const handled = ext ? this.handled() : 0
+    const pause = Number(s.settings.mottoPause) || 0
+    const cut = !!s.settings.mottoPauseCut
     let t = last.at
+    let skip = !!last.skip
     let i = Number(last.i) || 0
     let due = null
     // 手機已經通知到的最後一則（頁面在背景時先往後記到這裡）
     let seen = null
     for (let k = 0; k < 2000; k++) {
-      const next = nextMotto(t, every, s.rhythm)
-      if (next > +now) break
-      t = next
+      const next = stepMotto(t, skip, every, s.rhythm, pause, cut)
+      if (next.at > +now) break
+      t = next.at
+      skip = next.skip
       due = i++
-      if (t <= handled) seen = { at: t, i }
+      if (t <= handled) seen = { at: t, i, skip }
     }
     if (due === null) return
+    // 停著的時候到點的：另一邊也沒排這一則（交出去的那一串不排停著的時間），不管頁面在不在背景都往後記
+    if (skip) return this._saveMotto({ at: t, i, skip })
     if (ext) {
-      if (t <= handled) return this._saveMotto({ at: t, i })
+      if (t <= handled) return this._saveMotto({ at: t, i, skip })
       if (this.hidden(t)) {
         if (seen && seen.at > last.at) this._saveMotto(seen)
         return
       }
-      if (!this.claim(t)) return this._saveMotto({ at: t, i })
+      if (!this.claim(t)) return this._saveMotto({ at: t, i, skip })
     }
-    this._saveMotto({ at: t, i })
+    this._saveMotto({ at: t, i, skip })
     this.onRemind(mottoOf(on, due), 0, 'motto')
   }
   // 沒記過（剛寫下第一句、剛打開提醒）、記的時間在未來（時鐘被往回調）、或好幾天沒打開：從現在開始算，回傳 true。
@@ -180,12 +187,14 @@ export class Reminders {
     return last
   }
   // 接下來的提醒（交給手機排）：[{ at, text }]。quietUntil：這個時間以前不排（專注中）；
-  // since：這個時間以前的不排（預設是現在；交給手機時留著剛到點、還沒處理的那一則）
+  // since：這個時間以前的不排（預設是現在；交給手機時留著剛到點、還沒處理的那一則）。先停著的那段照設定不排
   mottoPlan(now = Date.now(), opts) {
     const s = this.store.state
-    return planMottos(s.mottos, s.settings.mottoEvery, s.rhythm, this.mottoState(), +now, opts)
+    return planMottos(s.mottos, s.settings.mottoEvery, s.rhythm, this.mottoState(), +now, { pause: Number(s.settings.mottoPause) || 0, cut: !!s.settings.mottoPauseCut, ...opts })
   }
-  _saveMotto(v) {
+  // skip 只在是 true 時記（停著時跳過的那一則）
+  _saveMotto({ at, i, skip }) {
+    const v = skip ? { at, i, skip: true } : { at, i }
     this.mottoLast = v
     try {
       localStorage.setItem(MOTTO_KEY, JSON.stringify(v))
