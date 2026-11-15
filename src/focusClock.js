@@ -4,9 +4,12 @@
 //   paused：暫停中時，倒數剩下的毫秒、往上數已經過的毫秒；沒暫停是 null
 //   ext：這一段是「加時」——倒數到點了還沒做完，從到點那時接著往上數；做完後照原本的輪數繼續
 //   doneAt：休息中才有，上一段專注是幾點結束的（加時從這裡接著數）
+//   small：這一組是「只做 5 分鐘」（提不起勁時先開個頭）：到點時問要不要接著做下去（加時），接著做、休息時都還記著
 
 // 正向計時（往上數）：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
 export const FREE_MIN = 5
+// 只做 5 分鐘
+export const SMALL_MIN = 5
 export const FREE_MAX = 180
 // 計時在關掉頁面、手機鎖著時早就結束了：結束後一小時內回來照常記，再晚就不照全長記進今天
 export const LATE = 60 * 60000
@@ -88,6 +91,8 @@ export function restoreState(saved, dflt = {}) {
   const taskId = typeof saved?.taskId === 'string' ? saved.taskId : null
   const rounds = Math.round(n(saved?.rounds, 1, MAX_ROUNDS, 1))
   const up = saved?.up === true
+  // 加時一定是往上數的專注
+  const ext = up && saved?.mode === 'focus' && saved?.ext === true
   return {
     mode: saved?.mode,
     endAt: n(saved?.endAt, 0, 8.64e15, 0),
@@ -95,8 +100,9 @@ export function restoreState(saved, dflt = {}) {
     taskId,
     projectId: !taskId && typeof saved?.projectId === 'string' ? saved.projectId : null,
     up,
-    // 加時一定是往上數的專注
-    ext: up && saved?.mode === 'focus' && saved?.ext === true,
+    ext,
+    // 只做 5 分鐘是倒數的（接著做下去時是加時）
+    small: saved?.small === true && (!up || ext),
     doneAt: saved?.mode === 'break' && Number.isFinite(saved?.doneAt) && saved.doneAt > 0 ? saved.doneAt : null,
     focusMin: n(saved?.focusMin, 0.05, FREE_MAX, dflt.focusMin ?? 25),
     breakMin: n(saved?.breakMin, 0.05, 60, dflt.breakMin ?? 5),

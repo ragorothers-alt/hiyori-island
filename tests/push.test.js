@@ -444,6 +444,10 @@ describe('到點的時間和通知上的字', () => {
     expect(timerNotice({ ...b, up: true })).toMatchObject({ title: 'ひより · 正向計時滿 3 小時了' })
     expect(timerNotice({ ...b, mode: 'break' })).toMatchObject({ title: 'ひより · 休息結束', body: '準備好了就再開始一輪吧' })
     expect(timerNotice({ ...b, mode: 'break', round: 1, rounds: 3 }).body).toBe('接著第 2/3 輪')
+    // 只做 5 分鐘到點了：開了頭就不難了，要接著做就回到 App；接著做下去（加時）時是正向計時，休息完照常
+    expect(timerNotice({ ...b, focusMin: 5, small: true, target: '寫期末報告' })).toEqual({ at: NOW, title: 'ひより · 5 分鐘到了', body: '「寫期末報告」開了頭就不難了。想接著做就回來按「繼續做下去」，不然休息一下吧' })
+    expect(timerNotice({ ...b, small: true, up: true }).title).toBe('ひより · 正向計時滿 3 小時了')
+    expect(timerNotice({ ...b, small: true, mode: 'break' }).title).toBe('ひより · 休息結束')
     expect(timerTag(NOW)).toBe(`hiyori-focus-${NOW}`)
   })
 })

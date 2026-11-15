@@ -2,7 +2,7 @@
 import { $, $$, esc, ICON, pickOne, scrollMode } from './dom.js'
 import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
-import { FREE_MIN, FREE_MAX } from '../focusClock.js'
+import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
 import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, tagOf } from '../theme.js'
 import { floating } from '../store.js'
 import { coatOfDay } from '../catWalk.js'
@@ -134,6 +134,7 @@ export class FocusTimer {
     this.round = 1
     this.ext = false
     this.doneAt = null
+    this.small = false
   }
 
   // 重新整理前的計時：每個欄位都檢查過才用（壞掉的數字會一路變成 NaN 分鐘）
@@ -146,9 +147,9 @@ export class FocusTimer {
   }
 
   _save() {
-    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid } = this
+    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small } = this
     try {
-      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid }))
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small }))
     } catch {}
     // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排，Android 殼裡的即時倒數跟著換
     this.hooks.focusPlan?.(this.boundary)
@@ -170,7 +171,7 @@ export class FocusTimer {
     const at = clock.nextEnd(this)
     if (at == null) return null
     const { mode, focusMin, breakMin, round, rounds } = this
-    return { at, mode, up: this.counting, focusMin, breakMin, round, rounds, target: this.task?.title || this.project?.name || '' }
+    return { at, mode, up: this.counting, focusMin, breakMin, round, rounds, target: this.task?.title || this.project?.name || '', ...(this.small ? { small: true } : {}) }
   }
 
   // 另一個分頁存了計時狀態：換成那一份，小島上的兩人也跟著進出小木屋（不放台詞、不記專注）
@@ -214,8 +215,9 @@ export class FocusTimer {
   get counting() {
     return clock.counting(this)
   }
+  // small：這一組是「只做 5 分鐘」（加時的 ext 也是 true 時，是到點後接著做下去）
   get info() {
-    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
+    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, small: !!this.small, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
   }
   // 可以選的目標：今天還沒做完的任務、專案裡的長期任務（收藏起來的專案不列）、進行中的專案（暫停的也可以）
   _targets() {
@@ -372,6 +374,11 @@ export class FocusTimer {
       if (b.dataset.v === 'down') this._syncRuler()
     })
     $('#fsTarget').addEventListener('change', (e) => this.setTarget(e.target.value))
+    // 提不起勁：照現在選的目標先做 5 分鐘就好（休息中點了某件事要專注的，也結束休息）
+    $('#fsSmall').onclick = () => {
+      this.toggleSet(false)
+      this.startSmall(this.taskId, this.projectId)
+    }
     $('#fsStart').onclick = () => {
       // 休息中按了某件事要專注（ask）：結束休息，照剛選的開始
       const fromBreak = this.mode === 'break' && this._asking
@@ -413,15 +420,19 @@ export class FocusTimer {
     $('#fsRoundsRow').hidden = up || live
     $('#fsBreakRow').hidden = live
     $('#fsStart').hidden = live
+    $('#fsSmall').hidden = live
     this._renderMore($('#fsExtend'), $('#fsAddRound'))
     if (!live) $('#fsMore').hidden = true
     pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
     pickOne($$('#fsBreak button'), (b) => +b.dataset.v === st.breakMin)
     const target = this.project ? `，時間記進「${this.project.name}」` : ''
+    const small = this.small ? `只做 ${this.focusMin} 分鐘，到點時再決定要不要繼續。` : ''
     $('#fsSum').textContent = live
       ? this.mode === 'break'
-        ? this.round < this.rounds ? `休息完接著第 ${this.round + 1}/${this.rounds} 輪` : '休息完就結束了。還沒做完可以延長，想繼續可以再加一輪'
-        : this.ext ? '加時中：做完按 ■，多做的分鐘會記進去' : `換了目標，這一輪的時間就算在新的目標上${target}`
+        ? this.round < this.rounds
+          ? `休息完接著第 ${this.round + 1}/${this.rounds} 輪`
+          : this.small ? '開了頭就做到了。想接著做就按「繼續做下去」，不然就好好休息' : '休息完就結束了。還沒做完可以延長，想繼續可以再加一輪'
+        : this.ext ? '加時中：做完按 ■，多做的分鐘會記進去' : `${small}換了目標，這一輪的時間就算在新的目標上${target}`
       : up
         ? `從 0 開始往上數，做完按 ■；滿 ${FREE_MIN} 分鐘就記下來（最長 ${FREE_MAX / 60} 小時）${target}`
         : `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪，中間休息 ${st.breakMin} 分` : `，做完休息 ${st.breakMin} 分`}${target}`
@@ -470,6 +481,20 @@ export class FocusTimer {
       this._loadLengths()
     }
     this.toggle()
+  }
+
+  // 只做 5 分鐘：提不起勁時最難的是開始。不照設定的長度和輪數，先倒數 5 分鐘（設定不動）；
+  // 到點時問要不要接著做下去（加時：從到點那一刻往上數），不想就照常休息。已經在專注：只換目標
+  startSmall(taskId = this.taskId, projectId = taskId ? null : this.projectId) {
+    if (this.mode === 'focus') return this.startWith(taskId || null, projectId || null)
+    this.taskId = taskId || null
+    this.projectId = this.taskId ? null : projectId || null
+    // 休息中：結束休息，現在開始
+    this.mode = 'idle'
+    this._loadLengths()
+    Object.assign(this, { up: false, focusMin: debugMin || SMALL_MIN, rounds: 1, small: true })
+    this.ui.toggleFull(false)
+    this._startFocus()
   }
 
   get total() {
@@ -630,8 +655,8 @@ export class FocusTimer {
       this._startFocus()
     } else if (step?.do === 'done') {
       this.toggleSet(false)
-      // 記著剛才這一組的樣子：提示卡上的「再來一輪」照它開始（中途改了設定也一樣）
-      this._last = { up: this.up, focusMin: this.focusMin, breakMin: this.breakMin }
+      // 記著剛才這一組的樣子：提示卡上的「再來一輪」照它開始（中途改了設定也一樣；只做 5 分鐘的也是再 5 分鐘）
+      this._last = { up: this.up, focusMin: this.focusMin, breakMin: this.breakMin, small: !!this.small }
       this.mode = 'idle'
       this._loadLengths()
       this._save()
@@ -674,7 +699,7 @@ export class FocusTimer {
     const multi = this.rounds > 1
     const label = {
       idle: this.up ? '正向計時 · ↑' : multi ? `${this.focusMin} 分 × ${this.rounds} 輪` : '專注 · しゅうちゅう',
-      focus: this.ext ? (multi ? `加時中 · ${this.round}/${this.rounds}` : '加時中') : multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : '專注中',
+      focus: this.ext ? (multi ? `加時中 · ${this.round}/${this.rounds}` : this.small ? '接著做下去' : '加時中') : multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : this.small ? `只做 ${this.focusMin} 分鐘` : '專注中',
       break: multi && this.round < this.rounds ? `休息 · 下一輪 ${this.round + 1}/${this.rounds}` : '休息 · きゅうけい',
     }[this.mode]
     const t = this.targetText
@@ -753,10 +778,10 @@ export class FocusTimer {
     if (this.paused != null) return '計時停在這裡'
     const at = clock.nextEnd(this)
     if (this.mode === 'break') return this.round < this.rounds ? `<b>${hhmm(at)}</b> 接著第 ${this.round + 1} 輪` : `休息到 <b>${hhmm(at)}</b>`
-    if (this.ext) return `原定的 ${this.focusMin} 分做完了`
+    if (this.ext) return this.small ? `${this.focusMin} 分鐘做到了，做完就按「做完了」` : `原定的 ${this.focusMin} 分做完了`
     // 正向計時：不寫「幾點開始」（暫停過的話，記著的起點會往後挪，不是真的開始的時間）
     if (this.counting) return this.elapsed < FREE_MIN * 60000 ? `滿 ${FREE_MIN} 分鐘就會記下來` : '做完了就按「做完了」'
-    return `<b>${hhmm(at)}</b> 結束`
+    return this.small ? `<b>${hhmm(at)}</b> 結束，到時再決定要不要繼續` : `<b>${hhmm(at)}</b> 結束`
   }
 
   // 時間拆成一格一格（每格一樣寬，秒數跳動時整串不會左右晃）：只換有變的那幾格，換上來的輕輕浮現
@@ -789,7 +814,9 @@ export class FocusTimer {
       // 從到點那時接著算：寫出已經過了多久，按之前就知道會從哪裡開始
       const now = Date.now()
       const over = now - clock.extendStart(this, now).endAt
-      put(ext, over >= 60000 ? `還沒做完，延長<small>已經多做 ${Math.floor(over / 60000)} 分</small>` : '還沒做完，延長')
+      // 只做 5 分鐘到點了：問的是要不要接著做下去
+      const word = this.small ? '繼續做下去' : '還沒做完，延長'
+      put(ext, over >= 60000 ? `${word}<small>已經多做 ${Math.floor(over / 60000)} 分</small>` : word)
       ext.title = '休息先不休了：從剛才到點的時間接著往上數，做完按「做完了」，多做的分鐘會記進去'
     }
     if (canAdd) add.title = `休息完再接一輪 ${this.focusMin} 分鐘`

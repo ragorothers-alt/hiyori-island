@@ -866,6 +866,10 @@ body.night .fs-time.up::after { color: #ffd38f; }
 .fs-row .seg button:disabled { opacity: .4; cursor: default; }
 .fs-sum { margin: 12px 0 10px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
 #fsStart { width: 100%; margin: 0; padding: 9px; }
+/* 提不起勁？只做 5 分鐘：「開始專注」下面的一行小字 */
+.fs-small { display: block; margin: 8px auto 0; padding: 4px 8px; border: 0; background: none; font: inherit; font-size: 12px; color: var(--ink-soft, var(--ink-faint)); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.fs-small:hover { color: var(--ink); }
+.fs-small[hidden] { display: none; }
 
 /* ── 金平糖 ── */
 .konpeito {

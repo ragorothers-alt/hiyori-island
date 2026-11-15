@@ -300,9 +300,11 @@ async function boot() {
         if (info.ext || !(info.round > 1)) haptic('tick')
         const t = taskId && store.state.tasks.find((x) => x.id === taskId)
         const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
-        // 加時：倒數到點了還沒做完，接著做
-        if (info.ext) say('mochi', '還差一點點對吧，我們陪你做完。')
+        // 加時：倒數到點了還沒做完，接著做（只做 5 分鐘到點了、說要接著做下去的也是）
+        if (info.ext) info.small ? talk('focusSmallMore', {}, undefined, '好，接著做下去！做完按「做完了」就好。') : say('mochi', '還差一點點對吧，我們陪你做完。')
         else if (info.round > 1) talk('focusRound', { round: info.round, rounds: info.rounds })
+        // 只做 5 分鐘：開個頭就好
+        else if (info.small) talk('focusSmall', { task: short(t ? t.title : p ? p.name : '這件事') }, undefined, '先做 5 分鐘就好，我陪你。')
         else if (t || p) talk('focusTask', { task: short(t ? t.title : p.name) })
         else if (info.free) talk('focusFree', {}, undefined, '', 'fuji')
         else if (!duet('focusStart')) talk('focusStart')
@@ -347,11 +349,21 @@ async function boot() {
       timerNotify({ at: info.at, mode: 'focus', up: info.free, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
       // 兩人出屋、天燈從小木屋屋頂升起；目標是專案的話，那棟房子泛起一圈光
       scene?.focusFinished(taskId, info.projectId)
+      const t = taskId && store.state.tasks.find((x) => x.id === taskId)
+      const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
+      // 只做 5 分鐘到點了：開了頭就不難了，問要不要接著做下去（從到點那一刻往上數），不想就照常休息
+      if (info.small) {
+        talk('focusSmallEnd', {}, 6000, '你看，開始了就做得到！要不要接著做？')
+        const what = t ? `「${short(t.title, 10)}」` : p ? `「${short(p.name, 10)}」` : ''
+        ui.toast({
+          icon: '灯', title: `${minutes} 分鐘到了，開了頭就不難了`, sub: `${what}+${minutes} 分鐘・要接著做嗎？`, tag: 'focus', ms: 15000,
+          actions: ui.focus.bigOpen ? [] : [...(ui.focus.canExtend ? [{ label: '繼續做下去', run: () => ui.focus.extend() }] : []), { label: '休息一下', soft: true, run: () => {} }],
+        })
+        return
+      }
       const multi = info.rounds > 1
       if (multi && info.last) talk('focusRoundsDone', { rounds: info.rounds })
       else if (!duet('focusEnd')) talk('focusEnd')
-      const t = taskId && store.state.tasks.find((x) => x.id === taskId)
-      const p = !t && info.projectId && store.state.projects.find((x) => x.id === info.projectId)
       const rest = multi && !info.last ? `休息 ${info.breakMin} 分鐘後接著第 ${info.round + 1} 輪` : '接著休息一下吧'
       const title = multi ? (info.last ? `${info.rounds} 輪都完成了，放一盞天燈` : `第 ${info.round}/${info.rounds} 輪完成`) : '專注完成，放一盞天燈'
       const sub = t ? `「${short(t.title, 10)}」長大了一點` : p ? `「${short(p.name, 10)}」+${minutes} 分鐘` : `+${minutes} 分鐘`
@@ -870,7 +882,13 @@ async function boot() {
         ms: 9000,
         tag: 'motto',
         actions: [
-          ...(next && ui.focus.mode !== 'focus' ? [{ label: '▶ 開始專注', run: seen(() => ui.focus.startWith(next.id)) }] : []),
+          ...(next && ui.focus.mode !== 'focus'
+            ? [
+                { label: '▶ 開始專注', run: seen(() => ui.focus.startWith(next.id)) },
+                // 提不起勁：先做 5 分鐘就好，到點時再決定要不要繼續
+                { label: '只做 5 分鐘', soft: true, run: seen(() => ui.focus.startSmall(next.id)) },
+              ]
+            : []),
           // 開會、吃飯時：先停一小時（停完那一刻再提醒一次）
           { label: '先停 1 小時', soft: true, run: seen(() => store.pauseMottos(pauseUntil('hour', store.state.rhythm, Date.now()))) },
         ],
@@ -966,7 +984,9 @@ async function boot() {
     ui.tickClock()
     // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
     const rolled = store.tick()
-    reminders.check()
+    // 開場還沒好（小島模式要等小島建好，載入畫面還蓋著）時先不提醒：提示卡會被蓋在載入畫面後面、到時間就收掉，
+    // 等於沒看到，警語還會被當成念過了（手機那邊也不再發）。開場一好，下一秒就照常檢查
+    if (booted) reminders.check()
     syncMottos()
     // 還沒有小島：天色照時間算（傍晚自然換深色玻璃）
     if (!scene) syncNight(lookNight())

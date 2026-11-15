@@ -463,6 +463,8 @@ test.describe('打開時的今日摘要', () => {
   }
 
   test('每天第一次打開：貓咪走進來說今天有什麼；點一項跳過去；重新整理不再出來；設定裡可以再看、可以關掉', async ({ page, context, site }) => {
+    // 重新整理兩次、等貓走進走出：同時跑很多個測試、機器很忙時會超過一分鐘
+    test.setTimeout(120000)
     await useAppMode(context)
     await morning(page)
     await page.goto(site.url)
@@ -697,6 +699,8 @@ test('檢視進度：總覽有這週每天做完幾件，點「看週報」到�
 })
 
 test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正計時，多做的分鐘記進去）；輪數做完了可以再加一輪、休息完再來一輪', async ({ page, context, site }) => {
+  // 步驟多、中間重新整理一次：同時跑很多個測試、機器很忙時一個動作要一秒
+  test.setTimeout(120000)
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
@@ -806,6 +810,85 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   })
   expect(late).toEqual({ mode: 'idle', pomos: 3 })
   await page.evaluate(() => window.hiyori.store.setSetting('focusUp', false))
+})
+
+test('只做 5 分鐘：卡關小卡、計時設定上都能按；不動設定的長度，到點時問要不要接著做下去，接著做的分鐘也記進去', async ({ page, context, site }) => {
+  // 步驟多、中間重新整理一次（見上一個測試）
+  test.setTimeout(120000)
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const state = () =>
+    page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      const s = window.hiyori.store
+      return { mode: f.mode, small: !!f.small, ext: !!f.ext, up: f.up, focusMin: f.focusMin, task: f.task?.title || null, pomos: s.stats.pomodoros, mins: s.stats.focusMinutes, setting: s.state.settings.focusMin }
+    })
+  const skip = (ms) =>
+    page.evaluate((ms) => {
+      const f = window.hiyori.ui.focus
+      f.endAt -= ms
+      f._save()
+    }, ms)
+  // 設定的長度是 50 分；一件往後挪了 3 次的任務：任務頁上出現卡關小卡
+  const before = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusMin', 50)
+    s.setSetting('focusRounds', 1)
+    const t = s.addTask({ title: '整理研究筆記', date: s.today })
+    t.moved = 3
+    s.save()
+    window.hiyori.ui.setTab('tasks')
+    window.hiyori.ui.renderTasks()
+    return { pomos: s.stats.pomodoros, mins: s.stats.focusMinutes }
+  })
+  const card = page.locator('#stuckBox .stuck-card')
+  await expect(card).toContainText('「整理研究筆記」好像卡住了')
+  await card.locator('[data-act="small"]').click()
+  // 先倒數 5 分鐘（設定的 50 分不動）；專注頁上寫著「只做 5 分鐘」、到時再決定
+  expect(await state()).toMatchObject({ mode: 'focus', small: true, up: false, focusMin: 5, task: '整理研究筆記', setting: 50 })
+  await expect(page.locator('#ffKicker')).toHaveText('只做 5 分鐘')
+  await expect(page.locator('#ffSub')).toHaveText(/^\d\d:\d\d 結束，到時再決定要不要繼續$/)
+  // 重新整理後還是只做 5 分鐘的那一輪
+  await page.reload()
+  await bootReady(page)
+  expect(await state()).toMatchObject({ mode: 'focus', small: true, focusMin: 5, setting: 50 })
+  // 到點（專注頁縮小時）：記 5 分鐘、接著休息；提示卡問要不要接著做下去
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(false))
+  await skip(6 * 60000)
+  await expect.poll(async () => (await state()).mode).toBe('break')
+  expect(await state()).toMatchObject({ pomos: before.pomos + 1, mins: before.mins + 5 })
+  const done = page.locator('#toasts .toast', { hasText: '5 分鐘到了，開了頭就不難了' })
+  await expect(done).toContainText('「整理研究筆記」+5 分鐘')
+  await expect(done.locator('.toast-act')).toHaveText(['繼續做下去', '休息一下'])
+  // 接著做下去：從到點那時（1 分鐘前）往上數；做完按「做完了」，多做的分鐘記進去（不多算一顆番茄）
+  await done.locator('.toast-act', { hasText: '繼續做下去' }).click()
+  expect(await state()).toMatchObject({ mode: 'focus', ext: true, up: true, small: true })
+  await expect(page.locator('#ffKicker')).toHaveText('接著做下去')
+  await expect(page.locator('#ffSub')).toHaveText('5 分鐘做到了，做完就按「做完了」')
+  await skip(10 * 60000)
+  await page.locator('#ffStop').click()
+  expect(await state()).toMatchObject({ mode: 'break', ext: false, pomos: before.pomos + 1, mins: before.mins + 16 })
+  await expect(page.locator('#toasts .toast', { hasText: '多做了 11 分鐘' })).toBeVisible()
+  // 休息中還可以再接著做；跳過休息回到待機：長度回到設定的 50 分
+  await expect(page.locator('#ffExtend')).toContainText('繼續做下去')
+  await page.locator('#ffStop').click()
+  expect(await state()).toMatchObject({ mode: 'idle', small: false, focusMin: 50 })
+
+  // 計時設定裡：「開始專注」下面一行「提不起勁？只做 5 分鐘」，照選好的目標開始；計時中不出現
+  await page.evaluate(() => window.hiyori.ui.focus.toggleSet(true))
+  await expect(page.locator('#fsSmall')).toHaveText('提不起勁？只做 5 分鐘')
+  await page.locator('#fsSmall').click()
+  expect(await state()).toMatchObject({ mode: 'focus', small: true, focusMin: 5, setting: 50 })
+  await expect(page.locator('#focusSet')).toBeHidden()
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.toggleBig(false)
+    window.hiyori.ui.focus.toggleSet(true)
+  })
+  await expect(page.locator('#fsSmall')).toBeHidden()
+  // 中途按結束：不到點的不記
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  expect(await state()).toMatchObject({ mode: 'idle', small: false, pomos: before.pomos + 1, mins: before.mins + 16 })
 })
 
 test('打勾的手感：列表不會整串重播淡入，做完的那件滑到後面；花瓣從勾爆開、App 模式冒出經驗值；今天全部做完時飄花瓣', async ({ page, context, site }) => {
@@ -1597,7 +1680,8 @@ test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出�
 })
 
 test('Android 殼：警語排好整串交給手機（App 關著也照時間通知）；看著 App 時頁面自己念，提示卡寫現在該做', async ({ page, context, site }) => {
-  // 固定在台北今天上午 10 點（醒著的時間）；上一則警語排在 9:45，打開時剛好輪到 10:00 那一則
+  // 台北今天上午 9:59:30 打開 App（醒著的時間）；上一則警語排在 9:45，開好之後到了 10:00 輪到下一則。
+  // （開場還沒好時不提醒：機器忙的時候開場很久，提示卡在測試看到之前就收掉了）
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = Date.parse(`${ymd}T10:00:00+08:00`)
   await context.addInitScript(({ t, ymd }) => {
@@ -1624,14 +1708,15 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   // 打開通知時順便訂閱推播：不連到真的伺服器
   await context.route('**/v1/push/**', (route) => route.fulfill({ json: { key: 'BAAA', ok: true }, headers: { 'Access-Control-Allow-Origin': '*' } }))
   await useAppMode(context)
-  await page.clock.setFixedTime(new Date(T))
+  await page.clock.setFixedTime(new Date(T - 30000))
   await page.goto(site.url)
   await bootReady(page)
+  await page.clock.setFixedTime(new Date(T))
   // 看著 App：頁面自己念（手機那時在前面不發），提示卡上寫現在該做的那一件，按一下就開始專注
   const toast = page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })
   await expect(toast).toBeVisible()
   await expect(toast).toContainText('現在該做：寫期末報告')
-  await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '先停 1 小時'])
+  await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '先停 1 小時'])
   // 焦點放在「先停 1 小時」上：提示卡先不收（下面先檢查交給手機的那一串，機器忙的時候會超過提示卡的 9 秒）
   await toast.locator('.toast-act', { hasText: '先停 1 小時' }).focus()
   // 頁面念之前跟手機說了：10:00 那一則手機不會再發
@@ -1796,7 +1881,8 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   })
   const mottoCalls = () => calls.filter((c) => c.path === '/v1/push/mottos')
   await useAppMode(context)
-  await page.clock.setFixedTime(new Date(T))
+  // 9:59:30 打開，開好之後到了 10:00（見上上一個測試）
+  await page.clock.setFixedTime(new Date(T - 30000))
   await page.goto(site.url)
   await bootReady(page)
   await swReady(page)
@@ -1804,6 +1890,7 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await page.reload()
   await bootReady(page)
   await swReady(page)
+  await page.clock.setFixedTime(new Date(T))
   const file = (name) =>
     page.evaluate(async (n) => {
       const hit = await (await caches.open('hiyoripush')).match(new URL(n, (await navigator.serviceWorker.ready).scope).href)

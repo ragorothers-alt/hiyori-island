@@ -112,6 +112,11 @@ export function timerNotice(b) {
   if (b.mode === 'focus' && b.up) {
     title = '正向計時滿 3 小時了'
     body = '先停下來，休息一下吧'
+  } else if (b.mode === 'focus' && b.small) {
+    // 只做 5 分鐘到點了：開了頭就不難了，要接著做的話回到 App 按「繼續做下去」
+    const what = b.target ? `「${b.target.length > 16 ? `${b.target.slice(0, 15)}…` : b.target}」` : ''
+    title = `${Math.max(1, Math.round(b.focusMin))} 分鐘到了`
+    body = `${what}開了頭就不難了。想接著做就回來按「繼續做下去」，不然休息一下吧`
   } else if (b.mode === 'focus') {
     const last = round >= rounds
     title = rounds > 1 ? (last ? `${rounds} 輪都完成了` : `第 ${round}/${rounds} 輪完成`) : '專注結束'

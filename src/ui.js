@@ -1338,6 +1338,8 @@ export class UI {
       // 好久沒碰的長期任務
       if (act === 'idle-open') return this.openProject(t.project, undefined, id)
       if (act === 'idle-focus') return this.focus.ask(id)
+      // 只做 5 分鐘：卡住的、好久沒碰的，先開個頭（ふじ不另外說：計時開始時會說）
+      if (act === 'small') return this.focus.startSmall(id)
       if (act === 'idle-snooze') {
         this.snoozeIdle(id)
         return this.renderTasks()
@@ -1632,6 +1634,7 @@ export class UI {
       <b>「${esc(t.title)}」好像卡住了</b><p>${why}。拆成小一點的步驟，會比較好開始。</p>
       <div class="stuck-btns">
         <button class="btn-primary" data-act="split" data-id="${esc(t.id)}">拆成三小步</button>
+        <button class="btn-ghost" data-act="small" data-id="${esc(t.id)}" title="先倒數 5 分鐘，到點時再決定要不要繼續">只做 5 分鐘</button>
         <button class="btn-ghost" data-act="later" data-id="${esc(t.id)}">排進明天</button>
         <button class="btn-ghost" data-act="drop" data-id="${esc(t.id)}">先放下</button>
         <button class="cm-link" data-act="mute" data-id="${esc(t.id)}">不再提醒這件</button>
@@ -1669,6 +1672,7 @@ export class UI {
       <b>「${esc(t.title)}」${it.idle} 天沒碰了</b><p>在「${esc(it.project.name)}」裡。長期的事不會逾期，放久了卻容易忘：今天碰一下就好。</p>
       <div class="stuck-btns">
         <button class="btn-primary" data-act="idle-open" data-id="${k}">打開它</button>
+        <button class="btn-ghost" data-act="small" data-id="${k}" title="先倒數 5 分鐘，到點時再決定要不要繼續">碰 5 分鐘就好</button>
         <button class="btn-ghost" data-act="idle-focus" data-id="${k}">專注一輪</button>
         <button class="cm-link" data-act="idle-snooze" data-id="${k}">過一週再提醒</button>
       </div></div></div>`
