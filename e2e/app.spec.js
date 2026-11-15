@@ -1781,12 +1781,12 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   // 看著 App：頁面自己念（手機那時在前面不發），提示卡上寫現在該做的那一件，按一下就開始專注
   const toast = page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })
   await expect(toast).toBeVisible()
+  // 焦點先放在「先停 1 小時」上：提示卡先不收（下面先檢查提示卡和交給手機的那一串，機器忙的時候會超過提示卡的 12 秒）
+  await toast.locator('.toast-act', { hasText: '先停 1 小時' }).focus()
   await expect(toast).toContainText('現在該做：寫期末報告')
   await expect(toast.locator('.toast-act')).toHaveText(['▶ 開始專注', '只做 5 分鐘', '✓ 在做了', '先停 1 小時'])
   // 回神紀錄：提醒了一次
   expect(await page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).nudges)).toBe(1)
-  // 焦點放在「先停 1 小時」上：提示卡先不收（下面先檢查交給手機的那一串，機器忙的時候會超過提示卡的 9 秒）
-  await toast.locator('.toast-act', { hasText: '先停 1 小時' }).focus()
   // 頁面念之前跟手機說了：10:00 那一則手機不會再發
   expect(await page.evaluate(() => window.__handled)).toBe(T)
   // 交給手機的那一串：從 10:15 起每 15 分鐘一則，排到明天就寢；通知上也寫著現在該做的那一件
@@ -1824,6 +1824,58 @@ test('Android 殼：警語排好整串交給手機（App 關著也照時間通�
   await page.locator('#mottoRoot .mt-reach [data-act="notify"]').click()
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('App 關著、手機鎖著也會照時間通知')
   await expect.poll(async () => (await plan())?.length ?? 0).toBeGreaterThan(60)
+})
+
+test('日程中先不提醒：開會那一段到點的警語不交給手機、看著 App 時也不念；警語卡上寫著現在是哪一場、可以關掉', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript(({ t, ymd }) => {
+    window.__mottos = []
+    window.__handled = 0
+    window.HiyoriNative = {
+      version: () => 3, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify() {},
+      mottos: (json) => window.__mottos.push(json),
+      mottoHandled: () => window.__handled,
+      mottoClaim: (at) => (at > window.__handled ? ((window.__handled = at), true) : false),
+      foreground: () => true, mottoSeen() {}, takeAct: () => '',
+    }
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [{ id: 'e2e-t1', title: '寫期末報告', priority: 3, date: ymd, star: true }]
+      const mottos = [{ id: 'e2e-m1', text: '先做最重要的那一件', on: true, createdAt: t - 86400000 }]
+      // 10:20～11:00 開會
+      const events = [{ id: 'e2e-e1', title: '組會', date: ymd, start: '10:20', end: '11:00', color: 0, done: false }]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, events, player: {}, mottos, settings: { notify: true, mottoEvery: 15, remindLead: -1 } }))
+    }
+    if (!localStorage.getItem('hiyori-motto-at')) localStorage.setItem('hiyori-motto-at', JSON.stringify({ at: t - 15 * 60000, i: 0 }))
+  }, { t: T, ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T - 30000))
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.clock.setFixedTime(new Date(T))
+  const plan = async () => {
+    const last = await page.evaluate(() => window.__mottos.at(-1))
+    return last ? JSON.parse(last).items.map((x) => (x.at - T) / 60000) : []
+  }
+  // 10:00 那一則照常念；交給手機的那一串跳過 10:30、10:45（開會中），11:00 照常
+  await expect(page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })).toBeVisible()
+  await expect.poll(async () => (await plan()).slice(0, 3)).toEqual([15, 60, 75])
+  // 警語卡：寫著日程中不打擾；開會時寫現在是哪一場
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#mottoRoot .mt-events')).toContainText('日程中先不提醒')
+  await page.clock.setFixedTime(new Date(T + 30 * 60000 + 5000))
+  await page.evaluate(() => window.hiyori.ui.dropToasts('motto'))
+  // 看著 App、開會中到點的 10:30 那一則：不念（回神紀錄也不算）
+  await page.waitForTimeout(2000)
+  await expect(page.locator('#toasts .toast', { hasText: '先做最重要的那一件' })).toHaveCount(0)
+  expect(await page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).nudges)).toBe(1)
+  await page.evaluate(() => window.hiyori.ui.renderRecords())
+  await expect(page.locator('#mottoRoot .mt-events')).toContainText('現在是「組會」（到 11:00）')
+  // 關掉：開會中也照常排（10:45 那一則回到交給手機的那一串裡）
+  await page.locator('#mottoRoot [data-act="events"]').click()
+  await expect(page.locator('#mottoRoot [data-act="events"]')).toHaveText('關')
+  await expect.poll(async () => (await plan())[0]).toBe(45)
 })
 
 // 專注中切去用別的 App：Android 的 App 分得出鎖著手機和切走（awayLocked），鎖著手機專心的不算中途離開。
@@ -1886,9 +1938,20 @@ test('專注中離開 App：切走時交給手機一則「回來吧」；回來�
   await page.waitForTimeout(300)
   await expect(page.locator('#appChat')).toContainText('（測試）')
   expect(await leaves()).toEqual([1, 1])
-  // 到點：提示卡寫這一輪中途離開了幾次
+  // 切走之後 Android 在背景把 App 收掉了：重新打開時（計時接回來）接著算剛才那一次
+  await page.clock.setFixedTime(new Date(T + 6 * 60000))
+  await leave(false)
+  await page.clock.setFixedTime(new Date(T + 8 * 60000))
+  await page.reload()
+  await bootReady(page)
+  await expect.poll(leaves).toEqual([2, 2])
+  // 到點時還在別的 App 裡：也算一次，提示卡寫這一輪中途離開了幾次
+  await page.clock.setFixedTime(new Date(T + 9 * 60000))
+  await leave(false)
   await page.clock.setFixedTime(new Date(T + 25 * 60000 + 1000))
-  await expect(page.locator('#toasts .toast', { hasText: '專注完成' })).toContainText('中途離開 1 次')
+  await expect(page.locator('#toasts .toast', { hasText: '專注完成' })).toContainText('中途離開 3 次')
+  expect((await leaves())[0]).toBe(3)
+  await back()
   // 設定裡關掉：切走時不排那一則（回來時照樣說一聲）。先縮小專注頁（休息中還開著）
   await page.evaluate(() => {
     window.hiyori.ui.focus.toggleBig(false)
@@ -1910,6 +1973,11 @@ test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶
   const T = Date.parse(`${ymd}T10:00:00+08:00`)
   // 假的 Android 殼：記著按了哪一顆按鈕（開機時就按了的放在 sessionStorage，重新整理也帶得到）
   await context.addInitScript(() => {
+    // 「今天還沒看過今日摘要」放在新頁面開機前才設（在舊頁面上設的話，重新整理之前舊頁面的檢查可能先把摘要叫出來、記成看過了）
+    if (sessionStorage.getItem('briefOld') === '1') {
+      sessionStorage.removeItem('briefOld')
+      localStorage.setItem('hiyori-brief-day', JSON.stringify('2000-01-01'))
+    }
     if (sessionStorage.getItem('native') !== '1') return
     window.__acts = JSON.parse(sessionStorage.getItem('acts') || '[]')
     sessionStorage.removeItem('acts')
@@ -1955,7 +2023,7 @@ test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶
   await page.evaluate(() => {
     window.hiyori.ui.focus.stop()
     sessionStorage.setItem('acts', JSON.stringify(['focus']))
-    localStorage.setItem('hiyori-brief-day', JSON.stringify('2000-01-01'))
+    sessionStorage.setItem('briefOld', '1')
   })
   await page.reload()
   await bootReady(page)

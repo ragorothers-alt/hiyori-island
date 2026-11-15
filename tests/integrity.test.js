@@ -52,15 +52,30 @@ describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調'
     expect(disk()).toMatchObject({ nudges: 2, backs: 1, onTask: 1 })
   })
 
-  it('換成另一個分頁的那一版時，這邊多記的次數寫回存檔（同一版、不算改了資料），那邊再併過去', async () => {
+  it('另一個分頁同一版自動記了次數、這邊還沒收到事件就改了資料：寫出去之前先把那邊的併進來；換成這一版的那邊也還在', async () => {
     store.saveNow()
     const b = new Store()
     b.mottoNudged(Date.now())
     await Promise.resolve()
-    // A 還沒收到 B 的事件就改了資料：A 寫出去的那一版沒有 B 記的提醒
     store.addTask({ title: 'A 的任務' })
     await Promise.resolve()
-    expect(disk()?.nudges || 0).toBe(0)
+    expect(disk().nudges).toBe(1)
+    expect(day(store).nudges).toBe(1)
+    b._otherTabSaved({ key: KEY })
+    await Promise.resolve()
+    expect(b.state.tasks.map((t) => t.title)).toContain('A 的任務')
+    expect(b.state.rev).toBe(store.state.rev)
+    expect(day(b).nudges).toBe(1)
+  })
+
+  it('換成另一個分頁的那一版時，這邊多記的次數寫回存檔（同一版、不算改了資料）', async () => {
+    store.saveNow()
+    const b = new Store()
+    // A 改了資料寫出去；B 在收到事件之前自動記了一則（只在記憶體裡，存檔還沒寫）
+    store.addTask({ title: 'A 的任務' })
+    await Promise.resolve()
+    b._refreshToday()
+    b.day(b.today).nudges++
     b._otherTabSaved({ key: KEY })
     await Promise.resolve()
     expect(b.state.tasks.map((t) => t.title)).toContain('A 的任務')
@@ -87,6 +102,47 @@ describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調'
     store._otherTabSaved({ key: KEY })
     expect(store.mottoAnswered('back', at)).toBe(true)
     expect(day(store)).toMatchObject({ nudges: 1, backs: 1 })
+  })
+
+  it('兩個分頁輪流記很多則：這邊記憶體裡舊的那幾則不會又排到最後面，把另一個分頁剛記的擠掉', () => {
+    store.saveNow()
+    const b = new Store()
+    const base = Date.now()
+    for (let i = 0; i < 40; i++) store.mottoNudged(base + i * 60000)
+    for (let i = 0; i < 40; i++) b.mottoNudged(base + (100 + i) * 60000)
+    store.mottoNudged(base + 500 * 60000)
+    // B 最近記的那幾則還認得（重新打開也是）
+    expect(new Store().mottoNudged(base + 139 * 60000)).toBe(false)
+    expect(new Store().mottoNudged(base + 110 * 60000)).toBe(false)
+  })
+
+  it('存檔大到改成停手才寫：兩個分頁幾乎同時記不同的兩則，兩次都算到（記了就馬上寫出去）', async () => {
+    store.saveNow()
+    const b = new Store()
+    store._slowSave = b._slowSave = true
+    const at = Date.now()
+    store.mottoNudged(at)
+    b.mottoNudged(at + 60000)
+    expect(day(b).nudges).toBe(2)
+    expect(disk().nudges).toBe(2)
+    store._otherTabSaved({ key: KEY })
+    expect(day(store).nudges).toBe(2)
+  })
+
+  it('存檔改成停手才寫、另一個分頁剛改了資料：這邊記的那一則換成那一版時馬上寫出去，那邊緊接著記的也讀得到', () => {
+    store.saveNow()
+    const b = new Store()
+    store._slowSave = b._slowSave = true
+    store.addTask({ title: 'A 的任務' })
+    store.flushSave()
+    // B 還沒收到 A 的事件就記了一則：存的時候換成 A 那一版、數字帶過去，馬上寫
+    b.mottoNudged(Date.now())
+    expect(disk()).toMatchObject({ nudges: 1 })
+    expect(b.state.tasks.map((t) => t.title)).toContain('A 的任務')
+    store.mottoNudged(Date.now() + 60000)
+    expect(disk()).toMatchObject({ nudges: 2 })
+    b.focusLeft()
+    expect(disk()).toMatchObject({ nudges: 2, leaves: 1 })
   })
 
   it('localStorage 寫不進去：同一則在這個分頁也只算一次', () => {

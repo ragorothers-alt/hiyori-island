@@ -1,6 +1,6 @@
 import './mottos.css'
 import { $, $$, esc, armConfirm, editing, inlineEdit, keepFocus, pickOne, setHTML } from './dom.js'
-import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, awakeAt, mottoAt, pauseText, pauseUntil, pausedUntil, windowEnd } from '../mottos.js'
+import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, awakeAt, mottoAt, pauseText, pauseUntil, pausedUntil, windowEnd, eventQuiet, inQuiet } from '../mottos.js'
 import { dateStr } from '../store/util.js'
 
 // 警語：自己寫給自己的話。
@@ -118,6 +118,9 @@ export class MottosView {
         s.setSetting('mottoBar', !s.state.settings.mottoBar)
         this.hooks.mottoBar?.()
         return this.render()
+      case 'events':
+        s.setSetting('mottoEvents', s.state.settings.mottoEvents === false)
+        return keepFocus(this.el.set, () => this.render())
     }
   }
 
@@ -146,11 +149,12 @@ export class MottosView {
     const bar = s.state.settings.mottoBar
     const kind = every && on ? this.hooks.mottoReach?.() : null
     const [reach, ask] = REACH[kind] || []
+    const evOn = s.state.settings.mottoEvents !== false
     setHTML(this.el.set, list.length
-      ? `<div class="set-row theme-row"><div><b>多久提醒一次</b><small>${every ? `醒著的時候（作息的起床到就寢）每 ${EVERY_TEXT[every]}，もち或ふじ念一句，提示卡上寫著現在該做的那一件；專注中不打擾` : '不定時提醒，只放在面板上方'}</small></div>
+      ? `<div class="set-row theme-row"><div><b>多久提醒一次</b><small>${every ? `醒著的時候（作息的起床到就寢）每 ${EVERY_TEXT[every]}，もち或ふじ念一句，提示卡上寫著現在該做的那一件；專注中${evOn ? '、日程中' : ''}不打擾` : '不定時提醒，只放在面板上方'}</small></div>
           <div class="seg mt-every" role="group" aria-label="警語多久提醒一次">${MOTTO_EVERY.map((v) => `<button type="button" data-act="every" data-v="${v}" aria-pressed="${v === every}" class="${v === every ? 'on' : ''}">${EVERY_TEXT[v]}</button>`).join('')}</div>
           ${reach ? `<div class="mt-reach"><small>${esc(reach)}<span class="mt-last" data-r="last" hidden></span></small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
-        ${every && on ? this._pauseRow() : ''}
+        ${every && on ? this._pauseRow() + this._eventsRow(evOn) : ''}
         <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}">${bar ? '開' : '關'}</button></div>`
       : '')
     pickOne($$('[data-act="every"]', this.el.set), (x) => +x.dataset.v === every)
@@ -178,6 +182,22 @@ export class MottosView {
     const today = awakeAt(s.rhythm, now) ? `<button type="button" class="chip-toggle" data-act="pause" data-v="today" title="停到今晚就寢（${esc(pauseText(windowEnd(s.rhythm, now), now))}）">今天先停</button>` : ''
     return `<div class="set-row mt-pause"><div><b>先停一下</b><small>開會、吃飯、跟朋友在一起時先不提醒，時間到了自己恢復</small></div>
       <div class="mt-pause-acts"><button type="button" class="chip-toggle" data-act="pause" data-v="hour">先停 1 小時</button>${today}</div></div>`
+  }
+
+  // 日程中先不提醒：開會、上課這些排了時段的日程進行中。現在就在其中一場的話寫是哪一場、到幾點
+  _eventsRow(on) {
+    const s = this.store
+    const now = Date.now()
+    const today = dateStr(new Date(now))
+    const cur = on ? s.eventsOn(today).find((e) => inQuiet(eventQuiet([e], today), now)) : null
+    const text = cur
+      ? `現在是「${esc(cur.title)}」（到 ${esc(cur.end)}）：這段時間到點的不念、不通知`
+      : '開會、上課這些排了時段的日程進行中，到點的不念、不通知（整天的日程、做完了的不算）'
+    clearTimeout(this._eventT)
+    // 那一場結束了：換回平常的說明
+    if (cur) this._eventT = setTimeout(() => keepFocus(this.el.set, () => this.render()), Math.max(1000, eventQuiet([cur], today)[0][1] - now + 500))
+    return `<div class="set-row mt-events"><div><b>日程中先不提醒</b><small>${text}</small></div>
+      <button type="button" class="chip-toggle${on ? ' on' : ''}" data-act="events" aria-pressed="${on}">${on ? '開' : '關'}</button></div>`
   }
 
   // 「上一則推播幾點送到這台」：頁面關著時有沒有收到，看這一行就知道

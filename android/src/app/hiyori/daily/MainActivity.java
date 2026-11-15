@@ -36,8 +36,9 @@ public class MainActivity extends Activity {
     private volatile boolean trusted;
     // App 在前面嗎：警語的鬧鐘響時在前面就不發通知（網頁自己會念）
     static volatile boolean foreground;
-    // 上一次離開 App 時手機是不是鎖著（按電源鍵、螢幕自己關掉）：鎖著手機專心做事不算「中途離開」
-    static volatile boolean awayLocked;
+    // 上一次離開 App 時手機是不是鎖著（按電源鍵、螢幕自己關掉）：鎖著手機專心做事不算「中途離開」。
+    // 也存在 SharedPreferences：App 在背景被系統收掉、重新打開時，網頁問得到剛才那一次
+    private static final String KEY_AWAY_LOCKED = "awayLocked";
     // 按了警語通知上的按鈕（"focus"／"pause"）：網頁用 takeAct 拿走、照著做
     private String act;
     private static final String KEY_ACT = "hiyoriAct";
@@ -145,7 +146,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         foreground = false;
-        awayLocked = MottoNotice.locked(this);
+        setAwayLocked(MottoNotice.locked(this));
         // 到點了、網頁還沒念的警語：離開 App 的這一刻由手機補發
         MottoNotice.away(getApplicationContext());
     }
@@ -154,7 +155,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
-        if (!foreground && MottoNotice.locked(this)) awayLocked = true;
+        if (!foreground && MottoNotice.locked(this)) setAwayLocked(true);
+    }
+
+    private void setAwayLocked(boolean v) {
+        getSharedPreferences("hiyori", MODE_PRIVATE).edit().putBoolean(KEY_AWAY_LOCKED, v).apply();
     }
 
     @Override
@@ -279,7 +284,7 @@ public class MainActivity extends Activity {
         // 上一次離開 App 時手機是不是鎖著（是的話不算「切去用別的 App」）
         @JavascriptInterface
         public boolean awayLocked() {
-            return awayLocked;
+            return getSharedPreferences("hiyori", MODE_PRIVATE).getBoolean(KEY_AWAY_LOCKED, false);
         }
     }
 }

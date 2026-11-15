@@ -26,6 +26,15 @@ import { coachMethods } from './store/coach.js'
 const KEY = 'hiyori-daily-v1'
 // 存檔的版本號另外存一份小的：寫之前先看一眼，就知道另一個分頁是不是剛寫過（不用每次讀整份）
 const REV_KEY = 'hiyori-daily-rev'
+// 每寫一次存檔換一個：同一版（自動記的回神紀錄不換 rev）另一個分頁剛寫過，也看得出來
+const SEQ_KEY = 'hiyori-daily-seq'
+const readSeq = () => {
+  try {
+    return localStorage.getItem(SEQ_KEY) || ''
+  } catch {
+    return ''
+  }
+}
 const BACKUP_KEY = 'hiyori-backup'
 // 讀不進來的存檔原文（壞掉了、或清洗時出錯）：另外留一份，不會被接下來的存檔蓋掉
 export const RESCUE_KEY = 'hiyori-rescue'
@@ -164,8 +173,9 @@ export class Store {
   constructor() {
     this.handlers = {}
     this.state = this._load()
-    // 存檔裡現在是哪一版（這邊讀進來、寫出去或換成另一個分頁的那一版）
+    // 存檔裡現在是哪一版（這邊讀進來、寫出去或換成另一個分頁的那一版）；_seq：這邊最後讀到、寫出去的是哪一次存檔
     this._diskRev = this.state.rev || ''
+    this._seq = readSeq()
     this.today = dateStr()
     this.selectedDate = this.today
     this._pending = []
@@ -206,13 +216,16 @@ export class Store {
       this._newer()
       return false
     }
+    const seq = readSeq()
     if (obj.rev === this.state.rev) {
       this._diskRev = obj.rev
+      this._seq = seq
       // 同一版，但另一個分頁自動記了回神紀錄（不換 rev）：數字併過來，這邊之後存檔時才不會用舊的數字蓋掉
       if (sameGen(obj, this.state) && keepTallies(obj.history, this.state.history)) this.emit('change')
       return false
     }
     try {
+      this._seq = seq
       this.replaceState(obj, obj.updatedAt, { soft: true, rev: obj.rev, peer: true })
       return true
     } catch (err) {
@@ -324,12 +337,21 @@ export class Store {
         }
         if (peer?.rev && !keepBackup(peer, 'tab', peer.updatedAt)) throw new Error('空間不夠，沒辦法先備份另一個分頁的版本')
         if (peer?.rev) keep = 1
+        // 那一版留成備份，回神紀錄（自動記的數字）照樣取比較大的帶過來
+        if (isObj(peer) && sameGen(peer, this.state)) keepTallies(peer.history, this.state.history)
+      } else if (readSeq() !== this._seq) {
+        // 同一版，但另一個分頁在這邊上次讀寫之後寫過（自動記的回神紀錄不換 rev）：那邊的數字先併進來，不會被這邊比較舊的蓋掉
+        this._diskTallies()
       }
       const t0 = performance.now()
       writeMain(JSON.stringify(this.state), keep)
       this._slowSave = performance.now() - t0 > SLOW_SAVE
       localStorage.setItem(REV_KEY, this.state.rev || '')
       this._diskRev = this.state.rev || ''
+      this._seq = uid()
+      try {
+        localStorage.setItem(SEQ_KEY, this._seq)
+      } catch {}
     } catch (e) {
       console.warn('[hiyori] 存檔失敗', e)
       // 只在「從存得進去變成存不進去」時說一次，不要每個動作都跳出來
@@ -1140,8 +1162,9 @@ export class Store {
     let saved = true
     if (peer) {
       this._diskRev = rev
-      // 這個分頁多記的回神紀錄：寫回存檔（同一版、不算改了資料；那個分頁讀到同一版時會把數字併過去）
-      if (raised) this.save(false)
+      // 這個分頁多記的回神紀錄：馬上寫回存檔（同一版、不算改了資料；那個分頁讀到同一版時會把數字併過去）。
+      // 不排隊：另一個分頁緊接著記的那一則才讀得到
+      if (raised) this.saveNow()
     } else saved = this.saveNow()
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready

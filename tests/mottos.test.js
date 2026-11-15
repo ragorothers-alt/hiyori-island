@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store } from '../src/store.js'
 import { Reminders } from '../src/reminders.js'
-import { MOTTO_MAX, MOTTO_LEN, MOTTO_ROTATE, MOTTO_EVERY, MOTTO_LATE, PLAN_MAX, PAUSE_MAX, activeMottos, awake, mottoAt, nextMotto, windowEnd, planMottos, planUntil, planKey, pauseText, pauseUntil, pausedUntil } from '../src/mottos.js'
+import { MOTTO_MAX, MOTTO_LEN, MOTTO_ROTATE, MOTTO_EVERY, MOTTO_LATE, PLAN_MAX, PAUSE_MAX, activeMottos, awake, mottoAt, nextMotto, windowEnd, planMottos, planUntil, planKey, pauseText, pauseUntil, pausedUntil, eventQuiet, inQuiet } from '../src/mottos.js'
 import { nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeAway, nativeBack, nativeAwayLocked } from '../src/native.js'
 
 const at = (h, m = 0, d = 25) => new Date(2026, 9, d, h, m)
@@ -100,6 +100,23 @@ describe('提醒排在什麼時候', () => {
     expect(planKey({ ...base, now: +at(10) })).not.toBe(planKey({ ...base, now: +at(10), mottos: [{ id: 'a', text: 'A', on: false }] }))
     expect(planKey({ ...base, now: +at(10) })).not.toBe(planKey({ ...base, now: +at(10), quietUntil: +at(10, 25) }))
     expect(planKey({ ...base, now: +at(10) })).not.toBe(planKey({ ...base, now: +at(10), task: '寫報告' }))
+    expect(planKey({ ...base, now: +at(10) })).not.toBe(planKey({ ...base, now: +at(10), quiet: [[+at(11), +at(12)]] }))
+  })
+
+  it('日程中先不提醒：有時段、還沒做完的日程變成那一段時間；整天的、做完的、結束沒有比開始晚的、別天的不算', () => {
+    const d = '2026-10-25'
+    const ev = (start, end, x = {}) => ({ id: start, title: '開會', date: d, start, end, done: false, ...x })
+    expect(eventQuiet([ev('14:00', '15:30')], d)).toEqual([[+at(14), +at(15, 30)]])
+    expect(eventQuiet([ev('09:00', '10:00', { allDay: true }), ev('10:00', '11:00', { done: true }), ev('12:00', '12:00'), ev('23:00', '01:00'), ev('13:00', '14:00', { date: '2026-10-26' }), ev('x', '14:00')], d)).toEqual([])
+    expect(eventQuiet(null, d)).toEqual([])
+    const quiet = eventQuiet([ev('10:20', '11:00')], d)
+    expect(inQuiet(quiet, +at(10, 30))).toBe(true)
+    expect(inQuiet(quiet, +at(11))).toBe(false)
+    expect(inQuiet(quiet, +at(10, 15))).toBe(false)
+    // 交給手機的那一串：日程中的那幾則不排，那一句照樣輪過去（11:00 接著是第 3 句）
+    const list = ['A', 'B', 'C', 'D'].map((t) => ({ id: t, text: t, on: true }))
+    const plan = planMottos(list, 15, r, { at: +at(10), i: 0 }, +at(10), { quiet })
+    expect(plan.slice(0, 3)).toEqual([{ at: +at(10, 15), text: 'A' }, { at: +at(11), text: 'D' }, { at: +at(11, 15), text: 'A' }])
   })
 
   it('作息幾乎整天醒著、每 10 分鐘：一直排到明天就寢，不會被上限截掉', () => {

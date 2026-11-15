@@ -186,12 +186,14 @@ export const extrasMethods = {
   // 記在那一則的那一天（跨午夜才按的回應也算在那天），同一則在這台只算一次（提示卡、頁面自己發的系統通知都按得到）。
   // 是自動發生的，不算使用者改了資料（剛打開、資料還舊的裝置念了一句，不會因此跟雲端比較新的那一版衝突）；
   // 換成別台、別的分頁的那一版時取比較大的數字（見 replaceState 的 _keepTallies），不會被蓋掉。回傳有沒有算
+  // 記了就馬上寫出去（存檔大到改成停手才寫的時候也是）：另一個分頁緊接著記的那一則才讀得到這一則，不會兩邊都從同一個數字加一
   mottoNudged(at = 0) {
     const key = tallyKey(at)
     if (key && this._tallies().has(key)) return false
     this._diskTallies()
     this._nudged(at, key)
     this.save(false)
+    this.flushSave()
     return true
   },
   _nudged(at, key) {
@@ -212,10 +214,11 @@ export const extrasMethods = {
     else d.backs++
     if (key) this._markTally(key, 'a')
     this.save()
+    this.flushSave()
     return true
   },
-  // 這台算過的那幾則：存著的加上記憶體裡的（localStorage 寫不進去時，同一則也不會一直重算）。
-  // 換了一份資料（gen 不一樣）就從頭記
+  // 這台算過的那幾則：存著的，加上寫不進去（localStorage 滿了、被封鎖）時記在記憶體裡的——同一則也不會一直重算。
+  // 寫進去了就只看存著的（記憶體裡舊的那幾則不會又排到最後面，把另一個分頁剛記的擠掉）。換了一份資料（gen 不一樣）就從頭記
   _tallies() {
     const gen = this.state.tallyGen || ''
     if (this._tallyGen !== gen) {
@@ -231,10 +234,12 @@ export const extrasMethods = {
     m.delete(key)
     m.set(key, v)
     const keys = [...m].slice(-TALLY_KEEP)
-    this._tallyMem = new Map(keys)
     try {
       localStorage.setItem(TALLY_KEY, JSON.stringify({ gen: this._tallyGen, keys }))
-    } catch {}
+      this._tallyMem = new Map()
+    } catch {
+      this._tallyMem = new Map(keys)
+    }
   },
 
   // 專注中切去用別的 App 一陣子（週報看得到）。自動記的：不算使用者改了資料（跟 mottoNudged 一樣，換版時取比較大的）
@@ -243,6 +248,7 @@ export const extrasMethods = {
     this._refreshToday()
     this.day().leaves++
     this.save(false)
+    this.flushSave()
   },
 
   // ── 先記下來 ──
