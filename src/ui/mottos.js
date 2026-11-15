@@ -8,7 +8,17 @@ import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, mottoA
 // 醒著的時候定時提醒在 reminders.js，提醒時もち或ふじ念出來（main.js）
 
 const HIDE_KEY = 'hiyori-motto-hide' // 今天先收起來：記今天的日期（只在這台裝置）
-const EVERY_TEXT = { 0: '不提醒', 30: '30 分', 60: '1 小時', 120: '2 小時', 180: '3 小時' }
+const EVERY_TEXT = { 0: '不提醒', 10: '10 分', 15: '15 分', 20: '20 分', 30: '30 分', 60: '1 小時', 120: '2 小時', 180: '3 小時' }
+// 提醒送得到哪裡（hooks.mottoReach() 回傳的）：App 不在前面時收不收得到，收不到的話怎麼辦
+const REACH = {
+  phone: ['App 關著、手機鎖著也會照時間通知', false],
+  'phone-off': ['打開系統通知後，App 關著、手機鎖著也會通知', true],
+  'old-app': ['現在要開著 App 才會提醒：重新安裝新版的 Android App，App 關著也會通知', false],
+  page: ['這個頁面開著就會提醒（切到別的分頁、視窗也會跳通知）；整個關掉就不會', false],
+  'page-off': ['現在只在看著這一頁時提醒。打開系統通知，切到別的分頁、視窗也會跳通知', true],
+  'page-blocked': ['通知被瀏覽器封鎖了，只在看著這一頁時提醒（到瀏覽器的網站設定裡允許通知）', false],
+  'page-only': ['這個瀏覽器只在看著這一頁時提醒', false],
+}
 
 export class MottosView {
   constructor(root, store, hooks = {}) {
@@ -83,6 +93,13 @@ export class MottosView {
       case 'every':
         s.setSetting('mottoEvery', +b.dataset.v)
         return this.render()
+      case 'notify':
+        // 問權限的時候先不能再按；問完（就算被拒絕、畫面跟原本一樣）要按得回來
+        b.disabled = true
+        return Promise.resolve(this.hooks.enableNotify?.()).finally(() => {
+          b.disabled = false
+          this.render()
+        })
       case 'bar':
         s.setSetting('mottoBar', !s.state.settings.mottoBar)
         this.hooks.mottoBar?.()
@@ -113,9 +130,11 @@ export class MottosView {
       .join(''))
     const every = s.state.settings.mottoEvery
     const bar = s.state.settings.mottoBar
+    const [reach, ask] = (every && on && REACH[this.hooks.mottoReach?.()]) || []
     setHTML(this.el.set, list.length
-      ? `<div class="set-row theme-row"><div><b>多久提醒一次</b><small>${every ? `醒著的時候（作息的起床到就寢）每 ${EVERY_TEXT[every]}，もち或ふじ念一句；專注中不打擾` : '不定時提醒，只放在面板上方'}</small></div>
-          <div class="seg" role="group" aria-label="警語多久提醒一次">${MOTTO_EVERY.map((v) => `<button type="button" data-act="every" data-v="${v}" aria-pressed="${v === every}" class="${v === every ? 'on' : ''}">${EVERY_TEXT[v]}</button>`).join('')}</div></div>
+      ? `<div class="set-row theme-row"><div><b>多久提醒一次</b><small>${every ? `醒著的時候（作息的起床到就寢）每 ${EVERY_TEXT[every]}，もち或ふじ念一句，提示卡上寫著現在該做的那一件；專注中不打擾` : '不定時提醒，只放在面板上方'}</small></div>
+          <div class="seg mt-every" role="group" aria-label="警語多久提醒一次">${MOTTO_EVERY.map((v) => `<button type="button" data-act="every" data-v="${v}" aria-pressed="${v === every}" class="${v === every ? 'on' : ''}">${EVERY_TEXT[v]}</button>`).join('')}</div>
+          ${reach ? `<div class="mt-reach"><small>${esc(reach)}</small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
         <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}">${bar ? '開' : '關'}</button></div>`
       : '')
     pickOne($$('[data-act="every"]', this.el.set), (x) => +x.dataset.v === every)

@@ -40,7 +40,7 @@ final class TimerNotice {
         return m;
     }
 
-    private static PendingIntent open(Context c) {
+    static PendingIntent open(Context c) {
         Intent i = new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         return PendingIntent.getActivity(c, 0, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }

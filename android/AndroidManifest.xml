@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 網頁的震動回饋（打勾、番茄鐘到點時輕震，navigator.vibrate）：WebView 要有這個權限才會震。一般權限，安裝時就有，不會跳出詢問 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 警語的定時提醒排在手機的鬧鐘上：開機後鬧鐘會被清掉，要重排（MottoBoot）。一般權限，不會跳出詢問 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:label="@string/app_name"
@@ -29,5 +31,13 @@
             </intent-filter>
         </activity>
         <receiver android:name=".TimerAlarm" android:exported="false" />
+        <receiver android:name=".MottoAlarm" android:exported="false" />
+        <!-- 只收系統發的開機、App 更新（exported=false 時其他 App 叫不到，系統的廣播照樣收得到） -->
+        <receiver android:name=".MottoBoot" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

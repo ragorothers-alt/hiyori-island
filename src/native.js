@@ -1,6 +1,8 @@
 // Android 殼（android/）：畫面是同一個網站，多了原生通知。在殼裡 window.HiyoriNative 存在，網頁透過它：
 //   timer(json)：專注、休息中的即時倒數（Android 16 的 Live Updates，三星手機上是 Now Bar）和到點的鬧鐘
 //   notify(title, body, tag)：一般的提醒；canNotify()／askNotify()：通知權限
+//   mottos(json)：警語的定時提醒，排好接下來的每一則交給手機的鬧鐘（App 關著、鎖著也照時間通知；新版的殼才有）；
+//   mottoHandled()／mottoClaim(at)：手機記的「念到哪一則了」、頁面要念某一則時先說一聲；foreground()：App 在前面嗎
 // 不在殼裡（瀏覽器、PWA）native 是 null，這個檔案什麼都不做。
 export const native = typeof window !== 'undefined' && window.HiyoriNative ? window.HiyoriNative : null
 
@@ -44,6 +46,49 @@ export function showLiveTimer(l, done) {
     native.timer(json)
   } catch (e) {
     console.warn('[hiyori] 即時倒數沒送到原生', e)
+  }
+}
+
+// 警語的定時提醒交給手機排：舊版的殼沒有這個（要重新安裝），那時照舊只在 App 開著時提醒
+export const nativeMottos = (bridge = native) => typeof bridge?.mottos === 'function'
+// items：[{ at, title, body }]（照時間排好），空的是不提醒了（手機上排著的取消）。內容沒變就不重送。回傳送到了沒
+let lastMottos = null
+export function sendMottos(items, bridge = native) {
+  if (!nativeMottos(bridge)) return false
+  const json = items?.length ? JSON.stringify({ items }) : ''
+  if (json === lastMottos) return true
+  try {
+    bridge.mottos(json)
+    lastMottos = json
+    return true
+  } catch (e) {
+    console.warn('[hiyori] 警語提醒沒送到原生', e)
+    return false
+  }
+}
+
+// 手機記著的「念到哪一則了」（手機通知過、或頁面念過的最後一則的時間）；問不到是 0
+export function nativeMottoHandled(bridge = native) {
+  try {
+    return Number(bridge?.mottoHandled?.()) || 0
+  } catch {
+    return 0
+  }
+}
+// 頁面要念這一則：先跟手機說，手機就不發。手機剛好搶先通知了的話回 false（頁面就不念）；問不到時頁面照念
+export function nativeMottoClaim(at, bridge = native) {
+  try {
+    return typeof bridge?.mottoClaim === 'function' ? !!bridge.mottoClaim(at) : true
+  } catch {
+    return true
+  }
+}
+// App 不在前面嗎：App 在背景時，頁面的 JavaScript 可能還在跑，看頁面自己的 document.hidden 不一定準
+export function nativeAway(bridge = native) {
+  try {
+    return typeof bridge?.foreground === 'function' && !bridge.foreground()
+  } catch {
+    return false
   }
 }
 

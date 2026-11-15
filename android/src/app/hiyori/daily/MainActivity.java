@@ -34,6 +34,8 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> picking;
     // 現在開著的是不是自己的網站：不是的話（照理不會發生）不讓它叫原生
     private volatile boolean trusted;
+    // App 在前面嗎：警語的鬧鐘響時在前面就不發通知（網頁自己會念）
+    static volatile boolean foreground;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -102,8 +104,18 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 回到 App：「時間到了」那一則已經看到了，收掉
+        foreground = true;
+        // 回到 App：「時間到了」和上一則警語已經看到了，收掉
         TimerNotice.clearDone(this);
+        MottoNotice.clear(getApplicationContext());
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        foreground = false;
+        // 到點了、網頁還沒念的警語：離開 App 的這一刻由手機補發
+        MottoNotice.away(getApplicationContext());
     }
 
     @Override
@@ -139,9 +151,10 @@ public class MainActivity extends Activity {
 
     // 網頁叫得到的東西。這些方法在另一條執行緒被叫到；只收字串，內容當成資料看
     class Bridge {
+        // 2：多了 mottos（警語的定時提醒）
         @JavascriptInterface
         public int version() {
-            return 1;
+            return 2;
         }
 
         @JavascriptInterface
@@ -176,6 +189,30 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void notify(String title, String body, String tag) {
             if (trusted) TimerNotice.remind(getApplicationContext(), title, body, tag);
+        }
+
+        // 警語的定時提醒：json 是接下來的每一則 { items: [{ at, title, body }] }，空字串是不提醒了
+        @JavascriptInterface
+        public void mottos(String json) {
+            if (trusted) MottoNotice.plan(getApplicationContext(), json);
+        }
+
+        // 警語念到哪一則了（手機通知過、或網頁念過的最後一則的時間）
+        @JavascriptInterface
+        public long mottoHandled() {
+            return MottoNotice.handledAt(getApplicationContext());
+        }
+
+        // 網頁要念 at 那一則：先說一聲（手機就不發）。手機已經通知過了回傳 false
+        @JavascriptInterface
+        public boolean mottoClaim(long at) {
+            return trusted && MottoNotice.claim(getApplicationContext(), at);
+        }
+
+        // App 在前面嗎（App 在背景時網頁的 JavaScript 可能還在跑）
+        @JavascriptInterface
+        public boolean foreground() {
+            return foreground;
         }
     }
 }

@@ -6,7 +6,9 @@ import { lotsAt } from './data/projectTown.js'
 import { sfx } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, timerNotice, timerTag, answerLooking } from './push.js'
-import { native, showLiveTimer } from './native.js'
+import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeAway } from './native.js'
+import { planKey, MOTTO_LATE } from './mottos.js'
+import { order as doFirst } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
@@ -118,6 +120,14 @@ async function boot() {
   // 頁面睡著時（手機鎖著、切到別的 App）靠伺服器到點推一則（push.js）；頁面醒著但沒在看時自己發。
   // 同一次到點只響一次：伺服器排上了就交給它，等幾秒還沒來（伺服器或網路出狀況）頁面才自己發
   const notifyOn = () => store.state.settings.notify && notifyPermission() === 'granted'
+  // 警語交給手機排了嗎：新版的 Android 殼、開了系統通知（手機照時間通知，頁面在背景時不用自己發）
+  const mottoExternal = () => nativeMottos() && notifyOn()
+  // 現在該做的那一件：今天還沒做完的任務裡，本命、重要的、排了時間早的在前（跟今日摘要一樣）
+  const nowTask = () => doFirst(store.tasksOn(store.today))[0] || null
+  const mottoBody = (text, task) => (task ? `${text}\n現在該做：${task.title}` : text)
+  // 把警語的那一串交給手機（下面「警語交給手機排」那一段接上）：改了設定、開始專注時馬上叫一次，
+  // 不等下一秒的檢查（剛改完就離開 App 的話頁面會睡著，手機上留著的還是舊的那一串）
+  let syncMottos = () => {}
   const timerPush = new TimerPush({ enabled: notifyOn, onState: () => setTimeout(() => ui.renderRemind()) })
   const timerNotify = (b) => {
     // Android 殼：到點由手機的鬧鐘發（native.js），這邊不用再發一次
@@ -145,7 +155,11 @@ async function boot() {
   // ── UI 掛鉤 ──
   const hooks = {
     // 計時的狀態變了：b 是下一次到點的時間和狀況（沒在計時、暫停中是 null），到點的推播跟著重排
-    focusPlan: (b) => timerPush.plan(b && timerNotice(b)),
+    focusPlan: (b) => {
+      timerPush.plan(b && timerNotice(b))
+      // 專注中那一段不提醒：交給手機的那一串跟著重排
+      syncMottos()
+    },
     // Android 殼：專注、休息中在狀態列和鎖定畫面顯示即時倒數，到點由手機自己通知
     focusLive: (l, b) => showLiveTimer(l, b && timerNotice(b)),
     push: timerPush,
@@ -745,14 +759,24 @@ async function boot() {
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, sub, `sub-${s.id}`)
       return
     }
-    // 警語：もち或ふじ念一句你寫給自己的話。專注中不打擾（下一輪再說）
+    // 警語：もち或ふじ念一句你寫給自己的話，提示卡上寫著現在該做的那一件（按一下就開始專注）。
+    // 專注中不打擾（暫停中的不算；下一輪再說）
     if (kind === 'motto') {
-      if (ui.focus.mode === 'focus') return
+      if (ui.focus.mode === 'focus' && ui.focus.paused == null) return
+      const next = nowTask()
       sfx.chime()
       // 頭上的泡泡放不下太長的句子：念前面一段，完整的在提示卡上
       talk('motto', { text: short(e.text, 28) }, 7000, `「${short(e.text, 28)}」`, pick(['mochi', 'fuji']))
-      ui.toast({ icon: '戒', title: e.text, sub: '寫給自己的警語', ms: 9000 })
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', e.text, 'motto')
+      ui.toast({
+        icon: '戒',
+        title: e.text,
+        sub: next ? `現在該做：${next.title}` : '寫給自己的警語',
+        ms: 9000,
+        tag: 'motto',
+        actions: next && ui.focus.mode !== 'focus' ? [{ label: '▶ 開始專注', run: () => ui.focus.startWith(next.id) }] : null,
+      })
+      // 交給手機排了（Android 殼）：通知由手機發，這邊只在畫面上念
+      if (!mottoExternal() && store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 給自己的警語', mottoBody(e.text, next), 'motto')
       return
     }
     if (kind === 'bed') {
@@ -770,7 +794,39 @@ async function boot() {
     ui.toast({ icon: kind === 'task' ? '時' : '鐘', title: e.title, sub: kind === 'task' ? `排定的任務・${when}` : when, ms: 9000 })
     if (kind === 'event' && store.selectedDate === store.today) scene?.pulseEvent(e.id)
     if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
+  }, {
+    // 警語交給手機排時怎麼跟手機分工（見 reminders.js 的 _motto）
+    external: () => mottoExternal(),
+    hidden: () => document.hidden || nativeAway(),
+    handled: () => nativeMottoHandled(),
+    claim: (at) => nativeMottoClaim(at),
   })
+
+  // ── 警語交給手機排（Android 殼）：App 關著、手機鎖著也照時間通知 ──
+  // 排好接下來到明天就寢的每一則（幾點、念哪一句、現在該做哪一件），手機的鬧鐘一則一則發；App 在前面時手機不發，
+  // 頁面自己念（離開 App 的那一刻還有到點沒念的，手機補發）。專注中的那一段不排；剛到點、還沒人處理的那一則留著。
+  // 會影響排法的東西（planKey：設定、作息、警語、上次念到哪、專注、現在該做的那件、排到幾點）變了才重排。
+  // 每秒看一次；改了資料、專注開始或結束、離開頁面時馬上看一次
+  let mottoSig = ''
+  syncMottos = () => {
+    if (!nativeMottos()) return
+    const now = Date.now()
+    const s = store.state
+    const on = mottoExternal()
+    const quietUntil = ui.focus.mode === 'focus' ? ui.focus.boundary?.at || 0 : 0
+    // 剛寫下第一句、剛打開提醒：先定好從什麼時候開始算（不等下一秒的檢查），才排得出那一串
+    if (on) reminders.startMotto(now)
+    const task = on ? nowTask() : null
+    const sig = on ? planKey({ every: s.settings.mottoEvery, rhythm: s.rhythm, mottos: s.mottos, last: reminders.mottoState(), quietUntil, task: task?.title, now }) : 'off'
+    if (sig === mottoSig) return
+    const since = Math.max(now - MOTTO_LATE, nativeMottoHandled())
+    const items = on ? reminders.mottoPlan(now, { quietUntil, since }).map((p) => ({ at: p.at, title: 'ひより · 給自己的警語', body: mottoBody(p.text, task) })) : []
+    // 沒送到（例如殼剛好出錯）：下一秒再試
+    if (sendMottos(items)) mottoSig = sig
+  }
+  store.on('dirty', () => syncMottos())
+  document.addEventListener('visibilitychange', () => document.hidden && syncMottos())
+  addEventListener('pagehide', () => syncMottos())
 
   // ── 同步：線上同步（同步碼，手機也能用）＋資料夾同步（資料寫進 OneDrive／Dropbox 裡的檔案）。兩種可以同時開 ──
   const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「紀錄 → 設定」選要保留哪一邊', ms: 7000 })
@@ -802,6 +858,7 @@ async function boot() {
     // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
     const rolled = store.tick()
     reminders.check()
+    syncMottos()
     // 還沒有小島：天色照時間算（傍晚自然換深色玻璃）
     if (!scene) syncNight(lookNight())
     if (rolled) return

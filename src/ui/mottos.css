@@ -25,6 +25,14 @@
 .mt-text:hover { background: var(--glass-hover); }
 .mt-text .inline-input { width: 100%; font-family: inherit; font-size: inherit; }
 .mt-k { width: 26px; height: 26px; font-size: 13px; border-width: 1.5px; box-shadow: inset 0 0 0 1.5px #fff; flex: none; }
+
+/* 多久提醒一次：八個選項排成兩列四個（手機上一列放不下） */
+.mt-every { display: grid; grid-template-columns: repeat(4, auto); gap: 1px; }
+.mt-every button { white-space: nowrap; padding: 4px 8px; }
+/* App 不在前面時收不收得到：一行說明（收不到的話旁邊一顆「打開系統通知」） */
+.set-row > .mt-reach { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 8px; border-top: 1px dashed var(--glass-border); }
+.mt-reach small { flex: 1 1 200px; font-size: 11.5px; line-height: 1.55; color: var(--ink-soft); }
+.mt-reach .chip-toggle { flex: none; }
 body.night .mt-k { background: radial-gradient(circle, #4a3550, #3a2a45); color: #ffb8cb; }
 
 /* 面板上方那一句：捲動時黏在最上面 */

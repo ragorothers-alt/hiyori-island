@@ -10,7 +10,7 @@ import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
-import { native } from './native.js'
+import { native, nativeMottos } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
 import { parseQuick, describeQuick, parseSpend } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -228,7 +228,12 @@ export class UI {
     this.life = new LifeView($('#lifeRoot'), store, viewHooks)
     this.subs = new SubsView($('#subsRoot'), store, viewHooks)
     this.mottoBar = new MottoBar($('#mottoBar'), store)
-    this.mottos = new MottosView($('#mottoRoot'), store, { ...viewHooks, mottoBar: () => this.mottoBar.render() })
+    this.mottos = new MottosView($('#mottoRoot'), store, {
+      ...viewHooks,
+      mottoBar: () => this.mottoBar.render(),
+      mottoReach: () => this.mottoReach(),
+      enableNotify: () => this.enableNotify(),
+    })
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
     this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)), $('#coachRoot'))
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
@@ -1799,24 +1804,12 @@ export class UI {
       this.renderRemind()
     })
     $('#notifyBtn').addEventListener('click', async () => {
-      const st = this.store.state.settings
-      const push = this.hooks.push
-      if (st.notify && notifyPermission() === 'granted') {
+      if (this.store.state.settings.notify && notifyPermission() === 'granted') {
         this.store.setSetting('notify', false)
         // 排著的到點通知取消、推播退訂
-        push?.off()
-      } else {
-        const perm = notifyPermission() === 'default' ? await requestNotify() : notifyPermission()
-        this.store.setSetting('notify', perm === 'granted')
-        if (perm === 'granted') {
-          // 順便訂閱推播：專注到點時，鎖著螢幕、切到別的 App 也收得到
-          const ok = await push?.setup()
-          this.toast({ icon: '鐘', title: '系統通知已開啟', sub: ok ? '提醒和專注到點都會通知，鎖著螢幕也收得到' : '切到別的視窗時也會提醒你' })
-          // 已經在計時：這一輪到點的通知現在排上
-          this.hooks.focusPlan?.(this.focus.boundary)
-        }
-      }
-      this.renderRemind()
+        this.hooks.push?.off()
+        this.renderRemind()
+      } else await this.enableNotify()
     })
     $('#notifyTest').addEventListener('click', async () => {
       const btn = $('#notifyTest')
@@ -1834,8 +1827,35 @@ export class UI {
     })
   }
 
+  // 打開系統通知（日程頁提醒那一列的按鈕、警語卡上的「打開系統通知」）：問權限、順便訂閱推播
+  async enableNotify() {
+    const perm = notifyPermission() === 'default' ? await requestNotify() : notifyPermission()
+    this.store.setSetting('notify', perm === 'granted')
+    if (perm === 'granted') {
+      // 順便訂閱推播：專注到點時，鎖著螢幕、切到別的 App 也收得到
+      const ok = await this.hooks.push?.setup()
+      this.toast({ icon: '鐘', title: '系統通知已開啟', sub: ok ? '提醒和專注到點都會通知，鎖著螢幕也收得到' : '切到別的視窗時也會提醒你' })
+      // 已經在計時：這一輪到點的通知現在排上
+      this.hooks.focusPlan?.(this.focus.boundary)
+    }
+    this.renderRemind()
+    return perm === 'granted'
+  }
+
+  // 警語的定時提醒送得到哪裡（警語卡上的那一行說明）：
+  // phone：手機照時間通知（App 關著也會）／phone-off：還沒開系統通知／old-app：舊版的 Android 殼，要開著 App 才提醒
+  // page：頁面開著時（切到別的分頁也會跳通知）／page-off：還沒開系統通知／page-blocked：被瀏覽器封鎖／page-only：這個瀏覽器沒有通知
+  mottoReach() {
+    const on = this.store.state.settings.notify && notifyPermission() === 'granted'
+    if (native) return nativeMottos() ? (on ? 'phone' : 'phone-off') : 'old-app'
+    if (!notifySupported()) return 'page-only'
+    return on ? 'page' : notifyPermission() === 'denied' ? 'page-blocked' : 'page-off'
+  }
+
   renderRemind() {
     const st = this.store.state.settings
+    // 警語卡上「App 關著時收不收得到」那一行也跟著通知的開關、權限（回到 App 時可能在系統設定裡改過）
+    this.mottos?.render()
     $('#remindLead').value = String(st.remindLead)
     const btn = $('#notifyBtn')
     const test = $('#notifyTest')

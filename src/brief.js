@@ -75,8 +75,8 @@ function awayOf(d, today, mins) {
   return items.length ? { label: `離開了 ${gone(now - a.since)}`, items } : null
 }
 
-// 還沒做的任務照「先做哪一件」排：本命、重要的、排了時間早的
-function order(tasks) {
+// 還沒做的任務照「先做哪一件」排：本命、重要的、排了時間早的（警語提醒時的「現在該做」也照這個）
+export function order(tasks) {
   return tasks
     .filter((t) => !t.done)
     .sort((a, b) => !!b.star - !!a.star || (b.priority || 0) - (a.priority || 0) || (a.at || '99:99').localeCompare(b.at || '99:99'))
