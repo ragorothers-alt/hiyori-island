@@ -332,6 +332,12 @@ body.night .tn-slot { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 
 /* ── 今日反思 ── */
 .td-ref-at { flex: none; font-size: 11.5px; color: var(--ink-faint); }
+/* 今天的回神：專注了多久、忍住幾次、警語提醒時回神幾次，下面誇一句 */
+.td-back { margin: -2px 0 12px; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, #86cdb0 12%, var(--field)); box-shadow: inset 0 0 0 1px var(--glass-border); }
+.td-back ul { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--ink-soft); }
+.td-back li b { font-family: var(--font-num); font-weight: 600; color: var(--ink); }
+.td-back li small { margin-left: 6px; font-size: 11px; color: var(--ink-faint); }
+.td-back p { margin: 6px 0 0; font-size: 12.5px; color: var(--ink); }
 .td-moods { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .td-mood { display: flex; align-items: center; gap: 6px; padding: 4px 12px 4px 4px; border-radius: 999px; background: var(--field); border: 1px solid var(--glass-border); font-size: 12.5px; color: var(--ink-soft); }
 .td-mood b { width: 26px; height: 26px; border-radius: 50%; display: grid; place-content: center; font-family: var(--font-display); font-weight: 400; font-size: 14px; color: var(--mc); border: 1.5px solid var(--mc); }

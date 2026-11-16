@@ -4,7 +4,7 @@ import { calmMotion } from './motion.js'
 import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
-import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, PULLS, tagOf } from '../theme.js'
+import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, PULLS, pullOf, tagOf } from '../theme.js'
 import { floating, NOISES } from '../store.js'
 import { nextStep } from '../brief.js'
 import { nextEvent } from '../planner.js'
@@ -707,6 +707,10 @@ export class FocusTimer {
     setText(alt, ask ? '還是想去' : '寫下來，等等再做')
     alt.dataset.urge = ask ? 'go' : 'park'
     pickOne($$('#ffUrgePulls [data-pull]'), (b) => b.dataset.pull === this.urgePull)
+    // 點了想去做什麼：寫一件現在就做得到的小事（把手機翻過來、先記下來…）
+    const tip = pullOf(this.urgePull)?.now || ''
+    setText($('#ffUrgeTip'), tip)
+    $('#ffUrgeTip').hidden = !tip
   }
 
   // ── 背景聲：專注時放雨聲、褐噪音、粉紅噪音蓋掉周圍的聲音（src/audio.js 的 noise）。

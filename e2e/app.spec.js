@@ -1246,12 +1246,17 @@ test('想分心時說出想去做什麼：點一下選起來（再點取消）�
   await btn.click()
   await expect(chips).toHaveText(['滑手機', '看訊息', '看影片', '吃點東西', '查別的事', '休息一下'])
   await expect(page.locator('#ffUrgePulls')).toHaveAttribute('role', 'group')
-  // 點一下選起來，再點一下取消；換一個
+  // 點一下選起來（下面寫一件現在就做得到的小事），再點一下取消；換一個
+  const now = page.locator('#ffUrgeTip')
+  await expect(now).toBeHidden()
   await chip('看訊息').click()
   await expect(chip('看訊息')).toHaveAttribute('aria-pressed', 'true')
+  await expect(now).toHaveText('訊息等休息時一起回；真的很急，回完那一則就回來。')
   await chip('看訊息').click()
   await expect(chip('看訊息')).toHaveAttribute('aria-pressed', 'false')
+  await expect(now).toBeHidden()
   await chip('滑手機').click()
+  await expect(now).toHaveText(/先把手機翻過來/)
   // 算了，回來做：忍住了一次，記下滑手機；說的話提到滑手機
   await page.locator('#ffUrgeBack').click()
   await expect(box).toBeHidden()
@@ -1292,6 +1297,35 @@ test('想分心時說出想去做什麼：點一下選起來（再點取消）�
   // 同一批紀錄不會接著又建議縮成 15 分：洞察還在，按鈕收起來、說一聲先照這樣看幾天
   await expect(page.locator('#coachRoot [data-act="focusMin"]')).toHaveCount(0)
   await expect(page.locator('#coachRoot .wr-ins li', { hasText: '最常想去休息一下' })).toContainText('先照這樣再看幾天')
+})
+
+test('今天的回神：今日反思最上面寫今天專注了多久、想分心時忍住幾次（最常想去做什麼）、警語提醒時回神幾次，誇一句；什麼都還沒有就不放', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => window.hiyori.ui.setTab('today'))
+  const back = page.locator('#todayRoot .td-back')
+  await expect(page.locator('#todayRoot .td-ref')).toBeVisible()
+  await expect(back).toHaveCount(0)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const now = Date.now()
+    s.focusHold('phone')
+    s.focusHold('phone')
+    s.focusHold('msg')
+    // 還是去了的不算忍住
+    s.focusWent('video')
+    // 提醒了 3 次：一次之後回到正事、一次本來就在做
+    s.mottoNudged(now - 30 * 60000)
+    s.mottoNudged(now - 20 * 60000)
+    s.mottoAnswered('back', now - 30 * 60000)
+    s.mottoAnswered('on', now - 10 * 60000)
+    s.completePomodoro(25)
+    window.hiyori.ui.today.render()
+  })
+  await expect(back.locator('li')).toHaveText(['專注 25 分', '想分心時忍住 3 次最常想去滑手機', '警語提醒時回神 2／3 次'])
+  // 拉回來的：忍住的 3 次＋提醒之後回到正事的 1 次（本來就在做的不算）
+  await expect(back.locator('p')).toHaveText('今天把自己拉回來 4 次，很不容易。')
 })
 
 test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一輪結束前就要開始的寫「記得提早收尾」、ふじ提醒一聲；進行中的寫到幾點', async ({ page, context, site }) => {
@@ -1461,6 +1495,8 @@ test('休息前留一步：到點時還沒寫下一步的那件，提示卡上�
 })
 
 test('休息前留一步（小島模式）：提示卡上按「留一步給等等」打開計時設定的小視窗直接寫，收起來再點 Dock 上的時間打開時打到一半的字還在；換了目標之後按舊的提示卡不會寫到別件上', async ({ page, site }) => {
+  // 小島模式一直在畫 3D 的小島：機器忙的時候每一步都慢一點
+  test.setTimeout(120000)
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
   await page.clock.setFixedTime(T('10:00:00'))
@@ -1508,7 +1544,8 @@ test('休息前留一步（小島模式）：提示卡上按「留一步給等�
   await page.locator('#fsTarget').focus()
   await page.keyboard.press('Escape')
   await expect(page.locator('#focusSet')).toBeHidden()
-  await page.locator('#focusTime').click()
+  // （直接送點擊：機器很忙的時候，等「捲到看得到、不再動」可能等到逾時）
+  await page.locator('#focusTime').dispatchEvent('click')
   await expect(page.locator('#focusSet')).toBeVisible()
   await expect(input).toHaveValue('把第二節的三個重點')
   await input.fill('把第二節的三個重點列出來')

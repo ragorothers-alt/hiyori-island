@@ -1,7 +1,7 @@
 import './today.css'
 import { $, $$, esc, ICON } from './dom.js'
 import { calmMotion, countUp } from './motion.js'
-import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS } from '../theme.js'
+import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS, pullOf } from '../theme.js'
 import { TODAY_QUOTES, TODAY_LEADS } from '../data/todayLines.js'
 import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
 import { applies, countOn, doneOn, streak } from '../habits.js'
@@ -746,6 +746,29 @@ export class TodayView {
     </section>`
   }
 
+  // ── 今天的回神（今日反思最上面）：今天專注了多久、想分心時忍住幾次（最常想去做什麼）、警語提醒時回到正事幾次。
+  // 把自己拉回來的每一次都算數：寫反思時看得到，誇自己一句。什麼都還沒有就不放 ──
+  _backHTML(today) {
+    const d = this.store.peekDay(today)
+    const focus = d.focus || 0
+    const holds = d.holds || 0
+    const nudges = d.nudges || 0
+    // 提醒之後回到正事的、提醒時本來就在做的（跟週報的「警語回神」一樣，不超過提醒的次數）
+    const back = Math.min(nudges, (d.backs || 0) + (d.onTask || 0))
+    if (!focus && !holds && !back) return ''
+    const top = Object.entries(d.pulls || {}).sort((a, b) => b[1] - a[1])[0]
+    const most = top && pullOf(top[0])
+    const items = [
+      focus ? `<li>專注 <b>${hm(focus)}</b></li>` : '',
+      holds ? `<li>想分心時忍住 <b>${holds}</b> 次${most ? `<small>最常想去${esc(most.label)}</small>` : ''}</li>` : '',
+      back ? `<li>警語提醒時回神 <b>${back}</b>／${nudges} 次</li>` : '',
+    ].join('')
+    // 拉回來的次數：忍住的、提醒之後回到正事的（本來就在做的不算「拉回來」）
+    const pulled = holds + Math.min(nudges, d.backs || 0)
+    const praise = pulled ? `今天把自己拉回來 ${pulled} 次，很不容易。` : `今天專注了 ${hm(focus)}，辛苦了。`
+    return `<div class="td-back" aria-label="今天的回神"><ul>${items}</ul><p>${praise}</p></div>`
+  }
+
   // ── 今日反思：選今天的天氣、寫幾句話（就是晚間回顧那一篇，第一次記下有經驗值） ──
   _refHTML(today) {
     const s = this.store
@@ -762,6 +785,7 @@ export class TodayView {
         : `第一次記下 +${XP.review} XP・Ctrl＋Enter 也可以記下`
     return `<section class="td-card td-ref${pending ? ' dirty' : ''}" aria-label="今日反思">
       <header class="td-h">${IC.pen}<h3>今日反思<small>きょうのふりかえり</small></h3>${stamp}</header>
+      ${this._backHTML(today)}
       <div class="td-moods" role="group" aria-label="今天的天氣（心情）">${moods}</div>
       <textarea class="td-ref-text" data-fk="ref-text" data-day="${today}" rows="3" maxlength="${REVIEW_TEXT}" aria-label="今日反思"
         placeholder="今天過得怎麼樣？做得好的、想改進的、明天想試試的">${esc(saved?.text || '')}</textarea>
