@@ -1594,8 +1594,9 @@ test('休息前留一步（小島模式）：提示卡上按「留一步給等�
   })
   expect(await page.evaluate(() => window.hiyori.ui.appMode)).toBe(false)
   // 到點：提示卡上有「留一步給等等」。按之前另一個分頁把目標換成別件：按了不會寫到那一件上
+  // （到點那一下要記專注、放提示卡、兩人走出小木屋：機器很忙時多等一下）
   await page.clock.setFixedTime(T('10:25:01'))
-  await expect.poll(mode).toBe('break')
+  await expect.poll(mode, { timeout: 30000 }).toBe('break')
   const first = page.locator('#toasts .toast', { hasText: '專注完成' })
   await expect(first.getByRole('button', { name: '留一步給等等' })).toBeVisible()
   await page.evaluate((b) => window.hiyori.ui.focus.setTarget(`t:${b}`), b)
@@ -1610,7 +1611,7 @@ test('休息前留一步（小島模式）：提示卡上按「留一步給等�
     f.startWith(a)
   }, a)
   await page.clock.setFixedTime(T('10:50:02'))
-  await expect.poll(mode).toBe('break')
+  await expect.poll(mode, { timeout: 30000 }).toBe('break')
   await page.locator('#toasts .toast', { hasText: '專注完成' }).getByRole('button', { name: '留一步給等等' }).click()
   await expect(page.locator('#focusSet')).toBeVisible()
   const input = page.locator('#fsStepText')
