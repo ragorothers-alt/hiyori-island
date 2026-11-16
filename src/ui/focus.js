@@ -28,7 +28,8 @@ const URGE_MS = 60000
 const BREATH_MS = 8000
 // 還有多久：45 分鐘、1 小時 5 分
 const span = (min) => (min >= 60 ? `${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}` : `${min} 分鐘`)
-const clip = (s, n = 16) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+// 照字數截（emoji 這種兩個字元組成的字不會被切成一半）
+const clip = (s, n = 16) => ([...s].length > n ? `${[...s].slice(0, n - 1).join('')}…` : s)
 // 字有變才換（每 250 毫秒重畫一次）
 const setText = (el, s) => {
   if (el.textContent !== s) el.textContent = s
@@ -905,7 +906,16 @@ export class FocusTimer {
   }
 
   tick() {
-    if (this.mode === 'idle' || this.paused != null) return
+    if (this.mode === 'idle') return
+    if (this.paused != null) {
+      // 暫停中計時停著，時間照走：專注頁開著時每秒照真的時間重寫「接下來」（會議開始了、結束了、日程改了）
+      const sec = Math.floor(Date.now() / 1000)
+      if (sec !== this._pausedSec && !$('#focusFull').hidden) {
+        this._pausedSec = sec
+        this._renderNext()
+      }
+      return
+    }
     const step = clock.due(this, Date.now())
     if (step?.do === 'expire') return this._expire()
     // 這一段本來排好到點的時間：通知用它認「同一次到點」
@@ -1047,7 +1057,8 @@ export class FocusTimer {
     const s = this.ui.store
     const d = new Date(now)
     const nowMin = d.getHours() * 60 + d.getMinutes()
-    const end = this.mode === 'focus' && !this.counting && this.paused == null && this.endAt > now ? nowMin + Math.ceil((this.endAt - now) / 60000) : null
+    // 結束時間帶著秒數算、不取整：10:00:30 開始的 25 分鐘結束在 10:25:30，會撞到 10:25 的會議（取整的話每過半分鐘就變一次）
+    const end = this.mode === 'focus' && !this.counting && this.paused == null && this.endAt > now ? nowMin + (d.getSeconds() * 1000 + d.getMilliseconds() + this.endAt - now) / 60000 : null
     return nextEvent(s.eventsOn(s.today), nowMin, end)
   }
   // 進行中的、這一輪結束前就要開始的一定寫（會撞到的寫「記得提早收尾」），其他的 2 小時內才寫（planner.js 的 nextEvent）

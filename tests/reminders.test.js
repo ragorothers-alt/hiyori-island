@@ -283,6 +283,33 @@ describe('任務與就寢提醒', () => {
     expect(noDur.dur ?? null).toBeNull()
   })
 
+  it('taskEnd 跨過午夜：昨天 23:30 開始 60 分鐘的，今天 00:30 問一次（開著過午夜、沒睡著也問；記在昨天那份）；不會多說一次開始', () => {
+    const night = store.addTask({ title: '趕作業', date: TODAY, at: '23:30', dur: 60 })
+    const late = store.addTask({ title: '收尾', date: TODAY, at: '23:45', dur: 15 })
+    const done = store.addTask({ title: '已經做完', date: TODAY, at: '23:30', dur: 60 })
+    store.toggleTask(done.id)
+    const next = (h, m) => new Date(2026, 9, 26, h, m)
+    const ends = () => callback.mock.calls.filter((c) => c[2] === 'taskEnd').map((c) => c[0].id)
+    reminders.check(at(23, 50))
+    reminders.check(at(23, 59, 30))
+    callback.mockClear()
+    reminders.check(next(0, 0))
+    expect(ends()).toEqual([late.id])
+    reminders.check(next(0, 10))
+    reminders.check(next(0, 29, 59))
+    expect(ends()).toEqual([late.id])
+    reminders.check(next(0, 30))
+    reminders.check(next(0, 30, 30))
+    expect(ends()).toEqual([late.id, night.id])
+    // 結束以外的提醒（開始、提前）都沒有再說一次
+    expect(callback.mock.calls.filter((c) => c[2] !== 'taskEnd')).toEqual([])
+    // 記在昨天那份：另一個分頁不會再問一次
+    const other = vi.fn()
+    new Reminders(store, other).check(next(0, 30, 40))
+    expect(other.mock.calls.filter((c) => c[2] === 'taskEnd')).toEqual([])
+    expect(JSON.parse(localStorage.getItem('hiyori-reminded'))[TODAY]).toEqual(expect.arrayContaining([`${night.id}@23:30~60`, `${late.id}@23:45~15`]))
+  })
+
   it('兩個分頁同時遇到剛開始的任務：開始的那一次只有一邊說（搶到提前那一次、沒搶到開始那一次的分頁不說）', () => {
     store.setSetting('remindLead', 0)
     const task = store.addTask({ title: '寫報告', date: TODAY, at: '14:00', dur: 60 })
@@ -311,8 +338,10 @@ describe('任務與就寢提醒', () => {
     // 23:55 之後睡著，隔天 00:03 醒來
     reminders.check(new Date(2026, 9, 26, 0, 3))
     reminders.check(new Date(2026, 9, 26, 0, 3, 30))
-    reminders.check(new Date(2026, 9, 26, 0, 20))
     expect(kinds()).toEqual([[10, 'task'], [0, 'taskStart']])
+    // 又睡著，00:20 醒來：排的時間（到 00:13）也過了，問一聲做完了沒（不會再說一次開始）
+    reminders.check(new Date(2026, 9, 26, 0, 20))
+    expect(kinds()).toEqual([[10, 'task'], [0, 'taskStart'], [0, 'taskEnd']])
     // 一直醒著過了午夜：23:58 那時就說過了，不會補第二次
     localStorage.clear()
     callback.mockClear()

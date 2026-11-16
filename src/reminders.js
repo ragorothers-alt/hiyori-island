@@ -231,7 +231,11 @@ export class Reminders {
     if (early) this.store.prepareRoutines?.(tomorrow)
     // 睡著時跨過了午夜：昨天快午夜時開始的（23:58 那件）也還在補提醒的 15 分鐘裡（記在昨天那份）
     const pastMidnight = slept && mins < LATE
-    const items = lead < 0 ? [] : [...(pastMidnight ? this._items(yesterday, -1440) : []), ...this._items(today, 0), ...(early ? this._items(tomorrow, 1440) : [])]
+    // 昨天開始、午夜或過了午夜才結束的排定任務（23:30 開始 60 分鐘、23:45 開始 15 分鐘）：結束的那一次也要問（記在昨天那份）。
+    // 睡著時跨過了午夜的話，昨天的全部都已經算進來了
+    const yest = lead < 0 ? [] : this._items(yesterday, -1440)
+    const overnight = pastMidnight ? yest : yest.filter(([item, at, kind]) => kind === 'task' && item.dur > 0 && toMin(at) - 1440 + item.dur >= 0)
+    const items = lead < 0 ? [] : [...overnight, ...this._items(today, 0), ...(early ? this._items(tomorrow, 1440) : [])]
     for (const [item, at, kind, date, offset] of items) {
       if (item.done) continue
       const key = `${item.id}@${at}`

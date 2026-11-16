@@ -1226,6 +1226,58 @@ test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一
   await expect(next).toBeHidden()
 })
 
+test('接下來：帶著秒數開始也算得準（10:00:30 開始的 25 分鐘會撞到 10:25）；暫停時照真的時間更新；停掉重來的那一輪不說上一輪的「會撞到」', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await useAppMode(context)
+  await page.clock.setFixedTime(T('10:00:30'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const id = await page.evaluate(() => {
+    const s = window.hiyori.store
+    for (const e of s.eventsOn(s.today)) s.deleteEvent(e.id)
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    return s.addEvent({ title: '設計週會', date: s.today, start: '10:25', end: '11:00' }).id
+  })
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  const next = page.locator('#ffNext')
+  // 這一輪結束在 10:25:30：會撞到 10:25 的會議
+  await expect(next).toHaveClass(/clash/)
+  await expect(page.locator('#appChat')).toContainText('設計週會')
+  // 過了一分鐘（10:01:30）還是會撞到：不會每過半分鐘就變一次
+  await page.clock.setFixedTime(T('10:01:30'))
+  await expect(next).toHaveText(/這一輪結束前\s*10:25 設計週會\s*還有 24 分鐘/)
+  await page.waitForTimeout(1200)
+  await expect(next).toHaveClass(/clash/)
+  // 暫停：計時停著（不寫會撞到），時間照走——會議開始了就寫進行中
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect(next).toHaveText(/接下來\s*10:25 設計週會/)
+  await expect(next).not.toHaveClass(/clash/)
+  await page.clock.setFixedTime(T('10:26:00'))
+  await expect(next).toHaveText(/進行中\s*設計週會\s*到 11:00/)
+  // 開始一輪會撞到「看牙醫」，馬上停掉、把牙醫改到 11:30 再開始：2.6 秒後不說上一輪的「會撞到」
+  const tooth = await page.evaluate((id) => {
+    const h = window.hiyori
+    h.store.deleteEvent(id)
+    h.ui.focus.stop()
+    const e = h.store.addEvent({ title: '看牙醫', date: h.store.today, start: '10:40', end: '11:00' })
+    h.ui.focus.toggle()
+    return { id: e.id, clash: h.ui.focus.nextUp().clash }
+  }, id)
+  expect(tooth.clash).toBe(true)
+  await page.evaluate((id) => {
+    const h = window.hiyori
+    h.ui.focus.stop()
+    h.store.updateEvent(id, { start: '11:30', end: '12:00' })
+    h.ui.focus.toggle()
+  }, tooth.id)
+  await page.waitForTimeout(3200)
+  await expect(page.locator('#appChat')).not.toContainText('看牙醫')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+})
+
 test('提示卡一口氣來很多張：先收沒有按鈕的，有按鈕的留著來得及按；全都有按鈕時最多多留一張', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
@@ -2259,6 +2311,46 @@ test('排定的任務時間到了：還沒做完就問一聲（寫著下一件�
   await page.clock.setFixedTime(T('11:15'))
   await expect.poll(() => page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('hiyori-reminded') || '{}')))).toContain('e2e-b@11:00~15')
   await expect(page.locator('#toasts .toast', { hasText: '「回覆老師的信」排的時間到了' })).toHaveCount(0)
+})
+
+test('排的時間到了：昨晚開始、過了午夜才結束的那件也問，「明天再做」挪到今天算的明天；預估快到 10 小時只加到 600 分鐘，到了就不再給「再 15 分鐘」', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const shift = (d, n) => {
+    const x = new Date(`${d}T12:00:00Z`)
+    x.setUTCDate(x.getUTCDate() + n)
+    return x.toISOString().slice(0, 10)
+  }
+  const T = (hm) => new Date(`${ymd}T${hm}:00+08:00`)
+  await context.addInitScript(({ yday, ymd }) => {
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [
+        { id: 'e2e-n', title: '趕期末作業', priority: 2, date: yday, at: '23:30', dur: 60 },
+        { id: 'e2e-l', title: '整理房間', priority: 1, date: ymd, at: '00:40', dur: 595 },
+      ]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: { remindLead: 10 } }))
+    }
+  }, { yday: shift(ymd, -1), ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(T('00:29'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const task = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id), id)
+  // 昨天 23:30 開始 60 分鐘：今天 00:30 問
+  await page.clock.setFixedTime(T('00:30'))
+  const night = page.locator('#toasts .toast', { hasText: '「趕期末作業」排的時間到了' })
+  await expect(night.locator('.toast-act')).toHaveText(['✓ 做完了', '再 15 分鐘', '明天再做'])
+  await night.locator('.toast-act', { hasText: '明天再做' }).click()
+  await expect.poll(async () => (await task('e2e-n')).date).toBe(shift(ymd, 1))
+  // 預估 595 分鐘（00:40 到 10:35）：再 15 分鐘只加得上 5 分鐘
+  await page.clock.setFixedTime(T('10:35'))
+  const long = page.locator('#toasts .toast', { hasText: '「整理房間」排的時間到了' })
+  await long.locator('.toast-act', { hasText: '再 15 分鐘' }).click()
+  await expect.poll(async () => (await task('e2e-l')).dur).toBe(600)
+  await toastSeen(page, '再 5 分鐘')
+  // 10:40 到了 600 分鐘：不再給「再 15 分鐘」
+  await page.clock.setFixedTime(T('10:40'))
+  await expect(page.locator('#toasts .toast', { hasText: '「整理房間」排的時間到了' }).locator('.toast-act')).toHaveText(['✓ 做完了', '明天再做'])
 })
 
 test('明天先做哪一件：晚上在今日總覽挑一件（明天的、今天沒做完挪過去的、或寫一件新的），就寢提醒提一下；早上的今日摘要從這件開始', async ({ page, context, site }) => {

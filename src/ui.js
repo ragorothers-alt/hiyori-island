@@ -1502,11 +1502,12 @@ export class UI {
   }
 
   // 往後挪一天，說一聲，可以復原（復原回到原本的日子和時段）
-  _postpone(id) {
+  // to：挪到哪一天（預設是那件的隔天；排的時間到了的提示卡是從今天算的明天，昨晚開始、過了午夜才結束的那件也挪到明天）
+  _postpone(id, to = null) {
     const s = this.store
     const t = s.state.tasks.find((x) => x.id === id)
     if (!t) return
-    const to = addDays(t.date, 1)
+    to ||= addDays(t.date, 1)
     // 復原交給 store：日期、時段、往後挪的次數（卡關提醒用）、被擠掉的本命都放回去
     const undo = s.postponeTask(id, to)
     if (!undo) return

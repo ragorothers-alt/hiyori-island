@@ -352,10 +352,15 @@ async function boot() {
         else if (info.free) talk('focusFree', {}, undefined, '', 'fuji')
         else if (!duet('focusStart')) talk('focusStart')
         // 這一輪結束前就有日程要開始（開會、上課）：ふじ提醒一聲記得提早收尾（專注頁上也寫著）
-        const next = ui.focus.nextUp()
-        if (next?.clash) {
-          const e = next.event
-          setTimeout(() => ui.focus.mode === 'focus' && talk('focusClash', { event: short(e.title), at: e.start }, 6000, `${e.start} 有「${short(e.title)}」，記得提早收尾。`, 'fuji'), 2600)
+        // 等開始的那句說完再說；到時候再看一次：還是同一輪、沒暫停、還會撞到才說（這中間停掉重來、日程改了、標成做完的就不說）
+        if (ui.focus.nextUp()?.clash) {
+          setTimeout(() => {
+            const f = ui.focus
+            const n = f.mode === 'focus' && f.sid === info.sid && f.paused == null ? f.nextUp() : null
+            if (!n?.clash) return
+            const e = n.event
+            talk('focusClash', { event: short(e.title), at: e.start }, 6000, `${e.start} 有「${short(e.title)}」，記得提早收尾。`, 'fuji')
+          }, 2600)
         }
       }
     },
@@ -1084,19 +1089,25 @@ async function boot() {
         }
         return c
       }
+      // 預估最多 600 分鐘（10 小時，跟存檔的上限一樣）：快到了只加到 600，已經到了就不再加（加不上去的話之後也不會再問）
+      const MAX_DUR = 600
       const more = () => {
         const c = cur()
         if (!c) return
-        const dur = Math.min(600, (c.dur || 0) + 15)
+        const add = Math.min(15, MAX_DUR - (c.dur || 0))
+        if (add <= 0) return ui.toast({ icon: '時', title: '已經排到 10 小時了', sub: '先停下來休息，或明天再做吧', ms: 4200 })
+        const dur = (c.dur || 0) + add
         store.updateTask(c.id, { dur })
-        ui.toast({ icon: '時', title: `「${short(c.title, 12)}」再 15 分鐘`, sub: `排到 ${minToHHMM(Math.min(1439, toMin(c.at) + dur))}，到時候再問你`, ms: 4200 })
+        // 過了午夜才結束的照樣寫幾點（23:30 開始 75 分鐘 → 00:45）
+        ui.toast({ icon: '時', title: `「${short(c.title, 12)}」再 ${add} 分鐘`, sub: `排到 ${minToHHMM((toMin(c.at) + dur) % 1440)}，到時候再問你`, ms: 4200 })
       }
       ui.toast({
         icon: '時', title: `「${t.title}」排的時間到了`, sub: next ? `做完了嗎？下一件：${next.at} ${short(next.title, 14)}` : '做完了嗎？', ms: 15000, tag: `end-${t.id}`,
         actions: [
           { label: '✓ 做完了', run: () => cur() && store.toggleTask(t.id) },
-          { label: '再 15 分鐘', soft: true, run: more },
-          { label: '明天再做', soft: true, run: () => cur() && ui._postpone(t.id) },
+          ...((t.dur || 0) < MAX_DUR ? [{ label: '再 15 分鐘', soft: true, run: more }] : []),
+          // 從今天算的明天（昨晚開始、過了午夜才結束的那件也是）
+          { label: '明天再做', soft: true, run: () => cur() && ui._postpone(t.id, addDays(store.today, 1)) },
         ],
       })
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${t.title}`, next ? `排的時間到了・下一件：${next.at} ${next.title}` : '排的時間到了，做完了嗎？', `end-${t.id}`)
