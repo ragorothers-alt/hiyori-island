@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
-import { taskHours, focusBuckets, weekdayRate, activeDays, buildInsights, mottoStats } from '../src/insights.js'
+import { taskHours, focusBuckets, weekdayRate, activeDays, buildInsights, mottoStats, pullStats } from '../src/insights.js'
 
 const TODAY = '2026-11-01'
 const at = (date, h) => new Date(`${date}T${String(h).padStart(2, '0')}:10:00`).getTime()
@@ -88,5 +88,22 @@ describe('洞察', () => {
     const fine = hist([['2026-11-01', { nudges: 10, backs: 4, onTask: 2 }]])
     expect(motto(fine)).toMatchObject({ title: '警語幫你回神了 6 次', text: expect.stringMatching(/60%.*其中 2 次本來就在做/) })
     expect(motto(hist([['2026-11-01', { nudges: 8, backs: 12 }]])).title).toBe('警語幫你回神了 8 次')
+  })
+
+  it('想分心時最常想去做什麼：最近兩週 3 次以上才說，給對應的建議；最常想休息、倒數計時的話一鍵把一輪縮短 5 分鐘', () => {
+    const hist = (rows) => Object.fromEntries(rows.map(([date, o]) => [date, day(o)]))
+    const pull = (history, focusMin = 25) => buildInsights({ tasks: [], history, habits: [], rhythm: R, today: TODAY, focusMin }).find((x) => x.id === 'pull')
+    // 兩週以前的、不認得的不算；不到 3 次不說
+    const old = hist([['2026-10-18', { pulls: { phone: 9 } }], ['2026-10-31', { pulls: { phone: 2, nope: 7 } }]])
+    expect(pullStats(old, TODAY)).toEqual({ phone: 2 })
+    expect(pull(old)).toBeUndefined()
+    // 最多的那個：滑手機 3 次（加起來好幾天的）
+    const phone = hist([['2026-10-30', { pulls: { phone: 2, msg: 1 } }], ['2026-11-01', { pulls: { phone: 1, video: 2 } }]])
+    expect(pull(phone)).toMatchObject({ kanji: '念', title: '想分心時，最常想去滑手機', text: expect.stringMatching(/^最近兩週有 3 次。專注時把手機/), action: null })
+    // 最常想休息：25 分 → 20 分；已經很短（15 分）、正向計時（0）就不給按鈕
+    const rest = hist([['2026-11-01', { pulls: { rest: 4 } }]])
+    expect(pull(rest)).toMatchObject({ title: '想分心時，最常想去休息一下', action: { kind: 'focusMin', value: 20, label: '一輪改成 20 分鐘' } })
+    expect(pull(rest, 15).action).toBeNull()
+    expect(pull(rest, 0).action).toBeNull()
   })
 })

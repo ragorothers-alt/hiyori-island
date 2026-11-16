@@ -2,7 +2,7 @@
 // 資料不夠（最近四週有在用的日子少於 5 天）時，改成依作息推測，並標上 guess。
 import { rate, streak } from './habits.js'
 import { PEAKS } from './planner.js'
-import { WEEK_ZH } from './theme.js'
+import { WEEK_ZH, pullOf } from './theme.js'
 import { MOTTO_EVERY } from './mottos.js'
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -81,8 +81,9 @@ export function activeDays(history, today, days = 28) {
 }
 
 // 回傳 [{ id, kanji, title, text, guess?, action? }]；action：{ kind: 'peak', value, label } 一鍵把作息的精神時段改掉、
-// { kind: 'mottoEvery', value, label } 一鍵把警語的提醒間隔拉長。mottoEvery：現在幾分鐘提醒一次（0 是不提醒）
-export function buildInsights({ tasks, history, habits, rhythm, today, mottoEvery = 0 }) {
+// { kind: 'mottoEvery', value, label } 一鍵把警語的提醒間隔拉長、{ kind: 'focusMin', value, label } 一鍵把專注一輪縮短。
+// mottoEvery：現在幾分鐘提醒一次（0 是不提醒）；focusMin：倒數計時一輪幾分鐘（正向計時是 0）
+export function buildInsights({ tasks, history, habits, rhythm, today, mottoEvery = 0, focusMin = 0 }) {
   const out = []
   const guess = activeDays(history, today) < 5
   const peak = PEAKS[rhythm.peak]
@@ -178,10 +179,36 @@ export function buildInsights({ tasks, history, habits, rhythm, today, mottoEver
       })
     }
   }
+
+  // 7. 想分心時最常想去做什麼（最近兩週，「先等一分鐘」上點的；3 次以上才說）：給對應的小建議。
+  // 最常是「休息一下」、而且是倒數計時：一鍵把一輪縮短 5 分鐘（最短 15 分）
+  const pulls = pullStats(history, today)
+  const most = top(pulls)
+  if (most && most[1] >= PULL_ENOUGH) {
+    const p = pullOf(most[0])
+    const shorter = p.id === 'rest' && focusMin >= 20 ? focusMin - 5 : 0
+    out.push({
+      id: 'pull', kanji: '念', title: `想分心時，最常想去${p.label}`,
+      text: `最近兩週有 ${most[1]} 次。${p.tip}`,
+      action: shorter ? { kind: 'focusMin', value: shorter, label: `一輪改成 ${shorter} 分鐘` } : null,
+    })
+  }
   return out
 }
 
 // 回神紀錄要多少次提醒才看得出傾向
 export const MOTTO_ENOUGH = 8
+// 想分心時想去做的事要記幾次才說
+export const PULL_ENOUGH = 3
+
+// 最近 days 天想分心時想去做什麼（每天的 pulls 加起來）：{ PULLS 的 id: 次數 }
+export function pullStats(history, today, days = 14) {
+  const out = {}
+  for (let i = 0; i < days; i++) {
+    const h = history[addDays(today, -i)]
+    for (const [k, n] of Object.entries(h?.pulls || {})) if (pullOf(k)) out[k] = (out[k] || 0) + n
+  }
+  return out
+}
 const everyText = (v) => (v >= 60 ? `每 ${v / 60} 小時` : `每 ${v} 分鐘`)
 

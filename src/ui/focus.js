@@ -4,7 +4,7 @@ import { calmMotion } from './motion.js'
 import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
-import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, tagOf } from '../theme.js'
+import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, PULLS, tagOf } from '../theme.js'
 import { floating, NOISES } from '../store.js'
 import { nextStep } from '../brief.js'
 import { nextEvent } from '../planner.js'
@@ -560,6 +560,14 @@ export class FocusTimer {
   _bindUrge() {
     $('#ffUrgeBtn').onclick = () => this.urge(true)
     for (const id of ['#ffUrgeBack', '#ffUrgeAlt']) $(id).onclick = (e) => this._urgeDo(e.currentTarget.dataset.urge)
+    // 想去做什麼：點一下選起來（再點一下取消），回到正事、寫下來、還是想去的時候一起記下來
+    $('#ffUrgePulls .ff-urge-chips').innerHTML = PULLS.map((p) => `<button type="button" class="chip-toggle" data-pull="${p.id}" aria-pressed="false">${esc(p.label)}</button>`).join('')
+    $('#ffUrgePulls').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pull]')
+      if (!b || !this._urgeLive()) return
+      this.urgePull = this.urgePull === b.dataset.pull ? null : b.dataset.pull
+      this._renderUrge()
+    })
     // Esc：收起來就好（不算忍住、也不算去了；不要連專注頁一起收起來）
     $('#ffUrge').addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229) return
@@ -582,6 +590,7 @@ export class FocusTimer {
     this.urgeSid = on ? this.sid : null
     if (!on) this._urgeShut = Date.now()
     this._urgeAsked = false
+    this.urgePull = null
     this._renderUrge()
     if (on) {
       $('#ffUrgeBack').focus()
@@ -589,17 +598,21 @@ export class FocusTimer {
     } else this._urgeFocus()
     return true
   }
-  // back：回到正事；park：先寫下來等等再做（焦點到「先記下來」那一行）；go：還是想去
+  // back：回到正事；park：先寫下來等等再做（焦點到「先記下來」那一行）；go：還是想去。
+  // 等的時候點了想去做什麼的話，一起記下來（忍住的、去了的都算）
   _urgeDo(act) {
     if (!this._urgeLive()) return
+    const pull = this.urgePull
     this.urgeAt = 0
+    this.urgePull = null
     this._urgeShut = Date.now()
     this._renderUrge()
     if (act === 'go') {
-      this.hooks.urgeGo?.()
+      if (pull) this.ui.store.focusWent(pull)
+      this.hooks.urgeGo?.(pull)
       return this._urgeFocus()
     }
-    this.ui.store.focusHold()
+    this.ui.store.focusHold(pull)
     if (act !== 'park') return this._urgeFocus()
     this._renderPark()
     $('#ffParkText').focus()
@@ -613,6 +626,7 @@ export class FocusTimer {
   _urgeSweep() {
     if (!this.urgeAt || this._urgeLive()) return
     this.urgeAt = 0
+    this.urgePull = null
     this._urgeShut = Date.now()
   }
   _renderUrge() {
@@ -649,6 +663,7 @@ export class FocusTimer {
     const alt = $('#ffUrgeAlt')
     setText(alt, ask ? '還是想去' : '寫下來，等等再做')
     alt.dataset.urge = ask ? 'go' : 'park'
+    pickOne($$('#ffUrgePulls [data-pull]'), (b) => b.dataset.pull === this.urgePull)
   }
 
   // ── 背景聲：專注時放雨聲、褐噪音、粉紅噪音蓋掉周圍的聲音（src/audio.js 的 noise）。

@@ -545,8 +545,8 @@ export class Store {
     const set = new Set(days)
     const tasks = this.state.tasks.filter((t) => set.has(t.date) && !floating(t))
     // nudges／backs／onTask：警語提醒了幾次、之後回到正事幾次、本來就在做正事幾次（回神紀錄）；leaves：專注中切去用別的 App 幾次；
-    // holds：專注中想分心時先等了一分鐘、回到正事幾次
-    const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null, nudges: 0, backs: 0, onTask: 0, leaves: 0, holds: 0 }
+    // holds：專注中想分心時先等了一分鐘、回到正事幾次；pulls：想分心時想去做什麼（PULLS 的 id → 次數，忍住和去了的都算）
+    const r = { week: wk, end, days: days.length, total: tasks.length, done: 0, rate: 0, focus: 0, pomodoros: 0, stars: 0, starTotal: 0, active: 0, habitRate: null, nudges: 0, backs: 0, onTask: 0, leaves: 0, holds: 0, pulls: {} }
     // 本命：完成的和總數都從同一批任務算（以前完成數看每天的紀錄，刪掉或改日期的本命會算出「1 / 0」）
     for (const t of tasks) {
       if (t.done) r.done++
@@ -565,6 +565,7 @@ export class Store {
       r.onTask += h.onTask || 0
       r.leaves += h.leaves || 0
       r.holds += h.holds || 0
+      for (const [k, n] of Object.entries(h.pulls || {})) r.pulls[k] = (r.pulls[k] || 0) + n
       if (h.tasks || h.focus || h.habits) r.active++
     }
     // 習慣：那幾天該做的次數裡做到了幾次（今天還沒做的不算進去）

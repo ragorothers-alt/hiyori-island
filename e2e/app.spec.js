@@ -1135,10 +1135,11 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
     return { at, hidden: document.getElementById('ffUrge').hidden }
   })).toEqual({ at: ['ffUrgeBack', 'ffUrgeBtn', 'ffUrgeBtn'], hidden: true })
   expect(await holds()).toBe(3)
-  // 用 Shift+Tab 移到別顆上再按 Esc：也是只收起來，不縮小專注頁
+  // 焦點移到面板外面的別顆上再按 Esc：也是只收起來，不縮小專注頁
+  // （面板裡從「算了，回來做」往前是想去做什麼的那一排，Shift+Tab 還在面板裡；直接把焦點放到右上的耳機上）
   await page.waitForTimeout(900)
   await btn.click()
-  await page.keyboard.press('Shift+Tab')
+  await page.locator('#ffNoiseBtn').focus()
   expect(await page.evaluate(() => document.getElementById('ffUrge').contains(document.activeElement))).toBe(false)
   await page.keyboard.press('Escape')
   await expect(box).toBeHidden()
@@ -1201,6 +1202,71 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   })
   await page.locator('#coachRoot [data-v="report"]').click()
   await expect(page.locator('#coachRoot .wr-perf li', { hasText: '想分心時忍住' })).toContainText('3 次')
+})
+
+test('想分心時說出想去做什麼：點一下選起來（再點取消），忍住或還是去了都記下來，ふじ／もち說到那件事；週報寫最常想去的、習慣洞察給建議', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const day = () => page.evaluate(() => { const s = window.hiyori.store; const d = s.peekDay(s.today); return { pulls: d.pulls || {}, holds: d.holds || 0 } })
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    window.hiyori.ui.focus.toggle()
+  })
+  const btn = page.locator('#ffUrgeBtn')
+  const box = page.locator('#ffUrge')
+  const chips = page.locator('#ffUrgePulls [data-pull]')
+  const chip = (text) => chips.filter({ hasText: text })
+  await btn.click()
+  await expect(chips).toHaveText(['滑手機', '看訊息', '看影片', '吃點東西', '查別的事', '休息一下'])
+  await expect(page.locator('#ffUrgePulls')).toHaveAttribute('role', 'group')
+  // 點一下選起來，再點一下取消；換一個
+  await chip('看訊息').click()
+  await expect(chip('看訊息')).toHaveAttribute('aria-pressed', 'true')
+  await chip('看訊息').click()
+  await expect(chip('看訊息')).toHaveAttribute('aria-pressed', 'false')
+  await chip('滑手機').click()
+  // 算了，回來做：忍住了一次，記下滑手機；說的話提到滑手機
+  await page.locator('#ffUrgeBack').click()
+  await expect(box).toBeHidden()
+  expect(await day()).toEqual({ pulls: { phone: 1 }, holds: 1 })
+  await expect.poll(() => chatSaid(page, '滑手機')).toBe(true)
+  // 再打開時是沒選的；一分鐘過了、選「休息一下」、還是想去：不算忍住，但記下來
+  await page.waitForTimeout(900)
+  await btn.click()
+  await expect(page.locator('#ffUrgePulls [aria-pressed="true"]')).toHaveCount(0)
+  await chip('休息一下').click()
+  await page.evaluate(() => (window.hiyori.ui.focus.urgeAt -= 61000))
+  await page.locator('#ffUrgeAlt', { hasText: '還是想去' }).click()
+  await expect(box).toBeHidden()
+  expect(await day()).toEqual({ pulls: { phone: 1, rest: 1 }, holds: 1 })
+  await expect.poll(() => chatSaid(page, '休息一下')).toBe(true)
+  // 選了但按 Esc 只收起來：什麼都不記
+  await page.waitForTimeout(900)
+  await btn.click()
+  await chip('看影片').click()
+  await page.keyboard.press('Escape')
+  await expect(box).toBeHidden()
+  expect(await day()).toEqual({ pulls: { phone: 1, rest: 1 }, holds: 1 })
+  // 週報：「最常想去」寫這週最常的兩個；習慣洞察：休息一下滿 3 次，建議一輪短一點，一鍵改成 20 分鐘
+  await page.evaluate(() => {
+    const h = window.hiyori
+    h.store.focusWent('rest')
+    h.store.focusWent('rest')
+    h.ui.focus.stop()
+    h.ui.setTab('coach')
+  })
+  await page.locator('#coachRoot [data-v="report"]').click()
+  await expect(page.locator('#coachRoot .wr-perf li', { hasText: '最常想去' })).toContainText(/休息一下\s*3\s*・\s*滑手機\s*1/)
+  const tip = page.locator('#coachRoot .wr-ins li', { hasText: '想分心時，最常想去休息一下' })
+  await expect(tip).toContainText('最近兩週有 3 次')
+  await tip.locator('[data-act="focusMin"]').click()
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.settings.focusMin)).toBe(20)
+  await toastSeen(page, '專注一輪改成 20 分鐘')
 })
 
 test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一輪結束前就要開始的寫「記得提早收尾」、ふじ提醒一聲；進行中的寫到幾點', async ({ page, context, site }) => {

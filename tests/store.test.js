@@ -2194,6 +2194,39 @@ describe('週報', () => {
     expect(migrate({ ...JSON.parse(JSON.stringify(store.state)), history: { '2026-10-21': { holds: 'x' } } }).history['2026-10-21'].holds).toBe(0)
   })
 
+  it('想分心時想去做什麼：忍住的、還是去了的都記在那天的 pulls，週報加起來；沒點、不認得的不記；存檔清洗', () => {
+    setDate('2026-10-21')
+    const held = []
+    store.on('focusHeld', (x) => held.push(x.pull))
+    store.focusHold('phone')
+    store.focusHold('phone')
+    store.focusHold()
+    store.focusHold('nope')
+    const holds = store.peekDay('2026-10-21').holds
+    expect(store.focusWent('msg')).toBe(true)
+    expect(store.focusWent(null)).toBe(false)
+    expect(store.focusWent('nope')).toBe(false)
+    // 還是去了的不算忍住
+    expect(store.peekDay('2026-10-21').holds).toBe(holds)
+    expect(held).toEqual(['phone', 'phone', null, null])
+    expect(store.peekDay('2026-10-21').pulls).toEqual({ phone: 2, msg: 1 })
+    setDate('2026-10-22')
+    store.focusHold('phone')
+    store.focusWent('rest')
+    expect(store.weekReport()).toMatchObject({ pulls: { phone: 3, msg: 1, rest: 1 } })
+    // 匯出匯入後還在；沒點過的日子沒有這個欄位
+    store.importJSON(store.exportJSON())
+    expect(store.peekDay('2026-10-21').pulls).toEqual({ phone: 2, msg: 1 })
+    expect('pulls' in store.peekDay('2026-10-20')).toBe(false)
+    // 讀存檔時清洗：不認得的、不是正整數的拿掉，一個都不剩就整個拿掉（不會被當成之後的版本多加的欄位原樣留下來）
+    const base = JSON.parse(JSON.stringify(store.state))
+    const clean = (pulls) => migrate({ ...base, history: { '2026-10-21': { holds: 1, pulls } } }).history['2026-10-21']
+    expect(clean({ phone: 2.6, msg: -1, video: 'x', nope: 5, rest: 0 }).pulls).toEqual({ phone: 3 })
+    expect('pulls' in clean({ nope: 3 })).toBe(false)
+    expect('pulls' in clean('phone')).toBe(false)
+    expect('pulls' in clean(null)).toBe(false)
+  })
+
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
     setDate('2026-10-21')
     const s1 = store.addTask({ title: '本命一', date: '2026-10-21' })

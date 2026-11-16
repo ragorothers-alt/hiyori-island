@@ -1,5 +1,5 @@
 import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
-import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN } from '../theme.js'
+import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
 import { MOTTO_LEN, MOTTO_MAX, MOTTO_EVERY, PAUSE_MAX } from '../mottos.js'
@@ -40,6 +40,18 @@ const DAY_NUMS = [
 ]
 // sleep：那天的睡眠已經給過獎勵
 const DAY_FLAGS = ['perfect', 'starAll', 'habitAll', 'sleep']
+// pulls：專注中想分心時想去做什麼（theme.js 的 PULLS 的 id → 次數；用過才有這個欄位）。
+// 不認得的、不是正的整數拿掉，一個都沒有就是 null
+const PULL_IDS = new Set(PULLS.map((p) => p.id))
+export function cleanPulls(v) {
+  if (!isObj(v)) return null
+  const out = {}
+  for (const [k, n] of Object.entries(v)) {
+    const c = PULL_IDS.has(k) ? num(n, 0, 1e5, 0) : 0
+    if (c > 0) out[k] = c
+  }
+  return Object.keys(out).length ? out : null
+}
 const emptyDay = () => {
   const d = {}
   for (const k of DAY_NUMS) d[k] = 0
@@ -584,8 +596,11 @@ function migrate(s) {
       const h = emptyDay()
       for (const k of DAY_NUMS) h[k] = num(v[k], 0, 1e7, 0)
       for (const k of DAY_FLAGS) h[k] = !!v[k]
+      h.pulls = cleanPulls(v.pulls)
       // 之後的版本多加的每日欄位：原樣留著（存回去不會洗掉）
       history[d] = keepExtra(v, h)
+      // 沒有（或整個壞掉）就不留這個欄位：舊的、壞掉的那份也不會被當成「之後的版本多加的」原樣留下來
+      if (!h.pulls) delete h.pulls
     }
   }
   // 花の圖鑑：{ 花的 key: { at: 第一次開出的日期, n: 開過幾朵 } }

@@ -13,7 +13,7 @@ import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
-import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf } from './theme.js'
+import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf, pullOf } from './theme.js'
 import { burst, floatText, petalRain, tapPoint, trackTaps, calmMotion } from './ui/motion.js'
 import { haptic } from './ui/haptics.js'
 import { RARITIES } from './data/flowers.js'
@@ -299,7 +299,12 @@ async function boot() {
     // 想分心了：打開「先等一分鐘」時陪一句；一分鐘到了輕輕響一聲；還是想去也不責備（專注照常計時）
     urgeOpen: () => talk('focusUrge', {}, 5200, '想分心很正常，我們一起等一分鐘。'),
     urgeAsk: () => sfx.chime(),
-    urgeGo: () => talk('focusGo', {}, 4600, '好，去吧。專注還在計時，記得回來。'),
+    // 點了想去做什麼的話，說到那件事（「去滑手機吧，計時還在走」）
+    urgeGo: (pull) => {
+      const p = pullOf(pull)
+      if (p) talk('focusGoPull', { what: p.label }, 4600, `好，去${p.label}吧。專注還在計時，記得回來。`)
+      else talk('focusGo', {}, 4600, '好，去吧。專注還在計時，記得回來。')
+    },
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => scene?.modalClosed(),
     setSound: (on) => sfx.setEnabled(on),
@@ -821,10 +826,12 @@ async function boot() {
     talk('urgeResisted', { habit: short(habit.name), days }, 3800)
   })
   // 專注中想分心時先等了一分鐘、回到正事（專注頁的「想分心了？」）
-  store.on('focusHeld', ({ count }) => {
+  store.on('focusHeld', ({ count, pull }) => {
     sfx.pop()
     haptic('tick')
-    talk('focusHeld', { count }, 4200, '忍住了，回來做正事吧。')
+    const p = pullOf(pull)
+    if (p) talk('focusHeldPull', { count, what: p.label }, 4200, `先不${p.label}，很好。我們接著做。`)
+    else talk('focusHeld', { count }, 4200, '忍住了，回來做正事吧。')
   })
   store.on('habitSlip', ({ habit, days }) => talk('habitSlip', { habit: short(habit.name), days }, 5200, '沒關係，我會陪你慢慢來。'))
   store.on('quitMilestone', ({ habit, days, xp }) => {

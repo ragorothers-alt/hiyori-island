@@ -1,6 +1,6 @@
 import './coach.css'
 import { $, esc, ICON, scrollMode } from './dom.js'
-import { TAGS, tagOf, PROJECT_COLORS, DUE_KINDS, moodOf } from '../theme.js'
+import { TAGS, tagOf, PROJECT_COLORS, DUE_KINDS, moodOf, pullOf } from '../theme.js'
 import { FUJI_LINES } from '../data/lines.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel, addDays } from '../coach.js'
 import { buildInsights } from '../insights.js'
@@ -370,6 +370,12 @@ export class CoachView {
       if (!MOTTO_EVERY.includes(v) || !v) return
       this.store.setSetting('mottoEvery', v)
       this.hooks.toast?.({ icon: '戒', title: `警語改成${v >= 60 ? `每 ${v / 60} 小時` : `每 ${v} 分鐘`}提醒一次`, sub: '紀錄頁的警語卡上可以再改' })
+    } else if (act === 'focusMin') {
+      // 想分心時最常想休息：專注一輪縮短一點（跟計時設定的刻度尺同一個範圍，10～90 分、每 5 分一格）
+      const v = +b.dataset.v
+      if (!(v >= 10 && v <= 90) || v % 5) return
+      this.store.setSetting('focusMin', v)
+      this.hooks.toast?.({ icon: '時', title: `專注一輪改成 ${v} 分鐘`, sub: '點 Dock 上的時間可以再改' })
     } else return
     this.render()
   }
@@ -650,6 +656,12 @@ export class CoachView {
     if (w.leaves || p.leaves) rows.push(['專注中切走', `${w.leaves}<small> 次</small>`, delta(w.leaves, p.leaves || null, ' 次', true)])
     // 專注中想分心時先等了一分鐘、回到正事（專注頁的「想分心了？」）：這兩週都沒有就不放
     if (w.holds || p.holds) rows.push(['想分心時忍住', `${w.holds}<small> 次</small>`, delta(w.holds, p.holds || null, ' 次')])
+    // 想分心時想去做什麼（「先等一分鐘」上點的）：這週最常的兩個。這兩週都沒點過就不放
+    const pulls = (r) => Object.entries(r.pulls || {}).filter(([k]) => pullOf(k)).sort((a, b) => b[1] - a[1])
+    if (pulls(w).length || pulls(p).length) {
+      const top2 = pulls(w).slice(0, 2)
+      rows.push(['最常想去', top2.length ? top2.map(([k, n]) => `${esc(pullOf(k).label)}<small> ${n}</small>`).join('<small>・</small>') : '<small>這週還沒有</small>', ''])
+    }
     parts.push(`<section class="wr-card">
       <h3>本週表現分析<small>跟上週同一段比</small></h3>
       <div class="wr-perf">
@@ -662,7 +674,8 @@ export class CoachView {
     parts.push(this._aiWeekHTML(w.week))
 
     // 習慣洞察
-    const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today, mottoEvery: s.state.settings.mottoEvery })
+    const st = s.state.settings
+    const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today, mottoEvery: st.mottoEvery, focusMin: st.focusUp ? 0 : st.focusMin })
     const guess = list.some((x) => x.guess)
     parts.push(`<section class="wr-card">
       <h3>習慣洞察${guess ? '<em class="wr-badge">部分依作息推測</em>' : ''}</h3>
