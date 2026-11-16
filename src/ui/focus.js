@@ -1,5 +1,6 @@
 // 番茄鐘的介面：Dock 上的計時器、專注頁、長度設定。計時規則在 ../focusClock.js。
 import { $, $$, esc, ICON, pickOne, scrollMode } from './dom.js'
+import { calmMotion } from './motion.js'
 import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
@@ -21,7 +22,7 @@ const RULER_TICK = 14
 const LOW = typeof matchMedia === 'function' ? matchMedia('(max-height: 520px) and (min-aspect-ratio: 4/3)') : { matches: false }
 // 專注頁圓環的周長（半徑 86）
 const ARC = 540.4
-// 想分心了：先等多久、跟著圓圈呼吸的一個來回（吸氣、吐氣各一半；focus.css 的 ffBreath 要一樣長）
+// 想分心了：先等多久、跟著圓圈呼吸的一個來回（吸氣、吐氣各一半；圓圈的大小也照它算，見 _renderUrge）
 const URGE_MS = 60000
 const BREATH_MS = 8000
 // 字有變才換（每 250 毫秒重畫一次）
@@ -439,7 +440,7 @@ export class FocusTimer {
     if (this.mode !== 'focus') return false
     if (this.bigOpen) {
       // 正在「先等一分鐘」：按 N 是想先寫下來（跟按「寫下來，等等再做」一樣）
-      if (this.urgeAt) {
+      if (this._urgeLive()) {
         this._urgeDo('park')
         return true
       }
@@ -558,22 +559,33 @@ export class FocusTimer {
       this.urge(false)
     })
   }
-  // 打開、收起「先等一分鐘」。專注中（沒暫停）才打得開；回傳有沒有打開
+  // 專注中、沒暫停（「想分心了？」只在這時候有）
+  _urgeCan() {
+    return this.mode === 'focus' && this.paused == null
+  }
+  // 「先等一分鐘」還算數嗎：打開時的那一輪（sid）、還在專注、沒暫停。換了一輪（到點、另一個分頁開始了新的一輪）就不算了
+  _urgeLive() {
+    return !!this.urgeAt && this.urgeSid === this.sid && this._urgeCan()
+  }
+  // 打開、收起「先等一分鐘」；回傳有沒有變。剛收起來不到一下（連按 Enter、按著不放）不會馬上又打開、又記一次
   urge(on) {
-    if (on && (this.mode !== 'focus' || this.paused != null)) return false
+    if (on ? !this._urgeCan() || Date.now() - (this._urgeShut || 0) < 800 : !this.urgeAt) return false
     this.urgeAt = on ? Date.now() : 0
+    this.urgeSid = on ? this.sid : null
+    if (!on) this._urgeShut = Date.now()
     this._urgeAsked = false
     this._renderUrge()
     if (on) {
       $('#ffUrgeBack').focus()
       this.hooks.urgeOpen?.()
     } else this._urgeFocus()
-    return on
+    return true
   }
   // back：回到正事；park：先寫下來等等再做（焦點到「先記下來」那一行）；go：還是想去
   _urgeDo(act) {
-    if (!this.urgeAt) return
+    if (!this._urgeLive()) return
     this.urgeAt = 0
+    this._urgeShut = Date.now()
     this._renderUrge()
     if (act === 'go') {
       this.hooks.urgeGo?.()
@@ -584,20 +596,36 @@ export class FocusTimer {
     this._renderPark()
     $('#ffParkText').focus()
   }
+  // 收起來之後焦點回到「想分心了？」；沒有那一顆（休息中、暫停了）就交給專注頁本身
   _urgeFocus() {
     const b = $('#ffUrgeBtn')
     ;(b.hidden ? $('#focusFull') : b).focus()
   }
+  // 不算數了（暫停、到點、換了一輪）就清掉：專注頁縮小著也要清，下一輪不會一開始就是打開的
+  _urgeSweep() {
+    if (!this.urgeAt || this._urgeLive()) return
+    this.urgeAt = 0
+    this._urgeShut = Date.now()
+  }
   _renderUrge() {
-    // 專注結束、暫停了：收起來
-    if (this.urgeAt && (this.mode !== 'focus' || this.paused != null)) this.urgeAt = 0
-    const on = !!this.urgeAt
-    $('#focusFull').classList.toggle('urging', on)
-    $('#ffUrgeBtn').hidden = on || this.mode !== 'focus' || this.paused != null
+    this._urgeSweep()
     const box = $('#ffUrge')
+    const on = !!this.urgeAt
+    // 自己收起來的（到點、暫停）時焦點在裡面：接到看得到的地方，不會掉到看不見的地方
+    const had = !on && !box.hidden && box.contains(document.activeElement)
+    $('#focusFull').classList.toggle('urging', on)
+    $('#ffUrgeBtn').hidden = on || !this._urgeCan()
     box.hidden = !on
+    if (had) this._urgeFocus()
     if (!on) return
     const gone = Date.now() - this.urgeAt
+    // 圓圈跟「吸氣」「吐氣」照同一個時間縮放（縮小專注頁再打開也對得上）；減少動態效果時不動
+    if (!calmMotion()) {
+      const s = 0.81 - 0.19 * Math.cos((2 * Math.PI * (gone % BREATH_MS)) / BREATH_MS)
+      const ring = box.querySelector('.ff-urge-breath i')
+      ring.style.transform = `scale(${s.toFixed(3)})`
+      ring.style.opacity = (0.7 + (0.3 * (s - 0.62)) / 0.38).toFixed(3)
+    }
     const ask = gone >= URGE_MS
     // 一分鐘到了：輕輕響一聲，問還想不想去
     if (ask && !this._urgeAsked) {
@@ -949,6 +977,7 @@ export class FocusTimer {
 
   _renderBig(time, frac, label) {
     const el = $('#focusFull')
+    this._urgeSweep()
     if (this.mode === 'idle') el.hidden = true
     this._catSync()
     if (el.hidden) {

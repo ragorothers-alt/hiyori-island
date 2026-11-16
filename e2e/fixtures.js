@@ -13,6 +13,19 @@ export const test = base.extend({
         if (!localStorage.getItem('hiyori-brief-day')) localStorage.setItem('hiyori-brief-day', JSON.stringify(today))
       })
     }
+    // 出現過的提示卡（標題和小字）都記在 window.__toasts：只留幾秒的那幾張，機器忙的時候輪詢可能剛好錯過（見 toastSeen）
+    await context.addInitScript(() => {
+      window.__toasts = []
+      const watch = () => {
+        const box = document.getElementById('toasts')
+        if (!box) return
+        new MutationObserver((list) => {
+          for (const m of list) for (const n of m.addedNodes) if (n.classList?.contains('toast')) window.__toasts.push(n.textContent.replace(/\s+/g, ' ').trim())
+        }).observe(box, { childList: true })
+      }
+      if (document.readyState === 'loading') addEventListener('DOMContentLoaded', watch)
+      else watch()
+    })
     await use(context)
   },
   site: async ({}, use) => {
@@ -28,6 +41,10 @@ export const useAppMode = (context) =>
   context.addInitScript(() => {
     if (!localStorage.getItem('hiyori-layout')) localStorage.setItem('hiyori-layout', '"app"')
   })
+
+// 有沒有出現過含 text 的提示卡（就算已經收掉了）：只是要確認「有說一聲」的地方用這個，
+// 不用 toBeVisible——一口氣來好幾張時，只留幾秒的那張可能在兩次輪詢之間就收掉了
+export const toastSeen = (page, text) => expect.poll(() => page.evaluate((t) => (window.__toasts || []).some((x) => x.includes(t)), text)).toBe(true)
 
 // 開機跑完（window.hiyori 有了），而且頁面已經由 Service Worker 接手
 // （CI 的機器慢，等久一點）

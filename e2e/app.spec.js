@@ -1,5 +1,5 @@
 // App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
-import { bootReady, expect, swReady, test, useAppMode } from './fixtures.js'
+import { bootReady, expect, swReady, test, toastSeen, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -940,7 +940,7 @@ test('先記下來：專注時腦中冒出別的事，在專注頁（或計時�
   await expect(card.locator('button').first()).toBeFocused()
   // 「明天做」：變成明天的任務；「×」：不用做了；都處理完卡片就收起來
   await card.locator('li', { hasText: '回小美的訊息' }).locator('[data-act="park-tmr"]').click()
-  await expect(page.locator('#toasts .toast', { hasText: '「回小美的訊息」排進明天' })).toBeVisible()
+  await toastSeen(page, '「回小美的訊息」排進明天')
   const tmr = await page.evaluate(() => {
     const s = window.hiyori.store
     const d = new Date()
@@ -1085,6 +1085,10 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   expect(await holds()).toBe(1)
   await expect(btn).toBeFocused()
   await expect(page.locator('#ffStop')).toBeVisible()
+  // 剛收起來的那一下按不開（連按 Enter 不會又打開）；過一下再按
+  await btn.click()
+  await expect(box).toBeHidden()
+  await page.waitForTimeout(900)
   // Esc：只收起來（不算忍住），專注頁還開著
   await btn.click()
   await page.keyboard.press('Escape')
@@ -1092,6 +1096,7 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   await expect(page.locator('#focusFull')).toBeVisible()
   expect(await holds()).toBe(1)
   // 一分鐘過了：問還想不想去；「還是想去」也沒關係，不算忍住，專注照常
+  await page.waitForTimeout(900)
   await btn.click()
   await page.evaluate(() => (window.hiyori.ui.focus.urgeAt -= 61000))
   await expect(page.locator('#ffUrgeT')).toHaveText('一分鐘過了')
@@ -1101,11 +1106,75 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   expect(await holds()).toBe(1)
   expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
   // 等的時候按 N（或「寫下來，等等再做」）：收起來、到「先記下來」那一行，也算忍住了一次
+  await page.waitForTimeout(900)
   await btn.click()
   await page.keyboard.press('n')
   await expect(box).toBeHidden()
   await expect(page.locator('#ffParkText')).toBeFocused()
   expect(await holds()).toBe(2)
+  // 連按 Enter：第一下回到正事（記一次），剛收起來時接著按的不會又打開、又記一次
+  await page.waitForTimeout(900)
+  await btn.click()
+  await expect(page.locator('#ffUrgeBack')).toBeFocused()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Enter')
+  await expect(box).toBeHidden()
+  expect(await holds()).toBe(3)
+  // 用 Shift+Tab 移到別顆上再按 Esc：也是只收起來，不縮小專注頁
+  await page.waitForTimeout(900)
+  await btn.click()
+  await page.keyboard.press('Shift+Tab')
+  expect(await page.evaluate(() => document.getElementById('ffUrge').contains(document.activeElement))).toBe(false)
+  await page.keyboard.press('Escape')
+  await expect(box).toBeHidden()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  // 等的時候到點進入休息：自己收起來，焦點交給專注頁本身（不會掉到看不見的地方）
+  await page.waitForTimeout(900)
+  await btn.click()
+  const nextRound = () =>
+    page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      f.addRound()
+      f.endAt = Date.now() - 1000
+      f._save()
+    })
+  const endRound = () =>
+    page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      f.endAt -= 60 * 60000
+      f._save()
+    })
+  await endRound()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  await expect(box).toBeHidden()
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe('focusFull')
+  // 打開後縮小專注頁、這一輪就到點了：下一輪不會一開始就是打開的
+  await nextRound()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await page.waitForTimeout(900)
+  await btn.click()
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(false))
+  await endRound()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  await nextRound()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
+  await expect(btn).toBeVisible()
+  await expect(box).toBeHidden()
+  // 打開後縮小專注頁、暫停又繼續：暫停就不算了，再打開專注頁時已經收起來
+  await page.waitForTimeout(900)
+  await btn.click()
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.toggleBig(false)
+    f.toggle()
+    f.toggle()
+    f.toggleBig(true)
+  })
+  await expect(box).toBeHidden()
+  await expect(btn).toBeVisible()
+  expect(await holds()).toBe(3)
   // 暫停中沒有這一顆
   await page.evaluate(() => window.hiyori.ui.focus.toggle())
   await expect(btn).toBeHidden()
@@ -1117,7 +1186,24 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
     window.hiyori.ui.setTab('coach')
   })
   await page.locator('#coachRoot [data-v="report"]').click()
-  await expect(page.locator('#coachRoot .wr-perf li', { hasText: '想分心時忍住' })).toContainText('2 次')
+  await expect(page.locator('#coachRoot .wr-perf li', { hasText: '想分心時忍住' })).toContainText('3 次')
+})
+
+test('提示卡一口氣來很多張：先收沒有按鈕的，有按鈕的留著來得及按；全都有按鈕時最多多留一張', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const shown = () => page.locator('#toasts .toast:not(.out) b').allTextContents()
+  await page.evaluate(() => {
+    const ui = window.hiyori.ui
+    ui.toast({ icon: '眠', title: '就寢時間快到了', ms: 12000, actions: [{ label: '挑明天的第一件', run() {} }] })
+    for (let i = 1; i <= 4; i++) ui.toast({ icon: '花', title: `慶祝 ${i}`, ms: 9000 })
+  })
+  expect(await shown()).toEqual(['就寢時間快到了', '慶祝 3', '慶祝 4'])
+  await page.evaluate(() => {
+    for (let i = 1; i <= 4; i++) window.hiyori.ui.toast({ icon: '時', title: `到點 ${i}`, ms: 12000, actions: [{ label: '▶ 開始專注', run() {} }] })
+  })
+  expect(await shown()).toEqual(['到點 1', '到點 2', '到點 3', '到點 4'])
 })
 
 test('打勾的手感：列表不會整串重播淡入，做完的那件滑到後面；花瓣從勾爆開、App 模式冒出經驗值；今天全部做完時飄花瓣', async ({ page, context, site }) => {

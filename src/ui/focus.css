@@ -143,7 +143,8 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-urge { display: grid; justify-items: center; gap: 8px; width: min(360px, 100%); padding: 16px 18px 18px; border-radius: 22px; background: var(--field); border: 1px solid var(--line); text-align: center; animation: fadeIn .3s var(--ease); }
 .ff-urge[hidden] { display: none; }
 .ff-urge-breath { position: relative; display: grid; place-items: center; width: 92px; height: 92px; }
-.ff-urge-breath i { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--ff-b) 50%, transparent), color-mix(in srgb, var(--ff-a) 22%, transparent) 72%); animation: ffBreath 8s ease-in-out infinite; }
+/* 圓圈的大小由 focus.js 的 _renderUrge 照經過的時間設（跟「吸氣」「吐氣」同一個時間，縮小專注頁再打開也對得上） */
+.ff-urge-breath i { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--ff-b) 50%, transparent), color-mix(in srgb, var(--ff-a) 22%, transparent) 72%); transform: scale(.62); opacity: .7; transition: transform .26s linear, opacity .26s linear; }
 .ff-urge-breath span { position: relative; font-size: 13px; letter-spacing: .24em; color: var(--ink-soft); }
 .ff-urge.ask .ff-urge-breath { display: none; }
 .ff-urge-t { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: .08em; color: var(--ink); }
@@ -152,8 +153,7 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-urge-left:empty { display: none; }
 .ff-urge-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 .ff-urge-btns button { min-height: 40px; margin: 0; padding: 0 16px; border-radius: 999px; font-size: 13.5px; }
-@keyframes ffBreath { 0%, 100% { transform: scale(.62); opacity: .7; } 50% { transform: scale(1); opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .ff-urge-breath i { animation: none; transform: scale(.86); } }
+@media (prefers-reduced-motion: reduce) { .ff-urge-breath i { transition: none; transform: scale(.86); opacity: .9; } }
 @keyframes ffIn { from { opacity: 0; transform: scale(.96); } }
 @keyframes ffBreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.07); opacity: .72; } }
 @keyframes ffHold { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }

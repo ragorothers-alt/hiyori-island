@@ -586,7 +586,8 @@ export class UI {
         levelModal: () => this.closeModal(),
         focusSet: () => this.focus.toggleSet(false),
         focusPick: () => this.focus.togglePicker(false),
-        focusFull: () => this.focus.toggleBig(false),
+        // 正在「先等一分鐘」：先只收起那一塊（焦點用 Tab 移到別顆上了也一樣），不縮小專注頁
+        focusFull: () => this.focus.urge(false) || this.focus.toggleBig(false),
         shop: () => this.toggleShop(false),
         placeBar: () => $('#placeCancel').click(),
         calendar: () => this._calendar.view?.close(),
@@ -3426,9 +3427,16 @@ export class UI {
       clearTimeout(old._life)
       old.replaceWith(el)
     } else box.append(el)
-    // 同時最多三張：一口氣來很多（升級、成就、新的花、每日任務…）時從最舊的開始收，不要疊滿半個畫面
-    const shown = $$('#toasts .toast:not(.out):not(.busy)')
-    for (const x of shown.slice(0, Math.max(0, shown.length - 3))) this._dropToast(x, true)
+    // 同時最多三張：一口氣來很多（升級、成就、新的花、每日任務…）時從最舊的開始收，不要疊滿半個畫面。
+    // 有按鈕的（就寢提醒的「挑明天的第一件」、到點的「▶ 開始專注」）先不收：不會被一串慶祝擠掉、來不及按——
+    // 都是有按鈕的時候最多多留一張，再多才從最舊的收。正停在上面、手指按著、焦點在裡面的（held）不收
+    const others = $$('#toasts .toast:not(.out):not(.busy):not(.held)').filter((x) => x !== el)
+    let extra = others.length + 1 - 3
+    for (const x of others.filter((x) => !x.classList.contains('has-act')).slice(0, Math.max(0, extra))) {
+      this._dropToast(x, true)
+      extra--
+    }
+    for (const x of others.filter((x) => x.classList.contains('has-act')).slice(0, Math.max(0, extra - 1))) this._dropToast(x, true)
     if (el.classList.contains('has-act')) {
       // 有按鈕、留得比較久的：下面一條細線慢慢縮短，看得出還剩多久
       if (ms >= 6000) {
