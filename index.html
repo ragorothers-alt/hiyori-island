@@ -446,6 +446,15 @@
       <!-- 專注時腦中冒出別的事：一行字先記下來，不離開專注；專注完在今日總覽決定什麼時候做（N 鍵也到這裡） -->
       <form class="ff-park" id="ffPark" autocomplete="off" hidden><input id="ffParkText" maxlength="80" placeholder="腦中冒出別的事？先記下來" aria-label="先記下來：腦中冒出的別的事" enterkeyhint="done"><button type="submit" class="btn-ghost">記下</button></form>
       <p class="ff-park-n" id="ffParkN" aria-live="polite" hidden></p>
+      <!-- 想分心了（想滑手機、想看別的）：先等一分鐘、跟著圓圈呼吸，一分鐘後還想去再去；回到正事記一次忍住了（src/ui/focus.js 的 _renderUrge） -->
+      <button type="button" class="ff-urge-btn" id="ffUrgeBtn" hidden>想分心了？先等一分鐘</button>
+      <section class="ff-urge" id="ffUrge" aria-labelledby="ffUrgeT" hidden>
+        <div class="ff-urge-breath" aria-hidden="true"><i></i><span id="ffUrgeBreath">吸氣</span></div>
+        <h3 class="ff-urge-t" id="ffUrgeT">先等一分鐘</h3>
+        <p class="ff-urge-p" id="ffUrgeP" aria-live="polite"></p>
+        <div class="ff-urge-left" id="ffUrgeLeft" role="timer"></div>
+        <div class="ff-urge-btns"><button type="button" class="btn-primary" id="ffUrgeBack" data-urge="back">算了，回來做</button><button type="button" class="btn-ghost" id="ffUrgeAlt" data-urge="park">寫下來，等等再做</button></div>
+      </section>
       <!-- 休息時：還沒做完就延長（從到點那時接著正計時）、最後一輪做完了還想繼續就再加一輪 -->
       <div class="ff-more" hidden><button type="button" class="btn-ghost" id="ffExtend" hidden>還沒做完，延長</button><button type="button" class="btn-ghost" id="ffAddRound" hidden>＋ 再加一輪</button></div>
       <button class="cm-link ff-cabin" id="ffCabin">到小木屋看兩人陪你讀書</button>

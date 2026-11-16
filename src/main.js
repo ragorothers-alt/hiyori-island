@@ -296,6 +296,10 @@ async function boot() {
       talk('stepDone', { step: short(step, 14), next: short(next, 14) }, 4200, `接著是「${short(next, 14)}」。`)
     },
     stepSet: (step) => talk('stepSet', { step: short(step, 16) }, 4200, `先從「${short(step, 16)}」開始就好。`),
+    // 想分心了：打開「先等一分鐘」時陪一句；一分鐘到了輕輕響一聲；還是想去也不責備（專注照常計時）
+    urgeOpen: () => talk('focusUrge', {}, 5200, '想分心很正常，我們一起等一分鐘。'),
+    urgeAsk: () => sfx.chime(),
+    urgeGo: () => talk('focusGo', {}, 4600, '好，去吧。專注還在計時，記得回來。'),
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => scene?.modalClosed(),
     setSound: (on) => sfx.setEnabled(on),
@@ -802,6 +806,12 @@ async function boot() {
     sfx.pop()
     haptic('tick')
     talk('urgeResisted', { habit: short(habit.name), days }, 3800)
+  })
+  // 專注中想分心時先等了一分鐘、回到正事（專注頁的「想分心了？」）
+  store.on('focusHeld', ({ count }) => {
+    sfx.pop()
+    haptic('tick')
+    talk('focusHeld', { count }, 4200, '忍住了，回來做正事吧。')
   })
   store.on('habitSlip', ({ habit, days }) => talk('habitSlip', { habit: short(habit.name), days }, 5200, '沒關係，我會陪你慢慢來。'))
   store.on('quitMilestone', ({ habit, days, xp }) => {

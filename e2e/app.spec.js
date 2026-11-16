@@ -1057,6 +1057,69 @@ test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下�
   await expect(input).toHaveValue('把衣服丟進洗衣機')
 })
 
+test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按鈕先收起來）；算了回來做、寫下來等等再做都記一次忍住了，一分鐘後還想去也沒關係；週報看得到', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const holds = () => page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).holds || 0)
+  await page.evaluate(() => {
+    window.hiyori.store.setSetting('focusRounds', 1)
+    window.hiyori.store.setSetting('focusUp', false)
+    window.hiyori.ui.focus.toggle()
+  })
+  const btn = page.locator('#ffUrgeBtn')
+  const box = page.locator('#ffUrge')
+  await expect(btn).toHaveText('想分心了？先等一分鐘')
+  // 打開：陪你等一分鐘，跟著圓圈呼吸；結束、暫停、記下來那幾顆先收起來，時間照樣走
+  await btn.click()
+  await expect(box).toBeVisible()
+  await expect(page.locator('#ffUrgeT')).toHaveText('先等一分鐘')
+  await expect(page.locator('#ffUrgeLeft')).toContainText('秒')
+  await expect(page.locator('#ffUrgeBreath')).toHaveText(/吸氣|吐氣/)
+  await expect(page.locator('#ffStop')).toBeHidden()
+  await expect(page.locator('#ffPark')).toBeHidden()
+  await expect(page.locator('#ffUrgeBack')).toBeFocused()
+  // 「算了，回來做」：記一次忍住了，焦點回到「想分心了？」
+  await page.locator('#ffUrgeBack').click()
+  await expect(box).toBeHidden()
+  expect(await holds()).toBe(1)
+  await expect(btn).toBeFocused()
+  await expect(page.locator('#ffStop')).toBeVisible()
+  // Esc：只收起來（不算忍住），專注頁還開著
+  await btn.click()
+  await page.keyboard.press('Escape')
+  await expect(box).toBeHidden()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  expect(await holds()).toBe(1)
+  // 一分鐘過了：問還想不想去；「還是想去」也沒關係，不算忍住，專注照常
+  await btn.click()
+  await page.evaluate(() => (window.hiyori.ui.focus.urgeAt -= 61000))
+  await expect(page.locator('#ffUrgeT')).toHaveText('一分鐘過了')
+  await expect(page.locator('#ffUrgeBack')).toHaveText('回來做正事')
+  await page.locator('#ffUrgeAlt', { hasText: '還是想去' }).click()
+  await expect(box).toBeHidden()
+  expect(await holds()).toBe(1)
+  expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  // 等的時候按 N（或「寫下來，等等再做」）：收起來、到「先記下來」那一行，也算忍住了一次
+  await btn.click()
+  await page.keyboard.press('n')
+  await expect(box).toBeHidden()
+  await expect(page.locator('#ffParkText')).toBeFocused()
+  expect(await holds()).toBe(2)
+  // 暫停中沒有這一顆
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect(btn).toBeHidden()
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect(btn).toBeVisible()
+  // 週報：本週表現分析多一列「想分心時忍住」
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.stop()
+    window.hiyori.ui.setTab('coach')
+  })
+  await page.locator('#coachRoot [data-v="report"]').click()
+  await expect(page.locator('#coachRoot .wr-perf li', { hasText: '想分心時忍住' })).toContainText('2 次')
+})
+
 test('打勾的手感：列表不會整串重播淡入，做完的那件滑到後面；花瓣從勾爆開、App 模式冒出經驗值；今天全部做完時飄花瓣', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)

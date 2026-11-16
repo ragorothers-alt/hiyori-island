@@ -2,7 +2,7 @@ import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PAR
 import { uid, addDays, daysBetween, dateStr } from './util.js'
 import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
-import { DATE_KINDS } from '../theme.js'
+import { DATE_KINDS, XP } from '../theme.js'
 
 // 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），照記下的先後只留最近的幾十則
 // （不照提醒的時間排：時鐘被往回調過的話，剛記的那一則會被當成最舊的丟掉）。
@@ -319,6 +319,19 @@ export const extrasMethods = {
     } catch {
       this._tallyMem = new Map(keys)
     }
+  },
+
+  // 專注中想分心了（專注頁的「想分心了？」）：先等一分鐘，之後（或還沒等完就決定）回到正事、或先記下來等等再做。
+  // 記一次忍住了（週報的「想分心時忍住」；成就、小鎮的「忍住了」也算），每天前 3 次有一點經驗值。發 focusHeld（今天第幾次）
+  focusHold() {
+    this._refreshToday()
+    const d = this.day()
+    d.holds = (d.holds || 0) + 1
+    this.stats.urgesResisted++
+    const fx = [['focusHeld', { count: d.holds }]]
+    if (d.holds <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
+    this._finish(fx)
+    return d.holds
   },
 
   // 專注中切去用別的 App 一陣子（週報看得到）。自動記的：不算使用者改了資料（跟 mottoNudged 一樣，換版時取比較大的）

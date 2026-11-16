@@ -135,6 +135,25 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-step-add input { flex: 1; min-width: 0; height: 38px; padding: 0 14px; border-radius: 999px; border: 1px dashed var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 13.5px; }
 .ff-step-add input::placeholder { color: var(--ink-faint); }
 .ff-step-add button { flex: none; height: 38px; margin: 0; padding: 0 14px; border-radius: 999px; font-size: 13px; }
+/* 想分心了：先等一分鐘、跟著圓圈呼吸（打開時專注頁下面其他的按鈕先收起來，時間照樣走） */
+.ff-urge-btn { margin: -4px 0 0; padding: 4px 10px; border: 0; background: none; color: var(--ink-faint); font: inherit; font-size: 12.5px; letter-spacing: .04em; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.ff-urge-btn:hover { color: var(--ink-soft); }
+.ff-urge-btn[hidden] { display: none; }
+.focus-full.urging .ff-ctl > :not(.ff-urge) { display: none; }
+.ff-urge { display: grid; justify-items: center; gap: 8px; width: min(360px, 100%); padding: 16px 18px 18px; border-radius: 22px; background: var(--field); border: 1px solid var(--line); text-align: center; animation: fadeIn .3s var(--ease); }
+.ff-urge[hidden] { display: none; }
+.ff-urge-breath { position: relative; display: grid; place-items: center; width: 92px; height: 92px; }
+.ff-urge-breath i { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--ff-b) 50%, transparent), color-mix(in srgb, var(--ff-a) 22%, transparent) 72%); animation: ffBreath 8s ease-in-out infinite; }
+.ff-urge-breath span { position: relative; font-size: 13px; letter-spacing: .24em; color: var(--ink-soft); }
+.ff-urge.ask .ff-urge-breath { display: none; }
+.ff-urge-t { margin: 2px 0 0; font-size: 17px; font-weight: 600; letter-spacing: .08em; color: var(--ink); }
+.ff-urge-p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-soft); }
+.ff-urge-left { font-family: var(--font-num); font-size: 12.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ff-urge-left:empty { display: none; }
+.ff-urge-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+.ff-urge-btns button { min-height: 40px; margin: 0; padding: 0 16px; border-radius: 999px; font-size: 13.5px; }
+@keyframes ffBreath { 0%, 100% { transform: scale(.62); opacity: .7; } 50% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ff-urge-breath i { animation: none; transform: scale(.86); } }
 @keyframes ffIn { from { opacity: 0; transform: scale(.96); } }
 @keyframes ffBreathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.07); opacity: .72; } }
 @keyframes ffHold { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }

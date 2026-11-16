@@ -21,6 +21,13 @@ const RULER_TICK = 14
 const LOW = typeof matchMedia === 'function' ? matchMedia('(max-height: 520px) and (min-aspect-ratio: 4/3)') : { matches: false }
 // 專注頁圓環的周長（半徑 86）
 const ARC = 540.4
+// 想分心了：先等多久、跟著圓圈呼吸的一個來回（吸氣、吐氣各一半；focus.css 的 ffBreath 要一樣長）
+const URGE_MS = 60000
+const BREATH_MS = 8000
+// 字有變才換（每 250 毫秒重畫一次）
+const setText = (el, s) => {
+  if (el.textContent !== s) el.textContent = s
+}
 const hhmm = (ts) => {
   const d = new Date(ts)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -103,6 +110,7 @@ export class FocusTimer {
     this._bindSet()
     this._bindPark()
     this._bindStep()
+    this._bindUrge()
     setInterval(() => this.tick(), 250)
     this.render()
     if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
@@ -430,6 +438,11 @@ export class FocusTimer {
   parkFocus() {
     if (this.mode !== 'focus') return false
     if (this.bigOpen) {
+      // 正在「先等一分鐘」：按 N 是想先寫下來（跟按「寫下來，等等再做」一樣）
+      if (this.urgeAt) {
+        this._urgeDo('park')
+        return true
+      }
       this._renderPark()
       $('#ffParkText').focus()
       return true
@@ -531,6 +544,75 @@ export class FocusTimer {
     // 焦點所在的那一顆被換掉、收起來了：接到這一行新的那一顆，沒有的話交給專注頁本身（不會掉到看不見的地方，
     // 也不會落在暫停這類一按就動的按鈕上）
     if (had && !el.contains(document.activeElement)) (input || $('#ffStep [data-step]') || $('#ffStep [data-step-open]') || $('#focusFull')).focus()
+  }
+
+  // ── 想分心了：專注中想去做別的事（滑手機、看別的網頁），先等一分鐘、跟著圓圈呼吸，一分鐘後還想去再去。
+  // 回到正事、或先寫下來等等再做：記一次忍住了（store 的 focusHold）。還是想去也沒關係，專注照常計時 ──
+  _bindUrge() {
+    $('#ffUrgeBtn').onclick = () => this.urge(true)
+    for (const id of ['#ffUrgeBack', '#ffUrgeAlt']) $(id).onclick = (e) => this._urgeDo(e.currentTarget.dataset.urge)
+    // Esc：收起來就好（不算忍住、也不算去了；不要連專注頁一起收起來）
+    $('#ffUrge').addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229) return
+      e.stopPropagation()
+      this.urge(false)
+    })
+  }
+  // 打開、收起「先等一分鐘」。專注中（沒暫停）才打得開；回傳有沒有打開
+  urge(on) {
+    if (on && (this.mode !== 'focus' || this.paused != null)) return false
+    this.urgeAt = on ? Date.now() : 0
+    this._urgeAsked = false
+    this._renderUrge()
+    if (on) {
+      $('#ffUrgeBack').focus()
+      this.hooks.urgeOpen?.()
+    } else this._urgeFocus()
+    return on
+  }
+  // back：回到正事；park：先寫下來等等再做（焦點到「先記下來」那一行）；go：還是想去
+  _urgeDo(act) {
+    if (!this.urgeAt) return
+    this.urgeAt = 0
+    this._renderUrge()
+    if (act === 'go') {
+      this.hooks.urgeGo?.()
+      return this._urgeFocus()
+    }
+    this.ui.store.focusHold()
+    if (act !== 'park') return this._urgeFocus()
+    this._renderPark()
+    $('#ffParkText').focus()
+  }
+  _urgeFocus() {
+    const b = $('#ffUrgeBtn')
+    ;(b.hidden ? $('#focusFull') : b).focus()
+  }
+  _renderUrge() {
+    // 專注結束、暫停了：收起來
+    if (this.urgeAt && (this.mode !== 'focus' || this.paused != null)) this.urgeAt = 0
+    const on = !!this.urgeAt
+    $('#focusFull').classList.toggle('urging', on)
+    $('#ffUrgeBtn').hidden = on || this.mode !== 'focus' || this.paused != null
+    const box = $('#ffUrge')
+    box.hidden = !on
+    if (!on) return
+    const gone = Date.now() - this.urgeAt
+    const ask = gone >= URGE_MS
+    // 一分鐘到了：輕輕響一聲，問還想不想去
+    if (ask && !this._urgeAsked) {
+      this._urgeAsked = true
+      this.hooks.urgeAsk?.()
+    }
+    box.classList.toggle('ask', ask)
+    setText($('#ffUrgeT'), ask ? '一分鐘過了' : '先等一分鐘')
+    setText($('#ffUrgeP'), ask ? '還想去嗎？想去也沒關係，專注會繼續計時。' : '想去做別的事很正常。跟著圓圈呼吸，一分鐘後還想去，再去。')
+    setText($('#ffUrgeLeft'), ask ? '' : `還有 ${Math.ceil((URGE_MS - gone) / 1000)} 秒`)
+    setText($('#ffUrgeBreath'), ask ? '' : gone % BREATH_MS < BREATH_MS / 2 ? '吸氣' : '吐氣')
+    setText($('#ffUrgeBack'), ask ? '回來做正事' : '算了，回來做')
+    const alt = $('#ffUrgeAlt')
+    setText(alt, ask ? '還是想去' : '寫下來，等等再做')
+    alt.dataset.urge = ask ? 'go' : 'park'
   }
 
   _setLength(v) {
@@ -922,6 +1004,7 @@ export class FocusTimer {
     this._renderMore($('#ffExtend'), $('#ffAddRound'))
     this._renderPark()
     this._renderStep()
+    this._renderUrge()
   }
 
   // 時間下面的一行小字：幾點結束、休息完接著什麼

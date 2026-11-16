@@ -648,6 +648,8 @@ export class CoachView {
     if (w.nudges || p.nudges) rows.push(['警語回神', `${back(w)}<small> / ${w.nudges} 次</small>`, delta(back(w), p.nudges ? back(p) : null, ' 次')])
     // 專注中切去用別的 App（Android 的 App 才記得到）：這兩週都沒有就不放
     if (w.leaves || p.leaves) rows.push(['專注中切走', `${w.leaves}<small> 次</small>`, delta(w.leaves, p.leaves || null, ' 次', true)])
+    // 專注中想分心時先等了一分鐘、回到正事（專注頁的「想分心了？」）：這兩週都沒有就不放
+    if (w.holds || p.holds) rows.push(['想分心時忍住', `${w.holds}<small> 次</small>`, delta(w.holds, p.holds || null, ' 次')])
     parts.push(`<section class="wr-card">
       <h3>本週表現分析<small>跟上週同一段比</small></h3>
       <div class="wr-perf">

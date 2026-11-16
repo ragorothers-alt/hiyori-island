@@ -6,7 +6,7 @@ import { restoreBackup } from '../src/sync.js'
 import { migrate } from '../src/store/migrate.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
-import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS, MAX_STARS } from '../src/theme.js'
+import { levelFromXp, xpNeed, MAX_PROJECTS, TOWER_SLOTS, MAX_STARS, XP } from '../src/theme.js'
 import { LAYOUT } from '../src/scene/island.js'
 import { PLAN, TOWN_POINTS, townLevel, levelFor, lotsAt, onStreet, inTown, propPrints, islandRadius, ISLAND_BASE_R } from '../src/data/projectTown.js'
 
@@ -2174,6 +2174,24 @@ describe('週報', () => {
     expect(store.state.rev).toBe(rev)
     expect(store.weekReport()).toMatchObject({ leaves: 2 })
     expect(store.peekDay('2026-10-21').leaves).toBe(2)
+  })
+
+  it('專注中想分心時先等了一分鐘、回到正事：記在今天（算使用者的動作），週報加起來；成就的「忍住了」也算，每天前 3 次有經驗值', () => {
+    setDate('2026-10-21')
+    const events = []
+    store.on('focusHeld', (x) => events.push(x.count))
+    const xp = store.state.player.xp
+    const urges = store.stats.urgesResisted
+    const rev = store.state.rev
+    for (let i = 0; i < 4; i++) store.focusHold()
+    expect(events).toEqual([1, 2, 3, 4])
+    expect(store.state.rev).not.toBe(rev)
+    expect(store.peekDay('2026-10-21').holds).toBe(4)
+    expect(store.stats.urgesResisted).toBe(urges + 4)
+    expect(store.state.player.xp - xp).toBe(3 * XP.urge)
+    expect(store.weekReport()).toMatchObject({ holds: 4 })
+    // 讀存檔時清洗：怪怪的數字當成 0
+    expect(migrate({ ...JSON.parse(JSON.stringify(store.state)), history: { '2026-10-21': { holds: 'x' } } }).history['2026-10-21'].holds).toBe(0)
   })
 
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
