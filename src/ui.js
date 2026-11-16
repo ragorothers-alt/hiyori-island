@@ -35,6 +35,7 @@ import { SubsView } from './ui/subs.js'
 import { MottosView, MottoBar } from './ui/mottos.js'
 import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
+import { AgentCard, AgentView } from './ui/agent.js'
 import { TodayView } from './ui/today.js'
 import { readBackup, readBackups, restoreBackup } from './sync.js'
 import { doneOn, todayProgress } from './habits.js'
@@ -242,6 +243,26 @@ export class UI {
       mottoLast: () => this.hooks.mottoPush?.last() ?? null,
       enableNotify: () => this.enableNotify(),
     })
+    // 自主的ふじ（agentRunner.js）：今日總覽上的卡片、教練分頁的對話
+    this.agent = hooks.agent || null
+    if (this.agent) {
+      const agentHooks = {
+        toast: (o) => this.toast(o),
+        startFocus: (id) => this.focus.ask(id),
+        openChat: () => this.openAgent(),
+        // 還沒接上 Claude：到設定裡填通行碼
+        openSetup: () => {
+          this.setTab('records')
+          requestAnimationFrame(() => {
+            $('#aiRow').scrollIntoView({ block: 'center' })
+            this.aiView._edit(true)
+          })
+        },
+      }
+      this.agentCard = new AgentCard(this.agent, store, agentHooks)
+      this.agentView = new AgentView(this.agent, store, agentHooks)
+      viewHooks.agentView = () => this.agentView
+    }
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
     this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)), $('#coachRoot'))
     this.dates = new DatesView($('#datesBox'), store, viewHooks)
@@ -260,6 +281,7 @@ export class UI {
       idleTasks: () => this.idleTasks(),
       snoozeIdle: (id) => this.snoozeIdle(id),
       openTask: (pid, tid) => this.openProject(pid, undefined, tid),
+      agentCard: () => this.agentCard || null,
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
     this._project = lazy(() =>
@@ -277,7 +299,16 @@ export class UI {
       ),
     )
     // 設定裡的「ふじ的 AI」（Claude 通行碼、模型）
-    this.aiView = new AiView($('#aiRow'), { toast: (o) => this.toast(o) })
+    this.aiView = new AiView($('#aiRow'), {
+      toast: (o) => this.toast(o),
+      // 通行碼、模型改了：ふじ的卡片跟著出現或收起來，之前連不上的也再試
+      changed: () => {
+        this.agent?.reset()
+        this.agentCard?.render()
+        this.agentView?.render()
+        this._coach.view?.aiChanged?.()
+      },
+    })
     this.applyFontScale()
     this.applyGlass()
     this.renderNewsDot()
@@ -286,6 +317,12 @@ export class UI {
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
     if (q.has('calendar')) this._use(this._calendar, (c) => c.open())
+  }
+
+  // 教練分頁的「ふじ」那一頁（對話和她自己整理的紀錄）
+  openAgent() {
+    this.setTab('coach')
+    this._use(this._coach, (c) => c.show('agent'))
   }
 
   // 載好了就直接做；還沒就先載再做（離線又沒快取時說一聲）。

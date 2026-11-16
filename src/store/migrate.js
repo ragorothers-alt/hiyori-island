@@ -1,5 +1,5 @@
 import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
-import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS, FOCUS_GOALS, FLOW_MAXES, CAT_MOTTOS } from '../theme.js'
+import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS, FOCUS_GOALS, FLOW_MAXES, CAT_MOTTOS, AGENT_MODES } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
 import { MOTTO_LEN, MOTTO_MAX, MOTTO_EVERY, PAUSE_MAX } from '../mottos.js'
@@ -122,6 +122,7 @@ function seed(samples = true) {
     life: {},
     town: { seen: {}, since: '', plevel: 0 },
     coach: emptyCoach(),
+    agent: emptyAgent(),
     dates: [],
     subscriptions: [],
     mottos: [],
@@ -234,6 +235,88 @@ function cleanCoach(c) {
     id: str(p.id), createdAt: ts(p.createdAt) || Date.now(), title: str(p.title, 40), from: ymd(p.from, ''), to: ymd(p.to, ''), count: num(p.count, 0, 99, 0),
   })).slice(-10)
   return { items, last, plans }
+}
+// 自主的ふじ（見 store/agent.js）：記得的事、早晚的整理上次哪天做的、最近做過的事（含撤銷用的紀錄）
+const emptyAgent = () => ({ memory: [], ran: { morning: '', evening: '', week: '' }, log: [] })
+const AGENT_RUN_IDS = ['morning', 'replan', 'capture', 'evening', 'chat']
+// 撤銷用的紀錄（store/agent.js 的 agentApply 寫的）：每一種只收認得的欄位、照型別清洗，缺了要緊的就當成不能撤銷（null；那一筆還是列得出來）。
+// 之後撤銷時每一筆還會對著現在的資料再檢查一次
+const AGENT_DROP_MAX = 60000
+const oid = (v) => (ID_RE.test(v) ? v : null)
+// 任務排了時間之前／之後的樣子
+const slotOf = (v) =>
+  isObj(v) && DATE_RE.test(v.date)
+    ? { date: v.date, at: TIME_RE.test(v.at) ? v.at : null, dur: v.dur ? num(v.dur, 5, 600, 30) : null, moved: num(v.moved, 0, 99, 0), star: !!v.star, first: !!v.first }
+    : null
+// 改過的欄位（標題、分類、優先度、專案、里程碑）之前／之後的值
+const fieldsOf = (v) => {
+  if (!isObj(v)) return null
+  const o = {}
+  if (typeof v.title === 'string' && v.title.trim()) o.title = str(v.title).trim()
+  if (TAGS.some((x) => x.id === v.tag)) o.tag = v.tag
+  if ([1, 2, 3].includes(v.priority)) o.priority = v.priority
+  if ('project' in v) o.project = oid(v.project)
+  if ('ms' in v) o.ms = oid(v.ms)
+  return Object.keys(o).length ? o : null
+}
+// 加進去的子任務、細項：[{ id, title }]
+const addedOf = (v) => (Array.isArray(v) ? v.slice(0, 40).map((x) => (isObj(x) && ID_RE.test(x.id) ? { id: x.id, title: str(x.title, 80) } : null)).filter(Boolean) : [])
+function cleanUndo(u) {
+  if (!isObj(u) || typeof u.k !== 'string') return null
+  const id = oid(u.id)
+  switch (u.k) {
+    case 'task': {
+      const before = slotOf(u.before)
+      const after = slotOf(u.after)
+      return id && before && after ? { k: 'task', id, before, after } : null
+    }
+    case 'edit': {
+      const before = fieldsOf(u.before)
+      const after = fieldsOf(u.after)
+      return id && before && after ? { k: 'edit', id, before, after } : null
+    }
+    // sig：剛加好時的樣子（之後被改過就不刪）
+    case 'add': return id && typeof u.sig === 'string' ? { k: 'add', id, sig: u.sig.slice(0, 4000) } : null
+    case 'done': case 'event': case 'date': return id ? { k: u.k, id } : null
+    case 'star': return id && typeof u.on === 'boolean' ? { k: 'star', id, on: u.on } : null
+    case 'first': return id ? { k: 'first', id, was: oid(u.was) } : null
+    case 'subs': {
+      const subs = addedOf(u.subs)
+      return id && subs.length ? { k: 'subs', id, subs } : null
+    }
+    case 'msteps': {
+      const steps = addedOf(u.steps)
+      return ID_RE.test(u.pid) && ID_RE.test(u.mid) && steps.length ? { k: 'msteps', pid: u.pid, mid: u.mid, steps } : null
+    }
+    // task：刪掉的那一件（整件存成 JSON 字串，放回去時照讀存檔的規則清洗）；logs：原本指著它的進度紀錄 [專案 id, 紀錄 id]
+    case 'drop': {
+      if (typeof u.task !== 'string' || u.task.length > AGENT_DROP_MAX) return null
+      const logs = (Array.isArray(u.logs) ? u.logs : []).filter((x) => Array.isArray(x) && ID_RE.test(x[0]) && ID_RE.test(x[1])).slice(0, 500).map((x) => [x[0], x[1]])
+      return { k: 'drop', task: u.task, logs }
+    }
+    case 'remember': case 'forget': {
+      const text = str(u.text, 80).trim()
+      return text ? { k: u.k, text } : null
+    }
+    default: return null
+  }
+}function cleanAgent(a) {
+  if (!isObj(a)) return emptyAgent()
+  const memory = (Array.isArray(a.memory) ? a.memory : []).map((x) => str(x, 80).replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const ran = isObj(a.ran) ? a.ran : {}
+  const log = cleanList(
+    a.log,
+    (e) => {
+      if (!ID_RE.test(e.id)) return null
+      const changes = (Array.isArray(e.changes) ? e.changes : [])
+        .slice(0, 80)
+        .map((c) => (isObj(c) && str(c.t, 120) ? { t: str(c.t, 120), u: cleanUndo(c.u) } : null))
+        .filter(Boolean)
+      return { id: e.id, at: ts(e.at) || Date.now(), run: AGENT_RUN_IDS.includes(e.run) ? e.run : 'chat', say: str(e.say, 300), next: ID_RE.test(e.next) ? e.next : null, changes, undone: !!e.undone }
+    },
+    false,
+  ).slice(-30)
+  return { memory: [...new Set(memory)].slice(0, 30), ran: { morning: ymd(ran.morning, ''), evening: ymd(ran.evening, ''), week: ymd(ran.week, '') }, log }
 }
 // 重要日子：考試、截止日、紀念日
 function cleanDates(list) {
@@ -391,50 +474,56 @@ function cleanTemplates(list) {
   }).slice(0, TEMPLATES_MAX)
 }
 
+// 一件任務清洗成合法的樣子（讀存檔、撤銷ふじ刪掉的任務時都走這裡）；沒有標題的不要（null）。
+// 專案、里程碑對不對得上由呼叫的地方再檢查
+export function cleanTask(t, today = dateStr()) {
+  if (!isObj(t)) return null
+  const tags = new Set(TAGS.map((x) => x.id))
+  const title = str(t.title).trim()
+  if (!title) return null
+  const done = !!t.done
+  return {
+    id: str(t.id), title, date: ymd(t.date, today), priority: num(t.priority, 1, 3, 2),
+    tag: tags.has(t.tag) ? t.tag : 'life', done, rewarded: !!t.rewarded || done,
+    createdAt: ts(t.createdAt) || Date.now(), doneAt: done ? ts(t.doneAt) : null,
+    routineId: ID_RE.test(t.routineId) ? t.routineId : null,
+    pomos: num(t.pomos, 0, 99, 0),
+    star: !!t.star,
+    // first：那天先做的那一件（前一晚挑好的；一天一件）
+    first: !!t.first,
+    flower: flowerOf(t.flower) ? t.flower : null,
+    // 時段安排：預估分鐘數、排進時間軸的開始時間
+    dur: t.dur ? num(t.dur, 5, 600, 30) : null,
+    at: TIME_RE.test(t.at) ? t.at : null,
+    // coach：ふじ排的（那次排程的 id，撤銷用）；moved：被往後挪了幾次（卡關提醒用）
+    coach: ID_RE.test(t.coach) ? t.coach : null,
+    moved: num(t.moved, 0, 99, 0),
+    // project：歸在哪個專案；ms：自己選的里程碑，null＝自動（下面清完專案後，對不上的拿掉）
+    project: ID_RE.test(t.project) ? t.project : null,
+    ms: ID_RE.test(t.ms) ? t.ms : null,
+    // ongoing：長期任務（只有歸在專案裡的可以是；下面清完專案後再檢查一次）
+    ongoing: !!t.ongoing,
+    // msAuto：沒自己選里程碑時，完成那一刻自動歸到的里程碑（之後里程碑取消又勾回來也不會換）
+    msAuto: done && ID_RE.test(t.msAuto) ? t.msAuto : null,
+    // 任務頁上的說明（要做到什麼程度、要注意的事）
+    note: str(t.note, PL.taskNote),
+    // 子任務：全部勾完時任務跟著完成（跟里程碑的細項一樣）
+    subs: cleanList(t.subs, (x) => {
+      const title = str(x.title, PL.subTitle).trim()
+      return title ? { id: str(x.id), title, done: !!x.done } : null
+    }).slice(0, PL.subs),
+    // 數字進度（練習曲的速度、頁數…）：目標和每天做到多少
+    tempo: cleanTempo(t.tempo),
+    // touched：最後一次推進這件事的時間（勾子任務、寫紀錄、記數字、專注）；長期任務太久沒碰時提醒用
+    touched: ts(t.touched),
+  }
+}
+
 function migrate(s) {
   if (!isObj(s)) throw new Error('不是有效的ひより存檔')
   const today = dateStr()
   const tags = new Set(TAGS.map((t) => t.id))
-  const tasks = cleanList(s.tasks, (t) => {
-    const title = str(t.title).trim()
-    if (!title) return null
-    const done = !!t.done
-    return {
-      id: str(t.id), title, date: ymd(t.date, today), priority: num(t.priority, 1, 3, 2),
-      tag: tags.has(t.tag) ? t.tag : 'life', done, rewarded: !!t.rewarded || done,
-      createdAt: ts(t.createdAt) || Date.now(), doneAt: done ? ts(t.doneAt) : null,
-      routineId: ID_RE.test(t.routineId) ? t.routineId : null,
-      pomos: num(t.pomos, 0, 99, 0),
-      star: !!t.star,
-      // first：那天先做的那一件（前一晚挑好的；一天一件）
-      first: !!t.first,
-      flower: flowerOf(t.flower) ? t.flower : null,
-      // 時段安排：預估分鐘數、排進時間軸的開始時間
-      dur: t.dur ? num(t.dur, 5, 600, 30) : null,
-      at: TIME_RE.test(t.at) ? t.at : null,
-      // coach：ふじ排的（那次排程的 id，撤銷用）；moved：被往後挪了幾次（卡關提醒用）
-      coach: ID_RE.test(t.coach) ? t.coach : null,
-      moved: num(t.moved, 0, 99, 0),
-      // project：歸在哪個專案；ms：自己選的里程碑，null＝自動（下面清完專案後，對不上的拿掉）
-      project: ID_RE.test(t.project) ? t.project : null,
-      ms: ID_RE.test(t.ms) ? t.ms : null,
-      // ongoing：長期任務（只有歸在專案裡的可以是；下面清完專案後再檢查一次）
-      ongoing: !!t.ongoing,
-      // msAuto：沒自己選里程碑時，完成那一刻自動歸到的里程碑（之後里程碑取消又勾回來也不會換）
-      msAuto: done && ID_RE.test(t.msAuto) ? t.msAuto : null,
-      // 任務頁上的說明（要做到什麼程度、要注意的事）
-      note: str(t.note, PL.taskNote),
-      // 子任務：全部勾完時任務跟著完成（跟里程碑的細項一樣）
-      subs: cleanList(t.subs, (x) => {
-        const title = str(x.title, PL.subTitle).trim()
-        return title ? { id: str(x.id), title, done: !!x.done } : null
-      }).slice(0, PL.subs),
-      // 數字進度（練習曲的速度、頁數…）：目標和每天做到多少
-      tempo: cleanTempo(t.tempo),
-      // touched：最後一次推進這件事的時間（勾子任務、寫紀錄、記數字、專注）；長期任務太久沒碰時提醒用
-      touched: ts(t.touched),
-    }
-  })
+  const tasks = cleanList(s.tasks, (t) => cleanTask(t, today))
   const taskIds = new Set(tasks.map((t) => t.id))
   const events = cleanList(s.events, (e) => {
     const title = str(e.title).trim()
@@ -683,6 +772,8 @@ function migrate(s) {
   // 到點自動延長最多幾分、貓咪多久念一句警語：也只收選項裡的
   if (!FLOW_MAXES.includes(settings.flowMax)) settings.flowMax = DEFAULT_SETTINGS.flowMax
   if (!CAT_MOTTOS.includes(settings.catMotto)) settings.catMotto = DEFAULT_SETTINGS.catMotto
+  // ふじ自己整理的方式：只收選項裡的
+  settings.agentMode = AGENT_MODES.includes(s.settings?.agentMode) ? s.settings.agentMode : DEFAULT_SETTINGS.agentMode
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
   if (!MOTTO_EVERY.includes(settings.mottoEvery)) settings.mottoEvery = DEFAULT_SETTINGS.mottoEvery
@@ -769,7 +860,7 @@ function migrate(s) {
     // lotsPlan：專案町的地塊編號版本。舊的塔位（散在島上的 16 個點）對不上新的地，全部先收回，讀進來後再依序排進去
     lotsPlan: 1,
     version: newer ? Number(s.version) : DATA_VERSION, tasks, events, projects, routines, placed, journal, dex, player, history, quests, weekly, weekCard: ymd(s.weekCard, ''), settings,
-    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
+    rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), agent: cleanAgent(s.agent), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
     parked: cleanParked(s.parked),
     // 舊存檔沒有：空字串（每台都一樣，照常取比較大的）

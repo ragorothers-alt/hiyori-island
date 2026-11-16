@@ -21,6 +21,7 @@ import { projectsMethods } from './store/projects.js'
 import { habitsMethods } from './store/habits.js'
 import { extrasMethods } from './store/extras.js'
 import { coachMethods } from './store/coach.js'
+import { agentMethods } from './store/agent.js'
 
 
 const KEY = 'hiyori-daily-v1'
@@ -1298,7 +1299,7 @@ export { DATA_VERSION, newerData, REVIEW_TEXT, ALLDAY_MAX, dateStr, parseDate, a
 export { floating, DATES_MAX, SUBS_MAX, httpUrl, blankTask, cleanRhythm } from './store/migrate.js'
 
 // 各領域的方法掛回 Store：跟直接寫在 class 裡一樣（getter 照原樣、不可列舉）
-for (const obj of [tasksMethods, projectsMethods, habitsMethods, extrasMethods, coachMethods]) {
+for (const obj of [tasksMethods, projectsMethods, habitsMethods, extrasMethods, coachMethods, agentMethods]) {
   const ds = Object.getOwnPropertyDescriptors(obj)
   for (const d of Object.values(ds)) d.enumerable = false
   Object.defineProperties(Store.prototype, ds)

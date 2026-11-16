@@ -4174,3 +4174,88 @@ test('回神紀錄：警語提示卡上按「✓ 在做了」記一筆、誇一�
   await expect(ins).toContainText('提醒了 11 次，有 9 次你本來就在做')
   await expect(page.locator('#coachRoot [data-act="mottoEvery"]')).toHaveCount(0)
 })
+test('自主的ふじ：早上打開自己把今天排好（可以整批撤銷）、總覽上說一句話就加好日程、教練分頁看得到對話和紀錄、可以改成先問我', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    if (localStorage.getItem('hiyori-daily-v1')) return
+    const tasks = [
+      { id: 'e2e-t1', title: '寫期末報告', priority: 3, date: ymd },
+      { id: 'e2e-t2', title: '買牛奶', priority: 1, date: ymd },
+    ]
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, events: [], projects: [], player: {} }))
+    // 測試用的通行碼（Worker 換成下面假的）
+    localStorage.setItem('hiyori-ai-pass', 'e2e-test-pass')
+  }, { ymd })
+  // 假的 Claude：早上把今天的任務排進 10:30、11:30；對話裡說牙醫就加一個明天的日程
+  const calls = []
+  await context.route(/\/v1\/ai$/, async (route) => {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+    const body = route.request().postDataJSON()
+    calls.push(body)
+    const d = body.data
+    const out = { say: '', schedule: [], add: [], steps: [], edit: [], star: [], first: '', msteps: [], next: '', remember: [], forget: [], done: [], drop: [], events: [], dates: [], ask: [] }
+    if (d.run === 'morning') {
+      const [a, b] = d.days[0].tasks
+      out.schedule = [{ id: a.id, date: d.today, at: '10:30', dur: 50 }, { id: b.id, date: d.today, at: '11:30', dur: 15 }]
+      out.star = [{ id: a.id, on: true }]
+      out.next = a.id
+      out.say = `今天排好了：先做「${a.title}」。`
+    } else if (d.run === 'chat') {
+      out.events = [{ title: '看牙醫', date: d.days[1].date, start: '15:00', end: '16:00' }]
+      out.say = '明天下午三點的牙醫記好了。'
+    }
+    await route.fulfill({ status: 200, headers: cors, contentType: 'application/json', body: JSON.stringify({ ok: true, model: 'mock', out }) })
+  })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await bootReady(page)
+  // 開場後幾秒自己整理：提示卡說一聲，總覽的卡片上寫著做了什麼
+  await toastSeen(page, 'ふじ整理了今天（3 項）')
+  expect(calls[0]).toMatchObject({ task: 'agent', data: { run: 'morning', mode: 'auto' } })
+  const tasks = () => page.evaluate(() => window.hiyori.store.state.tasks.map((t) => [t.title, t.at, t.dur, t.star]))
+  expect(await tasks()).toEqual([['寫期末報告', '10:30', 50, true], ['買牛奶', '11:30', 15, false]])
+  const card = page.locator('#todayRoot .ag-card')
+  await expect(card.locator('.ag-say')).toHaveText('今天排好了：先做「寫期末報告」。')
+  await expect(card.locator('.ag-did li')).toHaveText(['「寫期末報告」排在今天 10:30', '「買牛奶」排在今天 11:30', '本命：「寫期末報告」'])
+  await expect(card.locator('[data-ag="focus"]')).toHaveText('專注「寫期末報告」')
+  // 同一天不再整理一次
+  await page.evaluate(() => window.hiyori.agent.tick())
+  expect(calls).toHaveLength(1)
+  // 整批撤銷：回到原本的樣子
+  await card.locator('[data-ag="undo"]').click()
+  expect(await tasks()).toEqual([['寫期末報告', null, null, false], ['買牛奶', null, null, false]])
+  await expect(card.locator('.ag-undone')).toHaveText('已經撤銷')
+
+  // 總覽上直接說一句：輸入框打字時頁面重畫也不會把字弄丟
+  const input = card.locator('.ag-form input')
+  await input.fill('明天三點')
+  await page.evaluate(() => window.hiyori.ui.render())
+  await expect(input).toHaveValue('明天三點')
+  await input.fill('明天三點看牙醫')
+  await input.press('Enter')
+  await expect(card.locator('.ag-say')).toHaveText('明天下午三點的牙醫記好了。')
+  expect(calls[1].data).toMatchObject({ run: 'chat', message: '明天三點看牙醫' })
+  expect(await page.evaluate(() => window.hiyori.store.state.events.map((e) => [e.title, e.start]))).toEqual([['看牙醫', '15:00']])
+  await expect(input).toHaveValue('')
+
+  // 教練分頁：接了 Claude 時先看到ふじ那一頁，對話和她自己整理的紀錄排在一起
+  await card.locator('[data-ag="chat"]').click()
+  const feed = page.locator('#coachRoot .ag-feed')
+  await expect(feed.locator('.cmsg.me')).toHaveText('明天三點看牙醫')
+  await expect(feed.locator('.ag-bubble').first()).toContainText('整理今天')
+  await expect(feed.locator('.ag-bubble').last()).toContainText('日程「看牙醫」（明天 15:00）')
+  // 改成先問我：設定記下來，重新整理後還在
+  await page.locator('#coachRoot [data-av="mode"][data-v="ask"]').click()
+  await expect(page.locator('#coachRoot .ag-mode-sub')).toHaveText('看過再套用')
+  await page.evaluate(() => window.hiyori.store.flushSave())
+  await page.reload()
+  await bootReady(page)
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.agentMode)).toBe('ask')
+  // 原本的問卷排程還在另一頁
+  await page.evaluate(() => window.hiyori.ui.setTab('coach'))
+  await page.locator('#coachRoot [data-act="view"][data-v="plan"]').click()
+  await expect(page.locator('#coachRoot form[data-r="ask"]')).toBeVisible()
+})

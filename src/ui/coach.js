@@ -6,6 +6,7 @@ import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, as
 import { buildInsights } from '../insights.js'
 import { MOTTO_EVERY } from '../mottos.js'
 import { aiReady, askAI } from '../ai.js'
+import { keepFocus } from './agent.js'
 import { PEAKS } from '../planner.js'
 import { daypart } from '../daylight.js'
 import { weekProjects, tempoVal, fmtMins } from '../projects.js'
@@ -35,6 +36,11 @@ const DAYS = [
   { v: 7, label: '全力', sub: '7 天' },
 ]
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+// 那個時間是哪一天（YYYY-MM-DD，這台裝置的時區）
+const dayOf = (at) => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)}<small>時</small>${m % 60 ? `${m % 60}<small>分</small>` : ''}` : `${m}<small>分</small>`)
 // 跟上週比：↑ 多了、↓ 少了（數字一樣或上週沒有就不標）
 // less：越少越好的數字（例如專注中切走幾次）：變少是好的顏色
@@ -69,7 +75,8 @@ export class CoachView {
     this.live = Object.assign(document.createElement('p'), { className: 'sr-only' })
     this.live.setAttribute('aria-live', 'polite')
     root.after(this.live)
-    this.view = 'plan' // plan：排程 | report：週報
+    // agent：ふじ（自主的ふじ的對話和紀錄，見 ui/agent.js）| plan：排程（問卷）| report：週報。接上 Claude 的話先看ふじ
+    this.view = aiReady() && hooks.agentView?.() ? 'agent' : 'plan'
     this.step = 'ask' // ask：填問卷 | preview：看預覽 | done：已套用
     this.res = null
     this.planId = null
@@ -168,7 +175,7 @@ export class CoachView {
 
   // 從別的地方直接開某一頁（總覽的「看週報」）：plan 排程、report 週報
   show(view) {
-    this.view = view === 'report' ? 'report' : 'plan'
+    this.view = view === 'report' ? 'report' : view === 'agent' && this.hooks.agentView?.() ? 'agent' : 'plan'
     this.history = false
     this.render()
     this.root.closest('.panel-body')?.scrollTo({ top: 0 })
@@ -438,7 +445,22 @@ export class CoachView {
     this.render()
   }
 
+  // 通行碼設好或停用了：還沒看過別頁的話，跟著換到ふじ／排程
+  aiChanged() {
+    if (this.view !== 'report') this.view = aiReady() && this.hooks.agentView?.() ? 'agent' : 'plan'
+    this.render()
+  }
+
   render() {
+    // ふじ那一頁是一直留著的節點（ui/agent.js 的 AgentView），這裡只換上面的分頁列
+    const av = this.view === 'agent' ? this.hooks.agentView?.() : null
+    if (av) {
+      keepFocus(av.el, () => {
+        this.root.innerHTML = `<div class="coach">${this._head()}</div>`
+        this.root.firstElementChild.append(av.el)
+      })
+      return av.render()
+    }
     if (this.view === 'report') {
       this.root.innerHTML = `<div class="coach">${this._head()}${this._reportHTML()}</div>`
       // 切到週報：念出開場和本週到目前的幾個數字（數字沒變就不重念）
@@ -490,6 +512,7 @@ export class CoachView {
   _head() {
     const n = this.store.state.coach.plans.length
     const seg = [
+      ...(this.hooks.agentView?.() ? [['agent', 'ふじ', 'おまかせ']] : []),
       ['plan', '排程', 'けいかく'],
       ['report', '週報', 'しゅうほう'],
     ]
@@ -754,11 +777,18 @@ export class CoachView {
     }
   }
 
-  // ふじ的週報洞察（Claude）：設了通行碼才出現；每週存一份在這台裝置，想更新再按
+  // ふじ的週報洞察（Claude）：設了通行碼才出現；每週存一份在這台裝置。打開週報時自己看（見下面），想更新再按
   _aiWeekHTML(week) {
     if (!aiReady()) return ''
     const c = readWeekAI()
     const cur = c?.week === week ? c : null
+    // ふじ會自己整理時（設定不是「關」）：這週還沒看過、或上次是前幾天看的，打開週報就自己看一次（一天一次，出錯就等使用者按）
+    const today = this.store.today
+    const seenToday = cur && dayOf(cur.at) === today
+    if (!seenToday && !this.weekBusy && !this.weekErr && this._weekAuto !== today && this.store.state.settings.agentMode !== 'off') {
+      this._weekAuto = today
+      queueMicrotask(() => this.view === 'report' && this._aiWeek())
+    }
     let body
     if (this.weekBusy) body = `<p class="wr-ai-p">ふじ正在讀這週的數字<span class="cm-dots" aria-label="整理中"><i></i><i></i><i></i></span></p>`
     else if (cur) {

@@ -23,6 +23,7 @@ import { BOND_ACTS, outfitOf } from './data/bond.js'
 import { lookHour, nightAt, realHour, systemDark, daypart } from './daylight.js'
 import { RESIDENTS, buildingOf } from './data/town.js'
 import { pick, short, fill, line } from './voice.js'
+import { createAgent } from './agentRunner.js'
 
 // 描寫天色的字眼：外觀設定讓天空和真實時間不同時（例如白天開夜間模式），問候避開這些句子
 const SKY_WORDS = /陽光|晨光|太陽|曬|樹蔭|晚霞|夕陽|星星|月亮|夜色|天色|天黑|螢火蟲/
@@ -715,6 +716,42 @@ async function boot() {
     // 另一個分頁結束或停掉了計時：兩人走出小木屋就好（台詞、天燈那一邊已經放過了）
     focusSynced: () => scene?.focusStopped(),
   }
+  // ── 自主的ふじ（接了 Claude 時）：自己排今天、安排新任務、進度落後時重排、晚上準備明天；什麼時候動見 agentRunner.js ──
+  const AGENT_DID = { morning: '整理了今天', replan: '重排了今天', capture: '安排了新任務', evening: '準備好明天了' }
+  const AGENT_WANT = { morning: '想整理今天', replan: '想重排今天', capture: '想安排新任務', evening: '想準備明天' }
+  const agent = createAgent(store, {
+    // 打到一半的字、開著的表單：先不動資料
+    busy: () => ui.hasDraft(),
+    // 開場還沒好、正在專注、正在擺裝飾：不打擾
+    holding: () => !booted || ui.focus.mode === 'focus' || !!scene?.placing || cloudSync.state === 'conflict' || fileSync.state === 'conflict',
+    focusing: () => (ui.focus.mode === 'focus' ? ui.focus.taskId : null),
+    // 動手之前先把別台的變更拿回來；兩邊都改過、還沒選的時候不動
+    settle: () => Promise.allSettled([cloudSync.sync(), fileSync.sync()]),
+    // 她自己整理完（entry），或想好了等你決定（pending，設定成「先問我」時）：說一聲，附上撤銷／套用
+    notify: (entry, run, pending) => {
+      const n = entry ? entry.changes.length : pending.lines.length
+      const acts = []
+      if (pending) acts.push({ label: '套用', run: () => agent.accept() }, { label: '看看', soft: true, run: () => ui.openAgent() })
+      else {
+        const next = entry.next && store.state.tasks.find((t) => t.id === entry.next && !t.done)
+        if (next && ui.focus.mode === 'idle') acts.push({ label: '開始專注', run: () => ui.focus.ask(next.id) })
+        else acts.push({ label: '看看', soft: true, run: () => ui.openAgent() })
+        if (store.agentCanUndo(entry.id)) {
+          acts.push({
+            label: '撤銷', soft: true,
+            run: () => {
+              const k = store.agentUndo(entry.id)
+              ui.toast({ icon: '戻', title: k ? `撤銷了 ${k} 項` : '沒有可以撤銷的了', sub: '之後改過的、做完的留著' })
+            },
+          })
+        }
+      }
+      const say = (entry || pending).say
+      // 今日摘要開著時等它關掉再說（不然提示卡蓋在摘要後面）
+      ui.afterBrief(() => ui.toast({ icon: '藤', stamp: true, title: `ふじ${(pending ? AGENT_WANT : AGENT_DID)[run] || '整理了一下'}${n ? `（${n} 項）` : ''}`, sub: say || '', ms: 12000, tag: 'agent', actions: acts }))
+    },
+  })
+  hooks.agent = agent
   const ui = new UI(store, hooks)
   chatter = (who, text, ms) => ui.chatter(who, text, ms)
 
@@ -780,6 +817,8 @@ async function boot() {
   store.on('shopPoor', () => talk('shopPoor', {}, undefined, '金平糖還不太夠，慢慢來就好。'))
   store.on('taskAdded', (t) => {
     if (inGarden(t)) sfx.plant()
+    // 剛加的任務：ふじ等一下自己替它估時間、排進空檔
+    agent.added(t)
   })
   // 打勾的那一下：花瓣從剛按的那顆勾爆開（本命和高優先度大一點）。
   // App 模式看不到小島，經驗值也從剛按的地方冒出來（小島模式在島上冒，islandScene.js）
@@ -1694,6 +1733,8 @@ async function boot() {
       if (store.selectedDate === store.today && ui.tab === 'schedule') ui.renderSchedule(false)
       if (!scene?.placing && ui.focus.mode !== 'focus') ui.maybeAskReview()
       if (!nativeOut || Date.now() - lastInput < 60000) ui.markSeen()
+      // ふじ：該不該自己整理一次（早上、晚上、進度落後）
+      if (!nativeOut) agent.tick()
       // 晚上要挑明天先做的那一件：明天的例行公事先生成出來，才挑得到（例行公事只能刪不能改，刪的時候還沒做的會一起拿掉）
       const pickDay = ui.firstPickDay()
       if (pickDay && pickDay > store.today) store.prepareRoutines(pickDay)
@@ -1752,7 +1793,7 @@ async function boot() {
       }))
 
   // 方便除錯：在 console 用 hiyori.store；小島建好後還有 hiyori.sky.hourOverride = 20、hiyori.world…
-  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise }
+  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise, agent }
 
   // ── PWA：正式版註冊 Service Worker（開發時不註冊，避免快取干擾） ──
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
@@ -1870,6 +1911,9 @@ async function boot() {
   // 讀快取不擋開場：機器忙的時候不要讓載入畫面多停
   takeNativeAct()
   booted = true
+  // ふじ：開場好了、線上同步拉完之後看一次該不該整理今天；之後每分鐘、回到 App 時再看
+  setTimeout(() => agent.tick(), 6000)
+  document.addEventListener('visibilitychange', () => !document.hidden && setTimeout(() => agent.tick(), 1500))
   backReady = true
   if (bootAct) {
     const { act, at } = bootAct

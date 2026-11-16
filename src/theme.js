@@ -86,6 +86,8 @@ export const FOCUS_GOALS = [0, 60, 90, 120, 180]
 export const FLOW_MAXES = [0, 15, 30, 60]
 // 專注中貓咪多久念一句警語（分鐘；0 是不念）：不出聲，專注頁上的貓咪走過來說（計時設定、警語的設定裡選）
 export const CAT_MOTTOS = [0, 10, 15, 20, 30]
+// ふじ（接了 Claude 時）自己整理的方式：auto＝直接安排好、可以撤銷；ask＝先給我看再套用；off＝我開口才動
+export const AGENT_MODES = ['auto', 'ask', 'off']
 // 「1 小時」「1.5 小時」「45 分」
 export const goalText = (m) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10} 小時` : `${m} 分`)
 // 專注了多久：「1 小時 15 分」「2 小時」「45 分」

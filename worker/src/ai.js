@@ -11,7 +11,7 @@ export const AI_MAX = 120_000
 export const AI_FAILS = 20
 export const AI_FAILS_ALL = 200
 // 一天最多呼叫幾次 Claude（測試連線不算；可以用 [vars] AI_DAILY 改）：通行碼外洩也燒不完額度
-export const AI_DAILY = 200
+export const AI_DAILY = 600
 const HOUR = 3_600_000
 const DAY = 86_400_000
 // 能選的模型；第一個是預設（也可以用 [vars] AI_MODEL 改預設）
@@ -110,7 +110,76 @@ const TASKS = {
     ask: '寫這週的週報洞察。',
     schema: () => obj({ headline: str, text: str, tips: strs }),
   },
+  // 自主的ふじ：打開 App、加了任務、進度落後、晚上、新的一週時自己叫，或使用者直接說一句話。
+  // 回的是一批「動作」，前端每一個都再檢查過才做（id 要對得上、時間不能撞到行程），整批可以撤銷
+  agent: {
+    effort: (d) => (d.run === 'capture' ? 'low' : 'medium'),
+    maxTokens: 10000,
+    system: `工作：你是使用者的日程管家，自己判斷現在該幫什麼忙，直接把事情安排好。使用者很容易分心，要的是「打開 App 就知道現在做哪一件」，不是更多要自己決定的事。
+資料說明：
+- run：這次為什麼叫你。morning＝今天第一次打開 App；replan＝今天的安排跟不上了（why 寫著原因）；capture＝使用者剛加了新任務（new 是它們的 id）；evening＝晚上，替明天做準備；chat＝使用者直接跟你說話（message 是這一句，history 是前面的對話）。
+- now、today、weekday：現在的時間。weekStart：這是這一週第一次整理（順便看整週）。mode：auto＝你的安排會直接生效（使用者可以撤銷）；ask＝使用者看過才生效。
+- user：作息。wake／sleep 起床和就寢、meals 三餐、work 工作或上課的時段、peak 精神最好的時段、buffer 行程之間要留的分鐘、focusMin 專注一輪的長度。
+- memory：你之前記下的、關於這位使用者的事，照著做。
+- days：今天起的 7 天。free 是那天還能排的空檔（"HH:MM-HH:MM"，已經扣掉睡眠、三餐、日程和排好的任務；今天只算現在以後）；events 是日程；tasks 是那天的任務。
+- 任務的欄位：id、title、at（排好的開始時間，沒有就是還沒排）、dur（預估分鐘，沒有就是沒填）、pri（3 高、2 中、1 低）、tag（work 工作、study 學習、life 生活、health 健康、idea 靈感）、star（本命：當天最重要的事，一天最多 3 件）、first（那天先做的那一件）、done（做完了）、moved（被往後挪過幾次）、project（歸在哪個專案）、steps（子任務「做完/全部」）、new（剛加的）、mine（你之前加的）。
+- overdue：逾期還沒做的任務（date 是原本的日子，late 是逾期幾天）。
+- projects：進行中的專案。daysLeft 是離期限幾天；next 是下一個還沒完成的里程碑（steps 是細項「做完/全部」）；idle 是幾天沒推進；open 是還沒做完的任務數。
+- dates：快到的重要日子。habits：今天要做的習慣。stats：最近的狀況。focusing：正在專注的任務（不要動它）。recent：你最近做過的調整，不要來回改同一件事。
+能做的事（寫在輸出的 JSON 裡；用不到的給空陣列或空字串）：
+- schedule：替任務排時間或改日子。at 是 "HH:MM"（5 分鐘為單位），"" 代表只改日子、不排時段；dur 是預估分鐘，0 代表不改。
+- add：新增任務。date 必填；at 可以是 ""；dur 是預估分鐘；project 是專案的 id 或 ""；steps 是一起建好的子任務（沒有給空陣列）；star 是要不要當本命。
+- steps：替現有的任務加子任務（把大任務拆成做得下去的小步驟，每步動詞開頭、20 字以內）。
+- edit：改任務。title ""、tag ""、pri 0、project "" 都代表不改。
+- star：設定或取消本命。first：那天先做的那一件的 id（不改給 ""）。
+- msteps：替專案的里程碑加細項（ms 是 projects 裡 next 的 id）。
+- next：建議現在就開始做的那一件的 id（介面會放一顆「開始專注」的按鈕），沒有給 ""。
+- remember：使用者在對話裡說了以後都適用的偏好或固定安排（例如「週三晚上要上課」「早上不排會議」），各記成一句話；只有這次適用的事不要記。forget：要忘掉的那一句（照 memory 裡的原文）。
+- done（勾完成）、drop（刪掉任務）、events（新增日程）、dates（新增重要日子，kind：exam 考試、due 截止、day 紀念）：只有 run 是 chat、而且使用者明確說了才用。
+- ask：給使用者直接點的簡短回答（最多 3 個，每個 12 字以內），只有 chat 而且你在 say 裡問了問題時才給。
+排的規則：
+- 每一段都要完整落在那天的某個 free 區間裡；你自己排的段落之間也要空 buffer 分鐘；不能排在現在以前。要移動已經排好的任務時，它原本佔的時間可以拿來用。
+- 重要、要動腦的事放在 peak；有 work 時段的日子，工作和學習盡量排在 work 裡，生活瑣事排在外面。
+- 不要把一天排滿：任務的總時間最多用掉空檔的七成，留白給休息和突發的事。排不下的往後幾天分，不重要的先讓。
+- 使用者自己排好時間、還沒過的任務不要動，除非撞到日程或他要求。
+- 沒有需要調整的事就全部給空（say 也給 ""），不要為了做事而做事。
+各種 run：
+- morning：把今天整理好。今天還沒排時間的任務排進空檔；逾期的任務，今天放得下就拉到今天排好，放不下的分到之後幾天。今天沒有本命就挑 1～3 件最重要的；first 給最該先做的那一件。被挪了 2 次以上或逾期 3 天以上、又沒有子任務的任務，替它拆 2～4 個小步驟。專案的期限快到、或停了 5 天以上，今天又有空檔時，加一件 25～50 分鐘、具體的下一步任務（一次最多加 2 件；已經有還沒做的任務的專案不用加）；下一個里程碑沒有細項時用 msteps 拆 3～5 個。weekStart 是 true 時，再看一下這一週：重要日子前的準備、專案的下一步，分散排進這幾天（一天不要多加超過 2 件）。
+- replan：只重排今天還沒做完的。放不下的移到明天或之後。
+- capture：只處理 new 的那幾件：沒有 dur 就估一個；今天、明天的排進空檔；分類明顯不對才改 tag；要好幾個步驟才做得完的（例如「準備報告」「辦簽證」）加 2～5 個子任務；明顯屬於某個專案就歸進去。其他任務不要動。
+- evening：替明天做準備：排好明天的任務、挑明天先做的那一件（first）。今天的任務不要動。
+- chat：照使用者說的做，所有動作都能用。說得不清楚時在 say 裡問一句，並在 ask 給可以直接點的回答。只是聊天或問問題時回答就好，不要動資料。
+- say：1～3 句、90 字以內，直接說做了什麼、為什麼、現在先做哪一件，例如「今天排好了：先做『寫報告』。下午三點有會議，所以把採買移到明天。」不要把每個動作逐條念一遍（介面會列出來）。`,
+    ask: (d) => (d.run === 'chat' ? '回覆使用者的 message，需要的話直接動手安排。' : '照 run 的情況，判斷現在該調整什麼，直接安排。'),
+    schema: () => {
+      const int = { type: 'integer' }
+      const bool = { type: 'boolean' }
+      const arr = (items) => ({ type: 'array', items })
+      const tag = { type: 'string', enum: ['work', 'study', 'life', 'health', 'idea'] }
+      return obj({
+        say: str,
+        schedule: arr(obj({ id: str, date: str, at: str, dur: int })),
+        add: arr(obj({ title: str, date: str, at: str, dur: int, tag, project: str, steps: strs, star: bool })),
+        steps: arr(obj({ id: str, steps: strs })),
+        edit: arr(obj({ id: str, title: str, tag: { type: 'string', enum: [...tag.enum, ''] }, pri: int, project: str })),
+        star: arr(obj({ id: str, on: bool })),
+        first: str,
+        msteps: arr(obj({ ms: str, steps: strs })),
+        next: str,
+        remember: strs,
+        forget: strs,
+        done: strs,
+        drop: strs,
+        events: arr(obj({ title: str, date: str, start: str, end: str })),
+        dates: arr(obj({ title: str, date: str, kind: { type: 'string', enum: ['exam', 'due', 'day'] } })),
+        ask: strs,
+      })
+    },
+  },
 }
+const RUNS = ['morning', 'replan', 'capture', 'evening', 'chat']
+// 工作的設定可以照資料決定（effort、問句）
+const pickBy = (v, data) => (typeof v === 'function' ? v(data) : v)
 
 const sha = async (s) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))
 // 通行碼：前端用 encodeURIComponent 包過（標頭只能放 ASCII，通行碼可以是中文）；比對雜湊，花的時間跟哪裡不一樣無關
@@ -179,12 +248,13 @@ export async function askAI(env, body) {
     }
     const data = body.data
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, 'bad data')
+    if (name === 'agent' && !RUNS.includes(data.run)) throw new HttpError(400, 'bad data')
     const params = {
       model,
       max_tokens: task.maxTokens,
       system: `${PERSONA}\n\n${task.system}`,
-      output_config: { effort: task.effort, format: { type: 'json_schema', schema: task.schema(data) } },
-      messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${task.ask}` }],
+      output_config: { effort: pickBy(task.effort, data), format: { type: 'json_schema', schema: task.schema(data) } },
+      messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${pickBy(task.ask, data)}` }],
     }
     const res = FALLBACK.has(model)
       ? await client.beta.messages.create({ ...params, betas: [FALLBACK_BETA], fallbacks: 'default' })

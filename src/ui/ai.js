@@ -7,9 +7,10 @@ import { AI_MODELS, PASS_MIN, aiModel, aiPass, askAI, setAiModel, setAiPass } fr
 // 輸入框只在打開時建一次，測試連線的結果只更新文字，打字不會被打斷。
 
 export class AiView {
-  constructor(row, { toast }) {
+  constructor(row, { toast, changed = () => {} }) {
     this.row = row
     this.toast = toast
+    this.changed = changed
     this.editing = false
     this.busy = false
     this.result = '' // 上一次測試連線的結果
@@ -32,6 +33,7 @@ export class AiView {
     if (act === 'model') {
       setAiModel(btn.dataset.v)
       this.result = ''
+      this.changed()
       return this.render()
     }
     if (act === 'off') {
@@ -39,7 +41,8 @@ export class AiView {
         setAiPass('')
         this.result = ''
         this.render()
-        this.toast({ icon: '藤', title: 'ふじ的 AI 停用了', sub: '排程、拆細項會回到平常的方法' })
+        this.changed()
+        this.toast({ icon: '藤', title: 'ふじ的 AI 停用了', sub: 'ふじ不再自己整理；排程、拆細項回到平常的方法' })
       })
     }
     if (act === 'save') {
@@ -47,6 +50,7 @@ export class AiView {
       if (!v) return this.$('.ai-pass')?.focus()
       setAiPass(v)
       this.editing = false
+      this.changed()
       return this._test(true)
     }
     if (act === 'test') return this._test(false)
@@ -66,7 +70,8 @@ export class AiView {
     try {
       const r = await askAI('ping')
       this.result = `連上了・${r.name || r.model}`
-      if (first) this.toast({ icon: '藤', title: 'ふじ接上 Claude 了', sub: '排程、拆細項、整理進度和週報都能用了' })
+      if (first) this.toast({ icon: '藤', title: 'ふじ接上 Claude 了', sub: '之後她會自己排今天、安排新任務；總覽上可以直接跟她說' })
+      this.changed()
     } catch (err) {
       this.result = err.message
       if (first) this.toast({ icon: '！', title: '還沒連上 Claude', sub: err.message })
@@ -85,10 +90,10 @@ export class AiView {
       info = '填你在 Worker 設的通行碼（AI_PASS）。只存在這台裝置，不會同步也不會匯出'
       btns = [['save', '儲存並測試', 1], ['cancel', '取消']]
     } else if (!on) {
-      info = '接上自己 Claude Console 的 API：金鑰放在自己的 Worker 裡，這裡只填通行碼。設好後，ふじ會用 Claude 排程、拆細項、整理專案進度、寫週報洞察'
+      info = '接上自己 Claude Console 的 API：金鑰放在自己的 Worker 裡，這裡只填通行碼。設好後ふじ會自己動：早上排好今天、替新任務估時間和排空檔、進度落後時重排、晚上準備明天，也能用一句話請她做事（每次都可以撤銷）'
       btns = [['edit', '設定通行碼', 1]]
     } else {
-      info = `${esc(this.result || `已設定・用 ${model.label}`)}`
+      info = `${esc(this.result || `已設定・用 ${model.label}`)}・自己整理的方式（自動／先問我／關）在教練分頁的「ふじ」`
       // 通行碼太短容易被猜中：提醒到 Worker 重設一組長一點的（這裡跟著改）
       const len = [...aiPass()].length
       if (len < PASS_MIN) info += `<br><span class="ai-warn">通行碼只有 ${len} 個字，容易被猜中。建議在 worker 資料夾執行 <code>npx wrangler@4 secret put AI_PASS</code> 換成 ${PASS_MIN} 個字以上，再按「改通行碼」</span>`

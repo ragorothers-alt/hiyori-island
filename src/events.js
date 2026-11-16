@@ -38,6 +38,8 @@ export const EVENTS = {
   planApplied: '套用最佳化時程',
   coachApplied: '套用ふじ排的計畫',
   coachUndone: '撤銷ふじ排的計畫',
+  agentApplied: 'ふじ自己整理了一次（或照對話做了事）',
+  agentUndone: '撤銷ふじ那一次做的事',
   dateAdded: '新增重要日子',
   subAdded: '新增訂閱',
   subChanged: '訂閱改了（內容或重新訂閱）',

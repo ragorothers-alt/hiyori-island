@@ -1,7 +1,7 @@
 /* ── 教練 · ふじ ── */
 .coach { display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
 .coach-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.coach-seg { flex: 1; max-width: 260px; }
+.coach-seg { flex: 1; max-width: 360px; }
 .coach-seg button { flex: 1; font-size: 13px; padding: 6px 10px; }
 .coach-seg button small { margin-left: 6px; font-family: var(--font-display); font-size: 10px; color: var(--ink-faint); }
 .coach-seg button.on small { color: var(--sakura); }

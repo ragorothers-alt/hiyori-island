@@ -89,7 +89,7 @@ export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
   focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true, glass: 50,
   mottoEvery: 60, mottoPause: 0, mottoPauseFrom: 0, mottoPauseCut: false, mottoBar: true, focusCat: true, brief: true, awayNudge: true, tabNudge: false, backNudge: true, nextNudge: true,
-  mottoEvents: true, focusNoise: 'off', noiseVol: 50, flowMax: 30, catMotto: 15,
+  mottoEvents: true, focusNoise: 'off', noiseVol: 50, flowMax: 30, catMotto: 15, agentMode: 'auto',
   // 照週報洞察的建議調整過的那天（YYYY-MM-DD，沒有是空字串）：pull＝縮短一輪、motto＝拉長警語的間隔
   pullActed: '', mottoActed: '',
   // 每天的專注目標（分鐘，theme.js 的 FOCUS_GOALS；0 是不設）

@@ -135,7 +135,7 @@ export class TodayView {
   _tick() {
     this._late = this._down
     // 正在寫反思、寫明天先做的那一件：只換時鐘的數字，其他的晚一點再重畫，不打斷打字
-    if (document.activeElement?.matches?.('.td-ref-text, .td-first-in')) {
+    if (document.activeElement?.matches?.('.td-ref-text, .td-first-in, .ag-form input')) {
       const t = $('.tn-time', this.root)
       const n = new Date()
       if (t) t.textContent = hhmm(n.getHours() * 60 + n.getMinutes())
@@ -279,8 +279,13 @@ export class TodayView {
     const tasks = s.tasksOn(today)
     // 進度圈和長條現在在畫面上的樣子（動畫走到一半的話是走到的地方）：重畫後從這裡接著走
     const live = this._liveProg()
+    // ふじ的卡片是一直留著的節點（裡面有輸入框）：重畫後放回原位，游標接回去
+    const agEl = this.hooks.agentCard?.()?.el || null
+    const agFocus = agEl?.contains(a) ? a : null
+    const agCaret = agFocus?.matches('input') ? [agFocus.selectionStart, agFocus.selectionEnd] : null
     this.root.innerHTML = `<div class="td${this._drawn ? '' : ' td-enter'}">
       ${this._heroHTML(today, tasks, now)}
+      <div data-slot="agent"></div>
       ${this._parkHTML()}
       ${this._firstHTML(today, tasks, nowMin)}
       <div class="td-grid">
@@ -295,6 +300,13 @@ export class TodayView {
       </div>
     </div>`
     this._drawn = true
+    const slot = $('[data-slot="agent"]', this.root)
+    if (agEl) slot.replaceWith(agEl)
+    else slot.remove()
+    if (agFocus) {
+      agFocus.focus({ preventScroll: true })
+      if (agCaret) agFocus.setSelectionRange(...agCaret)
+    }
     this._animateProg(live)
     for (const [sel, top, left] of scroll) {
       const el = $(sel, this.root)

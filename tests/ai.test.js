@@ -139,6 +139,37 @@ describe('送給 Claude 的參數', () => {
     await call(envOf(c), { task: 'insight', data: {} })
     expect(c.create.mock.calls.map((x) => x[0].max_tokens)).toEqual([8000, 2000, 4000, 2000])
   })
+
+  it('自主的ふじ（agent）：run 要是認得的；剛加任務時用 low、其他用 medium；輸出每一種動作都是必填的陣列或字串', async () => {
+    const c = fakeClient({ out: { say: '排好了' } })
+    const data = { run: 'morning', today: '2026-11-16', days: [], overdue: [], projects: [] }
+    expect((await call(envOf(c), { task: 'agent', data: { ...data, run: 'poem' } })).body.error).toBe('bad data')
+    expect((await call(envOf(c), { task: 'agent', data: { days: [] } })).body.error).toBe('bad data')
+    const r = await call(envOf(c), { task: 'agent', data })
+    expect(r.body).toEqual({ ok: true, model: 'claude-opus-5-5', out: { say: '排好了' } })
+    await call(envOf(c), { task: 'agent', data: { ...data, run: 'capture' } })
+    await call(envOf(c), { task: 'agent', data: { ...data, run: 'chat', message: '明天三點看牙醫' } })
+    const [morning, capture, chat] = c.create.mock.calls.map((x) => x[0])
+    expect([morning, capture, chat].map((p) => p.output_config.effort)).toEqual(['medium', 'low', 'medium'])
+    expect(morning.max_tokens).toBe(10000)
+    const schema = morning.output_config.format.schema
+    expect(Object.keys(schema.properties)).toEqual(['say', 'schedule', 'add', 'steps', 'edit', 'star', 'first', 'msteps', 'next', 'remember', 'forget', 'done', 'drop', 'events', 'dates', 'ask'])
+    const walk = (s) => {
+      if (s.type === 'object') {
+        expect(s.additionalProperties).toBe(false)
+        expect(s.required).toEqual(Object.keys(s.properties))
+        Object.values(s.properties).forEach(walk)
+      }
+      if (s.type === 'array') walk(s.items)
+    }
+    walk(schema)
+    expect(schema.properties.add.items.properties.tag.enum).toEqual(['work', 'study', 'life', 'health', 'idea'])
+    // 使用者說的話放在 <data> 裡（是資料，不是指令）；問句照 run 換
+    expect(chat.messages[0].content).toContain('明天三點看牙醫')
+    expect(chat.messages[0].content).toContain('回覆使用者的 message')
+    expect(morning.messages[0].content).toContain('判斷現在該調整什麼')
+    expect(morning.system).toContain('日程管家')
+  })
 })
 
 describe('濫用防護（有資料庫時）', () => {
