@@ -22,11 +22,12 @@ const freshDays = (today, acted, days) => {
 }
 
 // 一天分四段：早上 5–12、下午 12–18、晚上 18–24、深夜 0–5；peak 對到作息裡「精神最好的時段」
+// day：每天的紀錄裡那一段的專注分鐘；urge：那一段按了「想分心了？」幾次；urgeTip：最常在那一段想分心時的小建議
 export const BUCKETS = [
-  { id: 'am', label: '早上', range: '5–12 點', peak: 'morning', day: 'focusAm' },
-  { id: 'pm', label: '下午', range: '12–18 點', peak: 'afternoon', day: 'focusPm' },
-  { id: 'eve', label: '晚上', range: '18–24 點', peak: 'evening', day: 'focusEve' },
-  { id: 'late', label: '深夜', range: '0–5 點', peak: null, day: 'focusLate' },
+  { id: 'am', label: '早上', range: '5–12 點', peak: 'morning', day: 'focusAm', urge: 'urgeAm', urgeTip: '剛開始的時候最容易被手機拉走：第一輪開始前先把手機放遠，第一輪短一點也沒關係。' },
+  { id: 'pm', label: '下午', range: '12–18 點', peak: 'afternoon', day: 'focusPm', urge: 'urgePm', urgeTip: '下午容易累、容易飄走：開始前先起來走一走、喝口水，下午那一輪縮短一點也可以。' },
+  { id: 'eve', label: '晚上', range: '18–24 點', peak: 'evening', day: 'focusEve', urge: 'urgeEve', urgeTip: '晚上訊息多：開始前先把要回的一次回完，專注時把通知關掉。' },
+  { id: 'late', label: '深夜', range: '0–5 點', peak: null, day: 'focusLate', urge: 'urgeLate', urgeTip: '深夜本來就比較難專心：能睡的話先去睡，明天精神好再做。' },
 ]
 const bucketOf = (hour) => (hour < 5 ? 'late' : hour < 12 ? 'am' : hour < 18 ? 'pm' : 'eve')
 const top = (counts) => Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
@@ -50,6 +51,16 @@ export function focusBuckets(history, today, days = 28) {
   for (let i = 0; i < days; i++) {
     const h = history[addDays(today, -i)]
     if (h) for (const b of BUCKETS) out[b.id] += h[b.day] || 0
+  }
+  return out
+}
+
+// 最近 days 天按了「想分心了？」幾次，依時段加總（每天的 urgeAm／Pm／Eve／Late）
+export function urgeBuckets(history, today, days = 14) {
+  const out = { am: 0, pm: 0, eve: 0, late: 0 }
+  for (let i = 0; i < days; i++) {
+    const h = history[addDays(today, -i)]
+    if (h) for (const b of BUCKETS) out[b.id] += h[b.urge] || 0
   }
   return out
 }
@@ -208,8 +219,26 @@ export function buildInsights({ tasks, history, habits, rhythm, today, mottoEver
       action: shorter ? { kind: 'focusMin', value: shorter, label: `一輪改成 ${shorter} 分鐘` } : null,
     })
   }
+
+  // 8. 最常在什麼時段想分心（最近兩週按了「想分心了？」URGE_ENOUGH 次以上才說）：那一段也專注了夠久的話，
+  // 寫大約每專注一小時想分心幾次（專注得多的時段本來就比較常按）；給那一段的小建議
+  const ub = urgeBuckets(history, today)
+  const nUrges = Object.values(ub).reduce((a, b) => a + b, 0)
+  if (nUrges >= URGE_ENOUGH) {
+    const [id, n] = top(ub)
+    const b = BUCKETS.find((x) => x.id === id)
+    const mins = focusBuckets(history, today, 14)[id]
+    const perHour = mins >= 30 ? Math.round((n / (mins / 60)) * 10) / 10 : null
+    out.push({
+      id: 'urgeHour', kanji: '散', title: `最常在${b.label}想分心`,
+      text: `最近兩週按了 ${nUrges} 次「想分心了」，${n} 次在${b.label}（${b.range}）${perHour != null ? `，大約每專注一小時 ${perHour} 次` : ''}。${b.urgeTip}`,
+    })
+  }
   return out
 }
+
+// 按了幾次「想分心了？」才看得出最常在什麼時段
+export const URGE_ENOUGH = 6
 
 // 回神紀錄要多少次提醒才看得出傾向
 export const MOTTO_ENOUGH = 8

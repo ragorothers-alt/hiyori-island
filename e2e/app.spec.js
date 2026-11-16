@@ -1088,6 +1088,12 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   await page.goto(site.url)
   await bootReady(page)
   const holds = () => page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).holds || 0)
+  // 按了幾次「想分心了？」（記在一天的哪一段，週報看得出最常在什麼時段想分心）
+  const urges = () =>
+    page.evaluate(() => {
+      const d = window.hiyori.store.peekDay(window.hiyori.store.today)
+      return (d.urgeAm || 0) + (d.urgePm || 0) + (d.urgeEve || 0) + (d.urgeLate || 0)
+    })
   await page.evaluate(() => {
     window.hiyori.store.setSetting('focusRounds', 1)
     window.hiyori.store.setSetting('focusUp', false)
@@ -1099,6 +1105,7 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   // 打開：陪你等一分鐘，跟著圓圈呼吸；結束、暫停、記下來那幾顆先收起來，時間照樣走
   await btn.click()
   await expect(box).toBeVisible()
+  expect(await urges()).toBe(1)
   await expect(page.locator('#ffUrgeT')).toHaveText('先等一分鐘')
   await expect(page.locator('#ffUrgeLeft')).toContainText('秒')
   await expect(page.locator('#ffUrgeBreath')).toHaveText(/吸氣|吐氣/)
@@ -1122,8 +1129,9 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
     return document.getElementById('ffUrge').hidden
   })).toBe(true)
   await page.waitForTimeout(900)
-  // Esc：只收起來（不算忍住），專注頁還開著
-  await btn.click()
+  // 鍵盤按 U 也打開；Esc：只收起來（不算忍住），專注頁還開著
+  await page.keyboard.press('u')
+  await expect(box).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(box).toBeHidden()
   await expect(page.locator('#focusFull')).toBeVisible()
@@ -1953,6 +1961,8 @@ test('回來了，現在該做：離開 20 分鐘以上再回到 App、沒在計
 })
 
 test('做完一件，接著下一件：沒在計時的時候勾掉現在該做的那一件，提示卡寫下一件（和下一步），一鍵開始專注；不是最前面那一件、專注中、20 分鐘內再勾、今天都做完了不說；設定裡可以關', async ({ page, context, site }) => {
+  // 「不說」要等過提示卡出來的那 2.6 秒才看得出來，一共好幾次；勾完還有慶祝、升級：機器忙的時候給多一點時間
+  test.setTimeout(120000)
   await useAppMode(context)
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = (hms) => new Date(`${ymd}T${hms}+08:00`)

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
-import { taskHours, focusBuckets, weekdayRate, activeDays, buildInsights, mottoStats, pullStats } from '../src/insights.js'
+import { taskHours, focusBuckets, weekdayRate, activeDays, buildInsights, mottoStats, pullStats, urgeBuckets, URGE_ENOUGH } from '../src/insights.js'
 
 const TODAY = '2026-11-01'
 const at = (date, h) => new Date(`${date}T${String(h).padStart(2, '0')}:10:00`).getTime()
@@ -138,5 +138,24 @@ describe('洞察', () => {
     expect(other).toMatchObject({ title: '想分心時，最常想去休息一下', action: null })
     // 兩週以前按的：不影響
     expect(pull(rest, 20, { pull: '2026-10-01' }).action.value).toBe(15)
+  })
+
+  it('最常在什麼時段想分心：最近兩週按了 6 次以上「想分心了」才說；那一段專注滿 30 分鐘才寫每專注一小時幾次；給那一段的建議', () => {
+    const hist = (rows) => Object.fromEntries(rows.map(([date, o]) => [date, day(o)]))
+    const urge = (history) => buildInsights({ tasks: [], history, habits: [], rhythm: R, today: TODAY }).find((x) => x.id === 'urgeHour')
+    // 兩週以前的不算；不到 6 次不說
+    const old = hist([['2026-10-18', { urgePm: 9 }], ['2026-10-31', { urgePm: 3, urgeAm: 2 }]])
+    expect(urgeBuckets(old, TODAY)).toEqual({ am: 2, pm: 3, eve: 0, late: 0 })
+    expect(URGE_ENOUGH).toBe(6)
+    expect(urge(old)).toBeUndefined()
+    // 下午最多（加起來好幾天的），下午專注了 2 小時：每專注一小時 2.5 次
+    const pm = hist([['2026-10-30', { urgePm: 3, urgeEve: 1, focusPm: 60 }], ['2026-11-01', { urgePm: 2, urgeAm: 1, focusPm: 60 }]])
+    expect(urge(pm)).toMatchObject({
+      kanji: '散', title: '最常在下午想分心',
+      text: '最近兩週按了 7 次「想分心了」，5 次在下午（12–18 點），大約每專注一小時 2.5 次。下午容易累、容易飄走：開始前先起來走一走、喝口水，下午那一輪縮短一點也可以。',
+    })
+    // 那一段專注不到 30 分鐘：不寫每小時幾次
+    const late = hist([['2026-11-01', { urgeLate: 6, focusLate: 20 }]])
+    expect(urge(late).text).toBe('最近兩週按了 6 次「想分心了」，6 次在深夜（0–5 點）。深夜本來就比較難專心：能睡的話先去睡，明天精神好再做。')
   })
 })

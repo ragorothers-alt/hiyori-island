@@ -341,6 +341,16 @@ export const extrasMethods = {
     this._finish(fx)
     return d.holds
   },
+  // 專注中按了「想分心了？」：記下是在一天的哪一段（早上 5–12、下午 12–18、晚上 18–24、深夜 0–5，跟專注的時段一樣分），
+  // 週報的習慣洞察看得出最常在什麼時段想分心
+  focusUrged() {
+    this._refreshToday()
+    const d = this.day()
+    const h = new Date().getHours()
+    const k = h < 5 ? 'urgeLate' : h < 12 ? 'urgeAm' : h < 18 ? 'urgePm' : 'urgeEve'
+    d[k] = (d[k] || 0) + 1
+    this._finish()
+  },
   // 限時去（等完還是想去時「去 5 分鐘就回來」）之後回來了：記一次（今天的回神、週報的「把自己拉回來」都算），
   // 每天前 3 次有一點經驗值。late：叫你回來之後才回來的；auto：切走之後回到 App 就算回來了。發 focusReturned
   focusReturned({ late = false, auto = false } = {}) {

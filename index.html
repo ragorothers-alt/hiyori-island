@@ -469,7 +469,7 @@
       <form class="ff-park" id="ffPark" autocomplete="off" hidden><input id="ffParkText" maxlength="80" placeholder="腦中冒出別的事？先記下來" aria-label="先記下來：腦中冒出的別的事" enterkeyhint="done"><button type="submit" class="btn-ghost">記下</button></form>
       <p class="ff-park-n" id="ffParkN" aria-live="polite" hidden></p>
       <!-- 想分心了（想滑手機、想看別的）：先等一分鐘、跟著圓圈呼吸，一分鐘後還想去再去；回到正事記一次忍住了（src/ui/focus.js 的 _renderUrge） -->
-      <button type="button" class="ff-urge-btn" id="ffUrgeBtn" hidden>想分心了？先等一分鐘</button>
+      <button type="button" class="ff-urge-btn" id="ffUrgeBtn" title="鍵盤按 U 也可以" aria-keyshortcuts="U" hidden>想分心了？先等一分鐘</button>
       <!-- 限時去：等完一分鐘還是想去時「去 5 分鐘就回來」，寫著幾點叫你回來；回來了按一下（切走再回到 App 也算） -->
       <div class="ff-detour" id="ffDetour" role="status" hidden><span id="ffDetourT"></span><button type="button" class="btn-ghost" id="ffDetourBack">我回來了</button></div>
       <section class="ff-urge" id="ffUrge" aria-labelledby="ffUrgeT" hidden>

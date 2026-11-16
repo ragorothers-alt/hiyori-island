@@ -681,6 +681,8 @@ export class FocusTimer {
     this._renderUrge()
     if (on) {
       $('#ffUrgeBack').focus()
+      // 記下幾點想分心（週報看得出最常在什麼時段想分心）
+      this.ui.store.focusUrged()
       this.hooks.urgeOpen?.()
     } else this._urgeFocus()
     return true

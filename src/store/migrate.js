@@ -34,10 +34,12 @@ const emptyStats = () => ({
 // 回神紀錄：nudges 警語提醒了幾次（畫面上的提示卡、按了通知上的按鈕），backs 提醒之後回到正事（開始專注、只做 5 分鐘），
 // onTask 提醒時本來就在做正事（按了「在做了」）；leaves 專注中切去用別的 App 1 分鐘以上幾次（Android 的 App 才記得到：
 // 鎖著手機專心的不算）；holds 專注中想分心時先等了一分鐘、回到正事幾次（專注頁的「想分心了」）；
-// returns 等完還是想去、說好「去 5 分鐘就回來」之後回來了幾次（限時去）
+// returns 等完還是想去、說好「去 5 分鐘就回來」之後回來了幾次（限時去）；
+// urgeAm／Pm／Eve／Late：專注中按了「想分心了？」落在早上、下午、晚上、深夜幾次
 const DAY_NUMS = [
   'tasks', 'events', 'milestones', 'pomodoros', 'focus', 'xp', 'stars', 'high', 'early', 'tagMask', 'routines', 'plan', 'review', 'pets', 'rare', 'habits', 'life', 'urges', 'timebox',
   'focusAm', 'focusPm', 'focusEve', 'focusLate', 'plogs', 'nudges', 'backs', 'onTask', 'leaves', 'holds', 'returns',
+  'urgeAm', 'urgePm', 'urgeEve', 'urgeLate',
 ]
 // sleep：那天的睡眠已經給過獎勵
 const DAY_FLAGS = ['perfect', 'starAll', 'habitAll', 'sleep']

@@ -469,6 +469,11 @@ export class UI {
         e.preventDefault()
         return this.focus.parkFocus()
       }
+      // 專注頁開著、專注中按 U：想分心了，先等一分鐘（跟按「想分心了？」一樣；那一顆不在的時候不動）
+      if ((e.key === 'u' || e.key === 'U') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && this._topLayer()?.id === 'focusFull' && this.focus.urge(true)) {
+        e.preventDefault()
+        return
+      }
       // 對話框、全螢幕計時或日曆蓋在上面時，快捷鍵先不作用：不然會動到底下看不到的面板
       if (typing || e.ctrlKey || e.metaKey || e.altKey || this._topLayer()) return
       if (e.key === 'n' || e.key === 'N') {

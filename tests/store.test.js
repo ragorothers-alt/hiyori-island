@@ -2194,6 +2194,18 @@ describe('週報', () => {
     expect(migrate({ ...JSON.parse(JSON.stringify(store.state)), history: { '2026-10-21': { holds: 'x' } } }).history['2026-10-21'].holds).toBe(0)
   })
 
+  it('按了「想分心了？」：記在今天的哪一段（早上、下午、晚上、深夜），匯出匯入後還在；存檔清洗', () => {
+    setDate('2026-10-21')
+    for (const h of [9, 14, 14, 20, 2]) {
+      vi.setSystemTime(new Date(2026, 9, 21, h, 30))
+      store.focusUrged()
+    }
+    expect(store.peekDay('2026-10-21')).toMatchObject({ urgeAm: 1, urgePm: 2, urgeEve: 1, urgeLate: 1 })
+    store.importJSON(store.exportJSON())
+    expect(store.peekDay('2026-10-21')).toMatchObject({ urgeAm: 1, urgePm: 2, urgeEve: 1, urgeLate: 1 })
+    expect(migrate({ ...JSON.parse(JSON.stringify(store.state)), history: { '2026-10-21': { urgePm: 'x' } } }).history['2026-10-21'].urgePm).toBe(0)
+  })
+
   it('限時去之後回來了（去 5 分鐘就回來）：記在今天、週報加起來，每天前 3 次有經驗值；不算忍住；存檔清洗', () => {
     setDate('2026-10-21')
     const events = []
