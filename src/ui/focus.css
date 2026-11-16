@@ -140,6 +140,10 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-step-check svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .ff-step-check:hover { background: color-mix(in srgb, var(--ff-a) 14%, transparent); }
 .ff-step.add { min-height: 0; padding: 0; border: 0; background: none; }
+/* 沒選目標時：建議現在該做的那一件（就做這件、× 這一輪不用） */
+.ff-step-pick { flex: none; height: 34px; margin: 0; padding: 0 14px; border-radius: 999px; font-size: 12.5px; }
+.ff-step-x { flex: none; width: 30px; height: 30px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--ink-faint); font-size: 18px; line-height: 1; cursor: pointer; }
+.ff-step-x:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, transparent); }
 /* 計時設定的小視窗裡的那一行（小島模式）：跟「先記下來」那一行一樣寬 */
 .fs-step { width: auto; margin: 8px 0 0; }
 .fs-step.add { margin-top: 6px; }

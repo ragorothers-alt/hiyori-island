@@ -982,10 +982,11 @@ test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下�
   expect(await subsOf(id)).toEqual(['✓找三篇參考資料', '・寫大綱'])
   await page.waitForTimeout(1300)
   await expect(step.locator('[data-step]')).toBeFocused()
-  // 最後一步：任務跟著完成，這一行收起來，專注照常
+  // 最後一步：任務跟著完成，專注照常；目標解除了，這一行換成建議現在該做的那一件（焦點在選目標的那一格）
   await step.locator('[data-step]').click()
   await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).done, id)).toBe(true)
-  await expect(step).toBeHidden()
+  await expect(step.locator('.ff-step-t small')).toHaveText('要專注這一件嗎？')
+  await expect(page.locator('#ffTarget')).toBeFocused()
   expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
   // 還沒拆的任務：「＋ 拆出第一小步」，打到一半每秒重畫也不會洗掉；Enter 寫下，變成下一步
   const id2 = await page.evaluate(() => {
@@ -1494,6 +1495,57 @@ test('休息前留一步：到點時還沒寫下一步的那件，提示卡上�
   await page.evaluate(() => window.hiyori.ui.focus.stop())
 })
 
+test('沒選目標就開始專注：專注頁建議現在該做的那一件（本命在前），「就做這件」選成這一輪的目標；按 × 這一輪不再問、下一輪再問', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const step = page.locator('#ffStep')
+  const id = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    // 只留這兩件：本命的那件排在前面
+    s.clearSamples()
+    for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+    s.addTask({ title: '回信', date: s.today })
+    const t = s.addTask({ title: '寫期末報告', date: s.today, priority: 3 })
+    s.toggleStar(t.id)
+    window.hiyori.ui.focus.setTarget('')
+    window.hiyori.ui.focus.toggle()
+    return t.id
+  })
+  await expect(page.locator('#focusFull')).toBeVisible()
+  await expect(step.locator('.ff-step-t small')).toHaveText('要專注這一件嗎？')
+  await expect(step.locator('.ff-step-t b')).toHaveText('寫期末報告')
+  // 就做這件：這一輪的目標換成它，這一行換成拆出第一小步（焦點接過去），ふじ／もち說一聲
+  await step.getByRole('button', { name: '就做這件' }).click()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.taskId)).toBe(id)
+  await expect(step.locator('[data-step-open]')).toBeFocused()
+  await expect(page.locator('#ffTarget')).toHaveValue(`t:${id}`)
+  await expect.poll(() => chatSaid(page, '寫期末報告')).toBe(true)
+  // 不指定也可以：按 ×，這一輪不再問（每秒重畫也不會再跑出來）
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.setTarget('')
+    f.toggle()
+  })
+  await expect(step.locator('.ff-step-t b')).toHaveText('寫期末報告')
+  await step.getByRole('button', { name: '這一輪不指定目標' }).click()
+  await expect(step).toBeHidden()
+  await page.waitForTimeout(1300)
+  await expect(step).toBeHidden()
+  // 下一輪再問
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.toggle()
+  })
+  await expect(step.locator('.ff-step-t small')).toHaveText('要專注這一件嗎？')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+})
+
 test('休息前留一步（小島模式）：提示卡上按「留一步給等等」打開計時設定的小視窗直接寫，收起來再點 Dock 上的時間打開時打到一半的字還在；換了目標之後按舊的提示卡不會寫到別件上', async ({ page, site }) => {
   // 小島模式一直在畫 3D 的小島：機器忙的時候每一步都慢一點
   test.setTimeout(120000)
@@ -1595,36 +1647,53 @@ test('回來了，現在該做：離開 20 分鐘以上再回到 App、沒在計
   await expect.poll(() => chatSaid(page, '寫期末報告')).toBe(true)
   await card.getByRole('button', { name: '▶ 開始專注' }).click()
   await expect.poll(mode).toEqual(['focus', 'e2e-b1'])
-  // 專注中離開又回來：交給「回來了，還剩幾分鐘」那一句，不放這張
-  await away('10:31:00', '10:52:00')
-  await page.waitForTimeout(1500)
-  expect(await welcomes()).toBe(1)
   await page.evaluate(() => window.hiyori.ui.focus.stop())
-  // 一個半小時內只說一次：40 分鐘後又離開半小時回來，不說
-  await away('10:53:00', '11:30:00')
+  // 一個半小時內只說一次：又離開一小時回來，不說
+  await away('10:31:00', '11:30:00')
   await page.waitForTimeout(1500)
   expect(await welcomes()).toBe(1)
-  // 過了一個半小時：離開不久（10 分鐘）不說；離開半小時才說
+  // 過了一個半小時：離開不久（10 分鐘）不說；離開半小時才說，「只做 5 分鐘」也可以
   await away('12:05:00', '12:15:00')
   await page.waitForTimeout(1500)
   expect(await welcomes()).toBe(1)
   await away('12:15:00', '12:45:00')
   await expect.poll(welcomes).toBe(2)
-  await expect(card.getByRole('button', { name: '只做 5 分鐘' })).toBeVisible()
-  // 設定裡關掉：不說
-  await page.evaluate(() => window.hiyori.store.setSetting('backNudge', false))
-  await away('14:30:00', '15:10:00')
+  await card.getByRole('button', { name: '只做 5 分鐘' }).click()
+  await expect.poll(() => page.evaluate(() => [window.hiyori.ui.focus.mode, window.hiyori.ui.focus.small, window.hiyori.ui.focus.taskId])).toEqual(['focus', true, 'e2e-b1'])
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 專注中離開又回來（過了一個半小時）：交給「回來了，還剩幾分鐘」那一句，不放這張
+  await page.clock.setFixedTime(T('14:20:00'))
+  await page.evaluate(() => window.hiyori.ui.focus.startWith('e2e-b1'))
+  await away('14:21:00', '14:42:00')
+  await page.waitForTimeout(1500)
+  expect(await mode()).toEqual(['focus', 'e2e-b1'])
+  expect(await welcomes()).toBe(2)
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 警語先停著（開會、吃飯，停到 16:00）：不說
+  await page.clock.setFixedTime(T('14:43:00'))
+  await page.evaluate(() => window.hiyori.store.pauseMottos(Date.now() + 77 * 60000))
+  await away('14:43:00', '15:20:00')
   await page.waitForTimeout(1500)
   expect(await welcomes()).toBe(2)
-  // 重新打開（App 被收掉了）也一樣：今天看過摘要、離開一陣子才打開，打開時就說（打招呼換成那一句）
+  // 設定裡關掉：不說
+  await page.evaluate(() => window.hiyori.store.setSetting('backNudge', false))
+  await away('16:30:00', '17:10:00')
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(2)
   await page.evaluate(() => window.hiyori.store.setSetting('backNudge', true))
-  // 先離開（關掉頁面時記下 15:10 還在看），17:00 再打開
+  // 重新打開（App 被收掉了）也一樣：今天看過摘要、離開一陣子才打開，打開時就說（打招呼換成那一句）。
+  // 先離開（關掉頁面時記下 17:20 還在看），18:30 再打開
+  await page.clock.setFixedTime(T('17:20:00'))
   await page.goto('about:blank')
-  await page.clock.setFixedTime(T('17:00:00'))
+  await page.clock.setFixedTime(T('18:30:00'))
   await page.goto(site.url)
   await bootReady(page)
   await expect.poll(welcomes).toBe(1)
   await expect(page.locator('#toasts .toast', { hasText: '歡迎回來' })).toContainText('現在該做：寫期末報告')
+  // 睡覺時間（預設 23:00 就寢）：不說
+  await away('18:31:00', '23:40:00')
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(1)
 })
 
 test('專注時的背景聲：計時設定、專注頁右上的耳機都可以選；只在專注中放，暫停、休息、結束時停；音效關著不放；Esc 先收選單', async ({ page, context, site }) => {

@@ -6,7 +6,7 @@ import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
 import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, PULLS, pullOf, tagOf } from '../theme.js'
 import { floating, NOISES } from '../store.js'
-import { nextStep } from '../brief.js'
+import { nextStep, order as doFirst } from '../brief.js'
 import { nextEvent } from '../planner.js'
 import { PROJECT_LIMITS as PL } from '../projects.js'
 import { coatOfDay } from '../catWalk.js'
@@ -482,6 +482,16 @@ export class FocusTimer {
         // 連按兩下的第二下（detail 是連按的第幾下）落在換上來的勾勾上：不算。勾完要重畫，機器忙的時候兩下會隔得比較久，
         // 只看時間（_checkStep 的 600 毫秒）擋不住
         if (b) return e.detail > 1 ? undefined : this._checkStep(b.dataset.step, el)
+        // 沒選目標時建議的那一件：選成這一輪的目標（焦點接到換上來的那一行）；× 是這一輪不用
+        const pick = e.target.closest('[data-pick]')
+        if (pick) {
+          this.setTarget(`t:${pick.dataset.pick}`)
+          return el.querySelector('[data-step], [data-step-open]')?.focus()
+        }
+        if (e.target.closest('[data-pick-x]')) {
+          this._noPick = this.sid
+          return this._renderStep()
+        }
         if (!e.target.closest('[data-step-open]')) return
         this._stepOpen = this.taskId
         this._renderStep()
@@ -560,12 +570,20 @@ export class FocusTimer {
     const draft = writing && this._stepDraft?.id === t.id ? this._stepDraft.text : null
     // 專注和休息時的提示字不一樣，畫好之後另外換（打到一半時到點，輸入框不會被換掉）
     const [ph, label] = brk ? ['等等回來先做什麼？寫小一點、一坐下就做得到的', '留一步給等等的自己：休息完先做什麼'] : ['下一小步是什麼？寫小一點、馬上做得到的', '寫下這件的下一小步']
+    // 沒選目標就開始專注：建議現在該做的那一件（本命、重要的、排了時間早的在前，跟警語的「現在該做」一樣），
+    // 一鍵選成這一輪的目標（專注的時間記進去、看得到下一步）。這一輪按了 × 就不再問
+    const pick = this.mode === 'focus' && !t && !this.project && this._noPick !== this.sid ? doFirst(this.ui.store.tasksOn(this.ui.store.today))[0] : null
     for (const el of [$('#ffStep'), $('#fsStep')]) {
       const big = el.id === 'ffStep'
       let html = ''
       // 小視窗：休息中點了某件事要專注（_asking：正在選下一輪的設定）時不放
       if (!big && this._asking) html = ''
-      else if (writing) {
+      else if (pick) {
+        html =
+          `<div class="ff-step-t"><small>要專注這一件嗎？</small><b>${esc(pick.title)}</b></div>` +
+          `<button type="button" class="btn-ghost ff-step-pick" data-pick="${esc(pick.id)}">就做這件</button>` +
+          `<button type="button" class="ff-step-x" data-pick-x title="這一輪不指定" aria-label="這一輪不指定目標">×</button>`
+      } else if (writing) {
         html = `<form class="ff-step-add" autocomplete="off"><input id="${el.id}Text" maxlength="${PL.subTitle}" enterkeyhint="done"><button type="submit" class="btn-ghost">寫下</button></form>`
       } else if (step) {
         const i = subs.indexOf(step) + 1
@@ -577,7 +595,7 @@ export class FocusTimer {
         html = `<button type="button" class="ff-step-open" data-step-open>＋ ${brk ? '休息前留一步給等等的自己' : subs.length ? '寫下接下來的一小步' : '拆出第一小步'}</button>`
       }
       el.hidden = !html
-      el.classList.toggle('add', !!html && (writing || !step))
+      el.classList.toggle('add', !!html && !pick && (writing || !step))
       el.classList.toggle('resume', brk && !!html)
       // 每秒重畫時沒變就不動（put）：打到一半的字、焦點都留著
       if (el._html !== html) {

@@ -108,13 +108,21 @@ async function boot() {
     }, 3000),
   )
   // 在背景打開的、鎖著過了一天的：回到 App 時才說
+  // shown：這個分頁現在看得到嗎（關掉時用：背景的分頁關掉不寫「還在看」）
+  let shown = !document.hidden
   document.addEventListener('visibilitychange', () => {
-    // 離開時記下時間、回來時抄下來：摘要的「你不在的時候」從那裡算起
-    if (document.hidden) return ui.markSeen(true)
+    // 離開時記下時間、回來時抄下來：摘要的「你不在的時候」、回來時提醒現在該做從那裡算起
+    if (document.hidden) {
+      if (shown) ui.markSeen(true)
+      shown = false
+      return
+    }
+    shown = true
     ui.returned()
     setTimeout(() => ui.maybeShowBrief(), 400)
   })
-  addEventListener('pagehide', () => ui.markSeen(true))
+  // 關掉分頁：看得到的才記（變成看不到時已經記過了；早就在背景的分頁關掉時不記，不會把其他分頁真正離開的時間洗掉）
+  addEventListener('pagehide', () => shown && ui.markSeen(true))
 
   // ── 計時器到點的通知 ──
   // 頁面睡著時（手機鎖著、切到別的 App）靠伺服器到點推一則（push.js）；頁面醒著但沒在看時自己發。
@@ -147,29 +155,41 @@ async function boot() {
   const BACK_MIN = 20 * 60000
   const BACK_GAP = 90 * 60000
   const BACK_KEY = 'hiyori-back-at'
+  // 上次說的時間也記在記憶體：瀏覽器空間滿了、存不進去時，一個半小時只說一次照樣算數
+  let backAt = 0
+  // 開場好了沒（載入畫面還蓋著時不說；開場那一段自己會看）
+  let backReady = false
   // 回傳有沒有說
   const welcomeBack = () => {
     const now = Date.now()
     const st = store.state.settings
+    // 頁面又看不到了（剛回來又馬上切走、Android 的 App 已經在背景）：不說，也不算說過
+    if (!backReady || document.hidden || (native && nativeAway())) return false
     if (st.backNudge === false || ui.awayMs() < BACK_MIN || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer()) return false
     const p = pauseOf(st)
     if (!awakeAt(store.state.rhythm, now) || (p.until > now && p.from <= now) || inQuiet(eventsQuiet(now), now)) return false
     // 警語的提示卡還在（上面就寫著現在該做）、正在打字：不疊上去
     if (ui.hasToast('motto') || document.activeElement?.closest?.('input, textarea, select, [contenteditable]')) return false
-    let last = 0
+    let last = backAt
     try {
-      last = Number(JSON.parse(localStorage.getItem(BACK_KEY) || '0')) || 0
+      last = Math.max(last, Number(JSON.parse(localStorage.getItem(BACK_KEY) || '0')) || 0)
     } catch {}
     if (Math.abs(now - last) < BACK_GAP) return false
     const t = nowTask()
     if (!t) return false
+    backAt = now
     try {
       localStorage.setItem(BACK_KEY, JSON.stringify(now))
     } catch {}
     const step = nextStep(t)
     talk('welcomeBack', { task: short(t.title) }, 5200, `回來啦。接下來先做「${short(t.title)}」好嗎？`, 'fuji')
-    // 按的時候已經在計時了（別的分頁開始了）就不動
-    const go = (fn) => () => ui.focus.mode === 'idle' && fn(t.id)
+    // 按的時候已經在計時了（別的分頁開始了）就不動；那一件做完了、刪掉了、不是今天的了（過了午夜），換成現在排在最前面的那一件
+    const go = (fn) => () => {
+      if (ui.focus.mode !== 'idle') return
+      store.tick()
+      const cur = store.tasksOn(store.today).find((x) => x.id === t.id && !x.done) || nowTask()
+      if (cur) fn(cur.id)
+    }
     ui.toast({
       icon: '回', title: '歡迎回來', sub: `現在該做：${t.title}${step ? `・下一步：${short(step.title, 16)}` : ''}`, ms: 12000, tag: 'back',
       actions: [
@@ -1351,6 +1371,8 @@ async function boot() {
 
   // ── 時間 ──
   let lastMin = -1
+  // Android 的 App 現在在背景嗎（手機說的；上一秒的樣子）
+  let nativeOut = false
   setInterval(() => {
     ui.tickClock()
     // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
@@ -1359,6 +1381,17 @@ async function boot() {
     // 等於沒看到，警語還會被當成念過了（手機那邊也不再發）。開場一好，下一秒就照常檢查
     if (booted) reminders.check()
     syncMottos()
+    // Android 的 App：切到別的 App 時頁面不一定馬上變成看不到（document.hidden），照手機說的算——
+    // 在背景時記下離開的時間、不再每分鐘記「還在看」；回到前景時當成回來了（離開夠久就提醒現在該做）
+    if (native) {
+      const out = nativeAway()
+      if (out && !nativeOut && !document.hidden) ui.markSeen(true)
+      if (!out && nativeOut && !document.hidden) {
+        ui.returned()
+        setTimeout(() => !ui.brief.open && welcomeBack(), 700)
+      }
+      nativeOut = out
+    }
     // 還沒有小島：天色照時間算（傍晚自然換深色玻璃）
     if (!scene) syncNight(lookNight())
     if (rolled) return
@@ -1368,7 +1401,7 @@ async function boot() {
       // 日程頁沒在看就不重畫（切過去時會重畫）
       if (store.selectedDate === store.today && ui.tab === 'schedule') ui.renderSchedule(false)
       if (!scene?.placing && ui.focus.mode !== 'focus') ui.maybeAskReview()
-      ui.markSeen()
+      if (!nativeOut) ui.markSeen()
       // 晚上要挑明天先做的那一件：明天的例行公事先生成出來，才挑得到（例行公事只能刪不能改，刪的時候還沒做的會一起拿掉）
       const pickDay = ui.firstPickDay()
       if (pickDay && pickDay > store.today) store.prepareRoutines(pickDay)
@@ -1545,6 +1578,7 @@ async function boot() {
   // 讀快取不擋開場：機器忙的時候不要讓載入畫面多停
   takeNativeAct()
   booted = true
+  backReady = true
   if (bootAct) {
     const { act, at } = bootAct
     bootAct = null
