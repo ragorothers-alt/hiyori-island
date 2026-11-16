@@ -237,6 +237,13 @@ export class Reminders {
       const key = `${item.id}@${at}`
       const done = (this.sent[date] ||= [])
       const start = toMin(at) + offset
+      // 排定的任務排的時間到了（開始 + 預估的分鐘數）還沒做完：問一聲做完了沒、下一件是什麼（kind 'taskEnd'，
+      // 轉換最難：一不小心就做過頭，或不知道接下來要做什麼）。預估改長了（「再 15 分鐘」）是新的一次，到新的時間再問
+      if (kind === 'task' && item.dur > 0 && mins >= start + item.dur) {
+        const endKey = `${key}~${item.dur}`
+        if (mins < start + item.dur + late && !done.includes(endKey) && this._claim(date, endKey)) this.onRemind({ ...item, start: at }, 0, 'taskEnd')
+        continue
+      }
       // 排定的任務到了開始的那一刻：另外說一次「現在開始吧」（kind 'taskStart'，提示卡上可以直接開始專注）。
       // 提前提醒是 0 分鐘、或錯過了提前的那一次（現在已經開始了）時，那一次就是這一次，不說兩次
       const begun = kind === 'task' && mins >= start && mins < start + late

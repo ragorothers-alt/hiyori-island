@@ -127,6 +127,12 @@ export const COACH_FUJI = {
     '好，去吧。專注還在計時，記得回來。',
     '去一下也沒關係，到點會提醒你。',
   ],
+  // 排定的任務排的時間到了還沒做完：{task}
+  taskEnd: [
+    '「{task}」排的時間到了，做完了嗎？',
+    '時間到了，「{task}」先收個尾吧。',
+    '「{task}」做到這裡，看看接下來是什麼。',
+  ],
   // 開始專注時，這一輪結束前就有日程要開始：{at} 幾點、{event} 哪一場
   focusClash: [
     '{at} 有「{event}」，這一輪會撞到，記得提早收尾。',
@@ -516,6 +522,10 @@ export const COACH_MOCHI = {
   focusClash: [
     '{at} 有「{event}」喔～記得提早收尾！',
     '等等要「{event}」，我幫你看著時間～',
+  ],
+  taskEnd: [
+    '「{task}」時間到囉～做完了嗎？',
+    '叮～「{task}」的時間到了！',
   ],
   coachApplied: [
     'ふじ排好 {count} 段，我陪你出發囉。',

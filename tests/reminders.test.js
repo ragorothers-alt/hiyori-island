@@ -248,6 +248,41 @@ describe('任務與就寢提醒', () => {
     expect(kinds()).toEqual([])
   })
 
+  it('排定的任務排的時間到了還沒做完（taskEnd）：到了開始 + 預估分鐘數時問一次；延長了到新的時間再問；做完了、沒有預估的不問', () => {
+    const task = store.addTask({ title: '寫報告', date: TODAY, at: '14:00', dur: 30 })
+    const noDur = store.addTask({ title: '回信', date: TODAY, at: '14:00' })
+    const ends = () => callback.mock.calls.filter((c) => c[2] === 'taskEnd').map((c) => [c[0].id, c[0].start, c[0].dur])
+    reminders.check(at(14, 0))
+    reminders.check(at(14, 29, 59))
+    expect(ends()).toEqual([])
+    reminders.check(at(14, 30))
+    reminders.check(at(14, 30, 40))
+    expect(ends()).toEqual([[task.id, '14:00', 30]])
+    // 「再 15 分鐘」：14:45 再問一次
+    store.updateTask(task.id, { dur: 45 })
+    reminders.check(at(14, 40))
+    reminders.check(at(14, 45))
+    expect(ends()).toEqual([[task.id, '14:00', 30], [task.id, '14:00', 45]])
+    // 晚了一會兒才打開（1 分鐘後）就不吵；電腦睡著醒來時 15 分鐘內照樣問
+    callback.mockClear()
+    localStorage.clear()
+    const late = new Reminders(store, callback)
+    late.check(at(14, 47))
+    expect(ends()).toEqual([])
+    const slept = new Reminders(store, callback)
+    localStorage.clear()
+    slept.check(at(13, 0))
+    slept.check(at(14, 55))
+    expect(ends()).toEqual([[task.id, '14:00', 45]])
+    // 做完了：不問
+    callback.mockClear()
+    localStorage.clear()
+    store.toggleTask(task.id)
+    new Reminders(store, callback).check(at(14, 45))
+    expect(ends()).toEqual([])
+    expect(noDur.dur ?? null).toBeNull()
+  })
+
   it('兩個分頁同時遇到剛開始的任務：開始的那一次只有一邊說（搶到提前那一次、沒搶到開始那一次的分頁不說）', () => {
     store.setSetting('remindLead', 0)
     const task = store.addTask({ title: '寫報告', date: TODAY, at: '14:00', dur: 60 })

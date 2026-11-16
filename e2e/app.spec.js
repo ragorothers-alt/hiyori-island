@@ -2223,6 +2223,44 @@ test('排定的任務到點：提示卡上直接開始專注、只做 5 分鐘�
   expect(await taskAt('e2e-b')).toBe('11:20')
 })
 
+test('排定的任務時間到了：還沒做完就問一聲（寫著下一件），再 15 分鐘到新的時間再問，做完了就勾掉；正在專注這一件不吵', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hm) => new Date(`${ymd}T${hm}:00+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [
+        { id: 'e2e-a', title: '寫期末報告', priority: 3, date: ymd, at: '10:00', dur: 30 },
+        { id: 'e2e-b', title: '回覆老師的信', priority: 2, date: ymd, at: '11:00', dur: 15 },
+      ]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: { remindLead: 10 } }))
+    }
+  }, { ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(T('10:29'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const task = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id), id)
+  // 10:30：排的時間到了，寫著下一件
+  await page.clock.setFixedTime(T('10:30'))
+  const end = page.locator('#toasts .toast', { hasText: '「寫期末報告」排的時間到了' })
+  await expect(end).toContainText('下一件：11:00 回覆老師的信')
+  await expect(end.locator('.toast-act')).toHaveText(['✓ 做完了', '再 15 分鐘', '明天再做'])
+  // 再 15 分鐘：預估變 45 分鐘，10:45 再問一次
+  await end.locator('.toast-act', { hasText: '再 15 分鐘' }).click()
+  await expect.poll(async () => (await task('e2e-a')).dur).toBe(45)
+  await toastSeen(page, '排到 10:45')
+  await page.clock.setFixedTime(T('10:45'))
+  const again = page.locator('#toasts .toast', { hasText: '「寫期末報告」排的時間到了' })
+  await again.locator('.toast-act', { hasText: '✓ 做完了' }).click()
+  await expect.poll(async () => (await task('e2e-a')).done).toBe(true)
+  // 正在專注這一件：時間到了也不吵（到點時專注那邊會問）
+  await page.evaluate(() => window.hiyori.ui.focus.startWith('e2e-b'))
+  await page.clock.setFixedTime(T('11:15'))
+  await expect.poll(() => page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('hiyori-reminded') || '{}')))).toContain('e2e-b@11:00~15')
+  await expect(page.locator('#toasts .toast', { hasText: '「回覆老師的信」排的時間到了' })).toHaveCount(0)
+})
+
 test('明天先做哪一件：晚上在今日總覽挑一件（明天的、今天沒做完挪過去的、或寫一件新的），就寢提醒提一下；早上的今日摘要從這件開始', async ({ page, context, site }) => {
   test.setTimeout(120000)
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())

@@ -1059,6 +1059,49 @@ async function boot() {
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${t.title}`, `排在 ${e.start}，現在開始吧`, t.id)
       return
     }
+    // 排定的任務排的時間到了還沒做完：問一聲做完了沒，寫著下一件是什麼（轉換最難：一不小心就做過頭）。
+    // 正在專注這一件就不吵（到點時專注那邊會問）
+    if (kind === 'taskEnd') {
+      const t = store.state.tasks.find((x) => x.id === e.id)
+      if (!t || t.done || (ui.focus.mode !== 'idle' && ui.focus.taskId === t.id)) return
+      sfx.reminder()
+      talk('taskEnd', { task: short(t.title) }, 6000, `「${short(t.title)}」排的時間到了，做完了嗎？`, 'fuji')
+      // 下一件：今天接下來（剛開始 5 分鐘內的也算）有時段的日程、排了時段的任務裡最早的那個
+      const n = new Date()
+      const nowMin = n.getHours() * 60 + n.getMinutes()
+      const next = [
+        ...store.eventsOn(store.today).filter((x) => !x.done).map((x) => ({ at: x.start, title: x.title })),
+        ...store.tasksOn(store.today).filter((x) => x.at && !x.done && x.id !== t.id).map((x) => ({ at: x.at, title: x.title })),
+      ]
+        .filter((x) => toMin(x.at) >= nowMin - 5)
+        .sort((a, b) => toMin(a.at) - toMin(b.at))[0]
+      // 時間在別處改過了（另一個分頁挪了、延長了）：不拿這張卡上的舊時間做事
+      const cur = () => {
+        const c = taskNow(e.id, e)
+        if (c && c.dur !== e.dur) {
+          ui.toast({ icon: '時', title: `「${short(c.title, 12)}」的時間已經改過了`, sub: `現在排到 ${minToHHMM(toMin(c.at) + (c.dur || 0))}`, ms: 4200 })
+          return null
+        }
+        return c
+      }
+      const more = () => {
+        const c = cur()
+        if (!c) return
+        const dur = Math.min(600, (c.dur || 0) + 15)
+        store.updateTask(c.id, { dur })
+        ui.toast({ icon: '時', title: `「${short(c.title, 12)}」再 15 分鐘`, sub: `排到 ${minToHHMM(Math.min(1439, toMin(c.at) + dur))}，到時候再問你`, ms: 4200 })
+      }
+      ui.toast({
+        icon: '時', title: `「${t.title}」排的時間到了`, sub: next ? `做完了嗎？下一件：${next.at} ${short(next.title, 14)}` : '做完了嗎？', ms: 15000, tag: `end-${t.id}`,
+        actions: [
+          { label: '✓ 做完了', run: () => cur() && store.toggleTask(t.id) },
+          { label: '再 15 分鐘', soft: true, run: more },
+          { label: '明天再做', soft: true, run: () => cur() && ui._postpone(t.id) },
+        ],
+      })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${t.title}`, next ? `排的時間到了・下一件：${next.at} ${next.title}` : '排的時間到了，做完了嗎？', `end-${t.id}`)
+      return
+    }
     sfx.reminder()
     const when = min > 0 ? `${min} 分鐘後開始（${e.start}）` : `現在開始（${e.start}）`
     // 看時間的是ふじ
