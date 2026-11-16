@@ -890,18 +890,20 @@ test('到點自動延長：原定的照常記下、不休息，接著往上數�
   await toastSeen(page, '自動延長的 30 分鐘也做滿了')
   await page.evaluate(() => window.hiyori.ui.focus.stop())
 
-  // 之後有日程：延長到開始前 5 分鐘為止；太近（剩不到 5 分鐘）就照常休息。午夜前後跨日的日程不算，那時不測
-  if (new Date().getHours() < 23) {
+  // 之後有日程：延長到開始前 5 分鐘為止；太近（剩不到 5 分鐘）就照常休息。
+  // 時間照頁面的時區算（CI 的機器是 UTC，頁面是台北時間）；快到午夜時日程排不進今天，那時不測
+  const caps = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const f = window.hiyori.ui.focus
+    const now = Date.now()
+    if (new Date(now).getHours() >= 23) return null
     const hm = (t) => new Date(t).toTimeString().slice(0, 5)
-    const caps = await page.evaluate(({ near, soon }) => {
-      const s = window.hiyori.store
-      const f = window.hiyori.ui.focus
-      const now = Date.now()
-      s.addEvent({ title: '開會', date: s.today, start: soon, end: '23:59' })
-      const a = f._flowCap(now)
-      s.addEvent({ title: '上課', date: s.today, start: near, end: '23:59' })
-      return [a, f._flowCap(now)]
-    }, { soon: hm(Date.now() + 16 * 60000), near: hm(Date.now() + 7 * 60000) })
+    s.addEvent({ title: '開會', date: s.today, start: hm(now + 16 * 60000), end: '23:59' })
+    const a = f._flowCap(now)
+    s.addEvent({ title: '上課', date: s.today, start: hm(now + 7 * 60000), end: '23:59' })
+    return [a, f._flowCap(now)]
+  })
+  if (caps) {
     expect(caps[0]).toBeGreaterThanOrEqual(10)
     expect(caps[0]).toBeLessThanOrEqual(11)
     expect(caps[1]).toBe(0)
