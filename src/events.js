@@ -103,3 +103,7 @@ export const EVENTS = {
 }
 
 export const isEvent = (type) => Object.hasOwn(EVENTS, type)
+
+// 慶祝的事件（跳視窗、提示卡、音效、鏡頭飛過去）：到點自動延長時記下原定的那一段，你還在心流裡，
+// 這些先留著，延長做完再放（store.quietly／releaseCheers）
+export const CHEERS = new Set(['xp', 'levelUp', 'achievement', 'questReady', 'weeklyReady', 'bondUp', 'gift', 'outfit', 'flower', 'townGrow', 'townMoveIn', 'townWelcome', 'projectTownGrew'])

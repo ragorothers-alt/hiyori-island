@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  COATS, COAT_IDS, coatOfDay, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, sleepiness, depth, callCat,
+  COATS, COAT_IDS, coatOfDay, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, sleepiness, depth, callCat, heedCat,
   bodyPath, legPath, tailPoints, smoothPath, stripesPath, POSES,
 } from '../src/catWalk.js'
 
@@ -60,6 +60,45 @@ describe('叫貓咪過來（今日摘要）', () => {
     expect([cat.x, cat.y, cat.away, cat.act.kind, cat.pose]).toEqual([150, BOUNDS.bottom, false, 'look', 'sit'])
     run(cat, 5, paused)
     expect([cat.x, cat.act.kind]).toEqual([150, 'look'])
+  })
+})
+
+describe('貓咪有話要說（專注中念警語、到點自動延長）', () => {
+  it('睡著的先醒來，再坐著看你一陣子；說完接著做自己的事', () => {
+    const cat = fresh(11, focus(30))
+    placeCat(cat, focus(30))
+    // 專注很久了：直接在地板上睡
+    expect(cat.act.kind).toBe('sleep')
+    expect(heedCat(cat, 5)).toBe(true)
+    expect(cat.act.kind).toBe('wake')
+    run(cat, 2, focus(30))
+    expect(cat.act.kind).toBe('look')
+    expect(cat.faceT).toBe(0)
+    run(cat, 5.5, focus(30))
+    expect(cat.act.kind).not.toBe('look')
+  })
+
+  it('醒著的停下來看你；在半空中的落地後再看；不在畫面上、正要離開的說不了', () => {
+    const cat = fresh(4)
+    run(cat, 8, focus(1))
+    expect(cat.away).toBe(false)
+    expect(heedCat(cat, 3)).toBe(true)
+    if (cat.act.kind !== 'look') expect(cat.queue.at(-1)[0]).toBe('look')
+    run(cat, 1.5, focus(1))
+    expect(cat.act.kind).toBe('look')
+    leaveCat(cat)
+    expect(heedCat(cat)).toBe(false)
+    const gone = createCat({ seed: 2, coat: 'mike', bounds: BOUNDS })
+    expect(heedCat(gone)).toBe(false)
+    expect(heedCat(null)).toBe(false)
+  })
+
+  it('減少動態效果：原地抬頭看你', () => {
+    const cat = createCat({ seed: 1, coat: 'mike', bounds: BOUNDS, still: true })
+    placeCat(cat, focus(20))
+    expect(cat.act.kind).toBe('sleep')
+    expect(heedCat(cat, 4)).toBe(true)
+    expect(cat.act.kind).toBe('look')
   })
 })
 

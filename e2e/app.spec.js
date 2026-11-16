@@ -410,6 +410,8 @@ test('番茄鐘到點的通知：開始時把「幾毫秒後」交給伺服器�
   })
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   await swReady(page)
 
   // 沒開通知：開始計時不會連到伺服器
@@ -704,6 +706,8 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const state = () =>
     page.evaluate(() => {
       const f = window.hiyori.ui.focus
@@ -812,6 +816,118 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await page.evaluate(() => window.hiyori.store.setSetting('focusUp', false))
 })
 
+test('到點自動延長：原定的照常記下、不休息，接著往上數，做完按「做完了」記延長的分鐘；之後有日程就延長得短一點、太近就照常休息；專注中貓咪小聲念警語', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const state = () =>
+    page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      const s = window.hiyori.store
+      return { mode: f.mode, ext: !!f.ext, cap: f.cap, up: f.up, pomos: s.stats.pomodoros, mins: s.stats.focusMinutes }
+    })
+  const skip = (ms) =>
+    page.evaluate((ms) => {
+      const f = window.hiyori.ui.focus
+      f.endAt -= ms
+      f._save()
+    }, ms)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    // 計時設定：預設到點自動延長最多 30 分、貓咪每 15 分鐘念一句
+    window.hiyori.ui.focus.toggleSet(true)
+  })
+  await expect(page.locator('#fsFlow button.on')).toHaveText('30 分')
+  await expect(page.locator('#fsCat button.on')).toHaveText('15 分')
+  await expect(page.locator('#fsSum')).toHaveText('25 分，到點自動延長（最多 30 分），做完休息 5 分')
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.toggleSet(false)
+    window.hiyori.ui.focus.toggle()
+  })
+  await expect(page.locator('#ffSub')).toHaveText(/^\d\d:\d\d 到點後自動延長$/)
+  // 到點的通知排在延長做滿的時間（到點那一刻不通知），字也照延長的寫
+  const plan = await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    return { gap: f.boundary.at - f.endAt, flow: f.boundary.flow }
+  })
+  expect(plan).toEqual({ gap: 30 * 60000, flow: 30 })
+
+  // 到點：原定的 25 分記下了，不休息，接著往上數（自動延長中）；不響、提示卡沒有按鈕（專注頁上有「做完了」）
+  await skip(25 * 60000 + 1000)
+  await expect.poll(async () => (await state()).ext).toBe(true)
+  expect(await state()).toMatchObject({ mode: 'focus', ext: true, cap: 30, up: true, pomos: 1, mins: 25 })
+  await expect(page.locator('#ffKicker')).toHaveText('自動延長中')
+  await expect(page.locator('#ffSub')).toHaveText(/^25 分記下了・最晚 \d\d:\d\d$/)
+  await expect(page.locator('#ffStop')).toHaveText('做完了')
+  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  // 貓咪說了一聲（貓在的話）或一張不響的提示卡
+  await expect.poll(() => page.evaluate(() => document.querySelector('#ffSay').textContent || (window.__toasts || []).find((t) => t.includes('自動延長中')) || '')).not.toBe('')
+  // 重新整理後還是自動延長中
+  await page.reload()
+  await bootReady(page)
+  expect(await state()).toMatchObject({ mode: 'focus', ext: true, cap: 30 })
+
+  // 再做 7 分鐘按「做完了」：延長的 7 分記進去，番茄數不變，接著休息
+  await skip(7 * 60000)
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
+  await page.locator('#ffStop').click()
+  expect(await state()).toMatchObject({ mode: 'break', ext: false, cap: 0, up: false, pomos: 1, mins: 32 })
+  await toastSeen(page, '延長了 7 分鐘，也記進去了')
+
+  // 延長做滿了：自己結束，記上限的分鐘數
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.toggle()
+  })
+  await skip(25 * 60000 + 31 * 60000)
+  await expect.poll(async () => (await state()).mode).toBe('break')
+  expect(await state()).toMatchObject({ pomos: 2, mins: 32 + 25 + 30 })
+  await toastSeen(page, '自動延長的 30 分鐘也做滿了')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+
+  // 之後有日程：延長到開始前 5 分鐘為止；太近（剩不到 5 分鐘）就照常休息。午夜前後跨日的日程不算，那時不測
+  if (new Date().getHours() < 23) {
+    const hm = (t) => new Date(t).toTimeString().slice(0, 5)
+    const caps = await page.evaluate(({ near, soon }) => {
+      const s = window.hiyori.store
+      const f = window.hiyori.ui.focus
+      const now = Date.now()
+      s.addEvent({ title: '開會', date: s.today, start: soon, end: '23:59' })
+      const a = f._flowCap(now)
+      s.addEvent({ title: '上課', date: s.today, start: near, end: '23:59' })
+      return [a, f._flowCap(now)]
+    }, { soon: hm(Date.now() + 16 * 60000), near: hm(Date.now() + 7 * 60000) })
+    expect(caps[0]).toBeGreaterThanOrEqual(10)
+    expect(caps[0]).toBeLessThanOrEqual(11)
+    expect(caps[1]).toBe(0)
+    // 太近：到點照常休息
+    await page.evaluate(() => window.hiyori.ui.focus.toggle())
+    await skip(25 * 60000 + 1000)
+    await expect.poll(async () => (await state()).mode).toBe('break')
+    await page.evaluate(() => window.hiyori.ui.focus.stop())
+  }
+
+  // 專注中貓咪念警語：照這一輪專注了多久算（暫停不算），到了念一句寫給自己的警語（輪流念）
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    for (const e of [...s.state.events]) s.deleteEvent(e.id)
+    s.addMotto('手機放遠一點')
+    s.setSetting('catMotto', 10)
+    window.hiyori.ui.focus.toggle()
+  })
+  await page.waitForTimeout(600)
+  await skip(10 * 60000 + 1000)
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector('#ffSay').textContent || (window.__toasts || []).find((t) => t.includes('手機放遠一點')) || ''), { timeout: 15000 })
+    .toContain('手機放遠一點')
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+})
+
 test('只做 5 分鐘：卡關小卡、計時設定上都能按；不動設定的長度，到點時問要不要接著做下去，接著做的分鐘也記進去', async ({ page, context, site }) => {
   // 步驟多、中間重新整理一次（見上一個測試）
   test.setTimeout(120000)
@@ -896,6 +1012,8 @@ test('先記下來：專注時腦中冒出別的事，在專注頁（或計時�
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const parked = () => page.evaluate(() => window.hiyori.store.state.parked.map((x) => x.text))
   await page.evaluate(() => {
     window.hiyori.store.setSetting('focusRounds', 1)
@@ -959,6 +1077,8 @@ test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下�
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const subsOf = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).subs.map((x) => `${x.done ? '✓' : '・'}${x.title}`), id)
   const id = await page.evaluate(() => {
     const s = window.hiyori.store
@@ -1087,6 +1207,8 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const holds = () => page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).holds || 0)
   // 按了幾次「想分心了？」（記在一天的哪一段，週報看得出最常在什麼時段想分心）
   const urges = () =>
@@ -1329,6 +1451,8 @@ test('限時去：等完一分鐘還是想去時「去 5 分鐘就回來」，�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const returns = () => page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).returns || 0)
   await page.evaluate(() => {
     const s = window.hiyori.store
@@ -1517,6 +1641,8 @@ test('每天的專注目標：計時設定裡選每天專注多久；專注頁�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   await page.evaluate(() => {
     const s = window.hiyori.store
     s.setSetting('focusRounds', 1)
@@ -1666,6 +1792,8 @@ test('休息前留一步：到點時還沒寫下一步的那件，提示卡上�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const step = page.locator('#ffStep')
   const input = page.locator('#ffStepText')
   const mode = () => page.evaluate(() => window.hiyori.ui.focus.mode)
@@ -1743,6 +1871,8 @@ test('沒選目標就開始專注：專注頁建議現在該做的那一件（�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const step = page.locator('#ffStep')
   const id = await page.evaluate(() => {
     const s = window.hiyori.store
@@ -1816,6 +1946,8 @@ test('休息前留一步（小島模式）：提示卡上按「留一步給等�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const mode = () => page.evaluate(() => window.hiyori.ui.focus.mode)
   const subs = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).subs.map((x) => x.title), id)
   const [a, b] = await page.evaluate(() => {
@@ -2191,6 +2323,8 @@ test('專注時的背景聲：計時設定、專注頁右上的耳機都可以�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const state = () => page.evaluate(() => window.hiyori.noise.state())
   await page.evaluate(() => {
     const s = window.hiyori.store
@@ -2624,6 +2758,8 @@ test('番茄鐘自己到點時，經驗值不會從剛點的別的東西冒出�
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   await page.evaluate(() => {
     const s = window.hiyori.store
     s.setSetting('focusRounds', 1)
@@ -3481,6 +3617,8 @@ test('專注中離開 App：切走時交給手機一則「回來吧」；回來�
   await page.clock.setFixedTime(new Date(T))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const plan = async () => {
     const last = await page.evaluate(() => window.__mottos.at(-1))
     return last ? JSON.parse(last).items : []
@@ -3578,6 +3716,8 @@ test('限時去（Android 的 App）：切去用別的 App 時，叫你回來的
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   const plan = async () => {
     const last = await page.evaluate(() => window.__mottos.at(-1))
     return last ? JSON.parse(last).items : []
@@ -3649,6 +3789,8 @@ test('桌機的網頁：「專注中切到別的分頁太久叫我回來」（�
   await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
+  // 這個測試看的是到點就休息：關掉到點自動延長（自動延長另外測）
+  await page.evaluate(() => window.hiyori.store.setSetting('flowMax', 0))
   await swReady(page)
   const id = await page.evaluate(() => {
     const s = window.hiyori.store

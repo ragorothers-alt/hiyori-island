@@ -448,6 +448,10 @@ describe('到點的時間和通知上的字', () => {
     expect(timerNotice({ ...b, focusMin: 5, small: true, target: '寫期末報告' })).toEqual({ at: NOW, title: 'ひより · 5 分鐘到了', body: '「寫期末報告」開了頭就不難了。想接著做就回來按「繼續做下去」，不然休息一下吧' })
     expect(timerNotice({ ...b, small: true, up: true }).title).toBe('ひより · 正向計時滿 3 小時了')
     expect(timerNotice({ ...b, small: true, mode: 'break' }).title).toBe('ひより · 休息結束')
+    // 到點自動延長的：到點那一刻不通知，延長也做滿了才通知（倒數中排好的、延長中排的同一套字）
+    expect(timerNotice({ ...b, flow: 30, target: '寫期末報告' })).toEqual({ at: NOW, title: 'ひより · 專注結束', body: '「寫期末報告」25 分鐘，又自動延長了 30 分鐘，休息一下吧' })
+    expect(timerNotice({ ...b, up: true, flow: 15, round: 1, rounds: 2 })).toMatchObject({ title: 'ひより · 第 1/2 輪完成', body: '25 分鐘，又自動延長了 15 分鐘，休息 5 分鐘再接著第 2 輪' })
+    expect(timerNotice({ ...b, mode: 'break', flow: 30 }).title).toBe('ひより · 休息結束')
     expect(timerTag(NOW)).toBe(`hiyori-focus-${NOW}`)
   })
 })

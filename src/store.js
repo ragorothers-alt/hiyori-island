@@ -6,7 +6,7 @@
 
 import { uid, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS } from './store/util.js'
 import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM } from './theme.js'
-import { isEvent } from './events.js'
+import { isEvent, CHEERS } from './events.js'
 import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE } from './store/migrate.js'
 import { projectProgress, progressAll } from './projects.js'
 import { bondLevel, BOND_POINTS, actLevel, outfitOf, outfitLevel } from './data/bond.js'
@@ -41,6 +41,8 @@ export const RESCUE_KEY = 'hiyori-rescue'
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
 export const NEWER_TAB_MSG = '另一個分頁已經是新版 App，這邊先不換資料：重新整理頁面之後再試一次'
 export const NO_SAVE_MSG = '瀏覽器的儲存空間不夠，存不進去，所以先不換：現在的小島沒有動。請先清出一些空間再試一次'
+// 到點自動延長時先留著的慶祝（store.quietly）：這個分頁重新整理也放得出來
+const HELD_KEY = 'hiyori-held-cheers'
 // 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
 const SLOW_SAVE = 8
 const SAVE_WAIT = 400
@@ -256,7 +258,49 @@ export class Store {
   }
   emit(type, payload) {
     if (!isEvent(type)) console.warn(`[hiyori] 沒有這個事件：${type}`)
+    if (this._holding && CHEERS.has(type)) {
+      this._heldList().push({ type, payload })
+      return this._keepHeld()
+    }
     for (const fn of this.handlers[type] || []) fn(payload)
+  }
+  // 先不慶祝：fn 裡冒出來的升級、成就、任務達成、經驗值這些先留著（資料照常記、畫面照常重畫、照常存檔），
+  // 之後 releaseCheers 再照原本的順序放。到點自動延長時用：原定的那一段記下了，但你還在心流裡，不跳視窗、不響。
+  // 留著的也記在這個分頁的 sessionStorage：延長中重新整理也放得出來（成就已經記成拿到了，不會再發一次）
+  quietly(fn) {
+    const was = this._holding
+    this._holding = true
+    try {
+      return fn()
+    } finally {
+      this._holding = was
+    }
+  }
+  _heldList() {
+    if (!this._held) {
+      try {
+        const v = JSON.parse(sessionStorage.getItem(HELD_KEY) || '[]')
+        this._held = Array.isArray(v) ? v.filter((x) => x && typeof x.type === 'string' && CHEERS.has(x.type)) : []
+      } catch {
+        this._held = []
+      }
+    }
+    return this._held
+  }
+  _keepHeld() {
+    try {
+      if (this._held?.length) sessionStorage.setItem(HELD_KEY, JSON.stringify(this._held))
+      else sessionStorage.removeItem(HELD_KEY)
+    } catch {}
+  }
+  get heldCheers() {
+    return this._heldList().length
+  }
+  releaseCheers() {
+    const list = this._heldList()
+    this._held = []
+    this._keepHeld()
+    for (const { type, payload } of list) this.emit(type, payload)
   }
 
   // ── 存取 ──

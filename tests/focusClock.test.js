@@ -1,6 +1,6 @@
 // 番茄鐘的計時規則：倒數、往上數、暫停、多輪、放太久
 import { describe, expect, it } from 'vitest'
-import { FREE_MAX, LATE, MAX_ROUNDS, breakStart, canAddRound, canExtend, counting, due, elapsedMs, extendStart, focusStart, isStale, leftMs, nextEnd, pauseToggle, restoreState, stopMinutes } from '../src/focusClock.js'
+import { FLOW_MAX, FREE_MAX, LATE, MAX_ROUNDS, breakStart, canAddRound, canExtend, counting, due, elapsedMs, extMax, extendStart, finalEnd, flowStart, flowing, focusStart, isStale, leftMs, nextEnd, pauseToggle, restoreState, stopMinutes } from '../src/focusClock.js'
 
 const MIN = 60000
 const T0 = 1_800_000_000_000
@@ -153,10 +153,71 @@ describe('時間到了還沒做完：加時；輪數做完了還想繼續：再�
   })
 })
 
+describe('到點自動延長（還在心流裡就不打斷）', () => {
+  const END = T0 + 25 * MIN
+  const flowOn = (o = {}) => start({ flow: 30, ...o })
+
+  it('設了自動延長的倒數：到點時不休息，原定的分鐘數照樣給；只做 5 分鐘、正向計時、加時中、沒設的不延長', () => {
+    const s = flowOn()
+    expect(flowing(s)).toBe(true)
+    expect(due(s, END - 1)).toBeNull()
+    expect(due(s, END)).toEqual({ do: 'flow', minutes: 25 })
+    expect(flowing(start())).toBe(false)
+    expect(flowing(flowOn({ small: true }))).toBe(false)
+    expect(flowing(flowOn({ up: true }))).toBe(false)
+    expect(due(flowOn({ small: true, focusMin: 5 }), T0 + 5 * MIN)).toEqual({ do: 'finishFocus', minutes: 5 })
+    // 休息中、待機不算
+    expect(flowing({ ...s, ...breakStart(s, END) })).toBe(false)
+    expect(flowing(idle({ flow: 30 }))).toBe(false)
+  })
+
+  it('延長：從到點那時往上數，做滿上限自己結束（記延長的分鐘數）；自己按「做完了」記實際多做的', () => {
+    const s = flowOn()
+    const ext = { ...s, ...flowStart(s, END, 30) }
+    expect(ext).toMatchObject({ mode: 'focus', up: true, ext: true, cap: 30, endAt: END, paused: null, doneAt: null })
+    expect(counting(ext)).toBe(true)
+    expect(extMax(ext)).toBe(30)
+    expect(nextEnd(ext)).toBe(END + 30 * MIN)
+    expect(due(ext, END + 29 * MIN)).toBeNull()
+    expect(due(ext, END + 30 * MIN)).toEqual({ do: 'finishFocus', minutes: 30 })
+    expect(stopMinutes(ext, END + 12.5 * MIN)).toBe(12)
+    // 頁面睡著時超過了：最多記到上限
+    expect(stopMinutes(ext, END + 50 * MIN)).toBe(30)
+    // 自己按延長的（cap 是 0）最長還是 3 小時
+    expect(extMax({ ...ext, cap: 0 })).toBe(FREE_MAX)
+    // 延長做完：回到倒數，下一輪照樣會自動延長
+    const brk = { ...ext, ...breakStart(ext, END + 10 * MIN) }
+    expect(brk).toMatchObject({ mode: 'break', up: false, ext: false, cap: 0, flow: 30 })
+    expect(flowing({ ...brk, round: 2, ...focusStart(brk, END + 15 * MIN) })).toBe(true)
+  })
+
+  it('到點的通知排在延長做滿的時間；放太久的判斷也從那時算起', () => {
+    const s = flowOn()
+    expect(nextEnd(s)).toBe(END)
+    expect(finalEnd(s)).toBe(END + 30 * MIN)
+    // 之後有日程、延長得比較短
+    expect(finalEnd(s, 10)).toBe(END + 10 * MIN)
+    expect(finalEnd(start())).toBe(END)
+    expect(isStale(s, END + 30 * MIN + LATE)).toBe(false)
+    expect(isStale(s, END + 30 * MIN + LATE + 1)).toBe(true)
+    // 暫停中：沒有到點的時間
+    expect(finalEnd({ ...s, ...pauseToggle(s, T0 + MIN) })).toBeNull()
+  })
+
+  it('重新整理後接得回來：設了幾分、延長中最多再幾分；壞掉的、不是延長中的 cap 不算', () => {
+    const saved = { mode: 'focus', endAt: END, paused: null, up: true, ext: true, flow: 30, cap: 20, focusMin: 25, breakMin: 5, round: 1, rounds: 2, sid: 'abc-x' }
+    expect(restoreState(saved)).toMatchObject({ ext: true, flow: 30, cap: 20, sid: 'abc-x' })
+    expect(restoreState({ ...saved, up: false, ext: false })).toMatchObject({ ext: false, flow: 30, cap: 0 })
+    expect(restoreState({ ...saved, flow: 'x', cap: -3 })).toMatchObject({ flow: 0, cap: 0 })
+    expect(restoreState({ ...saved, flow: 999, cap: 999 })).toMatchObject({ flow: FLOW_MAX, cap: FLOW_MAX })
+    expect(restoreState({ ...saved, mode: 'break', doneAt: END }).cap).toBe(0)
+  })
+})
+
 describe('重新整理後接回計時', () => {
   it('好好的存檔照原樣接回來', () => {
     const saved = { mode: 'focus', endAt: 1_000_000, paused: null, taskId: 't1', projectId: 'p1', up: false, focusMin: 50, breakMin: 10, round: 2, rounds: 3, sid: 'abc-123' }
-    expect(restoreState(saved)).toEqual({ ...saved, projectId: null, ext: false, doneAt: null, small: false, away: 0, detour: 0, detourRang: false })
+    expect(restoreState(saved)).toEqual({ ...saved, projectId: null, ext: false, doneAt: null, small: false, away: 0, detour: 0, detourRang: false, flow: 0, cap: 0 })
     // 中途離開了幾次：接著算（壞掉的是 0，取整數、最多 999）
     expect(restoreState({ ...saved, away: 2 }).away).toBe(2)
     expect(restoreState({ ...saved, away: 'x' }).away).toBe(0)
@@ -171,7 +232,7 @@ describe('重新整理後接回計時', () => {
 
   it('壞掉的欄位換成安全的值：長度用現在的、輪數夾在範圍裡、id 不是字串就不要', () => {
     const r = restoreState({ mode: 'break', endAt: 'x', paused: -5, taskId: 5, projectId: 'p2', up: 'yes', focusMin: NaN, breakMin: 999, round: 9, rounds: 7, sid: '<script>' }, { focusMin: 30, breakMin: 5 })
-    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, ext: false, small: false, away: 0, detour: 0, detourRang: false, doneAt: null, focusMin: 30, breakMin: 60, round: 7, rounds: 7, sid: null })
+    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, ext: false, small: false, away: 0, detour: 0, detourRang: false, doneAt: null, focusMin: 30, breakMin: 60, round: 7, rounds: 7, sid: null, flow: 0, cap: 0 })
     expect(restoreState({ rounds: 99, round: 50 })).toMatchObject({ rounds: MAX_ROUNDS, round: MAX_ROUNDS })
     // 加時的標記對不上（不是往上數、不是專注中）就不算；doneAt 壞掉也不要
     expect(restoreState({ mode: 'focus', up: false, ext: true }).ext).toBe(false)

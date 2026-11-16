@@ -2,6 +2,7 @@ import './mottos.css'
 import { $, $$, esc, armConfirm, editing, inlineEdit, keepFocus, pickOne, setHTML } from './dom.js'
 import { MOTTO_EVERY, MOTTO_EXAMPLES, MOTTO_LEN, MOTTO_MAX, activeMottos, awakeAt, mottoAt, pauseText, pauseUntil, pausedUntil, windowEnd, eventQuiet, inQuiet } from '../mottos.js'
 import { dateStr } from '../store/util.js'
+import { CAT_MOTTOS } from '../theme.js'
 
 // 警語：自己寫給自己的話。
 // MottosView：紀錄頁的那一張卡（寫、改、先收著、刪，多久提醒一次、要不要放在面板上方）
@@ -96,6 +97,11 @@ export class MottosView {
       case 'every':
         s.setSetting('mottoEvery', +b.dataset.v)
         return this.render()
+      // 專注中貓咪多久念一句（計時設定裡也有同一組）
+      case 'cat':
+        if (!CAT_MOTTOS.includes(+b.dataset.v)) return
+        s.setSetting('catMotto', +b.dataset.v)
+        return keepFocus(this.el.set, () => this.render())
       // 先停一下／現在就恢復：按完焦點放在換上來的那一顆（鍵盤操作的人不會掉到頁面最上面）
       case 'pause': {
         const until = pauseUntil(b.dataset.v, s.state.rhythm, Date.now())
@@ -155,6 +161,7 @@ export class MottosView {
           <div class="seg mt-every" role="group" aria-label="警語多久提醒一次">${MOTTO_EVERY.map((v) => `<button type="button" data-act="every" data-v="${v}" aria-pressed="${v === every}" class="${v === every ? 'on' : ''}">${EVERY_TEXT[v]}</button>`).join('')}</div>
           ${reach ? `<div class="mt-reach"><small>${esc(reach)}<span class="mt-last" data-r="last" hidden></span></small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
         ${every && on ? this._pauseRow() + this._eventsRow(evOn) : ''}
+        ${this._catRow()}
         <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}">${bar ? '開' : '關'}</button></div>`
       : '')
     pickOne($$('[data-act="every"]', this.el.set), (x) => +x.dataset.v === every)
@@ -198,6 +205,14 @@ export class MottosView {
     if (cur) this._eventT = setTimeout(() => keepFocus(this.el.set, () => this.render()), Math.max(1000, eventQuiet([cur], today)[0][1] - now + 500))
     return `<div class="set-row mt-events"><div><b>日程中先不提醒</b><small>${text}</small></div>
       <button type="button" class="chip-toggle${on ? ' on' : ''}" data-act="events" aria-pressed="${on}">${on ? '開' : '關'}</button></div>`
+  }
+
+  // 專注中貓咪念一句：上面的定時提醒專注中不打擾，改由專注頁上的貓咪小聲念（不出聲、不跳通知）
+  _catRow() {
+    const v = this.store.state.settings.catMotto || 0
+    const text = v ? `專注時每 ${v} 分鐘，專注頁上的貓咪走過來小聲念一句（不出聲、不跳通知）；專注頁沒開著是もち或ふじ說` : '專注中不念'
+    return `<div class="set-row theme-row mt-cat"><div><b>專注中貓咪念一句</b><small>${text}</small></div>
+      <div class="seg" role="group" aria-label="專注中貓咪多久念一句警語">${CAT_MOTTOS.map((m) => `<button type="button" data-act="cat" data-v="${m}" aria-pressed="${m === v}" class="${m === v ? 'on' : ''}">${m ? `${m} 分` : '關'}</button>`).join('')}</div></div>`
   }
 
   // 「上一則推播幾點送到這台」：頁面關著時有沒有收到，看這一行就知道

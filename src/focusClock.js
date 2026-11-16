@@ -1,16 +1,21 @@
 // 番茄鐘的計時規則（純函式，不碰 DOM、不讀時鐘）：ui.js 的 FocusTimer 照這裡算下一步，測試直接測這裡。
-// s：{ mode: 'idle'|'focus'|'break', endAt, paused, up, ext, doneAt, focusMin, breakMin, round, rounds }
+// s：{ mode: 'idle'|'focus'|'break', endAt, paused, up, ext, doneAt, focusMin, breakMin, round, rounds, small, flow, cap }
 //   endAt：倒數時是這一段結束的時間；往上數的專注是開始的時間（暫停過就往後挪）
 //   paused：暫停中時，倒數剩下的毫秒、往上數已經過的毫秒；沒暫停是 null
 //   ext：這一段是「加時」——倒數到點了還沒做完，從到點那時接著往上數；做完後照原本的輪數繼續
 //   doneAt：休息中才有，上一段專注是幾點結束的（加時從這裡接著數）
 //   small：這一組是「只做 5 分鐘」（提不起勁時先開個頭）：到點時問要不要接著做下去（加時），接著做、休息時都還記著
+//   flow：倒數到點時自動延長最多幾分鐘（0 是到點就休息）。開始時照設定記下，這一組每一輪都照它（計時中改了設定不影響）。
+//     到點時原定的那一段照常記下，不休息、不出聲，從到點那時接著往上數（加時），告一段落按「做完了」再休息——還在心流裡時不被打斷
+//   cap：這一段加時是到點時自動延長的，最多再幾分鐘（到點時算好：之後就有日程要開始的話縮短）；0 是自己按「還沒做完，延長」的
 
 // 正向計時（往上數）：滿 5 分鐘才記成一次專注，最長 3 小時自動結束
 export const FREE_MIN = 5
 // 只做 5 分鐘
 export const SMALL_MIN = 5
 export const FREE_MAX = 180
+// 自動延長最多幾分鐘（theme.js 的 FLOW_MAXES 裡最長的那個；存著的壞掉的數字收進這個範圍）
+export const FLOW_MAX = 60
 // 計時在關掉頁面、手機鎖著時早就結束了：結束後一小時內回來照常記，再晚就不照全長記進今天
 export const LATE = 60 * 60000
 // 做完了還想繼續時可以一輪一輪加，最多到這麼多輪
@@ -18,33 +23,43 @@ export const MAX_ROUNDS = 12
 
 // 往上數中（休息一律倒數）
 export const counting = (s) => !!s.up && s.mode === 'focus'
+// 倒數的專注，到點時會自動延長（只做 5 分鐘的到點時要問你，不延長）
+export const flowing = (s) => s.mode === 'focus' && !s.up && !s.ext && !s.small && s.flow > 0
+// 這一段加時最多做幾分鐘：到點自動延長的照到點時算好的，自己按延長的、正向計時最長 3 小時
+export const extMax = (s) => (s.ext && s.cap > 0 ? s.cap : FREE_MAX)
 // 倒數還剩幾毫秒（待機時是一整段的長度）
 export const leftMs = (s, now) => (s.mode === 'idle' ? s.focusMin * 60000 : s.paused ?? Math.max(0, s.endAt - now))
 // 往上數已經過了幾毫秒
 export const elapsedMs = (s, now) => s.paused ?? Math.max(0, now - s.endAt)
 
-// 下一次自己到點的時間（專注倒數完、正向計時滿 3 小時、休息結束）：沒在計時、暫停中是 null。到點的通知照這個排
-export const nextEnd = (s) => (s.mode === 'idle' || s.paused != null ? null : counting(s) ? s.endAt + FREE_MAX * 60000 : s.endAt)
+// 下一次自己到點的時間（專注倒數完、會自動延長的倒數到點、加時做滿、正向計時滿 3 小時、休息結束）：
+// 沒在計時、暫停中是 null。計時器照這個時間做下一步
+export const nextEnd = (s) => (s.mode === 'idle' || s.paused != null ? null : counting(s) ? s.endAt + extMax(s) * 60000 : s.endAt)
+// 最晚幾點結束：會自動延長的倒數，是延長做滿的時間（cap：到點時能延長幾分鐘，不給就照設定的最長）；其他跟 nextEnd 一樣
+export const finalEnd = (s, cap = s.flow) => {
+  const at = nextEnd(s)
+  return at != null && flowing(s) ? at + cap * 60000 : at
+}
 
-// 這一段本來該結束的時間過了太久（例如晚上開始專注後關掉，兩天後才打開）
+// 這一段本來該結束的時間過了太久（例如晚上開始專注後關掉，兩天後才打開）。會自動延長的倒數照延長做滿的時間算
 export function isStale(s, now) {
   if (s.mode === 'idle' || s.paused != null) return false
-  const end = counting(s) ? s.endAt + FREE_MAX * 60000 : s.endAt
-  return now - end > LATE
+  return now - finalEnd(s) > LATE
 }
 
 // 每次檢查時該做什麼：
 //   null：繼續計時
 //   { do: 'expire' }：放太久了，不記、回到待機
-//   { do: 'finishFocus', minutes }：一輪專注結束，記下分鐘數、接著休息
+//   { do: 'finishFocus', minutes }：一輪專注結束（加時做滿了的是加時的分鐘數），記下分鐘數、接著休息
+//   { do: 'flow', minutes }：倒數到點了、這一組設了自動延長：原定的分鐘數記下，接著往上數（flowStart），不休息
 //   { do: 'nextRound' }：休息完還有下一輪，自動開始
 //   { do: 'done' }：最後一輪的休息也結束了，回到待機
 export function due(s, now) {
   if (s.mode === 'idle' || s.paused != null) return null
   if (isStale(s, now)) return { do: 'expire' }
-  if (counting(s)) return elapsedMs(s, now) >= FREE_MAX * 60000 ? { do: 'finishFocus', minutes: FREE_MAX } : null
+  if (counting(s)) return elapsedMs(s, now) >= extMax(s) * 60000 ? { do: 'finishFocus', minutes: extMax(s) } : null
   if (now < s.endAt) return null
-  if (s.mode === 'focus') return { do: 'finishFocus', minutes: Math.max(1, Math.round(s.focusMin)) }
+  if (s.mode === 'focus') return { do: flowing(s) ? 'flow' : 'finishFocus', minutes: Math.max(1, Math.round(s.focusMin)) }
   return s.round < s.rounds ? { do: 'nextRound' } : { do: 'done' }
 }
 
@@ -58,8 +73,8 @@ export function pauseToggle(s, now) {
 // 加時按 ■ 一律是「做完了」：多做幾分鐘就記幾分鐘（不到 1 分鐘是 0，不另外記）
 export function stopMinutes(s, now) {
   if (!counting(s)) return null
-  // 最長 3 小時：頁面睡著時超過了、回來在下一次檢查之前就按，也不多記
-  const ms = Math.min(elapsedMs(s, now), FREE_MAX * 60000)
+  // 最長 3 小時（自動延長的照延長的上限）：頁面睡著時超過了、回來在下一次檢查之前就按，也不多記
+  const ms = Math.min(elapsedMs(s, now), extMax(s) * 60000)
   if (s.ext) return Math.floor(ms / 60000)
   return ms >= FREE_MIN * 60000 ? Math.floor(ms / 60000) : null
 }
@@ -71,7 +86,7 @@ export const focusStart = (s, now) => ({ mode: 'focus', paused: null, endAt: s.u
 export const breakStart = (s, now, doneAt = now) => ({
   mode: 'break', paused: null, endAt: now + s.breakMin * 60000,
   doneAt: Number.isFinite(doneAt) && doneAt <= now ? doneAt : now,
-  ext: false, up: s.ext ? false : !!s.up,
+  ext: false, cap: 0, up: s.ext ? false : !!s.up,
 })
 
 // 休息中可以「還沒做完，延長」嗎：倒數的專注才有（正向計時是自己按做完的）
@@ -79,8 +94,11 @@ export const canExtend = (s) => s.mode === 'break' && !s.up
 // 加時：休息不休了，從剛才到點的時間接著往上數。到點太久以前（頁面睡了很久才回來）就從現在開始
 export function extendStart(s, now) {
   const from = Number.isFinite(s.doneAt) && s.doneAt > 0 && s.doneAt <= now && now - s.doneAt <= LATE ? s.doneAt : now
-  return { mode: 'focus', paused: null, up: true, ext: true, endAt: from, doneAt: null }
+  return { mode: 'focus', paused: null, up: true, ext: true, cap: 0, endAt: from, doneAt: null }
 }
+// 自動延長：倒數到點（at）了不休息，從到點那時接著往上數，最多再 cap 分鐘（同一輪接著做，輪數不變）。
+// 做完按「做完了」或做滿了，跟自己按的延長一樣記下多做的分鐘、接著休息
+export const flowStart = (s, at, cap) => ({ mode: 'focus', paused: null, up: true, ext: true, cap, endAt: at, doneAt: null })
 // 最後一輪的休息中可以「再加一輪」嗎
 export const canAddRound = (s) => s.mode === 'break' && s.round >= s.rounds && s.rounds < MAX_ROUNDS
 
@@ -101,6 +119,9 @@ export function restoreState(saved, dflt = {}) {
     projectId: !taskId && typeof saved?.projectId === 'string' ? saved.projectId : null,
     up,
     ext,
+    // 到點自動延長最多幾分（這一組每一輪都照它）、這一段加時是自動延長的話最多再幾分（舊版存的沒有：到點照舊休息）
+    flow: n(saved?.flow, 0, FLOW_MAX, 0),
+    cap: ext ? n(saved?.cap, 0, FLOW_MAX, 0) : 0,
     // 只做 5 分鐘是倒數的（接著做下去時是加時）
     small: saved?.small === true && (!up || ext),
     // 這一輪中途離開了幾次

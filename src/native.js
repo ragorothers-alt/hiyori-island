@@ -17,7 +17,9 @@ const hhmm = (ms) => {
 const clip = (s, n = 18) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
 // 即時倒數那一則通知的樣子。
-// l：FocusTimer 的 live（{ mode, paused, at, since, leftMs, round, rounds, target }），沒在計時是 null；
+// l：FocusTimer 的 live（{ mode, paused, at, since, leftMs, round, rounds, target, flow, start, flowAt }），沒在計時是 null；
+// flow：到點會自動延長（倒數中）、正在自動延長（往上數）的話是延長幾分鐘，start 是這一輪開始的時間（暫停過就往後挪）、
+// flowAt 是延長做滿的時間；
 // done：到點時要發的那一則（push.js 的 timerNotice），沒有就不排
 export function liveTimer(l, done = null) {
   if (!l) return null
@@ -32,6 +34,13 @@ export function liveTimer(l, done = null) {
   const out = { done: done ? { title: done.title, body: done.body } : null }
   if (l.mode === 'break') {
     return { ...out, at: l.at, title: '休息中', text: `${hhmm(l.at)} 結束${multi && l.round < l.rounds ? `・接著第 ${l.round + 1}/${l.rounds} 輪` : ''}` }
+  }
+  // 會自動延長的這一輪（倒數中、延長中）：從這一輪開始的時間往上數（到點那一刻不跳、不響），鬧鐘排在延長做滿的時間（flowAt）。
+  // 手機的鬧鐘在倒數（at）時只會在到點那一刻響，那一刻正是不該吵你的時候；改成往上數，舊版的殼也排得到延長做滿的那一則，
+  // 頁面在背景睡著了也照樣叫你休息
+  if (l.flow) {
+    const tail = l.counting ? '告一段落回到 App 按「做完了」' : `${hhmm(l.at)} 到點後自動延長`
+    return { ...out, since: l.start, doneAt: l.flowAt, title: `${l.counting ? '自動延長中' : '專注中'}${what}`, text: `${tail}・最晚 ${hhmm(l.flowAt)}${multi ? `・第 ${l.round}/${l.rounds} 輪` : ''}` }
   }
   // 正向計時：從開始的時間往上數，滿 3 小時（at）自動結束
   if (l.counting) return { ...out, since: l.since, doneAt: l.at, title: `${l.ext ? '加時中' : '正向計時中'}${what}`, text: '做完回到 App 按「做完了」' }

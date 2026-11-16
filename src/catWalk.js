@@ -658,6 +658,39 @@ export function pokeCat(cat) {
   return 'meow'
 }
 
+// 有話要跟你說（專注中念警語、到點自動延長時說一聲）：停下來看著你 dur 秒（睡著的先醒來、正在跳的落地後再看）。
+// 不在畫面上（散步出去了、正要離開、正走出畫面邊邊）說不了，回傳 false
+export function heedCat(cat, dur = 6) {
+  if (!cat || cat.away || cat.leaving || !cat.bounds) return false
+  const a = cat.act
+  if (cat.still) {
+    begin(cat, 'look', { dur })
+    return true
+  }
+  // 暫停中本來就坐著看你
+  if (a.kind === 'look' && a.pause) return true
+  if (a.kind === 'exit') {
+    // 還在地板上：不走了，回頭看你；已經走到邊邊（只露出半隻）就算了
+    const m = margin(cat)
+    if (cat.x < m || cat.x > cat.bounds.w - m) return false
+    cat.queue = []
+    begin(cat, 'look', { dur, stand: true })
+    return true
+  }
+  // 正在半空中、轉身、蹲低準備撲、走進畫面：做完這一下再看你
+  if (['leap', 'land', 'turn', 'crouch', 'enter'].includes(a.kind)) {
+    cat.queue = cat.queue.filter(([k]) => k === 'land')
+    cat.queue.push(['look', { dur }])
+    return true
+  }
+  cat.queue = []
+  if (a.kind === 'sleep' || a.kind === 'loaf') {
+    begin(cat, 'wake')
+    cat.queue.push(['look', { dur }])
+  } else begin(cat, 'look', { dur, stand: cat.pose === 'stand' })
+  return true
+}
+
 // 滑鼠移到牠身上、移開（手機沒有這個）
 export function hoverCat(cat, on) {
   cat.hover = !!on

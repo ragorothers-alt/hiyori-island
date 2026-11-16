@@ -1,12 +1,17 @@
 // 專注頁（App 模式的全螢幕計時）上散步的貓咪：用 SVG 畫，身體每一格照 src/catWalk.js 算出來的姿勢重畫。
 // 只在專注頁開著時動；畫面在背景上、計時卡片底下，不會擋到按鈕。系統開了「減少動態效果」就只在角落睡覺。
 import {
-  COATS, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, callCat,
+  COATS, createCat, stepCat, poseOf, pokeCat, hoverCat, leaveCat, comeBack, placeCat, setBounds, callCat, heedCat,
   bodyPath, legPath, sockPath, smoothPath, stripesPath, LEG, TAIL,
 } from '../catWalk.js'
 import './focusCat.css'
 
 const OL = 1.7 // 外框粗細（單位）
+// 對話框（say）：一個字多久出來、說完後留多久（照字數，至少 5 秒）、收起來要多久；醒來看你太久還沒好就先說
+const SAY_TYPE = 45
+const sayMs = (text) => Math.min(11000, 4200 + [...text].length * 160)
+const SAY_OUT = 400
+const SAY_WAIT = 2600
 const f1 = (n) => Math.round(n * 10) / 10
 const f2 = (n) => Math.round(n * 100) / 100
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v))
@@ -157,6 +162,90 @@ export class FocusCat {
     if (this.cat.still) this._stillStep(0)
   }
 
+  // ── 專注頁用（ui/focus.js）：有話要說（念警語、到點自動延長時的一句），不出聲 ──
+  // 貓停下來看著你（睡著的先醒來），頭旁邊冒出一個對話框，字一個一個出來、嘴巴跟著動，說完瞇眼笑一下；
+  // 留一會兒就收起來，牠接著做自己的事。stamp：對話框前面的小印章（警語是「戒」）。
+  // 說不了（散步出去了、請牠離開了、畫面放不下）回傳 false，交給呼叫的那邊換別的方式說
+  say(text, { stamp = '' } = {}) {
+    text = String(text || '').trim()
+    const ms = sayMs(text)
+    if (!text || !this.on || !this.cat || !this.fits || !this._pose || !heedCat(this.cat, ms / 1000 + 1)) return false
+    this._dropSay()
+    const el = document.createElement('div')
+    el.className = 'nk-talk'
+    const chars = [...text]
+    // 還沒出來的字先佔著位置（看不見）：對話框一開始就是說完時的大小，字出來時不會一直變寬、跳行
+    el.innerHTML = `${stamp ? '<i class="stamp-k nk-talk-k"></i>' : ''}<span class="nk-talk-t"><span></span><span class="nk-talk-rest"></span></span>`
+    if (stamp) el.firstChild.textContent = stamp
+    const [shown, rest] = el.querySelector('.nk-talk-t').children
+    rest.textContent = text
+    el.hidden = true
+    this.layer.append(el)
+    this._talk = { el, shown, rest, chars, n: 0, at: performance.now(), start: 0, ms, w: 0, h: 0 }
+    if (this.cat.still) this._stillStep(0)
+    return true
+  }
+  // 對話框：等貓醒來看著你才開始說；字一個一個出來（不動的貓一次出來），說完笑一下，時間到了收起來。每一格叫一次
+  _sayStep(now) {
+    const t = this._talk
+    if (!t) return
+    if (!t.start) {
+      if (this.cat.act.kind !== 'look' && now - t.at < SAY_WAIT) return
+      t.start = now
+      t.el.hidden = false
+      t.w = t.el.offsetWidth
+      t.h = t.el.offsetHeight
+      if (this.cat.still) t.n = t.chars.length
+    }
+    const n = Math.min(t.chars.length, this.cat.still ? t.chars.length : Math.floor((now - t.start) / SAY_TYPE) + 1)
+    if (n !== t.n || !t.shown.textContent) {
+      t.n = n
+      t.shown.textContent = t.chars.slice(0, n).join('')
+      t.rest.textContent = t.chars.slice(n).join('')
+    }
+    const typing = n < t.chars.length
+    this.talk(typing)
+    if (!typing && !t.smiled) {
+      t.smiled = true
+      this.smile()
+    }
+    this._placeSay()
+    const gone = now - t.start
+    if (gone >= t.ms) t.el.classList.add('out')
+    if (gone >= t.ms + SAY_OUT) this._dropSay()
+  }
+  // 放在頭前面（頭朝哪一邊就放哪一邊，不蓋到身體）；那一邊放不下才放到另一邊、身體後面。
+  // 上面不壓到計時卡片，下面不超出畫面
+  _placeSay() {
+    const t = this._talk
+    const P = this._pose
+    const B = this._box
+    if (!t?.start || !P || !B) return
+    const hx = P.x + P.flip * P.s * (P.head.x + 4)
+    const hy = P.y + P.s * (P.head.y - 22)
+    const ahead = P.flip >= 0 ? 1 : -1
+    const near = 24 * P.s
+    const far = 104 * P.s
+    const fits = (side, gap) => (side > 0 ? hx + gap + t.w + 8 <= B.w : hx - gap - t.w - 8 >= 0)
+    const side = fits(ahead, near) || !fits(-ahead, far) ? ahead : -ahead
+    const right = side > 0
+    const gap = side === ahead ? near : far
+    const x = right ? Math.min(hx + gap, B.w - t.w - 8) : Math.max(8, hx - gap - t.w)
+    const y = Math.max(B.top + 6, Math.min(hy + 10 - t.h, B.h - t.h - 8))
+    t.el.classList.toggle('r', right)
+    t.el.style.transform = `translate3d(${f1(x)}px,${f1(y)}px,0)`
+  }
+  // 正在說話（對話框還在）
+  get talking() {
+    return !!this._talk
+  }
+  _dropSay() {
+    if (!this._talk) return
+    this._talk.el.remove()
+    this._talk = null
+    this.talk(false)
+  }
+
   // 專注頁關掉（縮小、結束）：停下來，狀態留著，很快又打開時接著走
   hide() {
     if (!this.on) return
@@ -168,17 +257,21 @@ export class FocusCat {
     this._timer = 0
     this._ro?.disconnect()
     hoverCat(this.cat, false)
+    this._dropSay()
     this.layer.hidden = true
   }
 
   // 關掉貓咪：小跑步離開畫面再收起來（減少動態效果時直接收）
   leave() {
     if (!this.on) return
+    this._dropSay()
     if (this.cat.still || this.cat.away) return this.hide()
     leaveCat(this.cat)
   }
 
   _build(coat, still) {
+    // 換一隻：說到一半的對話框跟著舊的那一隻收掉
+    this._dropSay()
     // 裁切路徑的 id 整頁不能重複（同一頁有兩份這個模組時也一樣）
     const id = `nk${++uid}${Math.random().toString(36).slice(2, 7)}`
     const c = COATS[coat] || COATS.mike
@@ -229,6 +322,13 @@ export class FocusCat {
     const top = Math.max(cardBottom + sitH * 0.92, bottom - Math.min(120, h * 0.14))
     this.fits = bottom - cardBottom >= sitH * 0.8
     setBounds(this.cat, { w, h, top: Math.min(top, bottom), bottom, k })
+    // 對話框放得到哪裡：卡片下面到畫面底（畫面變了，說到一半的對話框重新量大小）
+    this._box = { w, h, top: cardBottom }
+    if (this._talk?.start) {
+      this._talk.w = this._talk.el.offsetWidth
+      this._talk.h = this._talk.el.offsetHeight
+    }
+    if (!this.fits) this._dropSay()
     if (this.cat.still) this._draw()
   }
 
@@ -242,6 +342,7 @@ export class FocusCat {
     } while (left > 1e-6)
     this._draw()
     this._events()
+    this._sayStep(performance.now())
   }
 
   _start() {
@@ -271,6 +372,7 @@ export class FocusCat {
       this._drawnAt = now
       this._draw()
     }
+    this._sayStep(now)
     this._raf = requestAnimationFrame(this._frame)
   }
 

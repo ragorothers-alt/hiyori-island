@@ -83,11 +83,13 @@ export const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 
 // nextNudge：沒在計時的時候勾掉了現在該做的那一件，提示卡寫下一件；
 // mottoEvents：日程中（開會、上課這些排了時段的）先不提醒警語；
 // focusNoise：專注時的背景聲（off／rain 雨聲／brown 褐噪音／pink 粉紅噪音，休息、暫停時不放）；noiseVol：背景聲的音量（5～100）
+// flowMax：倒數到點時自動延長最多幾分鐘（theme.js 的 FLOW_MAXES；0 是到點就休息）；
+// catMotto：專注中貓咪每隔幾分鐘念一句警語（theme.js 的 CAT_MOTTOS；0 是不念）
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
   focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true, glass: 50,
   mottoEvery: 60, mottoPause: 0, mottoPauseFrom: 0, mottoPauseCut: false, mottoBar: true, focusCat: true, brief: true, awayNudge: true, tabNudge: false, backNudge: true, nextNudge: true,
-  mottoEvents: true, focusNoise: 'off', noiseVol: 50,
+  mottoEvents: true, focusNoise: 'off', noiseVol: 50, flowMax: 30, catMotto: 15,
   // 照週報洞察的建議調整過的那天（YYYY-MM-DD，沒有是空字串）：pull＝縮短一輪、motto＝拉長警語的間隔
   pullActed: '', mottoActed: '',
   // 每天的專注目標（分鐘，theme.js 的 FOCUS_GOALS；0 是不設）

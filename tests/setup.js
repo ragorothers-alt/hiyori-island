@@ -17,3 +17,5 @@ class MemoryStorage {
   }
 }
 globalThis.localStorage = new MemoryStorage()
+// 這個分頁才有的（到點自動延長時留著的慶祝）
+globalThis.sessionStorage = new MemoryStorage()

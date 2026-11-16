@@ -31,6 +31,20 @@ describe('Android 殼的即時倒數', () => {
     expect(p.at).toBeUndefined()
   })
 
+  it('會自動延長的這一輪：從開始的時間往上數（到點那一刻不跳、不響），鬧鐘排在延長做滿的時間；舊版的殼也排得到（沒有 at）', () => {
+    const START = AT - 25 * 60000
+    const FLOW_AT = AT + 30 * 60000
+    const p = liveTimer({ ...base, flow: 30, start: START, flowAt: FLOW_AT, target: '寫報告' }, done)
+    expect(p).toEqual({ since: START, doneAt: FLOW_AT, title: '專注中 · 寫報告', text: '17:25 到點後自動延長・最晚 17:55', done: { title: done.title, body: done.body } })
+    expect(p.at).toBeUndefined()
+    expect(liveTimer({ ...base, flow: 30, start: START, flowAt: FLOW_AT, round: 1, rounds: 2 }, done).text).toBe('17:25 到點後自動延長・最晚 17:55・第 1/2 輪')
+    // 到點後：同一個起點接著往上數（數字不跳），一樣在延長做滿時響
+    const ext = liveTimer({ ...base, counting: true, ext: true, flow: 30, since: AT, at: FLOW_AT, start: START, flowAt: FLOW_AT }, done)
+    expect(ext).toEqual({ since: START, doneAt: FLOW_AT, title: '自動延長中', text: '告一段落回到 App 按「做完了」・最晚 17:55', done: { title: done.title, body: done.body } })
+    // 自己按的延長
+    expect(liveTimer({ ...base, counting: true, ext: true, since: AT, at: AT + 180 * 60000 }).title).toBe('加時中')
+  })
+
   it('暫停中：不倒數、不排到點，寫還剩多久', () => {
     const p = liveTimer({ ...base, paused: true, at: null, leftMs: 12 * 60000 + 5000, target: '寫報告' }, null)
     expect(p).toEqual({ title: '暫停中 · 寫報告', text: '還剩 12:05，回到 App 繼續', chip: '暫停' })

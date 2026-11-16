@@ -111,13 +111,19 @@ export const pushSupported = () => typeof navigator !== 'undefined' && 'serviceW
 // iPhone／iPad 的 Safari 分頁裡沒有通知功能，要先加入主畫面、從主畫面打開
 export const needsHomeScreen = () => typeof navigator !== 'undefined' && 'standalone' in navigator && !navigator.standalone && !('PushManager' in globalThis)
 
-// 到點時通知上寫什麼。b：{ at, mode, up, focusMin, breakMin, round, rounds, target }
-// （mode 是到點前的狀態：'focus' 是專注結束、'break' 是休息結束；up 是正向計時滿 3 小時）
+// 到點時通知上寫什麼。b：{ at, mode, up, focusMin, breakMin, round, rounds, target, small, flow }
+// （mode 是到點前的狀態：'focus' 是專注結束、'break' 是休息結束；up 是正向計時滿 3 小時；
+// flow 是到點時自動延長了幾分鐘：倒數到點的那一刻不通知（不打斷你），延長也做滿了才通知，at 是那個時間）
 export function timerNotice(b) {
   const { round = 1, rounds = 1 } = b
   let title = '休息結束'
   let body = round < rounds ? `接著第 ${round + 1}/${rounds} 輪` : '準備好了就再開始一輪吧'
-  if (b.mode === 'focus' && b.up) {
+  if (b.mode === 'focus' && b.flow > 0) {
+    const last = round >= rounds
+    title = rounds > 1 ? (last ? `${rounds} 輪都完成了` : `第 ${round}/${rounds} 輪完成`) : '專注結束'
+    const what = b.target ? `「${b.target.length > 16 ? `${b.target.slice(0, 15)}…` : b.target}」` : ''
+    body = `${what}${Math.max(1, Math.round(b.focusMin))} 分鐘，又自動延長了 ${Math.round(b.flow)} 分鐘，${rounds > 1 && !last ? `休息 ${b.breakMin} 分鐘再接著第 ${round + 1} 輪` : '休息一下吧'}`
+  } else if (b.mode === 'focus' && b.up) {
     title = '正向計時滿 3 小時了'
     body = '先停下來，休息一下吧'
   } else if (b.mode === 'focus' && b.small) {

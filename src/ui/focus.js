@@ -4,10 +4,11 @@ import { calmMotion } from './motion.js'
 import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
-import { FOCUS_MIN, BREAK_MIN, FOCUS_GOALS, goalText, PROJECT_COLORS, PULLS, pullOf, tagOf } from '../theme.js'
-import { floating, NOISES } from '../store.js'
+import { FOCUS_MIN, BREAK_MIN, FOCUS_GOALS, FLOW_MAXES, CAT_MOTTOS, goalText, PROJECT_COLORS, PULLS, pullOf, tagOf } from '../theme.js'
+import { floating, NOISES, dateStr } from '../store.js'
 import { nextStep, order as doFirst } from '../brief.js'
-import { nextEvent } from '../planner.js'
+import { nextEvent, toM } from '../planner.js'
+import { activeMottos, MOTTO_EXAMPLES } from '../mottos.js'
 import { PROJECT_LIMITS as PL } from '../projects.js'
 import { coatOfDay } from '../catWalk.js'
 import './focus.css'
@@ -30,6 +31,13 @@ const BREATH_MS = 8000
 export const DETOUR_MS = 5 * 60000
 // 背景聲的名字（按鈕的說明、選單下面那一行）
 const NOISE_NAMES = { rain: '雨聲', brown: '褐噪音', pink: '粉紅噪音' }
+// 自動延長：之後就有日程（開會、上課）的話，延長到它開始前幾分鐘為止；剩不到幾分鐘就不延長（到點照常休息，留時間準備）
+const FLOW_GAP = 5
+const FLOW_MIN = 5
+// 專注中貓咪念的警語輪到第幾句（這台裝置記著：重新整理、下一輪也接著輪，不會一直是第一句）
+const CAT_MOTTO_KEY = 'hiyori-cat-motto'
+// 到點自動延長的那一刻，專注頁上的貓咪說的話（不出聲）
+const CAT_FLOW = ['時間到了にゃ。還在狀態裡就繼續吧', '先幫你記下來了，接著做吧にゃ', '看你這麼專心，延長一下にゃ', '不吵你，告一段落再按「做完了」にゃ']
 // 還有多久：45 分鐘、1 小時 5 分
 const span = (min) => (min >= 60 ? `${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}` : `${min} 分鐘`)
 // 照字數截（emoji 這種兩個字元組成的字不會被切成一半）
@@ -126,7 +134,8 @@ export class FocusTimer {
     this._bindNoise()
     setInterval(() => this.tick(), 250)
     this.render()
-    if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
+    // 重新整理前就在專注（倒數已經到點、會自動延長的也是：等一下接著往上數，兩人留在小木屋裡）
+    if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now() || clock.flowing(this))) hooks.focusStarted(true, this.task?.id || null, this.info)
     // 重新整理前就在計時：到點的通知再排一次（已經排著的話伺服器那邊只是換成同一個時間）
     hooks.focusPlan?.(this.boundary)
     hooks.focusLive?.(this.live, this.boundary)
@@ -157,6 +166,9 @@ export class FocusTimer {
     this.breakMin = debugMin ? debugMin / 2 : st.breakMin || BREAK_MIN
     this.rounds = this.up ? 1 : st.focusRounds || 1
     this.round = 1
+    // 到點自動延長最多幾分（開發時縮短的長度也跟著縮短）；正向計時本來就沒有到點
+    this.flow = this.up ? 0 : debugMin ? Math.min(st.flowMax || 0, debugMin) : st.flowMax || 0
+    this.cap = 0
     this.ext = false
     this.doneAt = null
     this.small = false
@@ -181,9 +193,9 @@ export class FocusTimer {
   }
   // 只寫進 localStorage（重新整理、另一個分頁接得回來），不重排通知
   _persist() {
-    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, detour, detourRang } = this
+    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, detour, detourRang, flow, cap } = this
     try {
-      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, ...(detour ? { detour, detourRang } : {}) }))
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, flow, cap, ...(detour ? { detour, detourRang } : {}) }))
     } catch {}
   }
   // 這一輪專注中切去用別的 App 一陣子（main.js 量的）：記一次，到點的提示卡上寫中途離開了幾次。
@@ -201,15 +213,50 @@ export class FocusTimer {
     const { mode, round, rounds } = this
     const paused = this.paused != null
     const counting = this.counting
-    return { mode, paused, counting, ext: !!this.ext, at: clock.nextEnd(this), since: counting && !paused ? this.endAt : null, leftMs: counting ? this.elapsed : this.left, round, rounds, target: this.task?.title || this.project?.name || '' }
+    const flow = paused ? 0 : this.flowNow
+    const at = clock.nextEnd(this)
+    // 會自動延長的這一輪：從這一輪開始的時間往上數（倒數中是到點前一整段的長度，延長中是到點的時間再往前一整段），延長做滿時叫你
+    const extra = flow ? { flow, start: (counting ? this.endAt : at) - this.focusMin * 60000, flowAt: counting ? at : at + flow * 60000 } : {}
+    return { mode, paused, counting, ext: !!this.ext, at, since: counting && !paused ? this.endAt : null, leftMs: counting ? this.elapsed : this.left, round, rounds, target: this.task?.title || this.project?.name || '', ...extra }
   }
 
-  // 下一次自己到點的時間和那時的狀況（排通知用）：沒在計時、暫停中是 null
+  // 下一次到點要通知的時間和那時的狀況（排通知用）：沒在計時、暫停中是 null。
+  // 到點會自動延長的倒數：到點的那一刻不通知（不打斷你），排在延長做滿的時間（那時還沒回來按「做完了」的話）
   get boundary() {
     const at = clock.nextEnd(this)
     if (at == null) return null
     const { mode, focusMin, breakMin, round, rounds } = this
-    return { at, mode, up: this.counting, focusMin, breakMin, round, rounds, target: this.task?.title || this.project?.name || '', ...(this.small ? { small: true } : {}) }
+    const flow = this.flowNow
+    return { at: flow && !this.counting ? at + flow * 60000 : at, mode, up: this.counting, focusMin, breakMin, round, rounds, target: this.task?.title || this.project?.name || '', ...(this.small ? { small: true } : {}), ...(flow ? { flow } : {}) }
+  }
+
+  // 自動延長幾分鐘：正在自動延長的是到點時算好的；倒數中、到點會自動延長的照現在的日程算（_flowCap）；其他是 0
+  get flowNow() {
+    if (this.mode !== 'focus') return 0
+    if (this.ext) return this.cap || 0
+    return clock.flowing(this) ? this._flowCap(this.endAt) : 0
+  }
+  // 到點（at）時能自動延長幾分鐘：設定的上限。之後就有日程要開始（開會、上課）的話，延長到它開始前 FLOW_GAP 分鐘為止，
+  // 剩不到 FLOW_MIN 分鐘就不延長（到點照常休息，留時間準備）。到點時已經在進行中的日程不算（本來就是在日程裡專注）
+  _flowCap(at = this.endAt) {
+    const max = this.flow || 0
+    if (!(max > 0)) return 0
+    const room = this._flowRoom(at, max)
+    if (room >= max) return max
+    return room >= FLOW_MIN ? Math.floor(room) : 0
+  }
+  // 從 from 起到下一個日程開始前 FLOW_GAP 分鐘，還有幾分鐘（沒有日程是 Infinity）。看 from 之後 span 分鐘內會碰到的那幾天：
+  // 延長跨過午夜時隔天一早的日程也算，還沒生成的例行日程也算。from 時已經開始了的不算
+  _flowRoom(from, span) {
+    let room = Infinity
+    for (const day of new Set([dateStr(new Date(from)), dateStr(new Date(from + span * 60000))])) {
+      const midnight = new Date(`${day}T00:00:00`).getTime()
+      for (const e of this.ui.store.timedEventsOn(day)) {
+        const t = midnight + toM(e.start) * 60000
+        if (!e.done && t > from) room = Math.min(room, (t - from) / 60000 - FLOW_GAP)
+      }
+    }
+    return room
   }
 
   // 另一個分頁存了計時狀態：換成那一份，小島上的兩人也跟著進出小木屋（不放台詞、不記專注）
@@ -254,8 +301,9 @@ export class FocusTimer {
     return clock.counting(this)
   }
   // small：這一組是「只做 5 分鐘」（加時的 ext 也是 true 時，是到點後接著做下去）；away：這一輪中途離開了幾次
+  // cap：這一段加時是到點自動延長的（最多再幾分）；focusMin：原定一輪幾分鐘
   get info() {
-    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, small: !!this.small, away: this.away || 0, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
+    return { round: this.round, rounds: this.rounds, free: this.up, ext: !!this.ext, cap: this.ext ? this.cap || 0 : 0, small: !!this.small, away: this.away || 0, focusMin: this.focusMin, breakMin: this.breakMin, projectId: this.task ? null : this.project?.id || null, sid: this.sid }
   }
   // 可以選的目標：今天還沒做完的任務、專案裡的長期任務（收藏起來的專案不列）、進行中的專案（暫停的也可以）
   _targets() {
@@ -414,6 +462,16 @@ export class FocusTimer {
     $('#fsGoal').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (b && FOCUS_GOALS.includes(+b.dataset.v)) this._setOption('focusGoal', +b.dataset.v)
+    })
+    // 到點時：休息，或自動延長最多幾分（還在心流裡就不打斷）
+    $('#fsFlow').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (b && FLOW_MAXES.includes(+b.dataset.v)) this._setOption('flowMax', +b.dataset.v)
+    })
+    // 專注中貓咪多久念一句警語
+    $('#fsCat').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (b && CAT_MOTTOS.includes(+b.dataset.v)) this._setOption('catMotto', +b.dataset.v)
     })
     // 倒數計時／正向計時
     $('#fsMode').addEventListener('click', (e) => {
@@ -932,6 +990,9 @@ export class FocusTimer {
     $('#fsRwrap').hidden = up || live
     $('#fsRoundsRow').hidden = up || live
     $('#fsBreakRow').hidden = live
+    // 到點自動延長：倒數才有（正向計時本來就是做完才按）
+    $('#fsFlowRow').hidden = up || live
+    $('#fsCatRow').hidden = live
     $('#fsGoalRow').hidden = live
     $('#fsStart').hidden = live
     $('#fsSmall').hidden = live
@@ -945,17 +1006,24 @@ export class FocusTimer {
     pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
     pickOne($$('#fsBreak button'), (b) => +b.dataset.v === st.breakMin)
     pickOne($$('#fsGoal button'), (b) => +b.dataset.v === (st.focusGoal || 0))
+    pickOne($$('#fsFlow button'), (b) => +b.dataset.v === (st.flowMax || 0))
+    pickOne($$('#fsCat button'), (b) => +b.dataset.v === (st.catMotto || 0))
     const target = this.project ? `，時間記進「${this.project.name}」` : ''
     const small = this.small ? `只做 ${this.focusMin} 分鐘，到點時再決定要不要繼續。` : ''
+    const flow = st.flowMax ? `，到點自動延長（最多 ${st.flowMax} 分）` : ''
     $('#fsSum').textContent = live
       ? this.mode === 'break'
         ? this.round < this.rounds
           ? `休息完接著第 ${this.round + 1}/${this.rounds} 輪`
           : this.small ? '開了頭就做到了。想接著做就按「繼續做下去」，不然就好好休息' : '休息完就結束了。還沒做完可以延長，想繼續可以再加一輪'
-        : this.ext ? '加時中：做完按 ■，多做的分鐘會記進去' : `${small}換了目標，這一輪的時間就算在新的目標上${target}`
+        : this.ext
+          ? this.cap
+            ? `自動延長中：原定的 ${this.focusMin} 分記下了，告一段落按 ■（最晚 ${hhmm(clock.nextEnd(this) ?? Date.now())}）`
+            : '加時中：做完按 ■，多做的分鐘會記進去'
+          : `${small}換了目標，這一輪的時間就算在新的目標上${target}`
       : up
         ? `從 0 開始往上數，做完按 ■；滿 ${FREE_MIN} 分鐘就記下來（最長 ${FREE_MAX / 60} 小時）${target}`
-        : `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪，中間休息 ${st.breakMin} 分` : `，做完休息 ${st.breakMin} 分`}${target}`
+        : `${v} 分${st.focusRounds > 1 ? ` × ${st.focusRounds} 輪${flow}，中間休息 ${st.breakMin} 分` : `${flow}，做完休息 ${st.breakMin} 分`}${target}`
     this._fillTargets($('#fsTarget'))
   }
   // 目標的下拉：今天的任務、長期任務和專案（手機上看不到任務標籤，從這裡選）
@@ -1038,6 +1106,12 @@ export class FocusTimer {
     Object.assign(this, clock.pauseToggle(this, Date.now()))
     // 限時去的時候按了暫停：自己停下來了，不再叫你回來
     if (this.paused != null) this.detour = 0
+    // 自動延長中暫停後繼續：延長做滿的時間跟著往後挪了，再看一次之後的日程，不會延長進會議裡（不夠的話很快就結束）
+    else if (this.ext && this.cap > 0) {
+      const used = this.elapsed / 60000
+      const room = this._flowRoom(Date.now(), this.cap)
+      if (room < Infinity) this.cap = Math.max(1, Math.floor(used), Math.min(this.cap, Math.floor(used + Math.max(0, room))))
+    }
     this._save()
     this.render()
   }
@@ -1098,8 +1172,53 @@ export class FocusTimer {
     // 手機橫放、很矮的視窗（版面跟 focus.css 最後那一段同一個條件）：卡片下面沒有地板，貓先不出來
     if (!open || LOW.matches) return this.cat.hide()
     if (!on) return this.cat.leave()
-    const focusMs = this.mode === 'focus' ? (this.counting ? this.elapsed : this.total - this.left) : 0
-    this.cat.show({ mode: this.mode, paused: this.paused != null, focusMs }, coatOfDay(this.ui.store.today))
+    this.cat.show({ mode: this.mode, paused: this.paused != null, focusMs: this.focusedMs }, coatOfDay(this.ui.store.today))
+  }
+  // 這一輪已經專注了多久（暫停的時間不算）：倒數的是做了多少；加時接著原定的長度往上加；正向計時是往上數的
+  get focusedMs() {
+    if (this.mode !== 'focus') return 0
+    if (this.ext) return this.focusMin * 60000 + this.elapsed
+    return this.counting ? this.elapsed : this.total - this.left
+  }
+
+  // ── 貓咪念警語：專注中每隔 catMotto 分鐘（設定），專注頁上的貓咪走過來，安靜地念一句你寫給自己的警語
+  // （不出聲、不跳通知，還在心流裡也不會被打斷；還沒寫警語的話念範例）。專注頁沒開著：小島上的もち或ふじ說
+  // （App 模式是畫面下方的對話框）；專注頁開著、貓咪不在（請牠離開了、畫面放不下）：一張不響的提示卡。
+  // 算的是這一輪專注了多久（暫停不算，延長接著算）；看不到頁面的時候先不念，回來時到了就念一句（不補念好幾句） ──
+  _catMottoTick() {
+    const every = this.ui.store.state.settings.catMotto
+    if (this.mode !== 'focus' || this.paused != null || !(every > 0)) return
+    // 同一輪：自動延長換了 id（後面多了 -x）還是同一輪
+    const key = `${this.round}:${String(this.sid || '').replace(/-x$/, '')}`
+    const slot = Math.floor(this.focusedMs / (every * 60000))
+    // 新的一輪、重新整理、改了間隔：從現在算起（不一開頭就念）
+    if (this._cm?.key !== key || this._cm.every !== every) {
+      this._cm = { key, every, slot }
+      return
+    }
+    // 貓咪還在說上一句（例如剛好在到點自動延長的那一刻）：說完再念
+    if (slot <= this._cm.slot || this.hooks.pageAway?.() || (this.bigOpen && this.cat.talking)) return
+    this._cm.slot = slot
+    const text = this._nextMotto()
+    if (this._catSay(text, { stamp: '戒' })) return
+    this.hooks.focusMotto?.(text, this.bigOpen)
+  }
+  // 專注頁上的貓咪說一句（不出聲；讀螢幕軟體念畫面外的那一行）。專注頁沒開著、貓不在（說不了）回傳 false
+  _catSay(text, o) {
+    if (!this.bigOpen || !this.cat.say(text, o)) return false
+    $('#ffSay').textContent = text
+    return true
+  }
+  // 輪到哪一句（拿出來的警語輪流念；一句都沒有就念範例）
+  _nextMotto() {
+    const on = activeMottos(this.ui.store.state.mottos).map((m) => m.text)
+    const list = on.length ? on : MOTTO_EXAMPLES
+    let i = 0
+    try {
+      i = Math.max(0, Math.floor(Number(localStorage.getItem(CAT_MOTTO_KEY)) || 0))
+      localStorage.setItem(CAT_MOTTO_KEY, String((i + 1) % 1000))
+    } catch {}
+    return list[i % list.length]
   }
 
   // 一輪專注結束：記下分鐘數，接著休息。at：本來排好到點的時間（自己按「做完了」的沒有）
@@ -1113,6 +1232,31 @@ export class FocusTimer {
     this.detourRang = false
     this._save()
     this.hooks.focusFinished(minutes, this.task?.id || null, info)
+    this.render()
+  }
+
+  // 倒數到點、這一組設了自動延長：原定的分鐘數照常記下（hooks.focusFlowed：不響、不震、不放天燈、兩人不出屋），
+  // 不休息，從到點那時接著往上數（加時）。之後就有日程要開始、剩不到幾分鐘的話照常休息（_flowCap 是 0）。
+  // late：頁面睡著，延長的時間都過了才醒來（下一次檢查就當成延長做滿）：不先說「延長中」
+  _flowOn(minutes, at) {
+    const cap = this._flowCap(at)
+    // 放太久才回來（照實際延長得到的時間算：之後有日程、延長得比較短的話更早算過期）：跟一般的倒數一樣不記
+    if (Date.now() - (at + cap * 60000) > clock.LATE) return this._expire()
+    if (!cap) return this._finishFocus(minutes, at)
+    const late = Date.now() >= at + cap * 60000
+    const info = { ...this.info, at, flow: cap, late, target: this.task?.title || this.project?.name || '' }
+    const was = this.sid
+    Object.assign(this, clock.flowStart(this, at, cap))
+    // 延長的那一段記成另一筆（只加分鐘、不多算一顆番茄）：兩個分頁同時到點，換成的也是同一個 id，只記一次
+    this.sid = `${was || 'f'}-x`.slice(-40)
+    // 這一輪按過 × 不指定目標的，延長時也不再問
+    if (this._noPick != null && this._noPick === was) this._noPick = this.sid
+    // 計時設定的小視窗開著（可能正在記下別的事）：不收起來，照新的樣子重畫
+    if (!$('#focusSet').hidden) this._renderSet()
+    this._save()
+    // 專注頁開著：貓咪說一聲（不出聲）；貓不在的話交給提示卡
+    info.catSaid = !late && this._catSay(CAT_FLOW[Math.floor(Math.random() * CAT_FLOW.length)])
+    this.hooks.focusFlowed?.(minutes, this.task?.id || null, info)
     this.render()
   }
 
@@ -1210,6 +1354,7 @@ export class FocusTimer {
     // 這一段本來排好到點的時間：通知用它認「同一次到點」
     const at = step ? clock.nextEnd(this) : null
     if (step?.do === 'finishFocus') this._finishFocus(step.minutes, at)
+    else if (step?.do === 'flow') this._flowOn(step.minutes, at)
     else if (step?.do === 'nextRound') {
       // 還有下一輪：休息完自動接著開始
       this.round++
@@ -1224,6 +1369,7 @@ export class FocusTimer {
       this._save()
       this.hooks.breakFinished(null, at)
     }
+    this._catMottoTick()
     // 每 0.25 秒檢查一次是為了準時結束；畫面上的數字一秒才變一次，沒變就不重寫
     const sec = this.mode === 'idle' ? -1 : Math.floor((this.counting ? this.elapsed : this.left) / 1000)
     if (sec === this._shown && this.mode === this._shownMode) return
@@ -1264,7 +1410,11 @@ export class FocusTimer {
     const multi = this.rounds > 1
     const label = {
       idle: this.up ? '正向計時 · ↑' : multi ? `${this.focusMin} 分 × ${this.rounds} 輪` : '專注 · しゅうちゅう',
-      focus: this.ext ? (multi ? `加時中 · ${this.round}/${this.rounds}` : this.small ? '接著做下去' : '加時中') : multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : this.small ? `只做 ${this.focusMin} 分鐘` : '專注中',
+      focus: this.ext
+        ? this.cap
+          ? multi ? `自動延長中 · ${this.round}/${this.rounds}` : '自動延長中'
+          : multi ? `加時中 · ${this.round}/${this.rounds}` : this.small ? '接著做下去' : '加時中'
+        : multi ? `專注中 · ${this.round}/${this.rounds}` : this.up ? '正向計時中' : this.small ? `只做 ${this.focusMin} 分鐘` : '專注中',
       break: multi && this.round < this.rounds ? `休息 · 下一輪 ${this.round + 1}/${this.rounds}` : '休息 · きゅうけい',
     }[this.mode]
     const t = this.targetText
@@ -1389,10 +1539,14 @@ export class FocusTimer {
     if (this.paused != null) return '計時停在這裡'
     const at = clock.nextEnd(this)
     if (this.mode === 'break') return this.round < this.rounds ? `<b>${hhmm(at)}</b> 接著第 ${this.round + 1} 輪` : `休息到 <b>${hhmm(at)}</b>`
+    // 自動延長：原定的那一段已經記下了，最晚幾點結束
+    if (this.ext && this.cap) return `${this.focusMin} 分記下了・最晚 <b>${hhmm(at)}</b>`
     if (this.ext) return this.small ? `${this.focusMin} 分鐘做到了，做完就按「做完了」` : `原定的 ${this.focusMin} 分做完了`
     // 正向計時：不寫「幾點開始」（暫停過的話，記著的起點會往後挪，不是真的開始的時間）
     if (this.counting) return this.elapsed < FREE_MIN * 60000 ? `滿 ${FREE_MIN} 分鐘就會記下來` : '做完了就按「做完了」'
-    return this.small ? `<b>${hhmm(at)}</b> 結束，到時再決定要不要繼續` : `<b>${hhmm(at)}</b> 結束`
+    if (this.small) return `<b>${hhmm(at)}</b> 結束，到時再決定要不要繼續`
+    // 到點會自動延長（之後的日程太近、延長不了的照常寫幾點結束）
+    return clock.flowing(this) && this._flowCap(at) ? `<b>${hhmm(at)}</b> 到點後自動延長` : `<b>${hhmm(at)}</b> 結束`
   }
 
   // 時間拆成一格一格（每格一樣寬，秒數跳動時整串不會左右晃）：只換有變的那幾格，換上來的輕輕浮現

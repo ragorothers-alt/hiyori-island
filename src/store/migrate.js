@@ -1,5 +1,5 @@
 import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
-import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS, FOCUS_GOALS } from '../theme.js'
+import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS, FOCUS_GOALS, FLOW_MAXES, CAT_MOTTOS } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
 import { MOTTO_LEN, MOTTO_MAX, MOTTO_EVERY, PAUSE_MAX } from '../mottos.js'
@@ -680,6 +680,9 @@ function migrate(s) {
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
   // 每天的專注目標：只收選項裡的（匯入的 75 分不會在計時設定裡對不到任何一顆）
   if (!FOCUS_GOALS.includes(settings.focusGoal)) settings.focusGoal = 0
+  // 到點自動延長最多幾分、貓咪多久念一句警語：也只收選項裡的
+  if (!FLOW_MAXES.includes(settings.flowMax)) settings.flowMax = DEFAULT_SETTINGS.flowMax
+  if (!CAT_MOTTOS.includes(settings.catMotto)) settings.catMotto = DEFAULT_SETTINGS.catMotto
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
   if (!MOTTO_EVERY.includes(settings.mottoEvery)) settings.mottoEvery = DEFAULT_SETTINGS.mottoEvery

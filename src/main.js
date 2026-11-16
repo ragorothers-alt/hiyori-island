@@ -259,6 +259,26 @@ async function boot() {
   let awayAtEnd = () => false
   // 叫你回來的那一則（backItem）交給手機排在幾點（Android；沒排著是 0）：限時去到了、App 在背景時，排著的就讓手機叫
   let backSent = 0
+  // 到點自動延長（接著往上數，換成延長那一段的 id）：中途離開的那一段跟著接著算（下面「專注中離開 App」那一段接上）
+  let awayFlow = () => {}
+  // 自動延長的那一輪，到點記下原定的那一段之前那天專注了幾分：跨過每天的目標的話，等延長做完再一起慶祝（不在心流裡吵你）。
+  // 記在這個分頁的 sessionStorage：延長中重新整理也還記得
+  const FLOW_WAS_KEY = 'hiyori-flow-was'
+  let flowWas = (() => {
+    try {
+      const v = JSON.parse(sessionStorage.getItem(FLOW_WAS_KEY) || 'null')
+      return v && typeof v.day === 'string' && Number.isFinite(v.was) ? v : null
+    } catch {
+      return null
+    }
+  })()
+  const setFlowWas = (v) => {
+    flowWas = v
+    try {
+      if (v) sessionStorage.setItem(FLOW_WAS_KEY, JSON.stringify(v))
+      else sessionStorage.removeItem(FLOW_WAS_KEY)
+    } catch {}
+  }
   const timerPush = new TimerPush({
     enabled: notifyOn,
     // 推播排得上了（剛訂閱）：警語那邊也重新看一次有沒有訂閱
@@ -557,21 +577,40 @@ async function boot() {
         ...(parked ? [{ label: `看記下的 ${parked} 件`, soft: true, run: () => ui.openParked() }] : []),
         ...leave(),
       ]
-      // 加時做完：多做的分鐘記進去（不多算一顆番茄）；不到 1 分鐘就不另外記
+      // 加時做完：多做的分鐘記進去（不多算一顆番茄）；不到 1 分鐘就不另外記。
+      // 到點自動延長的（cap）：原定的那一段到點時已經悄悄記下了，天燈、跨過每天的目標的慶祝留到現在
       if (info.ext) {
+        const auto = info.cap > 0
+        const base = auto && flowWas?.day === day0 ? flowWas.was : was
+        if (auto) setFlowWas(null)
+        // 做滿了才結束的（不是自己按「做完了」）：at 是延長做滿的時間
+        const full = auto && !!info.at
         if (minutes < 1 || store.completePomodoro(minutes, taskId, info.projectId, info.sid, { extra: true }) === false) {
-          scene?.focusStopped()
-          if (minutes < 1) ui.toast({ icon: '灯', title: '加時不到 1 分鐘', sub: '沒有另外記，接著休息一下吧', tag: 'focus', ms: 9000, actions: more() })
+          // 另一個分頁已經記過了（也已經慶祝過）：兩人出屋就好
+          if (minutes >= 1 || !auto) {
+            scene?.focusStopped()
+            if (minutes < 1) ui.toast({ icon: '灯', title: '加時不到 1 分鐘', sub: '沒有另外記，接著休息一下吧', tag: 'focus', ms: 9000, actions: more() })
+            return
+          }
+          // 自動延長了、馬上就按「做完了」：原定的那一段記下了，天燈照放
+          sfx.temple()
+          haptic('end')
+          goalDone(base, day0)
+          scene?.focusFinished(taskId, info.projectId)
+          talk('focusEnd')
+          ui.toast({ icon: '灯', title: `${Math.round(info.focusMin)} 分鐘的專注記下了`, sub: `延長不到 1 分鐘，沒有另外記・接著休息一下吧${awayNote}`, tag: 'focus', ms: 9000, actions: more() })
           return
         }
         sfx.temple()
         haptic('end')
-        goalDone(was, day0)
-        if (info.at) timerNotify({ at: info.at, mode: 'focus', up: true, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
+        goalDone(base, day0)
+        if (info.at) timerNotify({ at: info.at, mode: 'focus', up: true, focusMin: auto ? info.focusMin : minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target, ...(auto ? { flow: info.cap } : {}) })
         scene?.focusFinished(taskId, info.projectId)
-        talk('focusEnd')
+        if (full) talk('focusFlowEnd', {}, undefined, '延長的時間也到了，起來動一動吧。')
+        else talk('focusEnd')
         const next = info.rounds > 1 && !info.last ? `休息 ${info.breakMin} 分鐘後接著第 ${info.round + 1} 輪` : '接著休息一下吧'
-        ui.toast({ icon: '灯', title: `多做了 ${minutes} 分鐘，也記進去了`, sub: next + awayNote, ms: 9000, actions: more(), tag: 'focus' })
+        const title = full ? `自動延長的 ${minutes} 分鐘也做滿了` : auto ? `延長了 ${minutes} 分鐘，也記進去了` : `多做了 ${minutes} 分鐘，也記進去了`
+        ui.toast({ icon: '灯', title, sub: next + awayNote, ms: 9000, actions: more(), tag: 'focus' })
         return
       }
       // 同一輪另一個分頁已經記過了：這邊不再記、也不再放天燈
@@ -610,6 +649,37 @@ async function boot() {
       const actions = [...more(), ...(log ? [{ label: '寫紀錄', soft: true, run: () => ui.openTaskLog(t.id) }] : [])]
       ui.toast({ icon: '灯', title, sub: `${sub}・${rest}${awayNote}`, ...(actions.length ? { ms: 12000, actions } : {}), tag: 'focus' })
     },
+    // 倒數到點、設了自動延長（還在心流裡就不打斷）：原定的那一段照常記進去（番茄、經驗值、任務長大），
+    // 但不響、不震、不跳通知、不放天燈、兩人留在小木屋裡，跨過每天的目標也等延長做完再一起慶祝；計時接著往上數。
+    // 專注頁開著：貓咪已經說了一聲（catSaid，不出聲）；不然一張不響的提示卡（小島模式還有ふじ說一句），可以直接去休息。
+    // late：頁面睡著，延長的時間也過了才醒來：只記下，接著就是延長做滿（那邊會說）
+    focusFlowed: (minutes, taskId, info = {}) => {
+      const day0 = store.today
+      const was = store.peekDay(day0).focus || 0
+      // 升級、成就、每日任務達成這些慶祝先留著，延長做完再放（每秒的檢查看到不在自動延長了就放）。
+      // 同一輪另一個分頁已經記過了（也已經說過了）
+      if (store.quietly(() => store.completePomodoro(minutes, taskId, info.projectId, info.sid)) === false) return
+      setFlowWas({ day: day0, was })
+      awayFlow(info.sid, ui.focus.sid)
+      if (info.late) return
+      const end = clockOf(info.at + info.flow * 60000)
+      if (!ui.appMode) talk('focusFlow', { mins: minutes, end }, 5200, `${minutes} 分鐘到了。看你這麼專心，幫你延長到 ${end}。`, 'fuji')
+      if (info.catSaid) return
+      const t = info.target ? `「${short(info.target, 10)}」` : ''
+      ui.toast({
+        icon: '延', title: `${minutes} 分鐘到了，自動延長中`, sub: `${t}原定的記下了，還在狀態就接著做・最晚 ${end}`, ms: 9000, tag: 'focus',
+        // 專注頁開著：「做完了」就在頁面上，提示卡只說一聲
+        ...(ui.focus.bigOpen ? {} : { actions: [{ label: '現在休息', soft: true, run: () => ui.focus.mode === 'focus' && ui.focus.ext && ui.focus.stop() }] }),
+      })
+    },
+    // 專注中貓咪念警語的時間到了、專注頁上的貓說不了：專注頁沒開著是もち或ふじ說（小島上頭上的泡泡，App 模式是畫面下方的對話框）；
+    // 專注頁開著但貓不在（請牠離開了、畫面放不下）是一張不響的提示卡。都不出聲
+    focusMotto: (text, big) => {
+      if (big) return ui.toast({ icon: '戒', title: text, sub: '專注中・寫給自己的警語', ms: 7000, tag: 'motto' })
+      say(pick(['mochi', 'fuji']), `「${short(text, 28)}」`, 7000)
+    },
+    // 看不到頁面（切到別的分頁、別的 App、鎖螢幕；Android 殼另外問手機 App 在不在前面）：貓咪先不念
+    pageAway: () => document.hidden || (native && nativeAway()),
     // 最後一輪的休息中又加了一輪
     roundAdded: ({ next }) => {
       sfx.chime()
@@ -1373,7 +1443,8 @@ async function boot() {
     const t = focusTarget()
     const task = t ? `「${short(t)}」` : ''
     if (ui.focus.counting) {
-      const mins = Math.max(1, Math.floor(ui.focus.elapsed / 60000))
+      // 這一輪一共做了多久（延長的接著原定的長度算）
+      const mins = Math.max(1, Math.floor(ui.focus.focusedMs / 60000))
       talk('focusBackUp', { task, mins }, 5200, `回來了。${task}已經做了 ${mins} 分鐘，接著做吧。`)
     } else {
       const left = Math.max(1, Math.ceil(ui.focus.left / 60000))
@@ -1400,6 +1471,10 @@ async function boot() {
     store.focusLeft()
     return true
   }
+  // 到點自動延長了（同一輪接著做，換成延長那一段的 id）：還沒回來的那一段接著算，回來時、做完時照常記一次
+  awayFlow = (from, to) => {
+    if (awaySince && awaySid === from) setAway(awaySince, to)
+  }
   // 離開了 AWAY_NUDGE 還沒回來：通知叫你回來（一則；那時這一輪已經快結束的不用，到點的通知會叫你）。設定裡可以關。
   // 限時去（說好「去 5 分鐘就回來」）：就在說好的時間叫（說好的前一下子才離開的也是）；是自己要的，設定關著也叫。
   // 已經在 App 裡叫過了（之後才離開的）：照一般的離開算
@@ -1407,15 +1482,18 @@ async function boot() {
     const detour = ui.focus.detour && !ui.focus.detourRang ? ui.focus.detour : 0
     if (!awaySince || !focusing() || awaySid !== ui.focus.sid || !nativeBack() || (store.state.settings.awayNudge === false && !detour)) return null
     const at = detour || awaySince + AWAY_NUDGE
+    // 這一輪最晚幾點結束（到點會自動延長的倒數是延長做滿的時間：到點那一刻不通知，所以照樣要叫你）
     const end = ui.focus.boundary?.at || 0
     if (!(end - at > 60000)) return null
     const t = focusTarget()
     const what = t ? `「${short(t, 16)}」` : ''
+    // 還剩幾分鐘照原定到點的時間算；叫你的時候已經到點、在自動延長了的，就不寫還剩多久
+    const left = Math.round((ui.focus.endAt - at) / 60000)
     const body = detour
       ? `說好的 5 分鐘到了，回來接著做${what || '正事'}吧`
-      : ui.focus.counting
+      : ui.focus.counting || left < 1
         ? `${what}還在專注中，回來接著做吧`
-        : `${what}還在專注中，還剩 ${Math.round((end - at) / 60000)} 分鐘。回來吧`
+        : `${what}還在專注中，還剩 ${left} 分鐘。回來吧`
     return { at, title: 'ひより · 專注中', body, back: true }
   }
 
@@ -1462,8 +1540,9 @@ async function boot() {
       if (ui.focus.sid !== sid || !focusing()) return
       const t = focusTarget()
       const what = t ? `「${short(t, 16)}」` : ''
-      const left = Math.max(1, Math.round(((ui.focus.boundary?.at || end) - Date.now()) / 60000))
-      systemNotify('ひより · 專注中', ui.focus.counting ? `${what}還在專注中，回來接著做吧` : `${what}還在專注中，還剩 ${left} 分鐘。回來吧`, 'away')
+      // 還剩幾分鐘照原定到點的時間算（到點會自動延長的，最晚結束的時間更晚）
+      const left = Math.round((ui.focus.endAt - Date.now()) / 60000)
+      systemNotify('ひより · 專注中', ui.focus.counting || left < 1 ? `${what}還在專注中，回來接著做吧` : `${what}還在專注中，還剩 ${left} 分鐘。回來吧`, 'away')
     }
     // 背景的分頁計時器會對齊在整秒上，兩個分頁可能同一刻都看到「還沒叫過」：拿到鎖的那一邊在鎖裡再看一次才叫
     // （拿不到的這一秒先不看，下一秒會看到記錄）。沒有 Web Locks 的瀏覽器照舊直接看
@@ -1571,6 +1650,8 @@ async function boot() {
   // 最後一次在這一頁點、按鍵的時間：手機說 App 在背景、手上卻還在操作（殼的訊號卡住了）的話，照樣記「還在看」
   let lastInput = 0
   const touched = () => (lastInput = Date.now())
+  // 留著的慶祝等一下就放（見下面每秒的檢查）
+  let cheerT = 0
   addEventListener('pointerdown', touched, { capture: true, passive: true })
   addEventListener('keydown', touched, { capture: true })
   setInterval(() => {
@@ -1582,6 +1663,14 @@ async function boot() {
     if (booted) reminders.check()
     syncMottos()
     tabNudge()
+    // 到點自動延長時留著的慶祝（升級、成就、任務達成）：延長做完了（休息、結束、另一個分頁結束了），
+    // 等做完的那一句、提示卡先出來再放
+    if (!cheerT && store.heldCheers && !(ui.focus.mode === 'focus' && ui.focus.ext && ui.focus.cap > 0)) {
+      cheerT = setTimeout(() => {
+        cheerT = 0
+        store.releaseCheers()
+      }, 2400)
+    }
     // Android 的 App：切到別的 App 時頁面不一定馬上變成看不到（document.hidden），照手機說的算——
     // 在背景時記下離開的時間、不再每分鐘記「還在看」；回到前景時當成回來了（離開夠久就提醒現在該做）
     if (native) {

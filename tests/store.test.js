@@ -2299,6 +2299,45 @@ describe('週報', () => {
     }
   })
 
+  it('到點自動延長、貓咪念警語：預設延長最多 30 分、每 15 分鐘念一句；選項裡的匯出匯入後還在，不在選項裡的回到預設', () => {
+    expect(store.state.settings).toMatchObject({ flowMax: 30, catMotto: 15 })
+    store.setSetting('flowMax', 0)
+    store.setSetting('catMotto', 30)
+    store.importJSON(store.exportJSON())
+    expect(store.state.settings).toMatchObject({ flowMax: 0, catMotto: 30 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { flowMax: '60', catMotto: '10' } }))
+    expect(store.state.settings).toMatchObject({ flowMax: 60, catMotto: 10 })
+    for (const bad of [45, -15, 'x', 1e9]) {
+      store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { flowMax: bad, catMotto: bad } }))
+      expect(store.state.settings).toMatchObject({ flowMax: 30, catMotto: 15 })
+    }
+  })
+
+  it('先不慶祝（到點自動延長時）：記下的照常算，經驗值、升級這些事件先留著，之後照原本的順序放；不在裡面的照常馬上發', () => {
+    const got = []
+    store.on('xp', () => got.push('xp'))
+    store.on('achievement', () => got.push('achievement'))
+    store.on('change', () => got.push('change'))
+    const p0 = store.stats.pomodoros
+    store.quietly(() => store.completePomodoro(25, null, null, 'quiet-1'))
+    expect(store.stats.pomodoros).toBe(p0 + 1)
+    // 畫面照常重畫，慶祝的先留著
+    expect(got).toContain('change')
+    expect(got).not.toContain('xp')
+    expect(store.heldCheers).toBeGreaterThan(0)
+    // 延長中重新整理：這個分頁留著的還在（成就已經記成拿到了，不能指望之後再發一次）
+    const reloaded = new Store()
+    expect(reloaded.heldCheers).toBe(store.heldCheers)
+    got.length = 0
+    store.releaseCheers()
+    expect(new Store().heldCheers).toBe(0)
+    expect(got[0]).toBe('xp')
+    expect(store.heldCheers).toBe(0)
+    got.length = 0
+    store.completePomodoro(25, null, null, 'quiet-2')
+    expect(got).toContain('xp')
+  })
+
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
     setDate('2026-10-21')
     const s1 = store.addTask({ title: '本命一', date: '2026-10-21' })

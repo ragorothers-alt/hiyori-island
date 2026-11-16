@@ -409,6 +409,10 @@
     <div class="fs-row"><label for="fsTarget">目標</label><select class="fs-target" id="fsTarget"></select></div>
     <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds" role="group" aria-label="輪數"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
     <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak" role="group" aria-label="休息"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
+    <!-- 倒數到點時自動延長最多幾分（theme.js 的 FLOW_MAXES）：還在心流裡就不打斷，原定的照常記下、接著往上數，告一段落按「做完了」再休息 -->
+    <div class="fs-row" id="fsFlowRow"><span>自動延長</span><div class="seg" id="fsFlow" role="group" aria-label="倒數到點時自動延長最多幾分鐘"><button type="button" data-v="0" title="到點就休息">關</button><button type="button" data-v="15" title="到點不打斷你：原定的記下，接著往上數，最多再 15 分鐘">15 分</button><button type="button" data-v="30" title="到點不打斷你：原定的記下，接著往上數，最多再 30 分鐘">30 分</button><button type="button" data-v="60" title="到點不打斷你：原定的記下，接著往上數，最多再 60 分鐘">60 分</button></div></div>
+    <!-- 專注中貓咪多久念一句警語（theme.js 的 CAT_MOTTOS）：不出聲，專注頁上的貓咪走過來說；專注頁沒開著是もち或ふじ說 -->
+    <div class="fs-row" id="fsCatRow"><span>貓咪念警語</span><div class="seg" id="fsCat" role="group" aria-label="專注中貓咪多久念一句警語"><button type="button" data-v="0">關</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button><button type="button" data-v="20">20 分</button><button type="button" data-v="30">30 分</button></div></div>
     <!-- 每天的專注目標（theme.js 的 FOCUS_GOALS）：專注頁上方寫著已專注多少／目標，跨過去的那一輪慶祝一下 -->
     <div class="fs-row" id="fsGoalRow"><span>每天目標</span><div class="seg fs-goal" id="fsGoal" role="group" aria-label="每天的專注目標"><button type="button" data-v="0">不設</button><button type="button" data-v="60">1 小時</button><button type="button" data-v="90">1.5 小時</button><button type="button" data-v="120">2 小時</button><button type="button" data-v="180">3 小時</button></div></div>
     <!-- 專注時的背景聲（雨聲、褐噪音、粉紅噪音，src/audio.js 的 noise）：休息、暫停時不放；計時中也可以換、調音量 -->
@@ -429,6 +433,8 @@
   <div class="focus-full" id="focusFull" role="dialog" aria-modal="true" aria-label="專注計時" tabindex="-1" hidden>
     <!-- 在計時卡片下面散步的貓咪（src/ui/focusCat.js） -->
     <div class="ff-cat" id="ffCat" aria-hidden="true" hidden></div>
+    <!-- 貓咪說的話（念警語、到點自動延長時的一句）：畫面上是牠頭旁邊的對話框，讀螢幕軟體念這一行 -->
+    <p class="sr-only" id="ffSay" aria-live="polite"></p>
     <button class="icon-btn ff-min" id="ffMin" title="縮小（計時繼續）"><svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></svg></button>
     <!-- 到小木屋看兩人陪你讀書（換成小島模式）：放在左上角，下面的地板留給散步的貓咪 -->
     <button class="icon-btn ff-cabin" id="ffCabin" title="到小木屋看兩人陪你讀書（換成小島模式）" aria-label="到小木屋看兩人陪你讀書" hidden><svg viewBox="0 0 24 24"><path d="M3.8 11.6 12 4.8l8.2 6.8"/><path d="M6.3 9.8v9h11.4v-9"/><path d="M10.4 18.8v-4.6h3.2v4.6"/></svg></button>
