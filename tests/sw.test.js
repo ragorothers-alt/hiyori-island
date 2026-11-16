@@ -376,6 +376,35 @@ describe('Service Worker：警語的推播', () => {
       expect(await late.done()).toBeUndefined()
     }))
 
+  it('推播晚到、送到時已經過了就寢時間（頁面排的時候記著那一段醒著到幾點）：不出聲地放、記成念過了，不算進回神紀錄；還沒到就寢的照常出聲', () =>
+    withClock(async () => {
+      const s = setup({ mottos: [{ ...m(0), sleep: NOW + 3 * MIN }] })
+      await s.ready
+      vi.setSystemTime(NOW + 5 * MIN)
+      await run(s.on.push, { data: null })
+      expect(s.shown()).toEqual([expect.objectContaining({ tag: 'motto', body: m(0).body, silent: true, renotify: false })])
+      expect(s.alerts).toEqual([])
+      expect(await s.done()).toEqual({ at: NOW })
+      expect(await s.mottoLog()).toEqual([{ got: NOW + 5 * MIN, at: NOW, closed: false, asleep: true }])
+
+      const ok = setup({ mottos: [{ ...m(0), sleep: NOW + 30 * MIN }] })
+      await ok.ready
+      await run(ok.on.push, { data: null })
+      expect(ok.shown()).toEqual([expect.objectContaining({ tag: 'motto', silent: false, renotify: true })])
+      expect(await ok.mottoLog()).toEqual([{ got: NOW + 5 * MIN, at: NOW, closed: false }])
+    }))
+
+  it('警語的推播紀錄留最近 150 筆（一整天沒打開 App 也算得回回神紀錄）', () =>
+    withClock(async () => {
+      const s = setup({ mottos: [m(0)] })
+      await s.ready
+      await s.put('__motto-log', Array.from({ length: 200 }, (_, i) => ({ got: NOW - (200 - i) * MIN, at: NOW - (200 - i) * MIN, closed: false })))
+      await run(s.on.push, { data: null })
+      const log = await s.mottoLog()
+      expect(log).toHaveLength(150)
+      expect(log.at(-1)).toEqual({ got: NOW, at: NOW, closed: false })
+    }))
+
   it('頁面已經念過那一句（取消沒送到、推播還是來了）：不出聲地再放一次，不算新的一則；正看著 App 就幾秒後收掉', () =>
     withClock(async () => {
       const s = setup({ mottos: [m(0)], done: NOW, windows: () => [{ looking: true }] })

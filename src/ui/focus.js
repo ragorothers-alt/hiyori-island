@@ -47,6 +47,8 @@ const put = (el, html) => {
   el.innerHTML = html
 }
 export const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
+// 下一步那一行的按鈕：就做這件、×（這一輪不指定）、勾勾、寫下一步（重畫時焦點接回同一種）
+const STEP_KEYS = ['data-pick', 'data-pick-x', 'data-step', 'data-step-open']
 
 export class FocusTimer {
   constructor(ui, hooks) {
@@ -612,12 +614,18 @@ export class FocusTimer {
       // 每秒重畫時沒變就不動（put）：打到一半的字、焦點都留著
       if (el._html !== html) {
         const had = el.contains(document.activeElement)
+        // 焦點在哪一種按鈕上（就做這件、×、勾勾、寫下一步）：換上來的那一行有同一種的話接回同一種
+        // （例如別件做完了、建議的換成下一件，焦點還在「就做這件」上）
+        const kind = had ? STEP_KEYS.find((k) => document.activeElement.hasAttribute?.(k)) : null
         put(el, html)
         const input = el.querySelector('.ff-step-add input')
         if (input && draft != null) input.value = draft
         // 焦點所在的那一顆被換掉、收起來了：接到這一行新的那一顆，沒有的話交給專注頁本身、小視窗的目標
         // （不會掉到看不見的地方，也不會落在暫停這類一按就動的按鈕上）
-        if (had && !el.contains(document.activeElement)) (input || el.querySelector('[data-step]') || el.querySelector('[data-step-open]') || (big ? $('#focusFull') : $('#fsTarget'))).focus()
+        if (had && !el.contains(document.activeElement)) {
+          const same = kind && el.querySelector(`[${kind}]`)
+          ;(input || same || el.querySelector('[data-step], [data-step-open], [data-pick]') || (big ? $('#focusFull') : $('#fsTarget'))).focus()
+        }
       }
       const input = html && writing ? el.querySelector('.ff-step-add input') : null
       if (!input) continue
@@ -1040,8 +1048,11 @@ export class FocusTimer {
   }
   extend() {
     if (!this.canExtend) return false
+    const was = this.sid
     Object.assign(this, clock.extendStart(this, Date.now()))
     this.sid = `-${Math.random().toString(36).slice(2, 10)}`
+    // 延長是同一輪接著做：這一輪按過 × 不指定目標的，延長時也不再問「要專注這一件嗎？」
+    if (this._noPick != null && this._noPick === was) this._noPick = this.sid
     this._asking = false
     this.togglePicker(false)
     this.toggleSet(false)

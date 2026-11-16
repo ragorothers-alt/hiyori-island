@@ -213,13 +213,14 @@ function latestDue(list, now, late) {
   return best
 }
 
-// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆；警語留 24 筆（頁面回來時照它算回神紀錄的「提醒了幾次」，src/push.js 的 MOTTO_LOG_KEEP）
+// 記下這一則推播什麼時候送到（同一則的第二筆換掉第一筆），留最近 8 筆；警語留 150 筆（頁面回來時照它算回神紀錄的「提醒了幾次」，
+// 一整天沒打開 App 也留得下；src/push.js 的 MOTTO_LOG_KEEP）
 async function note(cache, name, entry) {
   try {
     const old = await readJSON(cache, name)
     const list = (Array.isArray(old) ? old : []).filter((x) => x && x.got !== entry.got)
     list.push(entry)
-    await putJSON(cache, name, list.slice(name === MOTTO_LOG ? -24 : -8))
+    await putJSON(cache, name, list.slice(name === MOTTO_LOG ? -150 : -8))
   } catch {}
 }
 
@@ -278,7 +279,11 @@ async function showPush() {
   const shows = []
   // 同一次到點，頁面自己發的通知也用同一個 tag（計時器：hiyori-focus-到點的時間；警語：motto）
   if (timer) shows.push({ ...timer, tag: `hiyori-focus-${timer.at}`, log: LOG_FILE, kind: 'timer' })
-  if (motto) shows.push({ ...motto, tag: 'motto', log: MOTTO_LOG, kind: 'motto', fresh: true })
+  // 推播晚到、已經過了那一段醒著的時間（頁面排的時候記下的就寢時間 sleep）：不出聲地放（已經在睡了），也不算進回神紀錄
+  if (motto) {
+    const asleep = Number.isFinite(motto.sleep) && now >= motto.sleep
+    shows.push({ ...motto, tag: 'motto', log: MOTTO_LOG, kind: 'motto', ...(asleep ? { silent: true, asleep: true } : { fresh: true }) })
+  }
   if (!shows.length) {
     if (again) shows.push({ ...again, silent: true })
     else if (planned) shows.push({ at: null, title: 'ひより', body: '提醒的時間剛改過，這一則可以略過', tag: 'hiyori-quiet', log: LOG_FILE, silent: true, quiet: true })
@@ -317,7 +322,7 @@ async function showPush() {
       for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'hiyori-motto-shown', at: said.at })
     } catch {}
   }
-  const entries = out.map((s) => [s, { got: now, at: s.at, closed: false, ...(s.quiet ? { quiet: true } : s.silent ? { again: true } : {}) }])
+  const entries = out.map((s) => [s, { got: now, at: s.at, closed: false, ...(s.quiet ? { quiet: true } : s.asleep ? { asleep: true } : s.silent ? { again: true } : {}) }])
   if (cache) for (const [s, e] of entries) await note(cache, s.log, e)
   return { cache, entries }
 }

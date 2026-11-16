@@ -7,7 +7,7 @@ import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
 import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
-import { planKey, pauseOf, pauseText, pauseUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt } from './mottos.js'
+import { planKey, pauseOf, pauseText, pauseUntil, pausedUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt, activeMottos, windowEnd } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
@@ -1332,10 +1332,18 @@ async function boot() {
   // 每秒看一次；改了資料、專注開始或結束、離開頁面時馬上看一次。leaving：頁面正要關掉（pagehide 時還不一定是 hidden）
   let mottoSig = ''
   let mottoItems = []
+  // 上一次看的時候提醒是不是關著、停著（網頁版：剛關掉、剛按先停的那一刻叫 mottoPush.hush）
+  let mottoHushed = false
   syncMottos = (leaving = false) => {
     if (!mottoPush && !nativeMottos()) return
     const now = Date.now()
     const s = store.state
+    // 時鐘被往回調了：推播那邊念到哪改回現在，照新的起點重排
+    if (mottoPush?.rewind(now)) mottoSig = ''
+    // 網頁版：自己關掉了提醒（間隔改成不提醒、警語都收起來了）、按了先停的那一刻，已經到點、推播還在路上的那幾則晚到時不出聲
+    const hushed = !(s.settings.mottoEvery > 0) || !activeMottos(s.mottos).length || pausedUntil(s.settings, now) > 0
+    if (mottoPush && hushed && !mottoHushed) mottoPush.hush(now)
+    mottoHushed = hushed
     const on = mottoExternal()
     const quietUntil = ui.focus.mode === 'focus' ? ui.focus.boundary?.at || 0 : 0
     // 剛寫下第一句、剛打開提醒：先定好從什麼時候開始算（不等下一秒的檢查），才排得出那一串
@@ -1352,7 +1360,10 @@ async function boot() {
       const items = on
         ? [
             ...(back ? [back] : []),
-            ...reminders.mottoPlan(now, { quietUntil, quiet, since, ...(max ? { max } : {}) }).map((p) => ({ at: p.at, title: 'ひより · 給自己的警語', body: mottoBody(p.text, task), ...(task ? { focus: true } : {}) })),
+            // sleep：那一段醒著的時間到幾點（推播晚到、過了就寢才送到的話，Service Worker 不出聲地放）
+            ...reminders
+              .mottoPlan(now, { quietUntil, quiet, since, ...(max ? { max } : {}) })
+              .map((p) => ({ at: p.at, title: 'ひより · 給自己的警語', body: mottoBody(p.text, task), ...(task ? { focus: true } : {}), ...(mottoPush ? { sleep: windowEnd(s.rhythm, p.at) } : {}) })),
           ].slice(0, max)
         : []
       if (mottoPush) {
@@ -1393,6 +1404,11 @@ async function boot() {
   let lastMin = -1
   // Android 的 App 現在在背景嗎（手機說的；上一秒的樣子）
   let nativeOut = false
+  // 最後一次在這一頁點、按鍵的時間：手機說 App 在背景、手上卻還在操作（殼的訊號卡住了）的話，照樣記「還在看」
+  let lastInput = 0
+  const touched = () => (lastInput = Date.now())
+  addEventListener('pointerdown', touched, { capture: true, passive: true })
+  addEventListener('keydown', touched, { capture: true })
   setInterval(() => {
     ui.tickClock()
     // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
@@ -1421,7 +1437,7 @@ async function boot() {
       // 日程頁沒在看就不重畫（切過去時會重畫）
       if (store.selectedDate === store.today && ui.tab === 'schedule') ui.renderSchedule(false)
       if (!scene?.placing && ui.focus.mode !== 'focus') ui.maybeAskReview()
-      if (!nativeOut) ui.markSeen()
+      if (!nativeOut || Date.now() - lastInput < 60000) ui.markSeen()
       // 晚上要挑明天先做的那一件：明天的例行公事先生成出來，才挑得到（例行公事只能刪不能改，刪的時候還沒做的會一起拿掉）
       const pickDay = ui.firstPickDay()
       if (pickDay && pickDay > store.today) store.prepareRoutines(pickDay)

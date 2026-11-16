@@ -18,10 +18,10 @@ function tallyDate(at, today) {
   const d = dateStr(new Date(at))
   return d <= today && daysBetween(d, today) <= 7 ? d : today
 }
-// 回到 App 時算進「提醒了幾次」的通知（手機的 App 'app'、推播 'sw' 發的）：來源那邊不清掉、各留最近幾十則，
+// 回到 App 時算進「提醒了幾次」的通知（手機的 App 'app' 留 32 則、推播 'sw' 留 150 則〔push.js 的 MOTTO_LOG_KEEP〕）：來源那邊不清掉，
 // 這台記著哪幾筆看過了（{ app: [代號], sw: [代號] }，各留最近 SHOWN_KEEP 筆，比來源留的多：還在來源裡的一定還記著）
 export const SHOWN_KEY = 'hiyori-motto-counted'
-const SHOWN_KEEP = 64
+export const SHOWN_KEEP = 200
 function readShown() {
   try {
     const v = JSON.parse(localStorage.getItem(SHOWN_KEY) || 'null')

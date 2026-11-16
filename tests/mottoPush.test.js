@@ -128,6 +128,8 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
       { got: NOW + 1000, at: NOW, closed: false },
       { got: NOW + 2000, at: NOW, closed: false, again: true },
       { got: NOW + 3000, at: NOW + 30 * MIN, closed: false, quiet: true },
+      // 晚到、過了就寢才送到的（不出聲地放）：不算
+      { got: NOW + 4000, at: NOW + 45 * MIN, closed: false, asleep: true },
       { got: NOW + 60 * MIN, at: NOW + 60 * MIN, closed: true },
       { got: NOW + 61 * MIN, at: 0 },
       null,
@@ -140,6 +142,42 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
     await log([{ got: NOW + 60 * MIN, at: NOW + 60 * MIN }, { got: NOW - 5 * MIN, at: NOW + 90 * MIN }])
     expect(await p.shown()).toEqual([{ id: `${NOW + 60 * MIN}:${NOW + 60 * MIN}`, at: NOW + 60 * MIN }, { id: `${NOW - 5 * MIN}:${NOW + 90 * MIN}`, at: NOW + 90 * MIN }])
   })
+  it('時鐘被往回調了（念到的那一則在十分鐘以後）：念到哪改回現在（快取裡的也照寫），頁面又念得到；推播早幾秒到的不算', async () => {
+    const p = await boot()
+    expect(p.claim(NOW + 120 * MIN)).toBe(true)
+    await flush()
+    expect(await file(MOTTO_DONE)).toEqual({ at: NOW + 120 * MIN })
+    expect(p.rewind(NOW + 120 * MIN - 5000)).toBe(false)
+    expect(p.done).toBe(NOW + 120 * MIN)
+    // 調回兩個小時前
+    expect(p.claim(NOW + 15 * MIN)).toBe(false)
+    expect(p.rewind(NOW)).toBe(true)
+    await flush()
+    expect(p.done).toBe(NOW)
+    expect(await file(MOTTO_DONE)).toEqual({ at: NOW })
+    expect(p.rewind(NOW)).toBe(false)
+    expect(p.claim(NOW + 15 * MIN)).toBe(true)
+    await flush()
+    // 另一個分頁重新讀快取：讀到的是改回來之後的
+    const q = await boot()
+    expect(q.done).toBe(NOW + 15 * MIN)
+  })
+
+  it('自己關掉提醒、按了先停：念到哪推到現在（快取裡的也是），已經到點、推播還在路上的那幾則晚到時當成念過了；已經比較後面就不動', async () => {
+    const p = await boot()
+    p.hush(NOW + 20 * MIN)
+    await flush()
+    expect(p.done).toBe(NOW + 20 * MIN)
+    expect(await file(MOTTO_DONE)).toEqual({ at: NOW + 20 * MIN })
+    expect(p.claim(NOW + 10 * MIN)).toBe(false)
+    p.hush(NOW + 10 * MIN)
+    await flush()
+    expect(p.done).toBe(NOW + 20 * MIN)
+    expect(await file(MOTTO_DONE)).toEqual({ at: NOW + 20 * MIN })
+    // 之後重新打開提醒：接下來的那幾則照常念
+    expect(p.claim(NOW + 35 * MIN)).toBe(true)
+  })
+
   it('看著頁面時只把字存進快取；離開頁面時才交（keepalive，幾毫秒後），沒變就不再交', async () => {
     const p = await boot()
     const list = items(15, 30, 45)

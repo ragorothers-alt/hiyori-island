@@ -20,9 +20,13 @@ export const MOTTO_FILE = '__motto-plan'
 // 警語念到哪一則了 { at }：頁面念之前寫、Service Worker 照推播顯示之後寫。誰先寫就是誰念，另一邊跳過
 export const MOTTO_DONE = '__motto-done'
 // 最近幾則警語的推播送到這台的時間 [{ got, at }]（警語卡上顯示上一則；回到頁面時算進回神紀錄，見 MottoPush.shown）。
-// Service Worker 留最近 MOTTO_LOG_KEEP 筆（public/sw.js 也寫了一份，要一起改）
+// Service Worker 留最近 MOTTO_LOG_KEEP 筆（public/sw.js 也寫了一份，要一起改）：每 10 分鐘提醒一次、一整天沒打開 App
+// 也留得下（之前只留 24 筆，四、五個小時沒打開，早一點的那幾則就算不進回神紀錄了）。
+// store/extras.js 的 SHOWN_KEEP 要比這個多
 export const MOTTO_LOG = '__motto-log'
-export const MOTTO_LOG_KEEP = 24
+export const MOTTO_LOG_KEEP = 150
+// 念到的那一則比現在晚這麼久以上：時鐘被往回調過了（推播會早幾秒到，一點點不算）
+const MOTTO_REWIND = 10 * 60000
 // 警語一次最多交給伺服器幾則（伺服器的上限也是 200）
 export const MOTTO_PUSH_MAX = 200
 // 看著頁面時，伺服器排著的下一則再過這麼久就到了：先取消，由頁面自己念（不然畫面上念一次、系統通知又跳一次）
@@ -548,14 +552,32 @@ export class MottoPush extends PushBase {
     return true
   }
 
-  async _writeDone(at) {
+  // 時鐘被往回調了（念到的那一則還在十分鐘以後）：念到哪改回現在，回傳 true（main.js 照新的起點重排那一串）。
+  // 不然往回調的那段時間裡頁面一則都不念、那一串也排不出來，推播來了也都當成念過了，要等時鐘走回原本的時間才恢復
+  rewind(now = this.now()) {
+    if (!(this.done > now + MOTTO_REWIND)) return false
+    this.done = now
+    this._writeDone(now, true)
+    return true
+  }
+
+  // 自己關掉了提醒（間隔改成不提醒、警語都收起來了）、按了先停：已經到點、推播還在路上的那幾則晚到時不出聲
+  // （念到哪推到現在，Service Worker 收到時當成念過了，不出聲地放，也不算進回神紀錄）
+  hush(now = this.now()) {
+    if (!(now > this.done)) return
+    this.done = now
+    this._writeDone(now)
+  }
+
+  // force：時鐘往回調過，比快取裡的還早也照寫
+  async _writeDone(at, force = false) {
     try {
       const reg = await this._reg()
       if (!reg) return
       const cache = await this.storage.open(PLAN_CACHE)
       const url = new URL(MOTTO_DONE, reg.scope).href
       const old = Number((await (await cache.match(url))?.json())?.at) || 0
-      if (old >= at) return this._seen(old)
+      if (!force && old >= at) return this._seen(old)
       await cache.put(url, jsonRes({ at }))
     } catch {}
   }
@@ -711,12 +733,13 @@ export class MottoPush extends PushBase {
 
   // 推播送到、Service Worker 顯示出來的警語（最近 MOTTO_LOG_KEEP 筆）：[{ id, at }]（id 是那一次送到的代號，at 是排在幾點）。
   // 回到頁面時算進回神紀錄的「提醒了幾次」（滑掉、只點通知本身的也算）；算過哪幾筆記在 store 那邊（見 mottosShown），
-  // 這裡不記、也不清，時鐘被往回調過也照樣認得新的那一筆。不出聲地再放一次的（同一則送了兩次）、「提醒的時間剛改過」的不算
+  // 這裡不記、也不清，時鐘被往回調過也照樣認得新的那一筆。不出聲地再放一次的（同一則送了兩次）、「提醒的時間剛改過」的、
+  // 晚到、已經過了就寢時間才不出聲地放的（asleep）不算
   async shown() {
     const list = await this._read(MOTTO_LOG)
     if (!Array.isArray(list)) return []
     return list
-      .filter((x) => x && Number.isFinite(x.got) && !x.quiet && !x.again && Number.isFinite(x.at) && x.at > 0)
+      .filter((x) => x && Number.isFinite(x.got) && !x.quiet && !x.again && !x.asleep && Number.isFinite(x.at) && x.at > 0)
       .map((x) => ({ id: `${x.got}:${x.at}`, at: x.at }))
   }
 }

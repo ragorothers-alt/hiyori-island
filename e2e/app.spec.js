@@ -1575,8 +1575,11 @@ test('休息前留一步：到點時還沒寫下一步的那件，提示卡上�
   await page.evaluate(() => window.hiyori.ui.focus.stop())
 })
 
-test('沒選目標就開始專注：專注頁建議現在該做的那一件（本命在前），「就做這件」選成這一輪的目標；按 × 這一輪不再問、下一輪再問', async ({ page, context, site }) => {
+test('沒選目標就開始專注：專注頁建議現在該做的那一件（本命在前），「就做這件」選成這一輪的目標；按 × 這一輪不再問（延長也是同一輪）、下一輪再問；建議的換了焦點接回「就做這件」', async ({ page, context, site }) => {
   await useAppMode(context)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await page.clock.setFixedTime(T('10:00:00'))
   await page.goto(site.url)
   await bootReady(page)
   const step = page.locator('#ffStep')
@@ -1621,13 +1624,26 @@ test('沒選目標就開始專注：專注頁建議現在該做的那一件（�
   await expect(page.locator('#ffTarget')).toBeFocused()
   await page.waitForTimeout(1300)
   await expect(step).toBeHidden()
-  // 下一輪再問
+  // 按了 × 的這一輪到點、還沒做完延長：同一輪接著做，也不再問
+  await page.clock.setFixedTime(T('10:25:01'))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  expect(await page.evaluate(() => window.hiyori.ui.focus.extend())).toBe(true)
+  await page.waitForTimeout(1300)
+  expect(await page.evaluate(() => window.hiyori.ui.focus.ext)).toBe(true)
+  await expect(step).toBeHidden()
+  // 下一輪再問（加時按 ■ 是做完了、接著休息：再按一次結束）
   await page.evaluate(() => {
     const f = window.hiyori.ui.focus
     f.stop()
+    if (f.mode !== 'idle') f.stop()
     f.toggle()
   })
   await expect(step.locator('.ff-step-t small')).toHaveText('要專注這一件嗎？')
+  // 焦點停在「就做這件」上時，建議的那一件換了（例如另一個分頁把它做完了）：焦點接到換上來的「就做這件」
+  await step.getByRole('button', { name: '就做這件' }).focus()
+  await page.evaluate((id) => window.hiyori.store.toggleTask(id), id)
+  await expect(step.locator('.ff-step-t b')).toHaveText('回信')
+  await expect(step.getByRole('button', { name: '就做這件' })).toBeFocused()
   await page.evaluate(() => window.hiyori.ui.focus.stop())
 })
 
@@ -3326,9 +3342,11 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await expect.poll(() => file('__motto-done')).toEqual({ at: T })
   // 接下來的字留在這台的快取裡；看著頁面時不交給伺服器。
   // （開機時先排好、後念的話，剛念完的 10:00 那一則也留著，見 tests/mottoPush.test.js；推播晚到時靠 __motto-done 認得出念過了）
+  // （sleep：那一段醒著的時間到幾點〔作息的就寢〕，推播晚到、過了就寢才送到的話 Service Worker 不出聲地放）
+  const bed = await page.evaluate(() => window.hiyori.store.state.rhythm.sleep)
   await expect
     .poll(async () => (await file('__motto-plan'))?.find((x) => x.at === T + 15 * 60000))
-    .toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告', focus: true })
+    .toEqual({ at: T + 15 * 60000, title: 'ひより · 給自己的警語', body: '先做最重要的那一件\n現在該做：寫期末報告', focus: true, sleep: Date.parse(`${ymd}T${bed}:00+08:00`) })
   expect((await file('__motto-plan')).every((x) => x.at >= T)).toBe(true)
   expect(mottoCalls()).toEqual([])
   await page.evaluate(() => window.hiyori.ui.setTab('records'))
@@ -3366,6 +3384,10 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await expect.poll(() => file('__motto-plan')).toEqual([])
   await page.evaluate(() => window.hiyori.ui.setTab('records'))
   await expect(page.locator('#mottoRoot .mt-reach')).toContainText('現在只在看著這一頁時提醒')
+  // 按了先停的那一刻：念到哪推到現在（已經到點、推播還在路上的那幾則晚到時，Service Worker 當成念過了、不出聲）
+  expect(await file('__motto-done')).toEqual({ at: T })
+  await page.evaluate(() => window.hiyori.store.setSetting('mottoPause', Date.now() + 3600000))
+  await expect.poll(() => file('__motto-done')).toEqual({ at: T + 5 * 60000 })
 })
 
 test('回神紀錄：警語提示卡上按「✓ 在做了」記一筆、誇一句；週報寫回神了幾次，提醒時多半本來就在做的話一鍵拉長間隔', async ({ page, context, site }) => {
