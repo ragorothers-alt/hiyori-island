@@ -7,7 +7,7 @@ import { canHaptics, hapticsOn, setHaptics, haptic, IOS } from './ui/haptics.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
-import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM } from './theme.js'
+import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM, pullOf } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
 import { native, nativeMottos, nativeBack } from './native.js'
@@ -2694,6 +2694,16 @@ export class UI {
     if (w.perfectDays) notes.push(`完美的一天 ${w.perfectDays} 次`)
     if (w.flowers.length) notes.push(`圖鑑新朋友：${w.flowers.slice(0, 4).map((f) => esc(f.name)).join('、')}${w.flowers.length > 4 ? ` 等 ${w.flowers.length} 種` : ''}`)
     if (w.challenge) notes.push(`每週挑戰「${esc(w.challenge.title)}」：${w.challenge.value >= w.challenge.goal ? '達成 ✓' : `${w.challenge.value} / ${w.challenge.goal}`}`)
+    // 這週把自己拉回來幾次：想分心時忍住的、警語提醒之後回到正事的（本來就在做的不算「拉回來」，跟今日反思的「今天的回神」一樣）；
+    // 最常想去做什麼
+    const r = s.weekReport(this.weekOpen)
+    const backs = Math.min(r.nudges, r.backs)
+    if (r.holds + backs) {
+      const top = Object.entries(r.pulls).sort((a, b) => b[1] - a[1])[0]
+      const most = top && pullOf(top[0])
+      const parts = [r.holds ? `忍住分心 ${r.holds} 次` : '', backs ? `警語提醒時回到正事 ${backs} 次` : ''].filter(Boolean).join('、')
+      notes.push(`把自己拉回來 ${r.holds + backs} 次（${parts}）${most ? `・最常想去${esc(most.label)}` : ''}`)
+    }
     $('#weekNotes').innerHTML = notes.map((n) => `<li>${n}</li>`).join('')
     // 回顧卡上的一句話，もち和ふじ輪流說
     const fuji = Math.random() < 0.5

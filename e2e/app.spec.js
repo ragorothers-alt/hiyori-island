@@ -982,11 +982,12 @@ test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下�
   expect(await subsOf(id)).toEqual(['✓找三篇參考資料', '・寫大綱'])
   await page.waitForTimeout(1300)
   await expect(step.locator('[data-step]')).toBeFocused()
-  // 最後一步：任務跟著完成，專注照常；目標解除了，這一行換成建議現在該做的那一件（焦點在選目標的那一格）
+  // 最後一步：任務跟著完成，專注照常；目標解除了，這一行換成建議現在該做的那一件（選單先讓位，焦點在「就做這件」）
   await step.locator('[data-step]').click()
   await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).done, id)).toBe(true)
   await expect(step.locator('.ff-step-t small')).toHaveText('要專注這一件嗎？')
-  await expect(page.locator('#ffTarget')).toBeFocused()
+  await expect(step.locator('[data-pick]')).toBeFocused()
+  await expect(page.locator('#ffTargetWrap')).toBeHidden()
   expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
   // 還沒拆的任務：「＋ 拆出第一小步」，打到一半每秒重畫也不會洗掉；Enter 寫下，變成下一步
   const id2 = await page.evaluate(() => {
@@ -1300,6 +1301,25 @@ test('想分心時說出想去做什麼：點一下選起來（再點取消）�
   await expect(page.locator('#coachRoot .wr-ins li', { hasText: '最常想去休息一下' })).toContainText('先照這樣再看幾天')
 })
 
+test('上週回顧卡：寫著那週把自己拉回來幾次（忍住分心、警語提醒時回到正事；本來就在做的不算）和最常想去做什麼', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = new Date(s.today + 'T00:00:00')
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    // 上週一
+    const mon = new Date(t.getFullYear(), t.getMonth(), t.getDate() - ((t.getDay() + 6) % 7) - 7)
+    const day = (n) => s.day(ymd(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + n)))
+    Object.assign(day(1), { holds: 2, nudges: 3, backs: 1, onTask: 1, pulls: { phone: 2 } })
+    Object.assign(day(3), { holds: 1, nudges: 2, backs: 2, pulls: { msg: 1 } })
+    window.hiyori.ui.openWeekCard()
+  })
+  await expect(page.locator('#weekModal')).toBeVisible()
+  await expect(page.locator('#weekNotes')).toContainText('把自己拉回來 6 次（忍住分心 3 次、警語提醒時回到正事 3 次）・最常想去滑手機')
+})
+
 test('今天的回神：今日反思最上面寫今天專注了多久、想分心時忍住幾次（最常想去做什麼）、警語提醒時回神幾次，誇一句；什麼都還沒有就不放', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
@@ -1518,13 +1538,16 @@ test('沒選目標就開始專注：專注頁建議現在該做的那一件（�
   await expect(page.locator('#focusFull')).toBeVisible()
   await expect(step.locator('.ff-step-t small')).toHaveText('要專注這一件嗎？')
   await expect(step.locator('.ff-step-t b')).toHaveText('寫期末報告')
-  // 就做這件：這一輪的目標換成它，這一行換成拆出第一小步（焦點接過去），ふじ／もち說一聲
+  // 目標的選單先讓位給這一行（版面一樣高）
+  await expect(page.locator('#ffTargetWrap')).toBeHidden()
+  // 就做這件：這一輪的目標換成它，這一行換成拆出第一小步（焦點接過去），選單回來寫著它，ふじ／もち說一聲
   await step.getByRole('button', { name: '就做這件' }).click()
   await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.taskId)).toBe(id)
   await expect(step.locator('[data-step-open]')).toBeFocused()
+  await expect(page.locator('#ffTargetWrap')).toBeVisible()
   await expect(page.locator('#ffTarget')).toHaveValue(`t:${id}`)
   await expect.poll(() => chatSaid(page, '寫期末報告')).toBe(true)
-  // 不指定也可以：按 ×，這一輪不再問（每秒重畫也不會再跑出來）
+  // 不指定也可以：按 ×，這一輪不再問（每秒重畫也不會再跑出來），選單出來、焦點在上面
   await page.evaluate(() => {
     const f = window.hiyori.ui.focus
     f.stop()
@@ -1534,6 +1557,8 @@ test('沒選目標就開始專注：專注頁建議現在該做的那一件（�
   await expect(step.locator('.ff-step-t b')).toHaveText('寫期末報告')
   await step.getByRole('button', { name: '這一輪不指定目標' }).click()
   await expect(step).toBeHidden()
+  await expect(page.locator('#ffTargetWrap')).toBeVisible()
+  await expect(page.locator('#ffTarget')).toBeFocused()
   await page.waitForTimeout(1300)
   await expect(step).toBeHidden()
   // 下一輪再問

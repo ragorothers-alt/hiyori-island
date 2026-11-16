@@ -488,9 +488,11 @@ export class FocusTimer {
           this.setTarget(`t:${pick.dataset.pick}`)
           return el.querySelector('[data-step], [data-step-open]')?.focus()
         }
+        // ×：這一輪不用，目標的選單出來（焦點放上去，想選別件就直接選）
         if (e.target.closest('[data-pick-x]')) {
           this._noPick = this.sid
-          return this._renderStep()
+          this.render()
+          return (el.id === 'fsStep' ? $('#fsTarget') : $('#ffTarget')).focus()
         }
         if (!e.target.closest('[data-step-open]')) return
         this._stepOpen = this.taskId
@@ -526,6 +528,13 @@ export class FocusTimer {
       })
     }
   }
+  // 沒選目標就開始專注：建議現在該做的那一件（本命、重要的、排了時間早的在前，跟警語的「現在該做」一樣），
+  // 一鍵選成這一輪的目標（專注的時間記進去、看得到下一步）。這一輪按了 × 就不再問。
+  // 專注頁上這一行先取代目標的選單（按 × 選單再出來）：版面一樣高，貓咪的地板不會被擠掉
+  _pickTask() {
+    if (this.mode !== 'focus' || this.task || this.project || this._noPick === this.sid) return null
+    return doFirst(this.ui.store.tasksOn(this.ui.store.today))[0] || null
+  }
   // 這一輪的那件還沒寫下一步（到點的提示卡上給「留一步給等等」）：還在計時（休息中、下一輪）、任務還沒做完、小步驟還沒滿
   get canLeaveStep() {
     const t = this.mode === 'idle' ? null : this.task
@@ -556,7 +565,8 @@ export class FocusTimer {
     // （專注頁休息時看不到那一格：交給專注頁本身）
     const next = this.task ? nextStep(this.task) : null
     this._renderStep()
-    if (!next) return (box.id === 'fsStep' ? $('#fsTarget') : this.mode === 'break' ? $('#focusFull') : $('#ffTarget')).focus()
+    // 專注中目標解除了、這一行換成建議的下一件時：焦點放在「就做這件」上（選單那時讓位給它）
+    if (!next) return (box.id === 'fsStep' ? $('#fsTarget') : this.mode === 'break' ? $('#focusFull') : box.querySelector('[data-pick]') || $('#ffTarget')).focus()
     box.querySelector('[data-step]')?.focus()
     this.hooks.stepDone?.(step.title, next.title)
   }
@@ -570,9 +580,7 @@ export class FocusTimer {
     const draft = writing && this._stepDraft?.id === t.id ? this._stepDraft.text : null
     // 專注和休息時的提示字不一樣，畫好之後另外換（打到一半時到點，輸入框不會被換掉）
     const [ph, label] = brk ? ['等等回來先做什麼？寫小一點、一坐下就做得到的', '留一步給等等的自己：休息完先做什麼'] : ['下一小步是什麼？寫小一點、馬上做得到的', '寫下這件的下一小步']
-    // 沒選目標就開始專注：建議現在該做的那一件（本命、重要的、排了時間早的在前，跟警語的「現在該做」一樣），
-    // 一鍵選成這一輪的目標（專注的時間記進去、看得到下一步）。這一輪按了 × 就不再問
-    const pick = this.mode === 'focus' && !t && !this.project && this._noPick !== this.sid ? doFirst(this.ui.store.tasksOn(this.ui.store.today))[0] : null
+    const pick = this._pickTask()
     for (const el of [$('#ffStep'), $('#fsStep')]) {
       const big = el.id === 'ffStep'
       let html = ''
@@ -1212,7 +1220,8 @@ export class FocusTimer {
     $('#ffTask').hidden = !brk
     $('#ffTask').textContent = this.round >= this.rounds && this.rounds > 1 ? '這一組做完了，起來動一動、喝口水' : '起來動一動、喝口水'
     const sel = $('#ffTarget')
-    $('#ffTargetWrap').hidden = brk
+    // 沒選目標、正在建議現在該做的那一件：選單先讓位給那一行（_pickTask）
+    $('#ffTargetWrap').hidden = brk || !!this._pickTask()
     // 選單在打開全螢幕時填好；目標從別的地方換了才重填（正在選的時候不動它）
     if (!brk && document.activeElement !== sel && sel.value !== this._targetKey()) this._fillTargets(sel)
     // 目標前面的點：任務分類或專案的顏色（沒指定是灰的）
