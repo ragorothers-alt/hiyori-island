@@ -860,7 +860,8 @@ test('只做 5 分鐘：卡關小卡、計時設定上都能按；不動設定�
   expect(await state()).toMatchObject({ pomos: before.pomos + 1, mins: before.mins + 5 })
   const done = page.locator('#toasts .toast', { hasText: '5 分鐘到了，開了頭就不難了' })
   await expect(done).toContainText('「整理研究筆記」+5 分鐘')
-  await expect(done.locator('.toast-act')).toHaveText(['繼續做下去', '休息一下'])
+  // 這件還沒寫下一步：也可以先留一步給等等的自己
+  await expect(done.locator('.toast-act')).toHaveText(['繼續做下去', '休息一下', '留一步給等等'])
   // 接著做下去：從到點那時（1 分鐘前）往上數；做完按「做完了」，多做的分鐘記進去（不多算一顆番茄）
   await done.locator('.toast-act', { hasText: '繼續做下去' }).click()
   expect(await state()).toMatchObject({ mode: 'focus', ext: true, up: true, small: true })

@@ -477,7 +477,9 @@ export class FocusTimer {
     const el = $('#ffStep')
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-step]')
-      if (b) return this._checkStep(b.dataset.step)
+      // 連按兩下的第二下（detail 是連按的第幾下）落在換上來的勾勾上：不算。勾完要重畫，機器忙的時候兩下會隔得比較久，
+      // 只看時間（_checkStep 的 600 毫秒）擋不住
+      if (b) return e.detail > 1 ? undefined : this._checkStep(b.dataset.step)
       if (!e.target.closest('[data-step-open]')) return
       this._stepOpen = this.taskId
       this._renderStep()
