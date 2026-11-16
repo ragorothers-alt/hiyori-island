@@ -3,7 +3,8 @@ import { esc, armConfirm } from './dom.js'
 import { AI_MODELS, PASS_MIN, aiModel, aiPass, askAI, setAiModel, setAiPass } from '../ai.js'
 
 // 設定裡「ふじ的 AI」那一列：填通行碼、選模型、測試連線。
-// Claude API 金鑰不經過這裡：它放在自己的 Worker 的 secret，這裡只放通行碼（只存在這台裝置）。
+// Claude API 金鑰不經過這裡：它放在自己的 Worker 的 secret，這裡只放通行碼和選的模型
+// （存在這台裝置；開著線上同步時跟著同步碼加密帶到別台，見 ../ai.js 的 aiShare）。
 // 輸入框只在打開時建一次，測試連線的結果只更新文字，打字不會被打斷。
 
 export class AiView {

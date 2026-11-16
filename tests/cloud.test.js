@@ -3,6 +3,7 @@ import worker, { MAX_DATA } from '../worker/src/index.js'
 import { Store } from '../src/store.js'
 import { CloudSync, codeFromHash, deriveKeys, newCode, normalizeCode, seal, shareLink, unseal } from '../src/cloud.js'
 import { FileSync } from '../src/sync.js'
+import { AI_MODELS, aiExtras, aiModel, aiPass, aiUnshared, setAiModel, setAiPass } from '../src/ai.js'
 import { createD1 } from './helpers/d1.js'
 
 // 每台裝置各自一份 localStorage；fetch 直接交給真正的 Worker 程式，資料庫是記憶體裡的 SQLite
@@ -190,6 +191,78 @@ describe('線上同步', () => {
     b.sync.extras = { set: () => { throw new Error('壞了') } }
     await b.run((_s, sync) => sync.sync())
     expect(titles(b.store)).toContain('A 又加一件')
+  })
+
+  it('ふじ的 AI 通行碼和選的模型（aiExtras）：一台設好，別台輸入同步碼就有；之後哪一台換了模型、改了通行碼，另一台同步後跟著換', async () => {
+    const [OPUS, SONNET, HAIKU] = AI_MODELS.map((m) => m.id)
+    const a = device()
+    const b = device()
+    const seenA = []
+    const seenB = []
+    a.sync.extras = aiExtras((x) => seenA.push(x))
+    b.sync.extras = aiExtras((x) => seenB.push(x))
+    const ai = () => ({ pass: aiPass(), model: aiModel(), unshared: aiUnshared() })
+    await a.run((s) => {
+      s.addTask({ title: 'A 的任務' })
+      setAiPass('春天的通行碼')
+      setAiModel(SONNET)
+      expect(aiUnshared()).toBe(true)
+    })
+    const code = await a.run((_s, sync) => sync.start())
+    expect(await a.run(ai)).toEqual({ pass: '春天的通行碼', model: SONNET, unshared: false })
+    later()
+    // B 沒設過、也沒選過模型：輸入同步碼，通行碼和模型都到了；剛從雲端拿來的不用為了它再送一次
+    expect(await b.run(ai)).toEqual({ pass: '', model: OPUS, unshared: false })
+    await b.run((_s, sync) => sync.join(code))
+    expect(await b.run(ai)).toEqual({ pass: '春天的通行碼', model: SONNET, unshared: false })
+    expect(seenB).toEqual([{ pass: true, model: true }])
+    later()
+    // B 換了模型：還沒送上去 → 存一次檔送上去（main.js 的 shareAi）；A 同步後跟著換，通行碼沒動
+    await b.run((s, sync) => {
+      setAiModel(HAIKU)
+      expect(aiUnshared()).toBe(true)
+      s.save()
+      return sync.sync()
+    })
+    expect(await b.run(ai)).toEqual({ pass: '春天的通行碼', model: HAIKU, unshared: false })
+    later()
+    await a.run((_s, sync) => sync.sync())
+    expect(await a.run(ai)).toEqual({ pass: '春天的通行碼', model: HAIKU, unshared: false })
+    expect(seenA).toEqual([{ pass: false, model: true }])
+    // A 改了通行碼：B 同步後跟著換，模型還是 B 選的那一個
+    later()
+    await a.run((s, sync) => {
+      setAiPass('夏天的通行碼')
+      s.save()
+      return sync.sync()
+    })
+    later()
+    await b.run((_s, sync) => sync.sync())
+    expect(await b.run(ai)).toEqual({ pass: '夏天的通行碼', model: HAIKU, unshared: false })
+    expect(seenB).toEqual([{ pass: true, model: true }, { pass: true, model: false }])
+    // B 停用了 AI：只停這一台。它之後寫上去的那一包不帶通行碼，A 照用自己的；B 再同步也不會被開回來
+    later()
+    await b.run((s, sync) => {
+      setAiPass('')
+      s.addTask({ title: 'B 的任務' })
+      return sync.sync()
+    })
+    later()
+    await a.run((_s, sync) => sync.sync())
+    expect(titles(a.store)).toContain('B 的任務')
+    expect(await a.run(ai)).toEqual({ pass: '夏天的通行碼', model: HAIKU, unshared: false })
+    later()
+    await a.run((s, sync) => {
+      s.addTask({ title: 'A 又加一件' })
+      return sync.sync()
+    })
+    later()
+    await b.run((_s, sync) => sync.sync())
+    expect(await b.run(ai)).toEqual({ pass: '', model: HAIKU, unshared: false })
+    // 伺服器存的是密文；小島的資料裡沒有通行碼和模型
+    expect(JSON.stringify(vaults())).not.toContain('通行碼')
+    expect(JSON.stringify(vaults())).not.toContain(HAIKU)
+    expect(a.store.exportJSON()).not.toContain('aiModel')
   })
 
   it('全新裝置輸入同步碼直接載入，不會問衝突', async () => {

@@ -24,7 +24,7 @@ import { lookHour, nightAt, realHour, systemDark, daypart } from './daylight.js'
 import { RESIDENTS, buildingOf } from './data/town.js'
 import { pick, short, fill, line } from './voice.js'
 import { createAgent } from './agentRunner.js'
-import { aiPass, aiPassAt, aiShare, aiAdopt } from './ai.js'
+import { AI_MODELS, aiModel, aiExtras, aiUnshared } from './ai.js'
 
 // 描寫天色的字眼：外觀設定讓天空和真實時間不同時（例如白天開夜間模式），問候避開這些句子
 const SKY_WORDS = /陽光|晨光|太陽|曬|樹蔭|晚霞|夕陽|星星|月亮|夜色|天色|天黑|螢火蟲/
@@ -1662,31 +1662,15 @@ async function boot() {
 
   // ── 同步：線上同步（同步碼，手機也能用）＋資料夾同步（資料寫進 OneDrive／Dropbox 裡的檔案）。兩種可以同時開 ──
   const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「紀錄 → 設定」選要保留哪一邊', ms: 7000 })
-  // ふじ的 AI 通行碼跟著同步碼走：放在加密的那一包裡帶到別台（伺服器看不到），別台輸入同步碼就能用，不用再填一次。
-  // 各台用比較新設的那一組；這台送上去過哪一組記在 AI_SHARED_KEY（還沒送過的，開機後補送一次）
-  const AI_SHARED_KEY = 'hiyori-ai-pass-shared'
-  const aiSharedAt = () => {
-    try {
-      return localStorage.getItem(AI_SHARED_KEY) || ''
-    } catch {
-      return ''
-    }
-  }
+  // ふじ的 AI 通行碼和選的模型跟著同步碼走：放在加密的那一包裡帶到別台（伺服器看不到），別台輸入同步碼就能用，不用再填、再選一次。
+  // 通行碼、模型各自用比較新設的那一個（src/ai.js 的 aiExtras）
   const cloudSync = new CloudSync(store, {
-    extras: {
-      get: aiShare,
-      sent: (x) => {
-        try {
-          localStorage.setItem(AI_SHARED_KEY, String(x.aiPassAt))
-        } catch {}
-      },
-      set: (x) => {
-        if (!aiAdopt(x)) return
-        // 別台設的通行碼到了：ふじ的卡片出現、之前連不上的再試
-        ui.aiShared()
-        ui.toast({ icon: '藤', stamp: true, title: 'ふじ的 AI 通行碼同步過來了', sub: '別台設好的，這台不用再填一次', ms: 6000 })
-      },
-    },
+    extras: aiExtras(({ pass }) => {
+      // 別台設的通行碼、選的模型到了：設定那一列跟著變、ふじ的卡片出現、之前連不上的再試
+      ui.aiShared()
+      if (pass) ui.toast({ icon: '藤', stamp: true, title: 'ふじ的 AI 通行碼同步過來了', sub: '別台設好的，這台不用再填一次', ms: 6000 })
+      else ui.toast({ icon: '藤', stamp: true, title: `ふじ改用 ${AI_MODELS.find((m) => m.id === aiModel())?.label || 'Claude'} 了`, sub: '別台選的模型，這台跟著換', ms: 5000 })
+    }),
     onStatus: () => ui.renderSync(),
     onPulled: () => ui.toast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),
     onConflict,
@@ -1698,12 +1682,12 @@ async function boot() {
   })
   ui.attachCloud(cloudSync)
   ui.attachSync(fileSync)
-  // 這台的通行碼還沒跟著同步送上去過（這個功能上線前就設好的）：同步接上後補送一次
-  const shareAiPass = () => {
-    if (cloudSync.state !== 'off' && cloudSync.state !== 'unsupported' && aiPass() && aiSharedAt() !== String(aiPassAt())) store.save()
+  // 這台的通行碼、模型還沒跟著同步送上去過（剛設、剛換，或這個功能上線前就設好的）：送一次（同步接上後也看一次）
+  const shareAi = () => {
+    if (cloudSync.state !== 'off' && cloudSync.state !== 'unsupported' && aiUnshared()) store.save()
   }
-  hooks.aiPassSet = shareAiPass
-  cloudSync.init().then(shareAiPass, () => {})
+  hooks.aiSet = shareAi
+  cloudSync.init().then(shareAi, () => {})
   fileSync.init()
   // 分享連結（#sync=同步碼）：先從網址拿掉，再到設定裡等使用者按「連線」
   const linkCode = codeFromHash()

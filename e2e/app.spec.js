@@ -4284,6 +4284,15 @@ test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的�
   // 可以換模型
   await row.locator('[data-ai="model"][data-v="claude-sonnet-5-5"]').click()
   await expect(row.locator('.ai-info')).toContainText('用 Sonnet')
+  // 選的模型跟通行碼一起帶上去
+  expect(await page.evaluate(() => window.hiyori.cloudSync.extras.get())).toMatchObject({ aiPass: 'e2e-synced-pass', aiModel: 'claude-sonnet-5-5' })
+  // 別台之後換了模型（通行碼還是原來那一組）：這台跟著換、說一聲；比這台舊的不理
+  await page.evaluate(() => window.hiyori.cloudSync.extras.set({ aiPass: 'e2e-synced-pass', aiPassAt: 1, aiModel: 'claude-haiku-5-5', aiModelAt: Date.now() + 5000 }))
+  await toastSeen(page, 'ふじ改用 Haiku 了')
+  await expect(row.locator('.ai-info')).toContainText('用 Haiku')
+  await expect(row.locator('[data-ai="model"][data-v="claude-haiku-5-5"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.evaluate(() => window.hiyori.cloudSync.extras.set({ aiModel: 'claude-opus-5-5', aiModelAt: 5 }))
+  await expect(row.locator('[data-ai="model"][data-v="claude-haiku-5-5"]')).toHaveAttribute('aria-pressed', 'true')
   // 自己正在打新的通行碼時，別處又變了：打到一半的字留著
   await row.locator('[data-ai="edit"]').click()
   await row.locator('.ai-pass').fill('打到一半')

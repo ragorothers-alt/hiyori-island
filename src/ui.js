@@ -304,8 +304,8 @@ export class UI {
       // 通行碼、模型改了：ふじ的卡片跟著出現或收起來，之前連不上的也再試
       changed: () => {
         this._aiChanged()
-        // 開著線上同步的話，新的通行碼跟著送到別台
-        this.hooks.aiPassSet?.()
+        // 開著線上同步的話，新的通行碼、剛選的模型跟著送到別台
+        this.hooks.aiSet?.()
       },
     })
     // 另一個分頁（或同一個網站的另一個視窗）設了、換了通行碼或模型：這邊的設定列和ふじ的卡片跟著變
@@ -329,7 +329,7 @@ export class UI {
     this.agentView?.render()
     this._coach.view?.aiChanged?.()
   }
-  // 別台設的通行碼同步過來了（main.js）
+  // 別台設的通行碼、選的模型同步過來了（main.js），或另一個分頁改了
   aiShared() {
     this.aiView.result = ''
     this.aiView.refresh()
