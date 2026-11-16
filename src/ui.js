@@ -35,7 +35,7 @@ import { SubsView } from './ui/subs.js'
 import { MottosView, MottoBar } from './ui/mottos.js'
 import { CloudView } from './ui/cloud.js'
 import { AiView } from './ui/ai.js'
-import { AgentCard, AgentView } from './ui/agent.js'
+import { AgentCard, AgentView, AgentDock } from './ui/agent.js'
 import { TodayView } from './ui/today.js'
 import { readBackup, readBackups, restoreBackup } from './sync.js'
 import { doneOn, todayProgress } from './habits.js'
@@ -248,10 +248,17 @@ export class UI {
     if (this.agent) {
       const agentHooks = {
         toast: (o) => this.toast(o),
-        startFocus: (id) => this.focus.ask(id),
-        openChat: () => this.openAgent(),
+        startFocus: (id) => {
+          this.fuji?.close()
+          this.focus.ask(id)
+        },
+        openChat: () => {
+          this.fuji?.close()
+          this.openAgent()
+        },
         // 還沒接上 Claude：到設定裡填通行碼
         openSetup: () => {
+          this.fuji?.close()
           this.setTab('records')
           requestAnimationFrame(() => {
             $('#aiRow').scrollIntoView({ block: 'center' })
@@ -262,6 +269,20 @@ export class UI {
       this.agentCard = new AgentCard(this.agent, store, agentHooks)
       this.agentView = new AgentView(this.agent, store, agentHooks)
       viewHooks.agentView = () => this.agentView
+      // 隨叫隨到的ふじ：Dock 的「藤」、J 或 Ctrl＋J。看得到現在在哪一頁
+      this.fuji = new AgentDock($('#fujiSheet'), this.agent, store, {
+        ...agentHooks,
+        here: () => this.here(),
+        // 關掉時焦點回到叫出她的那顆按鈕（鍵盤操作的人不會掉到頁面最外面）
+        closed: () => {
+          const back = this._fujiFrom
+          this._fujiFrom = null
+          if (back?.isConnected && !document.activeElement?.closest?.('.modal:not([hidden])')) back.focus({ preventScroll: true })
+        },
+      })
+      $('#fujiBtn').onclick = () => this.toggleFuji()
+      $('#fujiBtn').hidden = !this.agent.ready()
+      this._lookMode = store.state.settings.agentMode
     }
     this._calendar = lazy(() => import('./ui/calendar.js').then(({ CalendarView }) => new CalendarView($('#calendar'), store, viewHooks)))
     this._coach = lazy(() => import('./ui/coach.js').then(({ CoachView }) => new CoachView($('#coachRoot'), store, viewHooks)), $('#coachRoot'))
@@ -327,7 +348,90 @@ export class UI {
     this.agent?.reset()
     this.agentCard?.render()
     this.agentView?.render()
+    this.fuji?.render()
+    if (this.agent) $('#fujiBtn').hidden = !this.agent.ready()
     this._coach.view?.aiChanged?.()
+  }
+
+  // ── 隨叫隨到的ふじ（ui/agent.js 的 AgentDock）──
+  // 打開（text：先填進輸入框的一句）；別的對話框開著時不疊上去
+  openFuji(text = '') {
+    if (!this.fuji) return false
+    const top = this._topLayer()
+    if (top && top.id !== 'fujiSheet') return false
+    if (!this.fuji.isOpen) this._fujiFrom = document.activeElement
+    this.fuji.open(text)
+    return true
+  }
+  toggleFuji() {
+    if (this.fuji?.isOpen) this.fuji.close()
+    else this.openFuji()
+  }
+  // ふじ要知道使用者正在看哪裡：哪一頁、那一頁選的日子、打開著的專案（和裡面的任務）、正在編輯的日程或任務
+  here() {
+    // 開機時（日曆、專案詳情還沒建好）也會問一次
+    const cal = this._calendar?.view?.isOpen
+    const page = cal ? 'calendar' : this.tab
+    // 看著哪一天：任務、日程、日曆是選的那天；其他頁（今日總覽、習慣…）一律是今天
+    const out = { page, date: ['tasks', 'schedule', 'calendar'].includes(page) ? this.store.selectedDate : this.store.today }
+    const pv = this._project?.view
+    if (this.tab === 'projects' && pv?.id) {
+      out.project = pv.id
+      if (pv.taskId) out.task = pv.taskId
+    }
+    const ed = this.schedule?.editing
+    if (ed?.id && $('#editSheet') && !$('#editSheet').hidden) out[ed.type === 'event' ? 'event' : 'task'] = ed.id
+    return out
+  }
+  // ふじ說完之後替使用者打開的畫面（agentRunner 的 hooks.go）
+  agentGo(g) {
+    if (!g) return
+    this.fuji?.close()
+    if (g.do === 'focus') {
+      if (this.store.state.tasks.some((t) => t.id === g.id && !t.done)) this.focus.startWith(g.id)
+      return
+    }
+    if (g.page === 'calendar') return this._use(this._calendar, (c) => c.open())
+    if (g.page === 'settings') {
+      this.setTab('records')
+      return requestAnimationFrame(() => $('#settingsBox')?.scrollIntoView({ block: 'start' }))
+    }
+    if (g.page) return this.setTab(g.page)
+    const s = this.store.state
+    if (g.kind === 'project' || g.kind === 'milestone') return this.openProject(g.kind === 'project' ? g.id : g.pid)
+    if (g.kind === 'task') {
+      const t = s.tasks.find((x) => x.id === g.id)
+      if (!t) return
+      if (t.project && s.projects.some((p) => p.id === t.project)) return this.openProject(t.project, undefined, t.id)
+      this.store.selectDate(t.date)
+      return this.setTab('tasks')
+    }
+    if (g.kind === 'event') {
+      const e = s.events.find((x) => x.id === g.id)
+      if (!e) return
+      this.store.selectDate(e.date)
+      this.setTab('schedule')
+    }
+  }
+  // 設定被ふじ改了（或撤銷了）：外觀、字的大小、音效、計時、背景聲跟著換
+  syncSettings() {
+    const st = this.store.state.settings
+    // 外觀、音效：一樣的話這兩個什麼都不會變
+    this.hooks.setTheme?.(st.theme)
+    this.renderTheme()
+    this.hooks.setSound?.(st.sound !== false)
+    // 自己整理的方式換了：之前出的錯、還在路上的整理不算了（跟在「ふじ」那一頁換的時候一樣）
+    if ((this._lookMode ?? st.agentMode) !== st.agentMode) this.agent?.reset()
+    this._lookMode = st.agentMode
+    this.applyFontScale()
+    if (this.focus) {
+      if (this.focus.mode === 'idle') this.focus._loadLengths()
+      this.focus._renderSet?.()
+      this.focus.render()
+      this.focus._noiseSync()
+    }
+    this.renderChrome()
+    this.renderSettings()
   }
   // 別台設的通行碼、選的模型同步過來了（main.js），或另一個分頁改了
   aiShared() {
@@ -523,6 +627,13 @@ export class UI {
         e.preventDefault()
         return this.findProject()
       }
+      // Ctrl／⌘＋J 叫ふじ（跟 Notion AI 一樣）：在別的欄位打字時也能用；開著時再按一次收起來
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j' && this.fuji && this.agent?.ready()) {
+        const top = this._topLayer()
+        if (top && top.id !== 'fujiSheet') return
+        e.preventDefault()
+        return this.toggleFuji()
+      }
       // 專注中按 N：腦中冒出別的事，先記下來（不離開專注；專注頁、計時設定的小視窗開著時也可以）
       if ((e.key === 'n' || e.key === 'N') && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && this.focus.mode === 'focus' && ['focusFull', 'focusSet', undefined].includes(this._topLayer()?.id)) {
         e.preventDefault()
@@ -543,6 +654,9 @@ export class UI {
           this.setTab('tasks')
           $('#taskTitle').focus()
         } else this.openCapture()
+      } else if ((e.key === 'j' || e.key === 'J') && this.fuji && this.agent?.ready()) {
+        e.preventDefault()
+        this.openFuji()
       } else if (e.key === 'e' || e.key === 'E') this.toggleFull()
       else if (e.key === 'd' || e.key === 'D') this.toggleTheme()
       // 回到全景是要看島，先離開全螢幕
@@ -658,6 +772,7 @@ export class UI {
         weekModal: () => this.closeWeekCard(),
         brief: () => this.brief.close(),
         capture: () => this.capture.close(),
+        fujiSheet: () => this.fuji?.close(),
         levelModal: () => this.closeModal(),
         focusSet: () => this.focus.toggleSet(false),
         focusPick: () => this.focus.togglePicker(false),

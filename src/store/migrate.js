@@ -10,6 +10,7 @@ import { islandRadius } from '../data/projectTown.js'
 import { questOf, weeklyOf } from '../data/quests.js'
 import { THEMES } from '../daylight.js'
 import { LIFE_KINDS } from '../data/life.js'
+import { okVal, UNDO_GROUPS } from '../agentOps.js'
 import { BUILDINGS, MAX_STAGE } from '../data/town.js'
 import { DEFAULT_RHYTHM, PEAKS } from '../planner.js'
 
@@ -257,6 +258,9 @@ const fieldsOf = (v) => {
   if ([1, 2, 3].includes(v.priority)) o.priority = v.priority
   if ('project' in v) o.project = oid(v.project)
   if ('ms' in v) o.ms = oid(v.ms)
+  // 長期任務移出專案時一起變的（變回一般任務、排在今天）
+  if (typeof v.ongoing === 'boolean') o.ongoing = v.ongoing
+  if (DATE_RE.test(v.date)) o.date = v.date
   return Object.keys(o).length ? o : null
 }
 // 加進去的子任務、細項：[{ id, title }]
@@ -298,9 +302,82 @@ function cleanUndo(u) {
       const text = str(u.text, 80).trim()
       return text ? { k: u.k, text } : null
     }
+    // 對話裡改了任務以外的東西（store/agentOps.js）
+    case 'set': {
+      if (!OP_SET.includes(u.kind)) return null
+      const ref = opRef(u)
+      const before = opVals(u.before)
+      const after = opVals(u.after)
+      if (!ref || !before || !after) return null
+      // 每一欄的值照那一種、那個欄位的規則再看一次（設定值、作息、日期…）：不合法的那一欄不還原
+      let keep = Object.keys(after).filter((f) => Object.hasOwn(before, f) && okVal(u.kind, f, before[f]) && okVal(u.kind, f, after[f]))
+      // 一起變的那幾欄有一欄不合法：整組拿掉（只放回其中幾欄會拼出一個沒出現過的樣子）
+      const group = UNDO_GROUPS[u.kind] || []
+      if (group.some((f) => Object.hasOwn(after, f) && !keep.includes(f))) keep = keep.filter((f) => !group.includes(f))
+      if (!keep.length) return null
+      const pick = (o) => Object.fromEntries(keep.map((f) => [f, o[f]]))
+      return { k: 'set', kind: u.kind, ...ref, before: pick(before), after: pick(after) }
+    }
+    case 'new': {
+      const ref = OP_NEW.includes(u.kind) ? opRef(u) : null
+      if (!ref || typeof u.sig !== 'string' || u.sig.length > AGENT_DROP_MAX) return null
+      return { k: 'new', kind: u.kind, ...ref, sig: u.sig, ...(u.kind === 'sleep' ? { was: str(u.was, 2000) } : {}) }
+    }
+    case 'gone': {
+      const ref = OP_GONE.includes(u.kind) ? opRef(u) : null
+      if (!ref || typeof u.item !== 'string' || u.item.length > AGENT_DROP_MAX) return null
+      const ids = (v) => (Array.isArray(v) ? v.filter((x) => ID_RE.test(x)).slice(0, 500) : [])
+      const out = { k: 'gone', kind: u.kind, ...ref, item: u.item, at: num(u.at, 0, 100000, 0) }
+      if (u.kind === 'milestone') Object.assign(out, { tasks: ids(u.tasks), logs: ids(u.logs) })
+      // 細項、子任務：刪掉它讓上一層（里程碑、任務）跟著完成的話，那一刻的完成時間（撤銷時還是那個時間才退回去）
+      if ((u.kind === 'step' || u.kind === 'subtask') && ts(u.auto)) out.auto = ts(u.auto)
+      // 里程碑：刪掉它讓專案跟著落成的話，落成的時間、之前暫停的時間、這次才記成準時的
+      if (u.kind === 'milestone' && ts(u.pat)) Object.assign(out, { pat: ts(u.pat), ppause: ts(u.ppause), ponTime: !!u.ponTime })
+      // 例行公事：刪掉時一起拿掉的、今天以後還沒做的那幾天（整份存成 JSON 字串）
+      if (u.kind === 'routine' && typeof u.inst === 'string' && u.inst.length <= AGENT_DROP_MAX) out.inst = u.inst
+      return out
+    }
+    case 'tick': {
+      const ref = OP_TICK.includes(u.kind) ? opRef(u) : null
+      if (!ref) return null
+      return u.kind === 'habit' ? (DATE_RE.test(u.date) ? { k: 'tick', kind: 'habit', ...ref, n: num(u.n, 0, 99, 0) } : null) : { k: 'tick', kind: u.kind, ...ref }
+    }
     default: return null
   }
-}function cleanAgent(a) {
+}
+// 對話裡能改的種類（store/agentOps.js）：每一種要哪些指到那一筆的欄位
+const OP_SET = ['task', 'event', 'date', 'project', 'milestone', 'step', 'subtask', 'habit', 'motto', 'subscription', 'log', 'note', 'life', 'settings', 'rhythm']
+const OP_NEW = ['project', 'milestone', 'step', 'habit', 'routine', 'motto', 'subscription', 'log', 'note', 'life', 'sleep']
+const OP_GONE = ['event', 'date', 'milestone', 'step', 'subtask', 'routine', 'motto', 'subscription', 'park', 'log', 'note', 'life']
+const OP_TICK = ['event', 'milestone', 'step', 'subtask', 'habit']
+const OP_NEED = { milestone: ['pid'], step: ['pid', 'mid'], subtask: ['tid'], log: ['pid'], note: ['pid'], life: ['date'], sleep: ['date'] }
+function opRef(u) {
+  const out = {}
+  if (u.kind === 'settings' || u.kind === 'rhythm') return out
+  for (const k of ['id', 'pid', 'mid', 'tid']) if (ID_RE.test(u[k])) out[k] = u[k]
+  if (DATE_RE.test(u.date)) out.date = u.date
+  if (u.kind !== 'sleep' && !out.id) return null
+  return (OP_NEED[u.kind] || []).every((k) => out[k]) ? out : null
+}
+// 改之前／之後的值：字串、數字、開關、null，或作息的時段、三餐、星期這種小陣列和物件（存得成 JSON、不大）
+const OP_VAL_MAX = 12000
+function opVals(v) {
+  if (!isObj(v)) return null
+  const out = {}
+  for (const [k, x] of Object.entries(v).slice(0, 12)) {
+    if (k.length > 20 || BAD_KEYS.has(k)) return null
+    let s
+    try {
+      s = JSON.stringify(x ?? null)
+    } catch {
+      return null
+    }
+    if (s.length > OP_VAL_MAX) return null
+    out[k] = JSON.parse(s)
+  }
+  return Object.keys(out).length ? out : null
+}
+function cleanAgent(a) {
   if (!isObj(a)) return emptyAgent()
   const memory = (Array.isArray(a.memory) ? a.memory : []).map((x) => str(x, 80).replace(/\s+/g, ' ').trim()).filter(Boolean)
   const ran = isObj(a.ran) ? a.ran : {}
@@ -312,7 +389,7 @@ function cleanUndo(u) {
         .slice(0, 80)
         .map((c) => (isObj(c) && str(c.t, 120) ? { t: str(c.t, 120), u: cleanUndo(c.u) } : null))
         .filter(Boolean)
-      return { id: e.id, at: ts(e.at) || Date.now(), run: AGENT_RUN_IDS.includes(e.run) ? e.run : 'chat', say: str(e.say, 300), next: ID_RE.test(e.next) ? e.next : null, changes, undone: !!e.undone }
+      return { id: e.id, at: ts(e.at) || Date.now(), run: AGENT_RUN_IDS.includes(e.run) ? e.run : 'chat', say: str(e.say, 600), next: ID_RE.test(e.next) ? e.next : null, changes, undone: !!e.undone }
     },
     false,
   ).slice(-30)

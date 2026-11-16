@@ -173,7 +173,7 @@ export class AgentView extends Base {
     this.el.className = 'ag'
     this.panel = false
     this.el.innerHTML = `<div class="ag-top"></div><div class="ag-panel" hidden></div><div class="ag-feed" role="log"></div><div class="ag-hints"></div>
-      <form class="coach-say ag-form" autocomplete="off"><input name="fuji" maxlength="300" enterkeyhint="send" placeholder="想到什麼直接說：加任務、改時間、排這週…" aria-label="跟ふじ說" /><button class="btn-primary" type="submit">送出</button></form>`
+      <form class="coach-say ag-form" autocomplete="off"><input name="fuji" maxlength="300" enterkeyhint="send" placeholder="想改什麼直接說：任務、日程、專案、習慣、設定都行" aria-label="跟ふじ說" /><button class="btn-primary" type="submit">送出</button></form>`
     this.el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-av]')
       if (!b) return
@@ -263,3 +263,111 @@ export class AgentView extends Base {
   }
 }
 export const keepFocus = Base.keep
+
+// ── 隨叫隨到的ふじ（Dock 上的「藤」、J 或 Ctrl＋J）：任何一頁都能叫出來，一句話請她改 App 裡任何東西。
+// 她看得到你現在在哪一頁（hooks.here()），「這個專案」「這天」指的就是它；下面的建議也跟著那一頁換 ──
+const PAGE_NAME = { today: '今日總覽', tasks: '任務', schedule: '日程', coach: '教練', habits: '習慣', projects: '專案', records: '紀錄', calendar: '日曆' }
+const PAGE_HINTS = {
+  today: ['重排今天剩下的', '把最卡的那件拆小', '今天先做哪一件？'],
+  tasks: ['把這天沒排的排進空檔', '這天排鬆一點', '逾期的分到之後幾天'],
+  schedule: ['明天早上空出來', '這週有哪些日程？', '每週二四晚上八點健身'],
+  coach: ['這週表現怎麼樣？', '下週先顧哪幾件', '專注改成 50 分鐘'],
+  habits: ['加一個每天喝水 8 杯的習慣', '我今天運動了', '哪個習慣最穩？'],
+  projects: ['替這個專案拆下一步', '這個專案進度怎麼樣？', '截止日往後一週'],
+  records: ['換成夜間模式', '字大一點', '專注時放雨聲'],
+  calendar: ['這個月有哪些重要日子？', '下週五要交報告', '明天有什麼？'],
+}
+export class AgentDock extends Base {
+  // root：#fujiSheet（.modal）；hooks 多了 here()、close()
+  constructor(root, agent, store, hooks) {
+    super(agent, store, hooks)
+    this.root = root
+    this.el.className = 'agd-card'
+    this.el.innerHTML = `<header class="agd-head"><span class="stamp-k coach-k">藤</span><div class="agd-title"><b>跟ふじ說</b><small class="agd-here"></small></div>
+        <button type="button" class="cm-link" data-ag="chat">完整對話</button><button type="button" class="icon-btn small agd-x" data-agd="close" aria-label="關閉" title="關閉 (Esc)">×</button></header>
+      <div class="agd-feed" role="log" aria-live="polite"></div>
+      <div class="agd-hints"></div>
+      <form class="ag-form agd-form" autocomplete="off"><input name="fuji" maxlength="600" enterkeyhint="send" placeholder="想改什麼？直接說" aria-label="跟ふじ說要改什麼" /><button class="btn-primary" type="submit">送出</button></form>
+      <p class="agd-tip">日程、專案、習慣、作息、設定都能改；做了什麼會列出來，可以整批撤銷。</p>`
+    root.appendChild(this.el)
+    root.addEventListener('click', (e) => {
+      if (e.target === root || e.target.closest('[data-agd="close"]')) this.close()
+      else if (e.target.closest('[data-agd="hint"]')) this.send(e.target.closest('[data-agd="hint"]').dataset.v)
+    })
+    // 開著的時候她回話了：捲到最下面
+    this.render()
+  }
+  get isOpen() {
+    return !this.root.hidden
+  }
+  open(text = '') {
+    if (!this.isOpen) {
+      this.root.hidden = false
+      this._since = Date.now()
+    }
+    this.render()
+    const input = this.el.querySelector('input[name="fuji"]')
+    if (text) input.value = text
+    // 同一下點擊裡就放焦點：手機的鍵盤才會跟著出來
+    if (!input.disabled) input.focus({ preventScroll: true })
+  }
+  close() {
+    this.root.hidden = true
+    this.hooks.closed?.()
+  }
+  sent() {
+    this._stick = true
+  }
+  render() {
+    const { agent, store } = this
+    const $ = (s) => this.el.querySelector(s)
+    const on = agent.ready()
+    const here = this.hooks.here?.() || {}
+    const page = here.page || 'today'
+    const date = here.date && page !== 'today' && page !== 'records' && page !== 'habits' ? `・${dayLabel(here.date, store.today)}` : ''
+    const project = here.project ? store.state.projects.find((p) => p.id === here.project) : null
+    $('.agd-here').textContent = on ? `看著：${project ? `專案「${short(project.name, 14)}」` : `${PAGE_NAME[page] || '今日總覽'}${date}`}` : ''
+    $('.agd-form').hidden = !on
+    $('.agd-tip').hidden = !on
+    const feed = $('.agd-feed')
+    if (!on) {
+      feed.innerHTML = `<div class="ag-intro"><span class="stamp-k coach-k">藤</span><div><b>一句話，ふじ幫你改</b>
+        <p>接上 Claude 之後，在任何一頁按這顆（或 J 鍵）跟ふじ說一句話：「把明天的會議改到四點」「加一個每天喝水的習慣」「專注改成 50 分鐘」「這週專注了多久？」她直接改好、回答你，每一次都可以撤銷。</p>
+        <button type="button" class="btn-primary" data-ag="setup">去設定 Claude 通行碼</button></div></div>`
+      $('.agd-hints').innerHTML = ''
+      return
+    }
+    // 這次打開之後的對話（沒有的話放最近的一則，知道上次說到哪）
+    const items = agentFeed(agent, store, 30).filter((m) => !m.auto || m.at >= (this._since || 0))
+    const recent = items.filter((m) => m.at >= (this._since || 0))
+    const show = recent.length ? recent.slice(-8) : items.slice(-1)
+    const lastFuji = [...show].reverse().find((m) => m.who === 'fuji')
+    const rows = show.map((m) =>
+      m.who === 'me'
+        ? `<div class="cmsg me"><p>${esc(m.text)}</p></div>`
+        : `<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${fujiHTML(m, store, { open: this.opened.has(m.e?.id), max: 6, last: m === lastFuji && !agent.thinking })}</div></div>`,
+    )
+    if (agent.thinking) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say think">${agent.thinking === 'chat' ? '我想一下' : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`}${DOTS}${agent.thinking === 'chat' ? ' <button type="button" class="cm-link" data-ag="stop">停</button>' : ''}</p></div></div>`)
+    if (!rows.length) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say">想改什麼？任務、日程、專案、習慣、作息、設定都可以，直接說就好。</p></div></div>`)
+    const sig = `${show.length}:${show.at(-1)?.at || 0}:${agent.thinking || ''}`
+    feed.innerHTML = rows.join('')
+    $('.agd-hints').innerHTML = (PAGE_HINTS[page] || PAGE_HINTS.today)
+      .map((h) => `<button type="button" class="chip-toggle" data-agd="hint" data-v="${esc(h)}"${agent.thinking ? ' disabled' : ''}>${esc(h)}</button>`)
+      .join('')
+    $('.agd-form button').disabled = !!agent.thinking
+    if (sig !== this._sig || this._stick) {
+      this._sig = sig
+      this._stick = false
+      requestAnimationFrame(() => feed.scrollTo({ top: 1e6 }))
+    }
+  }
+}
+const dayLabel = (date, today) => {
+  if (date === today) return '今天'
+  const d = new Date(`${date}T00:00:00`)
+  const t = new Date(`${today}T00:00:00`)
+  const n = Math.round((d - t) / 86400000)
+  if (n === 1) return '明天'
+  if (n === -1) return '昨天'
+  return `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`
+}

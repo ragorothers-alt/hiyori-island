@@ -47,7 +47,8 @@ function pendingOf(p) {
 }
 
 // hooks：{ notify(entry, run, pending), busy(): 使用者正在打字或開著表單, focusing(): 正在專注的任務 id（沒有是 null）,
-//   holding(): 現在不要打擾（專注中、載入中）, settle(): 動手之前先把同步拉回來 }
+//   holding(): 現在不要打擾（專注中、載入中）, settle(): 動手之前先把同步拉回來,
+//   here(): 對話時使用者正在看哪裡（{ page, date, project, task, event }）, go(g): 她說完之後要打開的畫面（agentOps.js 的 go） }
 export function createAgent(store, hooks = {}) {
   const local = readLocal()
   const subs = new Set()
@@ -101,7 +102,9 @@ export function createAgent(store, hooks = {}) {
     // day：真的日期（不是 store 記著的今天：過了午夜、store 還沒跨日的那一下也認得出來）
     const from = { gen, day: dateStr(), ran: store.state.agent.ran[kind] || '' }
     try {
-      const { data, ids } = agentContext(store, kind, { ...extra, mode: mode(), weekStart, focusing: hooks.focusing?.() || null })
+      // 對話時：使用者正在看哪一頁（「這個專案」「這天」指的是什麼）
+      const here = chat ? hooks.here?.() || null : null
+      const { data, ids } = agentContext(store, kind, { ...extra, mode: mode(), weekStart, focusing: hooks.focusing?.() || null, here })
       const out = await askAI('agent', data, { signal: extra.signal })
       // 自己整理的：等回應的這段時間裡關掉了、換了設定、過了午夜，或別的分頁／別台已經做完同一種，這次就不算
       if (!chat && !extra.manual && (!agent.auto() || gen !== from.gen || dateStr() !== from.day)) return null
@@ -117,6 +120,8 @@ export function createAgent(store, hooks = {}) {
       }
       const entry = store.agentApply(act, { run: kind, weekStart, focusing: hooks.focusing?.() || null })
       if (!chat && entry) hooks.notify?.(entry, kind, null)
+      // 說完之後替使用者打開的畫面（開始專注那一件、某一頁、某個專案）
+      if (chat && act.ops?.go) hooks.go?.(act.ops.go)
       return { act, entry }
     } catch (err) {
       if (err?.name === 'AbortError') return null

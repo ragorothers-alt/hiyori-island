@@ -34,7 +34,6 @@ export const agentMethods = {
     const chat = run === 'chat'
     const n = new Date()
     const nowMin = n.getHours() * 60 + n.getMinutes()
-    const rhythm = this.state.rhythm
     const last = addDays(today, 90)
     const runId = uid()
     const changes = []
@@ -42,6 +41,20 @@ export const agentMethods = {
     const find = (id) => this._find('tasks', id)
     const day = (d) => dayWord(d, today)
     const note = (t, u) => changes.push({ t, u })
+    // 對話裡說的：「改任務」的那幾項換成下面排時間、改標題、本命、完成的做法；任務以外的新增先做（後面的任務可以歸進剛建的專案）
+    if (chat) act = this._agentTaskSets(act)
+    const refs = chat ? this._agentCreate(act.ops, note) : new Map()
+    const okDate = (d) => DATE_RE.test(d) && d >= today && d <= last
+    if (chat) {
+      // 會動到空檔的先做（新的日程、改時間或刪掉的日程、作息），還有取消完成的任務：後面排任務時避得開、改得到
+      for (const x of act.events || []) {
+        if (!okDate(x.date)) continue
+        const e = this.addEvent({ title: x.title, date: x.date, start: x.start, end: x.end || x.start })
+        if (e) note(`日程「${short(e.title)}」（${day(e.date)} ${e.start}）`, { k: 'event', id: e.id })
+      }
+      this._agentRest(act.ops, note, true)
+    }
+    const rhythm = this.state.rhythm
 
     // ── 改分類、標題、優先度、歸到哪個專案 ──
     for (const e of act.edit || []) {
@@ -50,13 +63,13 @@ export const agentMethods = {
       const patch = {}
       for (const k of ['title', 'tag', 'priority', 'project']) if (k in e && e[k] !== t[k]) patch[k] = e[k]
       if (!Object.keys(patch).length) continue
-      // 換專案時自己選的里程碑會跟著清掉：一起記下來，撤銷時放回去
-      const keys = 'project' in patch ? [...Object.keys(patch), 'ms'] : Object.keys(patch)
+      // 換專案時自己選的里程碑會跟著清掉；長期任務移出專案會變回一般任務、排在今天：一起記下來，撤銷時放回去
+      const keys = 'project' in patch ? [...Object.keys(patch), 'ms', ...(t.ongoing ? ['ongoing', 'date'] : [])] : Object.keys(patch)
       const before = Object.fromEntries(keys.map((k) => [k, t[k] ?? null]))
       const was = t.title
       this.updateTask(t.id, patch)
       const after = Object.fromEntries(keys.map((k) => [k, t[k] ?? null]))
-      const what = ['title' in patch ? `改名成「${short(t.title)}」` : '', 'tag' in patch ? `分類改成${TAGS.find((x) => x.id === t.tag)?.label || t.tag}` : '', 'priority' in patch ? `優先度改成${['', '低', '中', '高'][t.priority]}` : '', 'project' in patch && t.project ? `歸到「${short(this._find('projects', t.project)?.name || '', 14)}」` : '']
+      const what = ['title' in patch ? `改名成「${short(t.title)}」` : '', 'tag' in patch ? `分類改成${TAGS.find((x) => x.id === t.tag)?.label || t.tag}` : '', 'priority' in patch ? `優先度改成${['', '低', '中', '高'][t.priority]}` : '', 'project' in patch ? (t.project ? `歸到「${short(this._find('projects', t.project)?.name || '', 14)}」` : '移出專案') : '']
       note(`「${short(was)}」${what.filter(Boolean).join('、')}`, { k: 'edit', id: t.id, before, after })
     }
 
@@ -83,8 +96,6 @@ export const agentMethods = {
       busyOn(date).push(span)
       return toHHMM(s)
     }
-    const okDate = (d) => DATE_RE.test(d) && d >= today && d <= last
-
     for (const x of act.schedule || []) {
       const t = find(x?.id)
       if (!movable(t)) continue
@@ -117,7 +128,8 @@ export const agentMethods = {
       const date = okDate(x.date) ? x.date : today
       // 那天已經有同名、還沒做的任務：不重複加
       if (this.tasksOn(date).some((t) => !t.done && t.title === x.title)) continue
-      const p = x.project ? this._find('projects', x.project) : null
+      const pid = x.project || (x.projectRef ? refs.get(x.projectRef)?.id : null)
+      const p = pid ? this._find('projects', pid) : null
       const dur = x.dur || 30
       const t = blankTask({
         title: x.title, date, tag: x.tag, dur, at: x.at ? place(date, x.at, dur) : null, coach: `a-${runId}`,
@@ -217,16 +229,13 @@ export const agentMethods = {
         this.deleteTask(id)
         note(`刪掉「${short(title)}」`, u)
       }
-      for (const x of act.events || []) {
-        if (!okDate(x.date)) continue
-        const e = this.addEvent({ title: x.title, date: x.date, start: x.start, end: x.end || x.start })
-        if (e) note(`日程「${short(e.title)}」（${day(e.date)} ${e.start}）`, { k: 'event', id: e.id })
-      }
       for (const x of act.dates || []) {
         if (!okDate(x.date)) continue
         const d = this.addDate({ title: x.title, date: x.date, kind: x.kind === 'day' ? 'day' : x.kind === 'exam' ? 'exam' : 'deadline' })
         if (d) note(`重要日子「${short(d.title)}」（${day(d.date)}）`, { k: 'date', id: d.id })
       }
+      // 任務以外的：改欄位、勾完成、刪掉（專案、習慣、設定…，見 store/agentOps.js；日程、作息在最前面做過了）
+      this._agentRest(act.ops, note, false)
     }
 
     // ── 記住、忘掉 ──
@@ -338,6 +347,11 @@ export const agentMethods = {
         if ('project' in u.before && 'project' in u.after && (t.project ?? null) === u.after.project && (t.ms ?? null) === (u.after.ms ?? null)) {
           patch.project = u.before.project
           if (u.before.ms) patch.ms = u.before.ms
+          // 原本是長期任務：還停在移出後的樣子（一般任務、那一天）才變回長期
+          if (u.before.ongoing && !t.ongoing && !t.done && 'ongoing' in u.after && (!('date' in u.after) || t.date === u.after.date)) {
+            patch.ongoing = true
+            if (u.before.date) patch.date = u.before.date
+          }
         }
         if (!Object.keys(patch).length) continue
         this.updateTask(t.id, patch)
@@ -383,7 +397,7 @@ export const agentMethods = {
         if (a.memory.includes(u.text) || a.memory.length >= AGENT_MEMORY_MAX) continue
         a.memory.push(u.text)
         n++
-      }
+      } else if (this._agentUndoOp(u)) n++
     }
     entry.undone = true
     this._finish([['agentUndone', { id, count: n }]])

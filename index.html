@@ -314,6 +314,7 @@
   <!-- ── 下方：Dock ── -->
   <div class="dock glass">
     <button class="icon-btn cap-btn" id="captureBtn" title="快速記錄 (N)" aria-label="快速記錄" aria-haspopup="dialog" aria-controls="capture"><svg viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
+    <button class="icon-btn fuji-btn" id="fujiBtn" title="跟ふじ說 (J)" aria-label="跟ふじ說" aria-haspopup="dialog" aria-controls="fujiSheet" hidden><span class="fuji-k" aria-hidden="true">藤</span></button>
     <div class="dock-sep cap-sep"></div>
     <div class="focus" id="focusBox">
       <button class="focus-btn" id="focusBtn" title="開始專注">
@@ -518,6 +519,8 @@
     <p class="cap-tip" id="capTip"></p>
   </div>
 </div>
+<!-- 隨叫隨到的ふじ：任何分頁都叫得出來（Dock 的「藤」、J 或 Ctrl＋J）；內容在 src/ui/agent.js 的 AgentDock -->
+<div class="modal fuji-sheet" id="fujiSheet" role="dialog" aria-modal="true" aria-label="跟ふじ說" hidden></div>
 <div class="brief" id="brief" role="dialog" aria-modal="true" aria-label="今天的摘要" hidden><div class="bf-card"></div></div>
 <div class="brief-cat" id="briefCat" aria-hidden="true" hidden></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>

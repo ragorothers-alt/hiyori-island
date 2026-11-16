@@ -1176,9 +1176,9 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
   body.app-mode[data-tab="coach"] .panel.full .panel-body { scroll-padding-bottom: calc(172px + 51px * var(--ui-zoom, 1) + env(safe-area-inset-bottom)); }
   /* 番茄鐘縮成右下角的小膠囊，浮在分頁列上面；其他 Dock 按鈕先藏起來（日曆從日期列點） */
   body.app-mode .dock { left: auto; right: 12px; transform: none; bottom: calc(82px + env(safe-area-inset-bottom)); padding: 4px 8px 4px 4px; }
-  body.app-mode .dock > :not(#focusBox, #captureBtn) { display: none; }
+  body.app-mode .dock > :not(#focusBox, #captureBtn, #fujiBtn) { display: none; }
   /* 快速記錄的＋留在膠囊最左邊：拇指按得到，不用另外浮一顆按鈕 */
-  body.app-mode .dock #captureBtn { width: 44px; height: 44px; border-radius: 50%; color: var(--ink); }
+  body.app-mode .dock :is(#captureBtn, #fujiBtn) { width: 44px; height: 44px; border-radius: 50%; color: var(--ink); }
   body.app-mode .focus-pick { bottom: calc(140px + env(safe-area-inset-bottom)); }
   body.app-mode .toasts { top: 66px; }
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 import worker from '../worker/src/index.js'
-import { AI_FAILS, AI_FAILS_ALL, ipKey } from '../worker/src/ai.js'
+import { AI_FAILS, AI_FAILS_ALL, ipKey, FIELDS, CREATE_KINDS } from '../worker/src/ai.js'
 import { createD1 } from './helpers/d1.js'
 
 // Worker 的 /v1/ai：Claude 的用戶端換成假的（env.AI_CLIENT），只檢查送出去的參數和回應的處理
@@ -169,6 +169,36 @@ describe('送給 Claude 的參數', () => {
     expect(chat.messages[0].content).toContain('回覆使用者的 message')
     expect(morning.messages[0].content).toContain('判斷現在該調整什麼')
     expect(morning.system).toContain('日程管家')
+  })
+
+  it('對話時什麼都能改：schema 多了 set、create、go（欄位名稱是固定的 enum），max_tokens 給多一點；自己整理時沒有', async () => {
+    const c = fakeClient({ out: { say: '好了' } })
+    const data = { run: 'chat', today: '2026-11-16', days: [], overdue: [], projects: [], message: '專注改成 50 分鐘' }
+    await call(envOf(c), { task: 'agent', data })
+    await call(envOf(c), { task: 'agent', data: { ...data, run: 'evening' } })
+    const [chat, evening] = c.create.mock.calls.map((x) => x[0])
+    expect(chat.max_tokens).toBe(16000)
+    expect(evening.max_tokens).toBe(10000)
+    const schema = chat.output_config.format.schema
+    expect(Object.keys(schema.properties).slice(-3)).toEqual(['set', 'create', 'go'])
+    expect(evening.output_config.format.schema.properties).not.toHaveProperty('set')
+    expect(schema.properties.set.items.properties.field.enum).toEqual(FIELDS)
+    expect(schema.properties.create.items.properties.kind.enum).toEqual(CREATE_KINDS)
+    expect(schema.properties.create.items.properties.fields.items.properties.field.enum).toEqual(FIELDS)
+    expect(schema.properties.go.properties.do.enum).toEqual(['', 'focus', 'open'])
+    // structured outputs 的限制：沒有 anyOf、沒有選填的欄位
+    const walk = (s) => {
+      expect(s).not.toHaveProperty('anyOf')
+      if (s.type === 'object') {
+        expect(s.additionalProperties).toBe(false)
+        expect(s.required).toEqual(Object.keys(s.properties))
+        Object.values(s.properties).forEach(walk)
+      }
+      if (s.type === 'array') walk(s.items)
+    }
+    walk(schema)
+    // 提示詞說明了每一種代號、設定和作息怎麼改
+    for (const word of ['world.here', 'settings', 'rhythm', 'focusMin', 'create', 'go']) expect(chat.system).toContain(word)
   })
 })
 

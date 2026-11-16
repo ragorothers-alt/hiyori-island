@@ -4317,3 +4317,81 @@ test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的�
   })
   await expect(row.locator('.ai-btns button')).toHaveText(['測試連線', '改通行碼', '停用'])
 })
+
+test('隨叫隨到的ふじ：任何一頁按 J 叫出來，看得到正在看哪一頁；一句話改日程、設定、新增習慣，做完打開那一頁；整批撤銷', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    if (localStorage.getItem('hiyori-daily-v1')) return
+    const events = [{ id: 'e2e-ev', title: '組會', date: ymd, start: '15:00', end: '16:00', color: 0 }]
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks: [], events, projects: [], player: {}, settings: { agentMode: 'off' } }))
+    localStorage.setItem('hiyori-ai-pass', 'e2e-test-pass')
+  }, { ymd })
+  // 假的 Claude：把組會改到 16:00、字改大、專注改成 50 分鐘、新增一個習慣，做完打開習慣頁
+  const calls = []
+  await context.route(/\/v1\/ai$/, async (route) => {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+    const body = route.request().postDataJSON()
+    calls.push(body)
+    const d = body.data
+    const out = { say: '', schedule: [], add: [], steps: [], edit: [], star: [], first: '', msteps: [], next: '', remember: [], forget: [], done: [], drop: [], events: [], dates: [], ask: [], set: [], create: [], go: { do: '', id: '' } }
+    if (d.run === 'chat') {
+      const ev = d.world.events.find((e) => e.title === '組會').id
+      out.set = [
+        { id: ev, field: 'start', value: '16:00' },
+        { id: ev, field: 'end', value: '17:00' },
+        { id: 'settings', field: 'fontScale', value: '1.12' },
+        { id: 'settings', field: 'focusMin', value: '50' },
+      ]
+      out.create = [{ kind: 'habit', ref: '', parent: '', title: '喝水', date: '', start: '', end: '', fields: [{ field: 'target', value: '8' }, { field: 'unit', value: '杯' }] }]
+      out.go = { do: 'open', id: 'habits' }
+      out.say = '組會改到四點了，字放大一點，專注改成 50 分鐘，也加了喝水的習慣。'
+    }
+    await route.fulfill({ status: 200, headers: cors, contentType: 'application/json', body: JSON.stringify({ ok: true, model: 'mock', out }) })
+  })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await bootReady(page)
+  // 在日程頁按 J：卡片寫著正在看哪一頁，建議跟著那一頁換
+  await page.evaluate(() => window.hiyori.ui.setTab('schedule'))
+  await expect(page.locator('#fujiBtn')).toBeVisible()
+  await page.keyboard.press('j')
+  const sheet = page.locator('#fujiSheet')
+  await expect(sheet).toBeVisible()
+  await expect(sheet.locator('.agd-here')).toHaveText('看著：日程・今天')
+  await expect(sheet.locator('.agd-hints button').first()).toHaveText('明天早上空出來')
+  const input = sheet.locator('input[name="fuji"]')
+  await expect(input).toBeFocused()
+  await input.fill('組會改到四點，字大一點，專注 50 分鐘，再加一個每天喝 8 杯水的習慣')
+  await input.press('Enter')
+  // 說完之後：卡片收起來、打開習慣頁；改了的東西都生效
+  await expect(sheet).toBeHidden()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.tab)).toBe('habits')
+  expect(calls).toHaveLength(1)
+  expect(calls[0].data.world.here).toMatchObject({ page: 'schedule', date: ymd })
+  const state = () =>
+    page.evaluate(() => {
+      const s = window.hiyori.store.state
+      const e = s.events.find((x) => x.id === 'e2e-ev')
+      return { ev: [e.start, e.end], font: s.settings.fontScale, focusMin: s.settings.focusMin, habits: s.habits.map((h) => [h.name, h.target, h.unit]), zoom: getComputedStyle(document.body).getPropertyValue('--ui-zoom').trim() }
+    })
+  expect(await state()).toMatchObject({ ev: ['16:00', '17:00'], font: 1.12, focusMin: 50, habits: [['喝水', 8, '杯']] })
+  await expect.poll(async () => (await state()).zoom).toBe('1.12')
+  await expect(page.locator('#focusTime')).toHaveText('50:00')
+  // 再叫出來：剛才的對話和做了什麼都在，可以整批撤銷
+  await page.keyboard.press('Control+j')
+  await expect(sheet).toBeVisible()
+  await expect(sheet.locator('.agd-here')).toHaveText('看著：習慣')
+  await expect(sheet.locator('.ag-say').last()).toHaveText('組會改到四點了，字放大一點，專注改成 50 分鐘，也加了喝水的習慣。')
+  await expect(sheet.locator('.ag-did li')).toHaveText(['新增習慣「喝水」（每天 8 杯）', '日程「組會」開始時間改成 16:00、結束時間改成 17:00', '字的大小改成大、專注一輪改成 50 分鐘'])
+  await sheet.locator('[data-ag="undo"]').click()
+  await toastSeen(page, '撤銷了 3 項')
+  expect(await state()).toMatchObject({ ev: ['15:00', '16:00'], font: 1, focusMin: 25, habits: [] })
+  await expect.poll(async () => (await state()).zoom).toBe('1')
+  await expect(page.locator('#focusTime')).toHaveText('25:00')
+  // Esc 收起來
+  await page.keyboard.press('Escape')
+  await expect(sheet).toBeHidden()
+})

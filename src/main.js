@@ -728,6 +728,9 @@ async function boot() {
     focusing: () => (ui.focus.mode === 'focus' ? ui.focus.taskId : null),
     // 動手之前先把別台的變更拿回來；兩邊都改過、還沒選的時候不動
     settle: () => Promise.allSettled([cloudSync.sync(), fileSync.sync()]),
+    // 對話時：使用者正在看哪一頁（「這個專案」「這天」）；她說完之後替使用者打開的畫面
+    here: () => ui.here(),
+    go: (g) => ui.agentGo(g),
     // 她自己整理完（entry），或想好了等你決定（pending，設定成「先問我」時）：說一聲，附上撤銷／套用
     notify: (entry, run, pending) => {
       const n = entry ? entry.changes.length : pending.lines.length
@@ -755,6 +758,10 @@ async function boot() {
   hooks.agent = agent
   const ui = new UI(store, hooks)
   chatter = (who, text, ms) => ui.chatter(who, text, ms)
+  // ふじ在對話裡改了設定（或撤銷了）：外觀、字的大小、音效、計時跟著換
+  const touchedSettings = (entry) => !!entry?.changes.some((c) => c.u?.k === 'set' && c.u.kind === 'settings')
+  store.on('agentApplied', ({ entry }) => touchedSettings(entry) && ui.syncSettings())
+  store.on('agentUndone', ({ id }) => touchedSettings(store.state.agent.log.find((e) => e.id === id)) && ui.syncSettings())
 
   // ── 夜晚切換深色玻璃 ──
   // 有小島時跟著天空的顏色走（小島每幀呼叫），還沒有就照時間和外觀設定算；回傳這次有沒有換

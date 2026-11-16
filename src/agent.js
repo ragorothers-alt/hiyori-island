@@ -6,6 +6,7 @@
 import { toM, toHHMM, gaps, busyOf, awake, bedAt, taskDur, PEAKS } from './planner.js'
 import { addDays, parseDate, daysBetween } from './store/util.js'
 import { projectStats } from './projects.js'
+import { worldOf, cleanOps, saneOps, hasOps } from './agentOps.js'
 
 export const AGENT_RUNS = ['morning', 'replan', 'capture', 'evening', 'chat']
 // 自己整理（不是使用者開口）時不能做的事：勾完成、刪任務、加日程、加重要日子
@@ -32,7 +33,8 @@ class Alias {
     this.n = {}
   }
   of(kind, id, extra = null) {
-    const key = `${kind}:${id}`
+    // 子任務、細項、進度這些的 id 只在上層裡面不重複：上層的 id 也算進去（兩件任務各有一個 id 一樣的子任務時是兩個代號）
+    const key = extra ? `${kind}:${id}:${JSON.stringify(extra)}` : `${kind}:${id}`
     if (!this.to.has(key)) {
       const a = `${kind}${(this.n[kind] = (this.n[kind] || 0) + 1)}`
       this.to.set(key, a)
@@ -175,8 +177,48 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
   if (run === 'chat') {
     data.message = clip(extra.message, 600)
     data.history = (extra.history || []).slice(-10).map((m) => ({ who: m.who === 'me' ? 'user' : 'fuji', text: clip(m.text, 300) }))
+    // 對話時什麼都能改：日程、專案、習慣、設定…都帶上（每一筆有代號），還有使用者正在看哪裡（here）
+    data.world = worldOf(store, ids, extra.here || null)
+    fitData(data)
   }
   return { data, ids }
+}
+
+// 送給 Worker 的資料有上限（worker/src/ai.js 的 AI_MAX，120 KB）：用了很久、專案很多時，先拿掉比較不要緊的，再縮短
+export const DATA_MAX = 100_000
+export function fitData(data, max = DATA_MAX) {
+  const size = () => new TextEncoder().encode(JSON.stringify(data)).length
+  if (size() <= max) return data
+  const w = data.world
+  const soon = addDays(data.today, 14)
+  const cuts = [
+    () => (w.history = []),
+    () => (w.doneRecent = []),
+    () => (w.later = w.later.slice(0, 10)),
+    () => (w.subtasks = []),
+    () => w.projects.forEach((p) => (delete p.logs, delete p.notes)),
+    () => w.projects.forEach((p) => p.milestones?.forEach((m) => delete m.steps)),
+    () => (w.events = w.events.filter((e) => e.date <= soon)),
+    () => (w.projects = w.projects.map((p) => ({ id: p.id, name: p.name, status: p.status }))),
+    () => data.days.forEach((d) => (d.tasks = d.tasks.slice(0, 15))),
+    () => (data.overdue = data.overdue.slice(0, 10)),
+  ]
+  for (const cut of cuts) {
+    cut()
+    if (size() <= max) return data
+  }
+  // 還是太大（每一種都很多）：每一串一次砍一半，直到放得下。對話的前幾句、這一句話留到最後
+  const WORLD = ['events', 'later', 'ongoing', 'subtasks', 'projects', 'habits', 'archivedHabits', 'routines', 'dates', 'mottos', 'subscriptions', 'parked', 'life', 'sleep']
+  const lists = () => [
+    ...WORLD.map((k) => [w, k]),
+    [data, 'overdue'], [data, 'projects'], [data, 'recent'], [data, 'dates'], [data, 'habits'], [data, 'memory'],
+    ...data.days.flatMap((d) => [[d, 'tasks'], [d, 'events'], [d, 'free'], [d, 'done'], [d, 'allDay']]),
+  ]
+  for (let i = 0; i < 12 && size() > max; i++) {
+    for (const [o, k] of lists()) if (Array.isArray(o?.[k]) && o[k].length) o[k] = o[k].slice(0, Math.floor(o[k].length / 2))
+  }
+  if (size() > max) data.history = (data.history || []).slice(-2)
+  return data
 }
 const stamp = (at) => {
   const d = new Date(at)
@@ -196,12 +238,16 @@ export function cleanOut(out, ids, run = 'chat') {
   const chat = run === 'chat'
   const tid = (a) => ids.real(a, 't')?.id || null
   const act = {
-    say: text(o.say, 300),
+    // 對話時可能是在回答問題（這週專注了多久…），可以說長一點
+    say: text(o.say, chat ? 600 : 300),
     schedule: [], add: [], steps: [], edit: [], star: [], first: null, msteps: [], next: null,
     remember: texts(o.remember, 80, 5), forget: texts(o.forget, 80, 5),
     done: [], drop: [], events: [], dates: [],
     ask: chat ? texts(o.ask, 16, 3) : [],
+    // 任務以外的（日程、專案、習慣、設定…）：只有對話時有
+    ops: chat ? cleanOps(o, ids) : null,
   }
+  const made = new Set((act.ops?.create || []).filter((c) => c.kind === 'project' && c.ref).map((c) => c.ref))
   const seen = new Set()
   for (const x of arr(o.schedule)) {
     const id = tid(x?.id)
@@ -212,10 +258,13 @@ export function cleanOut(out, ids, run = 'chat') {
   for (const x of arr(o.add, chat ? 20 : 3)) {
     const title = text(x?.title, 80)
     if (!title) continue
-    act.add.push({
+    const a = {
       title, date: DATE.test(x.date) ? x.date : '', at: time(x.at), dur: mins(x.dur), tag: TAG_IDS.includes(x.tag) ? x.tag : 'life',
       project: ids.real(x.project, 'p')?.id || null, steps: texts(x.steps, 80, 8), star: !!x.star,
-    })
+    }
+    // 歸進這一次剛建的專案（create 的 ref）
+    if (!a.project && made.has(text(x.project, 16))) a.projectRef = text(x.project, 16)
+    act.add.push(a)
   }
   for (const x of arr(o.steps)) {
     const id = tid(x?.id)
@@ -269,7 +318,7 @@ export function saneAct(a) {
   return (
     isO(a) &&
     every(a.schedule, (x) => isO(x) && isS(x.id) && isS(x.date) && hhmm(x.at) && Number.isFinite(x.dur)) &&
-    every(a.add, (x) => isO(x) && isS(x.title) && !!x.title.trim() && isS(x.date) && hhmm(x.at) && Number.isFinite(x.dur) && isS(x.tag) && (x.project === null || isS(x.project)) && every(x.steps, isS)) &&
+    every(a.add, (x) => isO(x) && isS(x.title) && !!x.title.trim() && isS(x.date) && hhmm(x.at) && Number.isFinite(x.dur) && isS(x.tag) && (x.project === null || isS(x.project)) && (x.projectRef === undefined || isS(x.projectRef)) && every(x.steps, isS)) &&
     every(a.steps, (x) => isO(x) && isS(x.id) && every(x.steps, isS)) &&
     every(a.edit, (x) => isO(x) && isS(x.id)) &&
     every(a.star, (x) => isO(x) && isS(x.id) && typeof x.on === 'boolean') &&
@@ -278,12 +327,13 @@ export function saneAct(a) {
     every(a.msteps, (x) => isO(x) && isS(x.pid) && isS(x.mid) && every(x.steps, isS)) &&
     every(a.remember, isS) && every(a.forget, isS) && every(a.done, isS) && every(a.drop, isS) &&
     every(a.events, (x) => isO(x) && isS(x.title) && isS(x.date) && TIME.test(x.start) && hhmm(x.end)) &&
-    every(a.dates, (x) => isO(x) && isS(x.title) && isS(x.date) && isS(x.kind))
+    every(a.dates, (x) => isO(x) && isS(x.title) && isS(x.date) && isS(x.kind)) &&
+    saneOps(a.ops)
   )
 }
 // 這批動作裡有沒有要動資料的（只有一句話、建議先做哪一件不算）
 export const hasActions = (a) =>
-  !!a && ['schedule', 'add', 'steps', 'edit', 'star', 'msteps', 'remember', 'forget', 'done', 'drop', 'events', 'dates'].some((k) => a[k]?.length) || !!a?.first
+  (!!a && ['schedule', 'add', 'steps', 'edit', 'star', 'msteps', 'remember', 'forget', 'done', 'drop', 'events', 'dates'].some((k) => a[k]?.length)) || !!a?.first || hasOps(a?.ops)
 
 // 在那天找一個放得下的位置：want 是想放的開始時間（分鐘）、dur 是長度、busy 是已經佔掉的區間、[lo, hi] 是可以排的範圍。
 // 想放的位置可以就用它；不行就找最近的空檔。放不下回 null

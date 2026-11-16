@@ -58,3 +58,46 @@
 .ag-intro p { margin: 6px 0 12px; font-size: 13px; line-height: 1.75; color: var(--ink-soft); }
 .ag-intro .btn-primary { margin: 0; }
 .ag .coach-say[hidden] { display: none; }
+
+/* ── 隨叫隨到的ふじ（#fujiSheet，src/ui/agent.js 的 AgentDock）：跟快速記錄一樣靠上放，手機的鍵盤出來時不會蓋到 ── */
+/* 對話泡泡、印章、連結、等回答的三個點：教練分頁的樣式是第一次打開才載入，這裡先放一份（同樣的規則） */
+.agd-card .cmsg, .ag-card .cmsg { display: flex; gap: 9px; align-items: flex-start; animation: fadeUp .35s var(--ease); }
+.agd-card .cmsg > p { margin: 0; padding: 9px 13px; border-radius: 4px 16px 16px 16px; background: var(--glass-strong); border: 1px solid var(--glass-border); font-size: 13.5px; line-height: 1.65; max-width: calc(100% - 46px); overflow-wrap: anywhere; }
+.agd-card .cmsg.me { justify-content: flex-end; }
+.agd-card .cmsg.me p { border-radius: 16px 4px 16px 16px; background: color-mix(in srgb, #b9a7e6 20%, var(--glass-strong)); font-size: 12.5px; color: var(--ink-soft); }
+.coach-k { width: 34px; height: 34px; flex: none; font-size: 16px; color: #8f78c9; border-color: #b9a7e6; background: radial-gradient(circle, #fbf8ff, #ece4fb); }
+body.night .coach-k { color: #d6c8ff; background: radial-gradient(circle, #463d5e, #352d4a); }
+.cm-link { font-size: 12px; color: #8f78c9; text-decoration: underline; text-underline-offset: 3px; padding: 0 2px; }
+body.night .cm-link { color: #cbbcff; }
+.cm-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
+.cm-dots i { width: 5px; height: 5px; border-radius: 50%; background: #b9a7e6; animation: cmDot 1.1s ease-in-out infinite; }
+.cm-dots i:nth-child(2) { animation-delay: .15s; }
+.cm-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes cmDot { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .cm-dots i { animation: none; opacity: .7; } }
+
+.fuji-sheet { place-content: start center; padding: calc(56px + env(safe-area-inset-top)) 12px 0; }
+.agd-card { box-sizing: border-box; width: min(540px, calc((100vw - 24px) / var(--ui-zoom, 1))); max-height: calc((100dvh - 76px - env(safe-area-inset-top)) / var(--ui-zoom, 1)); display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 22px; background: var(--lg-bg-strong); backdrop-filter: var(--lg-filter); -webkit-backdrop-filter: var(--lg-filter); border: 1px solid var(--glass-border); box-shadow: var(--shadow); zoom: var(--ui-zoom, 1); animation: capIn .32s var(--ease) both; }
+.agd-head { display: flex; align-items: center; gap: 9px; }
+.agd-head .coach-k { width: 30px; height: 30px; font-size: 14px; }
+.agd-title { flex: 1; min-width: 0; display: grid; }
+.agd-title b { font-size: 15px; font-weight: 600; letter-spacing: .04em; }
+.agd-here { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agd-head .cm-link { flex: none; }
+.agd-x { flex: none; font-size: 18px; line-height: 1; color: var(--ink-faint); }
+.agd-feed { flex: 1 1 auto; min-height: 56px; max-height: 52dvh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding: 2px; }
+.agd-feed .ag-intro { padding: 12px; }
+.agd-hints { display: flex; flex-wrap: wrap; gap: 6px; }
+.agd-hints:empty { display: none; }
+.agd-hints .chip-toggle { font-size: 12.5px; padding: 5px 11px; border-color: color-mix(in srgb, #b9a7e6 60%, transparent); }
+.agd-form { display: flex; gap: 8px; }
+.agd-form[hidden], .agd-tip[hidden] { display: none; }
+/* 16px：iOS 才不會在點進輸入框時把整頁放大 */
+.agd-form input { flex: 1; min-width: 0; height: 44px; padding: 0 14px; border-radius: 14px; font-size: 16px; color: var(--ink); background: var(--field); border: 1px solid var(--glass-border); }
+.agd-form input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.agd-form .btn-primary { flex: none; margin: 0; padding: 0 18px; height: 44px; }
+.agd-tip { margin: 0 2px; font-size: 11.5px; line-height: 1.5; color: var(--ink-faint); }
+/* Dock 上的「藤」 */
+.fuji-btn .fuji-k { font: 400 16px var(--font-display); line-height: 1; color: #8f78c9; }
+body.night .fuji-btn .fuji-k { color: #d6c8ff; }
+.fuji-btn[hidden] { display: none; }

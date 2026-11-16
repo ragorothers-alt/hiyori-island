@@ -114,7 +114,8 @@ const TASKS = {
   // 回的是一批「動作」，前端每一個都再檢查過才做（id 要對得上、時間不能撞到行程），整批可以撤銷
   agent: {
     effort: (d) => (d.run === 'capture' ? 'low' : 'medium'),
-    maxTokens: 10000,
+    // 對話時一次可能改很多東西（建一個專案連里程碑、整週的日程搬家）
+    maxTokens: (d) => (d.run === 'chat' ? 16000 : 10000),
     system: `工作：你是使用者的日程管家，自己判斷現在該幫什麼忙，直接把事情安排好。使用者很容易分心，要的是「打開 App 就知道現在做哪一件」，不是更多要自己決定的事。
 資料說明：
 - run：這次為什麼叫你。morning＝今天第一次打開 App；replan＝今天的安排跟不上了（why 寫著原因）；capture＝使用者剛加了新任務（new 是它們的 id）；evening＝晚上，替明天做準備；chat＝使用者直接跟你說話（message 是這一句，history 是前面的對話）。
@@ -149,14 +150,45 @@ const TASKS = {
 - capture：只處理 new 的那幾件：沒有 dur 就估一個；今天、明天的排進空檔；分類明顯不對才改 tag；要好幾個步驟才做得完的（例如「準備報告」「辦簽證」）加 2～5 個子任務；明顯屬於某個專案就歸進去。其他任務不要動。
 - evening：替明天做準備：排好明天的任務、挑明天先做的那一件（first）。今天的任務不要動。
 - chat：照使用者說的做，所有動作都能用。說得不清楚時在 say 裡問一句，並在 ask 給可以直接點的回答。只是聊天或問問題時回答就好，不要動資料。
-- say：1～3 句、90 字以內，直接說做了什麼、為什麼、現在先做哪一件，例如「今天排好了：先做『寫報告』。下午三點有會議，所以把採買移到明天。」不要把每個動作逐條念一遍（介面會列出來）。`,
+- say：1～3 句、90 字以內，直接說做了什麼、為什麼、現在先做哪一件，例如「今天排好了：先做『寫報告』。下午三點有會議，所以把採買移到明天。」不要把每個動作逐條念一遍（介面會列出來）。對話時在回答問題的話可以到 5 句、200 字以內。
+
+對話（run 是 chat）時，App 裡什麼都能照使用者說的改，不只任務：
+- 多帶的資料在 world：events（前 3 天到之後 45 天的日程）、later（7 天以後的任務）、ongoing（專案裡的長期任務）、doneRecent（最近 7 天做完的任務）、subtasks（任務的子任務）、projects（每個專案的里程碑 milestones 和細項 steps、最近的進度 logs、筆記 notes；status：active 進行中、paused 暫停、done 已落成、archived 收起來了）、habits（today 今天打了幾次卡、streak 連續天數、clean 戒了幾天）、archivedHabits、routines（例行公事）、dates（重要日子）、mottos（警語）、subscriptions（訂閱，next 是下次扣款日）、parked（專注時先記下來的事）、life（昨天和今天的生活記錄）、energy、sleep（最近的睡眠）、settings（設定現在的值）、history（最近 14 天每天做完幾件、總共幾件、專注幾分鐘）。
+- world.here：使用者現在正在看的地方（page 是哪一頁；date 是那一頁選的日子；project、task、event 是打開著的那一個）。使用者說「這個」「這天」「這個專案」時指的就是它。
+- 每一筆的 id 是短代號，第一個字母是種類：t 任務、e 日程、d 重要日子、p 專案、m 里程碑、s 細項、u 子任務、h 習慣、r 例行公事、w 警語、b 訂閱、k 先記下來的事、l 專案的進度、n 專案的筆記、f 生活記錄。只用資料裡有的代號。
+- 任務照上面的 schedule、add、steps、edit、star、first、done、drop 做；也可以用 set 改任務的欄位。
+- set：改某一筆的某個欄位，value 一律寫成字串。id 是那一筆的代號；改設定時 id 寫 "settings"，改作息寫 "rhythm"。同一筆改好幾個欄位就寫好幾項（例如日程換時間：date、start、end 各一項）。能改的欄位：
+  任務 t：title、date、at（"" 是取消時段）、dur（分鐘）、priority（1～3）、tag、note、project（專案的代號，"" 是移出專案）、star、first、done（"false" 是取消完成）
+  日程 e：title、date、start、end、note、allDay、endDate、done
+  重要日子 d：title、date、kind（exam 考試、deadline 截止、day 紀念）
+  專案 p：title、deadline（"" 是不設）、goal、status（active、paused、archived）
+  里程碑 m：title、due、note、done；細項 s、子任務 u：title、done
+  習慣 h：title、target（一天幾次）、unit、days（"每天"、"平日"、"一三五" 這樣寫）、status（archived 收起來、active 拿回來）
+  警語 w：text、on；訂閱 b：title、price、cur（TWD、USD、JPY、EUR、HKD、CNY、GBP）、every、unit（week、month、year）、date（第一次扣款日）、status（cancelled 取消訂閱、active 恢復）
+  生活記錄 f：text、amount、kind、at；進度 l：text、dur（分鐘）；筆記 n：title、text（內文）
+  作息 rhythm：wake、sleep（"HH:MM"）、peak（morning、afternoon、evening）、buffer（行程之間留幾分鐘）、work（"09:00-18:00 一二三四五"，沒有固定的工作時段給 ""）、meals（"早餐 07:30-08:00、午餐 12:00-13:00、晚餐 18:30-19:30"）
+  設定 settings：focusMin（專注一輪幾分鐘，10～90）、breakMin（5、10、15）、focusRounds（連續幾輪，1～4）、focusUp（往上數、不設長度）、flowMax（到點自動延長最多幾分：0、15、30、60）、focusGoal（每天專注的目標分鐘：0、60、90、120、180）、focusNoise（背景聲：off、rain、brown、pink）、noiseVol（5～100）、catMotto（貓咪念警語的間隔分鐘：0、10、15、20、30）、mottoEvery（警語提醒的間隔分鐘：0、10、15、20、30、60、120、180）、mottoBar、mottoEvents、sound（音效）、remindLead（日程前幾分鐘提醒：-1 不提醒、0、5、10、15、30）、theme（auto 跟著時間、system 跟著系統、day 白天、night 夜晚）、fontScale（字的大小：0.9、1、1.12、1.25）、stuckNudge、brief、backNudge、nextNudge、focusCat、agentMode（auto、ask、off）。開關寫 "true" 或 "false"。
+- create：新增任務、日程、重要日子以外的東西（那三種用 add、events、dates）。沒用到的欄位給 "" 或空陣列。kind：
+  project：title 名稱、date 截止日、fields 可以有 goal
+  milestone：parent 是專案、title、date 期限；step：parent 是里程碑、title
+  habit：title、fields：kind（build 養成、quit 戒除）、target、unit、days
+  routine（例行公事）：title；有 start、end 是例行日程，沒有是例行任務；date 從哪天開始；fields：days（"每天"、"平日"、"二四"）、tag、priority。改例行公事＝drop 舊的、create 新的
+  motto：title 是警語的字；subscription：title、date 第一次扣款日、fields：price（一定要有）、cur、every、unit
+  log（專案的進度）：parent 是專案、title 是做了什麼、date、fields：dur（分鐘）；note（專案的筆記）：parent 是專案、title、fields：text 內文
+  life（生活記錄，只能記今天以前）：title 內容、date、start 時間、fields：kind（meal、move、mood、spend、rest、note）、amount 金額
+  sleep：date 是醒來那天、start 就寢、end 起床
+  ref：替這一筆取個代號（例如 "n1"），同一次裡後面 create 的 parent、add 的 project 可以寫它（例如新的專案底下一起建里程碑和任務）。
+- done：勾完成，也可以是日程 e、里程碑 m、細項 s、子任務 u、習慣 h（今天打一次卡）。drop：刪掉，任何代號都可以；專案和習慣是收起來（之後可以拿回來）。先記下來的事 k 要排成任務：add 一件、再 drop 它。
+- go：做完之後替使用者打開畫面。do 是 "focus"（id 是任務：馬上開始專注那一件；要改長度就同時用 set 改 focusMin）或 "open"（id 是 today、tasks、schedule、habits、coach、projects、records、calendar、settings 其中一頁，或某個專案、任務、日程、里程碑的代號）。不用就給 do ""、id ""。
+- 使用者問問題（「這週專注了多久」「下次扣款是哪天」「明天有什麼」）就照資料回答在 say 裡，不用動資料。
+- 每一項改動介面都會列出來、可以整批撤銷，使用者說得清楚就直接做，不用再確認。不確定指的是哪一筆，或一次要刪很多筆時，先在 say 裡問、用 ask 給可以直接點的選項。`,
     ask: (d) => (d.run === 'chat' ? '回覆使用者的 message，需要的話直接動手安排。' : '照 run 的情況，判斷現在該調整什麼，直接安排。'),
-    schema: () => {
+    schema: (d) => {
       const int = { type: 'integer' }
       const bool = { type: 'boolean' }
       const arr = (items) => ({ type: 'array', items })
       const tag = { type: 'string', enum: ['work', 'study', 'life', 'health', 'idea'] }
-      return obj({
+      const base = {
         say: str,
         schedule: arr(obj({ id: str, date: str, at: str, dur: int })),
         add: arr(obj({ title: str, date: str, at: str, dur: int, tag, project: str, steps: strs, star: bool })),
@@ -173,10 +205,31 @@ const TASKS = {
         events: arr(obj({ title: str, date: str, start: str, end: str })),
         dates: arr(obj({ title: str, date: str, kind: { type: 'string', enum: ['exam', 'due', 'day'] } })),
         ask: strs,
+      }
+      if (d.run !== 'chat') return obj(base)
+      // 對話時多的：改任何一筆的欄位、新增任務以外的東西、做完後打開的畫面（欄位名稱跟前端 src/agentOps.js 的 FIELDS 一樣）
+      const field = { type: 'string', enum: FIELDS }
+      return obj({
+        ...base,
+        set: arr(obj({ id: str, field, value: str })),
+        create: arr(obj({ kind: { type: 'string', enum: CREATE_KINDS }, ref: str, parent: str, title: str, date: str, start: str, end: str, fields: arr(obj({ field, value: str })) })),
+        go: obj({ do: { type: 'string', enum: GO_KINDS }, id: str }),
       })
     },
   },
 }
+// 對話時 set、create 的欄位名稱和新增的種類：前端 src/agentOps.js 有同一份（tests/agentOps.test.js 會比對兩邊）
+const SETTING_KEYS = [
+  'focusMin', 'breakMin', 'focusRounds', 'focusUp', 'flowMax', 'catMotto', 'focusGoal', 'focusNoise', 'noiseVol', 'mottoEvery', 'mottoBar',
+  'mottoEvents', 'sound', 'remindLead', 'theme', 'fontScale', 'stuckNudge', 'brief', 'backNudge', 'nextNudge', 'focusCat', 'agentMode',
+]
+export const FIELDS = [
+  'title', 'date', 'at', 'dur', 'priority', 'tag', 'note', 'project', 'star', 'first', 'done', 'start', 'end', 'allDay', 'endDate', 'kind',
+  'deadline', 'goal', 'status', 'due', 'target', 'unit', 'days', 'text', 'on', 'price', 'cur', 'every', 'amount',
+  'wake', 'sleep', 'peak', 'buffer', 'work', 'meals', ...SETTING_KEYS,
+]
+export const CREATE_KINDS = ['project', 'milestone', 'step', 'habit', 'routine', 'motto', 'subscription', 'log', 'note', 'life', 'sleep']
+export const GO_KINDS = ['', 'focus', 'open']
 const RUNS = ['morning', 'replan', 'capture', 'evening', 'chat']
 // 工作的設定可以照資料決定（effort、問句）
 const pickBy = (v, data) => (typeof v === 'function' ? v(data) : v)
@@ -251,7 +304,7 @@ export async function askAI(env, body) {
     if (name === 'agent' && !RUNS.includes(data.run)) throw new HttpError(400, 'bad data')
     const params = {
       model,
-      max_tokens: task.maxTokens,
+      max_tokens: pickBy(task.maxTokens, data),
       system: `${PERSONA}\n\n${task.system}`,
       output_config: { effort: pickBy(task.effort, data), format: { type: 'json_schema', schema: task.schema(data) } },
       messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${pickBy(task.ask, data)}` }],
