@@ -431,9 +431,12 @@ async function boot() {
       // 這一輪中途切去用別的 App 幾次（Android 的 App 才分得出來；到點時還在別的 App 裡的也算一次）
       const away = (info.away || 0) + (awayAtEnd(info.sid, info.at) ? 1 : 0)
       const awayNote = away ? `・中途離開 ${away} 次` : ''
-      // 專注的那件還沒寫下一步：休息前留一步給等等的自己（打開專注頁直接寫；專注頁開著的話頁面上就有那一行）。
-      // 按的時候別的分頁已經寫好了：打開專注頁看那一步
-      const leave = () => (!ui.focus.bigOpen && ui.focus.canLeaveStep ? [{ label: '留一步給等等', soft: true, run: () => ui.focus.leaveStep() || ui.focus.toggleBig(true) }] : [])
+      // 專注的那件還沒寫下一步：休息前留一步給等等的自己（打開專注頁、小島模式是計時設定的小視窗，直接寫；
+      // 專注頁開著的話頁面上就有那一行）。記著是哪一件：之後換了目標、計時結束了，按了也不會寫到別件上
+      const leave = () => {
+        const tid = ui.focus.taskId
+        return !ui.focus.bigOpen && ui.focus.canLeaveStep ? [{ label: '留一步給等等', soft: true, run: () => ui.focus.leaveStep(tid) }] : []
+      }
       const more = () => [
         ...(ui.focus.bigOpen
           ? []

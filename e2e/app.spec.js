@@ -1460,6 +1460,65 @@ test('休息前留一步：到點時還沒寫下一步的那件，提示卡上�
   await page.evaluate(() => window.hiyori.ui.focus.stop())
 })
 
+test('休息前留一步（小島模式）：提示卡上按「留一步給等等」打開計時設定的小視窗直接寫，收起來再點 Dock 上的時間打開時打到一半的字還在；換了目標之後按舊的提示卡不會寫到別件上', async ({ page, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const mode = () => page.evaluate(() => window.hiyori.ui.focus.mode)
+  const subs = (id) => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).subs.map((x) => x.title), id)
+  const [a, b] = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    s.setSetting('breakMin', 5)
+    const a = s.addTask({ title: '寫期末報告', date: s.today })
+    const b = s.addTask({ title: '整理房間', date: s.today })
+    window.hiyori.ui.focus.startWith(a.id)
+    return [a.id, b.id]
+  })
+  expect(await page.evaluate(() => window.hiyori.ui.appMode)).toBe(false)
+  // 到點：提示卡上有「留一步給等等」。按之前另一個分頁把目標換成別件：按了不會寫到那一件上
+  await page.clock.setFixedTime(T('10:25:01'))
+  await expect.poll(mode).toBe('break')
+  const first = page.locator('#toasts .toast', { hasText: '專注完成' })
+  await expect(first.getByRole('button', { name: '留一步給等等' })).toBeVisible()
+  await page.evaluate((b) => window.hiyori.ui.focus.setTarget(`t:${b}`), b)
+  await first.getByRole('button', { name: '留一步給等等' }).click()
+  await expect(page.locator('#focusSet')).toBeHidden()
+  expect(await subs(b)).toEqual([])
+  expect(await subs(a)).toEqual([])
+  // 換回來、再一輪：這次按了打開計時設定的小視窗，焦點在輸入框
+  await page.evaluate((a) => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.startWith(a)
+  }, a)
+  await page.clock.setFixedTime(T('10:50:02'))
+  await expect.poll(mode).toBe('break')
+  await page.locator('#toasts .toast', { hasText: '專注完成' }).getByRole('button', { name: '留一步給等等' }).click()
+  await expect(page.locator('#focusSet')).toBeVisible()
+  const input = page.locator('#fsStepText')
+  await expect(input).toBeFocused()
+  await expect(input).toHaveAttribute('placeholder', /等等回來先做什麼/)
+  await input.fill('把第二節的三個重點')
+  // 先收起小視窗（Esc 在別的地方按），再點 Dock 上的時間打開：打到一半的字還在
+  await page.locator('#fsTarget').focus()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('#focusSet')).toBeHidden()
+  await page.locator('#focusTime').click()
+  await expect(page.locator('#focusSet')).toBeVisible()
+  await expect(input).toHaveValue('把第二節的三個重點')
+  await input.fill('把第二節的三個重點列出來')
+  await input.press('Enter')
+  await expect(page.locator('#fsStep .ff-step-t small')).toHaveText('等等從這裡開始')
+  await expect(page.locator('#fsStep .ff-step-t b')).toHaveText('把第二節的三個重點列出來')
+  expect(await subs(a)).toEqual(['把第二節的三個重點列出來'])
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+})
+
 test('回來了，現在該做：離開 20 分鐘以上再回到 App、沒在計時時，提示卡寫現在該做的那一件和下一步，一鍵開始專注；一陣子內只說一次、離開不久不說、專注中不說；設定裡可以關', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = (hms) => new Date(`${ymd}T${hms}+08:00`)

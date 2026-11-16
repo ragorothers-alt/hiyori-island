@@ -472,62 +472,69 @@ export class FocusTimer {
   // ── 下一步：專注的那一件拆成了小步驟（子任務）時，專注頁上寫著第一個還沒勾的那一步，做完了直接勾、換下一步
   // （最後一步勾完，任務也跟著完成）。還沒拆的話可以寫下一小步。
   // 休息時寫著「等等從這裡開始」：還沒寫下一步的話，休息前留一步給等等的自己（停下來之前先想好回來要做什麼，
-  // 回來時不用重新想、比較不會被剛才的念頭拉走）──
+  // 回來時不用重新想、比較不會被剛才的念頭拉走）。
+  // 專注頁（#ffStep）和計時設定的小視窗（#fsStep：小島模式點 Dock 上的時間）各一行，畫的是同一個東西，打到一半的字兩邊共用 ──
   _bindStep() {
-    const el = $('#ffStep')
-    el.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-step]')
-      // 連按兩下的第二下（detail 是連按的第幾下）落在換上來的勾勾上：不算。勾完要重畫，機器忙的時候兩下會隔得比較久，
-      // 只看時間（_checkStep 的 600 毫秒）擋不住
-      if (b) return e.detail > 1 ? undefined : this._checkStep(b.dataset.step)
-      if (!e.target.closest('[data-step-open]')) return
-      this._stepOpen = this.taskId
-      this._renderStep()
-      $('#ffStepText')?.focus()
-    })
-    // 打到一半的字記著（是哪一件的）：這一行被換掉（到點進入休息、重新整理畫面）再出來時還在
-    el.addEventListener('input', (e) => {
-      if (e.target.matches('#ffStepText')) this._stepDraft = { id: this.taskId, text: e.target.value }
-    })
-    el.addEventListener('submit', (e) => {
-      e.preventDefault()
-      const input = $('#ffStepText')
-      const t = this.task
-      if (!t || !input?.value.trim()) return
-      const x = this.ui.store.addSub(t.id, input.value)
-      if (!x) return this.ui.toast({ icon: '步', title: '這件的小步驟已經滿了', sub: '到任務清單整理一下，再寫新的' })
-      this._stepOpen = null
-      this._stepDraft = null
-      this._renderStep()
-      $('#ffStep [data-step]')?.focus()
-      // 休息時留的：ふじ／もち說「休息完從這裡開始」
-      this.hooks.stepSet?.(x.title, this.mode === 'break')
-    })
-    // Esc：收起這一行就好（不要連專注頁一起收起來）。輸入法選字中的 Esc 是取消選字，不收
-    el.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229 || !e.target.matches('#ffStepText')) return
-      e.stopPropagation()
-      this._stepOpen = null
-      this._stepDraft = null
-      this._renderStep()
-      $('#ffStep [data-step-open]')?.focus()
-    })
+    for (const el of [$('#ffStep'), $('#fsStep')]) {
+      const input = () => el.querySelector('.ff-step-add input')
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-step]')
+        // 連按兩下的第二下（detail 是連按的第幾下）落在換上來的勾勾上：不算。勾完要重畫，機器忙的時候兩下會隔得比較久，
+        // 只看時間（_checkStep 的 600 毫秒）擋不住
+        if (b) return e.detail > 1 ? undefined : this._checkStep(b.dataset.step, el)
+        if (!e.target.closest('[data-step-open]')) return
+        this._stepOpen = this.taskId
+        this._renderStep()
+        input()?.focus()
+      })
+      // 打到一半的字記著（是哪一件的）：這一行被換掉（到點進入休息、重新整理畫面）、換到另一邊再出來時還在
+      el.addEventListener('input', (e) => {
+        if (e.target === input()) this._stepDraft = { id: this.taskId, text: e.target.value }
+      })
+      el.addEventListener('submit', (e) => {
+        e.preventDefault()
+        const t = this.task
+        const text = input()?.value || ''
+        if (!t || !text.trim()) return
+        const x = this.ui.store.addSub(t.id, text)
+        if (!x) return this.ui.toast({ icon: '步', title: '這件的小步驟已經滿了', sub: '到任務清單整理一下，再寫新的' })
+        this._stepOpen = null
+        this._stepDraft = null
+        this._renderStep()
+        el.querySelector('[data-step]')?.focus()
+        // 休息時留的：ふじ／もち說「休息完從這裡開始」
+        this.hooks.stepSet?.(x.title, this.mode === 'break')
+      })
+      // Esc：收起這一行就好（不要連專注頁、小視窗一起收起來）。輸入法選字中的 Esc 是取消選字，不收
+      el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229 || e.target !== input()) return
+        e.stopPropagation()
+        this._stepOpen = null
+        this._stepDraft = null
+        this._renderStep()
+        el.querySelector('[data-step-open]')?.focus()
+      })
+    }
   }
   // 這一輪的那件還沒寫下一步（到點的提示卡上給「留一步給等等」）：還在計時（休息中、下一輪）、任務還沒做完、小步驟還沒滿
   get canLeaveStep() {
     const t = this.mode === 'idle' ? null : this.task
     return !!t && !nextStep(t) && (t.subs?.length || 0) < PL.subs
   }
-  // 從提示卡按的：打開專注頁，直接開始寫（焦點在輸入框）
-  leaveStep() {
-    if (!this.canLeaveStep) return false
-    this.toggleBig(true)
-    this._stepOpen = this.taskId
+  // 從提示卡按的：直接開始寫（焦點在輸入框）。App 模式打開專注頁，小島模式打開計時設定的小視窗（點 Dock 上的時間也回得來）。
+  // taskId：提示卡是哪一件的——之後換了目標（另一個分頁換的也算）、計時結束了就不動，不會寫到別件上。
+  // 按之前別的分頁已經寫好了下一步：打開讓你看到那一步就好
+  leaveStep(taskId = this.taskId) {
+    if (this.mode === 'idle' || !taskId || taskId !== this.taskId || !this.task) return false
+    const big = this.ui.appMode
+    if (big) this.toggleBig(true)
+    else this.toggleSet(true)
+    if (this.canLeaveStep) this._stepOpen = this.taskId
     this._renderStep()
-    $('#ffStepText')?.focus()
+    $(big ? '#ffStep' : '#fsStep').querySelector('.ff-step-add input, [data-step]')?.focus()
     return true
   }
-  _checkStep(sid) {
+  _checkStep(sid, box = $('#ffStep')) {
     // 連按兩下：第一下勾完，同一個位置馬上換成下一步的勾勾——第二下不算，不會一口氣勾掉兩步
     if (Date.now() - (this._stepAt || 0) < 600) return
     const t = this.task
@@ -536,52 +543,59 @@ export class FocusTimer {
     this._stepAt = Date.now()
     this.ui.store.toggleSub(t.id, sid)
     // 最後一步：任務跟著完成（照完成任務的慶祝），這一輪的目標自動解除——焦點交給選目標的那一格
-    // （休息中看不到那一格：交給專注頁本身）
+    // （專注頁休息時看不到那一格：交給專注頁本身）
     const next = this.task ? nextStep(this.task) : null
     this._renderStep()
-    if (!next) return (this.mode === 'break' ? $('#focusFull') : $('#ffTarget')).focus()
-    $('#ffStep [data-step]')?.focus()
+    if (!next) return (box.id === 'fsStep' ? $('#fsTarget') : this.mode === 'break' ? $('#focusFull') : $('#ffTarget')).focus()
+    box.querySelector('[data-step]')?.focus()
     this.hooks.stepDone?.(step.title, next.title)
   }
   _renderStep() {
-    const el = $('#ffStep')
     const brk = this.mode === 'break'
     const t = this.mode === 'focus' || brk ? this.task : null
     const subs = Array.isArray(t?.subs) ? t.subs : []
     const step = t ? nextStep(t) : null
     // 正在寫的那一行（這一件的）：別的分頁剛好加了一步也不收起來，寫完再看下一步
     const writing = !!t && this._stepOpen === t.id && subs.length < PL.subs
-    let html = ''
-    if (writing) {
-      // 專注和休息時的提示字不一樣，在下面另外換（打到一半時到點，輸入框不會被換掉）
-      html = `<form class="ff-step-add" autocomplete="off"><input id="ffStepText" maxlength="${PL.subTitle}" enterkeyhint="done"><button type="submit" class="btn-ghost">寫下</button></form>`
-    } else if (step) {
-      const i = subs.indexOf(step) + 1
-      html =
-        `<div class="ff-step-t"><small>${brk ? '等等從這裡開始' : '下一步'}</small><b>${esc(step.title)}</b></div>` +
-        `<span class="ff-step-n" aria-label="第 ${i} 步，共 ${subs.length} 步">${i}/${subs.length}</span>` +
-        `<button type="button" class="ff-step-check" data-step="${esc(step.id)}" title="這一步做完了" aria-label="「${esc(step.title)}」做完了">${ICON.check}</button>`
-    } else if (t && subs.length < PL.subs) {
-      html = `<button type="button" class="ff-step-open" data-step-open>＋ ${brk ? '休息前留一步給等等的自己' : subs.length ? '寫下接下來的一小步' : '拆出第一小步'}</button>`
-    }
-    el.hidden = !html
-    el.classList.toggle('add', writing || (!!html && !step))
-    el.classList.toggle('resume', brk && !!html)
-    // 每秒重畫時沒變就不動（put）：打到一半的字、焦點都留著
-    if (el._html !== html) {
-      const had = el.contains(document.activeElement)
-      put(el, html)
-      const input = $('#ffStepText')
-      if (input && this._stepDraft?.id === t.id) input.value = this._stepDraft.text
-      // 焦點所在的那一顆被換掉、收起來了：接到這一行新的那一顆，沒有的話交給專注頁本身（不會掉到看不見的地方，
-      // 也不會落在暫停這類一按就動的按鈕上）
-      if (had && !el.contains(document.activeElement)) (input || $('#ffStep [data-step]') || $('#ffStep [data-step-open]') || $('#focusFull')).focus()
-    }
-    const input = writing ? $('#ffStepText') : null
-    if (!input) return
+    const draft = writing && this._stepDraft?.id === t.id ? this._stepDraft.text : null
+    // 專注和休息時的提示字不一樣，畫好之後另外換（打到一半時到點，輸入框不會被換掉）
     const [ph, label] = brk ? ['等等回來先做什麼？寫小一點、一坐下就做得到的', '留一步給等等的自己：休息完先做什麼'] : ['下一小步是什麼？寫小一點、馬上做得到的', '寫下這件的下一小步']
-    if (input.placeholder !== ph) input.placeholder = ph
-    if (input.getAttribute('aria-label') !== label) input.setAttribute('aria-label', label)
+    for (const el of [$('#ffStep'), $('#fsStep')]) {
+      const big = el.id === 'ffStep'
+      let html = ''
+      // 小視窗：休息中點了某件事要專注（_asking：正在選下一輪的設定）時不放
+      if (!big && this._asking) html = ''
+      else if (writing) {
+        html = `<form class="ff-step-add" autocomplete="off"><input id="${el.id}Text" maxlength="${PL.subTitle}" enterkeyhint="done"><button type="submit" class="btn-ghost">寫下</button></form>`
+      } else if (step) {
+        const i = subs.indexOf(step) + 1
+        html =
+          `<div class="ff-step-t"><small>${brk ? '等等從這裡開始' : '下一步'}</small><b>${esc(step.title)}</b></div>` +
+          `<span class="ff-step-n" aria-label="第 ${i} 步，共 ${subs.length} 步">${i}/${subs.length}</span>` +
+          `<button type="button" class="ff-step-check" data-step="${esc(step.id)}" title="這一步做完了" aria-label="「${esc(step.title)}」做完了">${ICON.check}</button>`
+      } else if (t && subs.length < PL.subs) {
+        html = `<button type="button" class="ff-step-open" data-step-open>＋ ${brk ? '休息前留一步給等等的自己' : subs.length ? '寫下接下來的一小步' : '拆出第一小步'}</button>`
+      }
+      el.hidden = !html
+      el.classList.toggle('add', !!html && (writing || !step))
+      el.classList.toggle('resume', brk && !!html)
+      // 每秒重畫時沒變就不動（put）：打到一半的字、焦點都留著
+      if (el._html !== html) {
+        const had = el.contains(document.activeElement)
+        put(el, html)
+        const input = el.querySelector('.ff-step-add input')
+        if (input && draft != null) input.value = draft
+        // 焦點所在的那一顆被換掉、收起來了：接到這一行新的那一顆，沒有的話交給專注頁本身、小視窗的目標
+        // （不會掉到看不見的地方，也不會落在暫停這類一按就動的按鈕上）
+        if (had && !el.contains(document.activeElement)) (input || el.querySelector('[data-step]') || el.querySelector('[data-step-open]') || (big ? $('#focusFull') : $('#fsTarget'))).focus()
+      }
+      const input = html && writing ? el.querySelector('.ff-step-add input') : null
+      if (!input) continue
+      // 在另一邊打的字：沒在這一邊打的時候跟上
+      if (draft != null && document.activeElement !== input && input.value !== draft) input.value = draft
+      if (input.placeholder !== ph) input.placeholder = ph
+      if (input.getAttribute('aria-label') !== label) input.setAttribute('aria-label', label)
+    }
   }
 
   // ── 想分心了：專注中想去做別的事（滑手機、看別的網頁），先等一分鐘、跟著圓圈呼吸，一分鐘後還想去再去。
@@ -813,6 +827,8 @@ export class FocusTimer {
     $('#fsSmall').hidden = live
     // 專注中：腦中冒出別的事，在這裡先記下來
     $('#fsPark').hidden = !(this.mode === 'focus' && !this._asking)
+    // 這一件的下一步（休息時：等等從這裡開始、休息前留一步）：跟專注頁的那一行一樣
+    this._renderStep()
     this._renderMore($('#fsExtend'), $('#fsAddRound'))
     if (!live) $('#fsMore').hidden = true
     this._noiseSync()
@@ -1100,6 +1116,8 @@ export class FocusTimer {
     if (this.mode !== 'idle' && !$('#focusSet').hidden) {
       $('#fsTime').textContent = time
       if (!this._asking) this._renderMore($('#fsExtend'), $('#fsAddRound'))
+      // 下一步那一行：到點進入休息、下一輪開始時跟著換說法
+      this._renderStep()
     }
     $('#focusTime').textContent = time
     $('#focusTime').title = this.mode === 'idle' ? '倒數或正向計時、長度、目標' : this.ui.appMode ? '打開全螢幕計時' : '換專注的目標'

@@ -413,6 +413,8 @@
     <p class="noise-hint fs-noise-hint" hidden></p>
     <!-- 計時中：腦中冒出別的事，一行字先記下來（跟專注頁的那一行一樣） -->
     <form class="fs-park" id="fsPark" autocomplete="off" hidden><input id="fsParkText" maxlength="80" placeholder="腦中冒出別的事？先記下來" aria-label="先記下來：腦中冒出的別的事" enterkeyhint="done"><button type="submit" class="btn-ghost">記下</button></form>
+    <!-- 這一件的下一步（休息時：等等從這裡開始、休息前留一步給等等的自己）：跟專注頁的那一行一樣（src/ui/focus.js 的 _renderStep） -->
+    <div class="ff-step fs-step" id="fsStep" hidden></div>
     <p class="fs-sum" id="fsSum"></p>
     <div class="fs-more" id="fsMore" hidden><button type="button" class="btn-ghost" id="fsExtend" hidden>還沒做完，延長</button><button type="button" class="btn-ghost" id="fsAddRound" hidden>＋ 再加一輪</button></div>
     <button type="button" class="btn-primary" id="fsStart">開始專注</button>
