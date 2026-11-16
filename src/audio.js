@@ -27,8 +27,11 @@ function ctxOf() {
     fb.connect(delay)
     delay.connect(wet)
     wet.connect(ctx.destination)
+    // 解鎖了（自動播放被允許、使用者點了一下）、被系統打斷又回來了：背景聲照現在該怎樣再對一次
+    ctx.addEventListener?.('statechange', () => applyNoise())
   }
-  if (ctx.state === 'suspended') ctx.resume()
+  // 還沒解鎖（suspended）、iOS 切走時被打斷（interrupted）：試著恢復（不被允許時會一直等到使用者點一下）
+  if (ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume()?.catch?.(() => {})
   return ctx
 }
 
@@ -212,8 +215,10 @@ let want = { kind: 'off', vol: 50 }
 let bed = null // 正在放的：{ kind, src, gain }
 let cache = null // 最後做的那一段（換一種聲音才重做；只留一段，手機上不佔太多記憶體）
 let beat = null
+// localStorage 讀不到、寫不進去（隱私模式、空間滿了）：分頁之間沒辦法商量，就自己放（之後寫得進去了再照常商量）
+let solo = false
 
-// 現在誰在放（沒有、壞掉的是 null）。localStorage 不能用（隱私模式）：分頁之間沒辦法商量，就當成自己放
+// 現在誰在放（沒有、壞掉的是 null）
 function ownerOf() {
   let raw
   try {
@@ -230,21 +235,36 @@ function ownerOf() {
 }
 // 太久沒記「還在」（或時間在很後面：時鐘被調過）：當成那個分頁已經不在了
 const gone = (o) => !o || Math.abs(Date.now() - o.at) > STALE
-const mine = () => ownerOf()?.id === tabId
-const claim = () => {
+const mine = () => solo || ownerOf()?.id === tabId
+function claim() {
   try {
     localStorage.setItem(NOISE_TAB, JSON.stringify({ id: tabId, at: Date.now() }))
+    solo = false
+  } catch {
+    solo = true
+  }
+}
+// 不放了、要走了：是自己在放的話讓出來，還想放的分頁馬上接手（不用等 STALE）。
+// 寫不進去而自己放的（solo）也結束；那時記著的是別的分頁的話不動它
+function release() {
+  solo = false
+  if (ownerOf()?.id !== tabId) return
+  try {
+    localStorage.removeItem(NOISE_TAB)
   } catch {}
 }
-// 想放的時候每 BEAT 看一次：自己放的就記一次「還在」；別人放的那個太久沒記了就接手
+// 音訊真的在跑：還沒解鎖（suspended）、被系統打斷（interrupted）的分頁放不出聲音，不搶也不續著，讓放得出來的分頁接手
+const live = () => ctx?.state === 'running'
+// 想放的時候每 BEAT 看一次：自己放、音訊也在跑的就記一次「還在」；別人放的那個太久沒記了就看看能不能接手
 function heartbeat() {
   if (want.kind === 'off') {
     clearInterval(beat)
     beat = null
     return
   }
-  if (mine()) claim()
-  else if (gone(ownerOf())) applyNoise()
+  if (mine()) {
+    if (live()) claim()
+  } else if (gone(ownerOf())) applyNoise()
 }
 // 音量 0～100 → 音量的倍數（照聽起來的大小，用平方）
 export const noiseLevel = (vol) => Math.min(1, Math.max(0, (Number(vol) || 0) / 100) ** 2)
@@ -268,9 +288,12 @@ function bufferOf(c, kind) {
   return buf
 }
 function applyNoise() {
-  if (want.kind !== 'off' && gone(ownerOf())) claim()
-  const kind = want.kind !== 'off' && mine() ? want.kind : 'off'
-  if (want.kind !== 'off' && !beat) beat = setInterval(heartbeat, BEAT)
+  const on = want.kind !== 'off'
+  // 沒人放（或放的分頁不在了）：音訊在跑的話接手。還沒有音訊的先建好、試著解鎖——
+  // 允許自動播放的（Android 的 App）解鎖了會再叫一次這裡（statechange）；不允許的等使用者在這個分頁點一下（grab）
+  if (on && gone(ownerOf()) && ctxOf()?.state === 'running') claim()
+  const kind = on && mine() ? want.kind : 'off'
+  if (on && !beat) beat = setInterval(heartbeat, BEAT)
   // 換了一種、或不放了：舊的淡出（0.6 秒左右），淡完再停
   if (bed && bed.kind !== kind) {
     const t = ctx.currentTime
@@ -301,11 +324,13 @@ function applyNoise() {
 export const noise = {
   // kind：'off' 或 NOISE_KINDS 之一（不認得的當成 off）；vol：0～100
   want(kind, vol) {
+    const was = want.kind
     want = { kind: GEN[kind] ? kind : 'off', vol: Number(vol) || 0 }
-    // 不放了：不用再記「還在」（別的分頁 15 秒後就可以接手）
-    if (want.kind === 'off' && beat) {
+    // 不放了：不用再記「還在」，是自己在放的話讓出來
+    if (want.kind === 'off') {
       clearInterval(beat)
       beat = null
+      if (was !== 'off') release()
     }
     applyNoise()
   },
@@ -314,9 +339,9 @@ export const noise = {
     return { want: want.kind, vol: want.vol, playing: bed?.kind || 'off', mine: mine() }
   },
 }
-// 在這個分頁操作了（點、按鍵）：換這個分頁放。音訊還沒解鎖的話也在這時候解鎖
+// 在這個分頁操作了（點、按鍵）：換這個分頁放。音訊還沒解鎖、被系統打斷的話也在這時候恢復
 const grab = () => {
-  if (want.kind === 'off' || (mine() && bed && ctx?.state !== 'suspended')) return
+  if (want.kind === 'off' || (mine() && bed && live())) return
   claim()
   applyNoise()
 }
@@ -327,10 +352,5 @@ globalThis.addEventListener?.('storage', (e) => {
   if (e.key === NOISE_TAB || e.key === null) applyNoise()
 })
 // 這個分頁關掉、離開（放進上一頁的快取也算）：讓還想放的分頁接手；從快取回來時再看一次
-globalThis.addEventListener?.('pagehide', () => {
-  if (!mine()) return
-  try {
-    localStorage.removeItem(NOISE_TAB)
-  } catch {}
-})
+globalThis.addEventListener?.('pagehide', release)
 globalThis.addEventListener?.('pageshow', (e) => e.persisted && applyNoise())

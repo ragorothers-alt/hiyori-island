@@ -1400,6 +1400,13 @@ test('專注時的背景聲：計時設定、專注頁右上的耳機都可以�
   await panel.locator('[data-noise-vol]').fill('80')
   await expect.poll(state).toMatchObject({ vol: 80 })
   await expect.poll(() => page.evaluate(() => window.hiyori.store.state.settings.noiseVol)).toBe(80)
+  // 焦點還停在音量上（沒在拖）、別的地方改了音量：滑桿跟著變，下一次按方向鍵從新的接著調
+  await panel.locator('[data-noise-vol]').focus()
+  await page.evaluate(() => window.hiyori.store.setSetting('noiseVol', 30))
+  await expect(panel.locator('[data-noise-vol]')).toHaveValue('30')
+  await expect.poll(state).toMatchObject({ vol: 30 })
+  await page.evaluate(() => window.hiyori.store.setSetting('noiseVol', 80))
+  await expect(panel.locator('[data-noise-vol]')).toHaveValue('80')
   await expect(panel.locator('.noise-hint')).toHaveText('專注時放褐噪音，休息、暫停時會停')
   // Esc 先收選單、焦點回到耳機；專注頁還開著
   await page.keyboard.press('Escape')
@@ -1414,6 +1421,16 @@ test('專注時的背景聲：計時設定、專注頁右上的耳機都可以�
   // 暫停：停；繼續：再放
   await page.locator('#ffToggle').click()
   await expect.poll(state).toMatchObject({ want: 'off', playing: 'off' })
+  // 暫停中打開選單、用鍵盤縮小專注頁（沒有點到外面）：選單跟著收，再打開專注頁時不會還開著
+  await btn.click()
+  await expect(panel).toBeVisible()
+  await page.locator('#ffMin').focus()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#focusFull')).toBeHidden()
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
+  await expect(page.locator('#focusFull')).toBeVisible()
+  await expect(panel).toBeHidden()
+  await expect(btn).toHaveAttribute('aria-expanded', 'false')
   await page.locator('#ffToggle').click()
   await expect.poll(state).toMatchObject({ want: 'brown', playing: 'brown' })
   // 音效關著：不放，選單裡說一聲；打開音效又放

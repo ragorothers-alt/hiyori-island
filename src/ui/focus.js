@@ -676,12 +676,17 @@ export class FocusTimer {
       })
     }
     for (const r of $$('[data-noise-vol]')) {
-      // 拖的時候音量跟著變，放開才存（不用每一格都存一次）
+      // 拖的時候音量跟著變，放開才存（不用每一格都存一次）。沒等到放開就離開了（change 沒來）：離開時照拖到的存
       r.addEventListener('input', () => {
         this._volDraft = +r.value
         this._noiseSync()
       })
       r.addEventListener('change', () => {
+        this._volDraft = null
+        this._setNoise('noiseVol', +r.value)
+      })
+      r.addEventListener('blur', () => {
+        if (this._volDraft == null) return
         this._volDraft = null
         this._setNoise('noiseVol', +r.value)
       })
@@ -695,8 +700,9 @@ export class FocusTimer {
     if (this.ui.store.state.settings[key] !== v) this.ui.store.setSetting(key, v)
     this._noiseSync()
   }
-  // 專注頁右上的背景聲選單。回傳有沒有收起來（Esc 先收它，再收專注頁）
-  noisePanel(force) {
+  // 專注頁右上的背景聲選單。回傳有沒有收起來（Esc 先收它，再收專注頁）。
+  // refocus：收起來時焦點在裡面的話交回耳機（專注頁整個收起來時不用）
+  noisePanel(force, refocus = true) {
     const el = $('#ffNoise')
     const open = force ?? el.hidden
     if (!open && el.hidden) return false
@@ -706,7 +712,7 @@ export class FocusTimer {
     if (open) {
       this._renderNoise()
       ;(el.querySelector('.noise-seg .on') || el.querySelector('[data-noise]')).focus()
-    } else if (had) $('#ffNoiseBtn').focus()
+    } else if (had && refocus) $('#ffNoiseBtn').focus()
     return true
   }
   _renderNoise() {
@@ -715,8 +721,8 @@ export class FocusTimer {
     const mute = st.sound === false
     pickOne($$('.noise-seg [data-noise]'), (b) => b.dataset.noise === kind)
     for (const r of $$('[data-noise-vol]')) {
-      // 正在拖的那一條不動它
-      if (document.activeElement !== r) r.value = st.noiseVol
+      // 正在拖的時候不動它（放開時照拖到的存）；只是焦點停在上面的照樣跟著設定走（別的分頁改了音量，下一次按方向鍵才從新的接著調）
+      if (this._volDraft == null) r.value = st.noiseVol
       r.closest('.noise-vol').hidden = kind === 'off'
     }
     const hint = mute ? '音效關著，聽不到背景聲：打開音效才會放' : kind === 'off' ? '專注時放一點聲音，蓋掉周圍的雜音' : `專注時放${NOISE_NAMES[kind]}，休息、暫停時會停`
@@ -899,8 +905,10 @@ export class FocusTimer {
   toggleBig(force) {
     const open = (force ?? $('#focusFull').hidden) && this.mode !== 'idle'
     $('#focusFull').hidden = !open
-    // 縮小回來：手機上往下捲時讓開的 Dock 膠囊先回來（剛縮小就要按得到計時器）
+    // 縮小回來：手機上往下捲時讓開的 Dock 膠囊先回來（剛縮小就要按得到計時器）；右上的背景聲選單也收起來
+    // （暫停中的計時不會重畫，不能等重畫時才收）
     if (!open) {
+      this.noisePanel(false, false)
       this.ui.tuckDock?.(false)
       return this._catSync()
     }
