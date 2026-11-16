@@ -1385,6 +1385,65 @@ test('限時去：等完一分鐘還是想去時「去 5 分鐘就回來」，�
   await page.evaluate(() => window.hiyori.ui.focus.toggle())
   await expect(detour).toBeHidden()
   expect(await page.evaluate(() => window.hiyori.ui.focus.detour)).toBe(0)
+  // 新的一輪（10:20～10:45）快到點時才去：說好 10:46 回來，這一輪 10:45 先到點了——交給到點那邊（不先叫「5 分鐘到了」），
+  // 切走再回來也不算回來了
+  await page.clock.setFixedTime(T('10:20:00'))
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.toggle()
+  })
+  await btn.click()
+  await page.clock.setFixedTime(T('10:41:00'))
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
+  await expect(page.locator('#ffDetourT')).toHaveText('去一下・10:46 叫你回來')
+  // 正在限時去：「想分心了？」打不開，另一個分頁還開著的「先等一分鐘」也不算了
+  expect(await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    const opened = f.urge(true)
+    f.urgeAt = Date.now()
+    f.urgeSid = f.sid
+    f._renderUrge()
+    return { opened, urgeAt: f.urgeAt, hidden: document.getElementById('ffUrge').hidden }
+  })).toEqual({ opened: false, urgeAt: 0, hidden: true })
+  await page.evaluate(() => {
+    window.__hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.setFixedTime(T('10:47:00'))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  await page.evaluate(() => {
+    window.__hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.waitForTimeout(600)
+  expect(await returns()).toBe(2)
+  expect(await page.evaluate(() => (window.__toasts || []).filter((x) => x.includes('說好的 5 分鐘到了')).length)).toBe(1)
+  // 另一個分頁已經按了「我回來了」（存著的已經沒有限時去，這邊的 storage 事件還沒到）：這邊按了只跟著收起來，不再記一次；
+  // 已經叫過了的也不再叫
+  await page.clock.setFixedTime(T('11:00:00'))
+  const other = await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.toggle()
+    const s = window.hiyori.store
+    const before = s.peekDay(s.today).returns || 0
+    const stored = () => JSON.parse(localStorage.getItem('hiyori-focus'))
+    // 這邊記憶體裡還有限時去，存著的沒有
+    f.detour = Date.now() + 60000
+    const counted = f.detourBack()
+    const a = { counted, detour: f.detour, returns: (s.peekDay(s.today).returns || 0) - before }
+    // 存著的已經叫過了：時間到了這邊不再叫
+    f.detour = Date.now() - 1000
+    f.detourRang = false
+    f._persist()
+    localStorage.setItem('hiyori-focus', JSON.stringify({ ...stored(), detourRang: true }))
+    return { a, before: (window.__toasts || []).length }
+  })
+  expect(other.a).toEqual({ counted: false, detour: 0, returns: 0 })
+  await page.waitForTimeout(800)
+  expect(await page.evaluate(() => window.hiyori.ui.focus.detourRang)).toBe(true)
+  expect(await page.evaluate(() => (window.__toasts || []).filter((x) => x.includes('說好的 5 分鐘到了')).length)).toBe(1)
   // 今日反思：寫著去一下就回來幾次，也算進「把自己拉回來」
   await page.evaluate(() => {
     window.hiyori.ui.focus.stop()
@@ -1891,6 +1950,88 @@ test('回來了，現在該做：離開 20 分鐘以上再回到 App、沒在計
   await away('18:31:00', '23:40:00')
   await page.waitForTimeout(1500)
   expect(await welcomes()).toBe(1)
+})
+
+test('做完一件，接著下一件：沒在計時的時候勾掉現在該做的那一件，提示卡寫下一件（和下一步），一鍵開始專注；不是最前面那一件、專注中、20 分鐘內再勾、今天都做完了不說；設定裡可以關', async ({ page, context, site }) => {
+  await useAppMode(context)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const ids = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.clearSamples()
+    for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+    const a = s.addTask({ title: '寫期末報告', date: s.today, priority: 3 })
+    s.toggleStar(a.id)
+    const b = s.addTask({ title: '整理筆記', date: s.today, priority: 3 })
+    s.addSub(b.id, '把第三章的重點抄下來')
+    const c = s.addTask({ title: '回信', date: s.today, priority: 2 })
+    const d = s.addTask({ title: '買牛奶', date: s.today, priority: 1 })
+    return { a: a.id, b: b.id, c: c.id, d: d.id }
+  })
+  const done = (id) => page.evaluate((id) => window.hiyori.store.toggleTask(id), id)
+  const nexts = () => page.evaluate(() => (window.__toasts || []).filter((x) => x.includes('下一件')).length)
+  // 不是排在最前面的那一件：不說
+  await done(ids.d)
+  await page.waitForTimeout(3200)
+  expect(await nexts()).toBe(0)
+  // 勾掉現在該做的那一件（本命）：慶祝之後提示卡寫下一件和下一步，ふじ說一聲
+  await done(ids.a)
+  const card = page.locator('#toasts .toast', { hasText: '下一件：整理筆記' })
+  await expect(card).toContainText('下一步：把第三章的重點抄下來')
+  await expect.poll(() => chatSaid(page, '整理筆記')).toBe(true)
+  // ▶ 開始專注：開始專注那一件
+  await card.getByRole('button', { name: '▶ 開始專注' }).click()
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.taskId)).toBe(ids.b)
+  // 專注中勾掉的不說（專注那邊自己會接著問）
+  await done(ids.b)
+  await page.waitForTimeout(3200)
+  expect(await nexts()).toBe(1)
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 20 分鐘內又勾掉現在該做的那一件：已經很順了，不吵
+  await page.clock.setFixedTime(T('10:05:00'))
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.addTask({ title: '洗衣服', date: s.today, priority: 1 })
+    s.addTask({ title: '寫週報', date: s.today, priority: 1 })
+  })
+  await done(ids.c)
+  await page.waitForTimeout(3200)
+  expect(await nexts()).toBe(1)
+  // 過了 20 分鐘：又說
+  await page.clock.setFixedTime(T('10:30:00'))
+  const top = () => page.evaluate(() => {
+    const s = window.hiyori.store
+    return s.tasksOn(s.today).filter((t) => !t.done).map((t) => t.id)
+  })
+  const [first] = await top()
+  await done(first)
+  await expect.poll(nexts).toBe(2)
+  // 今天剩下最後一件、勾掉了：沒有下一件，不說（過了 20 分鐘也一樣）
+  await page.clock.setFixedTime(T('11:00:00'))
+  const [last] = await top()
+  await done(last)
+  await page.waitForTimeout(3200)
+  expect(await nexts()).toBe(2)
+  // 設定裡關掉：不說
+  await page.clock.setFixedTime(T('11:30:00'))
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.addTask({ title: '倒垃圾', date: s.today })
+    s.addTask({ title: '澆花', date: s.today })
+    window.hiyori.ui.setTab('records')
+  })
+  // （勾了好幾件，可能剛好升級、「升級了」的視窗蓋在上面：直接送點擊）
+  await page.locator('#nextBtn').dispatchEvent('click')
+  await expect(page.locator('#nextBtn')).toHaveText('關')
+  const [one] = await top()
+  await done(one)
+  await page.waitForTimeout(3200)
+  expect(await nexts()).toBe(2)
 })
 
 test('專注時的背景聲：計時設定、專注頁右上的耳機都可以選；只在專注中放，暫停、休息、結束時停；音效關著不放；Esc 先收選單', async ({ page, context, site }) => {
@@ -3464,7 +3605,7 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await expect.poll(() => mottoCalls().at(-1).body.after).toBeNull()
   expect(mottoCalls().at(-1).body.seq).toBeGreaterThan(arm.body.seq)
 
-  // 10:05 又離開：再交一次；回來（下一則還久）關掉系統通知：伺服器上排著的取消、快取裡的字拿掉
+  // 10:05 又離開：再交一次
   await page.clock.setFixedTime(new Date(T + 5 * 60000))
   await leave(true)
   await expect.poll(() => mottoCalls().length).toBe(3)
@@ -3472,17 +3613,36 @@ test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面�
   await leave(false)
   await page.waitForTimeout(1500)
   expect(mottoCalls()).toHaveLength(3)
-  await page.evaluate(() => window.hiyori.ui.setTab('schedule'))
-  await page.locator('#notifyBtn').click()
-  await expect.poll(() => mottoCalls().length).toBe(4)
-  expect(mottoCalls()[3].body.after).toBeNull()
-  await expect.poll(() => file('__motto-plan')).toEqual([])
-  await page.evaluate(() => window.hiyori.ui.setTab('records'))
-  await expect(page.locator('#mottoRoot .mt-reach')).toContainText('現在只在看著這一頁時提醒')
-  // 按了先停的那一刻：念到哪推到現在（已經到點、推播還在路上的那幾則晚到時，Service Worker 當成念過了、不出聲）
+  // 回來後按了先停：念到哪推到現在（已經到點、推播還在路上的那幾則晚到時，Service Worker 當成念過了、不出聲）；
+  // 排法變了，伺服器上排著的那一串取消。恢復之後再離開：照原本的那一串再交一次
   expect(await file('__motto-done')).toEqual({ at: T })
   await page.evaluate(() => window.hiyori.store.setSetting('mottoPause', Date.now() + 3600000))
   await expect.poll(() => file('__motto-done')).toEqual({ at: T + 5 * 60000 })
+  await expect.poll(() => mottoCalls().length).toBe(4)
+  expect(mottoCalls()[3].body.after).toBeNull()
+  await page.evaluate(() => window.hiyori.store.setSetting('mottoPause', 0))
+  await leave(true)
+  await expect.poll(() => mottoCalls().length).toBe(5)
+  expect(mottoCalls()[4].body.after[0]).toBe(10 * 60000)
+  // 回來（下一則還久）關掉系統通知：伺服器上排著的取消、快取裡的字拿掉
+  await leave(false)
+  await page.waitForTimeout(1500)
+  expect(mottoCalls()).toHaveLength(5)
+  await page.evaluate(() => window.hiyori.ui.setTab('schedule'))
+  await page.locator('#notifyBtn').click()
+  await expect.poll(() => mottoCalls().length).toBe(6)
+  expect(mottoCalls()[5].body.after).toBeNull()
+  await expect.poll(() => file('__motto-plan')).toEqual([])
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#mottoRoot .mt-reach')).toContainText('現在只在看著這一頁時提醒')
+  // 沒訂閱推播了：再按先停也不動念到哪（不會有推播來）
+  await page.clock.setFixedTime(new Date(T + 6 * 60000))
+  await page.evaluate(() => {
+    window.hiyori.store.setSetting('mottoPause', 0)
+    window.hiyori.store.setSetting('mottoPause', Date.now() + 3600000)
+  })
+  await page.waitForTimeout(1500)
+  expect(await file('__motto-done')).toEqual({ at: T + 5 * 60000 })
 })
 
 test('回神紀錄：警語提示卡上按「✓ 在做了」記一筆、誇一句；週報寫回神了幾次，提醒時多半本來就在做的話一鍵拉長間隔', async ({ page, context, site }) => {

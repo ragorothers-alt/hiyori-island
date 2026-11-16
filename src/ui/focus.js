@@ -661,9 +661,10 @@ export class FocusTimer {
       this.urge(false)
     })
   }
-  // 專注中、沒暫停（「想分心了？」只在這時候有）
+  // 專注中、沒暫停、不是正在限時去（「想分心了？」只在這時候有）。
+  // 另一個分頁按了「去 5 分鐘就回來」：這邊還開著的「先等一分鐘」也不算了（不會被舊的那一顆把回來的時間往後延）
   _urgeCan() {
-    return this.mode === 'focus' && this.paused == null
+    return this.mode === 'focus' && this.paused == null && !this.detour
   }
   // 「先等一分鐘」還算數嗎：打開時的那一輪（sid）、還在專注、沒暫停。換了一輪（到點、另一個分頁開始了新的一輪）就不算了
   _urgeLive() {
@@ -709,10 +710,30 @@ export class FocusTimer {
     this._renderPark()
     $('#ffParkText').focus()
   }
+  // 限時去的狀態以存著的為準：另一個分頁可能已經按了「我回來了」、已經叫過了（storage 事件還沒到）。
+  // 同一輪的話回傳存著的 { detour, detourRang }，不是同一輪、讀不到是 null
+  _detourStored() {
+    try {
+      const s = JSON.parse(localStorage.getItem(FOCUS_KEY) || 'null')
+      if (!s || s.sid !== this.sid) return null
+      const detour = s.mode === 'focus' && Number.isFinite(s.detour) && s.detour > 0 ? s.detour : 0
+      return { detour, detourRang: !!detour && s.detourRang === true }
+    } catch {
+      return null
+    }
+  }
   // 限時去之後回來了：按了「我回來了」、提示卡上的按鈕，或切走之後回到 App（auto）。記一次回來了（今天的回神、週報），
-  // もち／ふじ說一聲。回傳剛才是不是在限時去
+  // もち／ふじ說一聲。回傳有沒有記。
+  // 另一個分頁已經記過了：跟著收起來，不再記一次。這一輪其實已經到點了（頁面睡著、還沒換到休息）：不算，留給到點那邊
   detourBack(auto = false) {
     if (!this.detour) return false
+    const s = this._detourStored()
+    if (s && s.detour !== this.detour) {
+      Object.assign(this, s)
+      this._renderUrge()
+      return false
+    }
+    if (this.mode !== 'focus' || this.paused != null || clock.due(this, Date.now())) return false
     const late = this.detourRang
     this.detour = 0
     this.detourRang = false
@@ -1161,14 +1182,18 @@ export class FocusTimer {
       }
       return
     }
-    // 限時去的時間到了：叫你回來（一次；另一個分頁叫過了就不再叫）
-    if (this.detour && !this.detourRang && this.mode === 'focus' && Date.now() >= this.detour) {
-      this.detourRang = true
-      this._persist()
-      if (!$('#focusFull').hidden) this._renderUrge()
-      this.hooks.detourDue?.()
-    }
     const step = clock.due(this, Date.now())
+    // 限時去的時間到了：叫你回來（一次）。這一輪剛好也到點、放太久失效了的話，交給下面到點的那邊（不先叫一聲才結束）。
+    // 另一個分頁已經叫過、已經回來了：照存著的，不再叫。叫的那邊說先不叫（Android 的 App 在背景：手機的那一則會叫）就等等再看
+    if (!step && this.detour && !this.detourRang && this.mode === 'focus' && Date.now() >= this.detour) {
+      const s = this._detourStored()
+      if (s && (s.detour !== this.detour || s.detourRang)) Object.assign(this, s)
+      else if (this.hooks.detourDue?.() !== false) {
+        this.detourRang = true
+        this._persist()
+      }
+      if (!$('#focusFull').hidden) this._renderUrge()
+    }
     if (step?.do === 'expire') return this._expire()
     // 這一段本來排好到點的時間：通知用它認「同一次到點」
     const at = step ? clock.nextEnd(this) : null

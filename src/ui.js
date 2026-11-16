@@ -2392,6 +2392,9 @@ export class UI {
     const backOn = this.store.state.settings.backNudge !== false
     setOn($('#backBtn'), backOn)
     $('#backBtn').textContent = backOn ? '開' : '關'
+    const nextOn = this.store.state.settings.nextNudge !== false
+    setOn($('#nextBtn'), nextOn)
+    $('#nextBtn').textContent = nextOn ? '開' : '關'
     const brief = this.store.state.settings.brief !== false
     setOn($('#briefBtn'), brief)
     $('#briefBtn').textContent = brief ? '開' : '關'
@@ -2868,6 +2871,10 @@ export class UI {
     }
     $('#backBtn').onclick = () => {
       this.store.setSetting('backNudge', this.store.state.settings.backNudge === false)
+      this.renderSettings()
+    }
+    $('#nextBtn').onclick = () => {
+      this.store.setSetting('nextNudge', this.store.state.settings.nextNudge === false)
       this.renderSettings()
     }
     $('#briefBtn').onclick = () => {
