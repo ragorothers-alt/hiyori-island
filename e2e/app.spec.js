@@ -3594,6 +3594,117 @@ test('限時去（Android 的 App）：切去用別的 App 時，叫你回來的
   expect(await dues()).toBe(1)
 })
 
+test('桌機的網頁：「專注中切到別的分頁太久叫我回來」（預設關著）打開後，離開 3 分鐘、這段時間也沒有別的分頁看著 App 時通知一次（同一段離開只叫一次）；回到頁面收掉那則通知；限時去的時候、再一下就到點的不叫', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  await useAppMode(context)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await context.addInitScript(() => {
+    // 無頭瀏覽器不給通知權限：當成允許；Service Worker 顯示的通知記在 __shown，收掉的記在 __closed
+    Object.defineProperty(Notification, 'permission', { get: () => 'granted' })
+    window.__shown = []
+    window.__closed = []
+    ServiceWorkerRegistration.prototype.showNotification = async function (title, o = {}) {
+      window.__shown.push({ title, body: o.body, tag: o.tag })
+    }
+    ServiceWorkerRegistration.prototype.getNotifications = async function (f = {}) {
+      return window.__shown.filter((n) => !f.tag || n.tag === f.tag).map((n) => ({ ...n, close: () => window.__closed.push(n.tag) }))
+    }
+    // 切到別的分頁：設了 window.__hidden 就照它算（沒設照瀏覽器的：重新整理時不能被當成回到頁面）
+    const real = (k) => Object.getOwnPropertyDescriptor(Document.prototype, k).get
+    const hidden = real('hidden')
+    const state = real('visibilityState')
+    Object.defineProperty(Document.prototype, 'hidden', { get() { return window.__hidden ?? hidden.call(this) }, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get() { return window.__hidden == null ? state.call(this) : window.__hidden ? 'hidden' : 'visible' }, configurable: true })
+  })
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  await swReady(page)
+  const id = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('notify', true)
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    return s.addTask({ title: '寫期末報告', date: s.today }).id
+  })
+  const away = () => page.evaluate(() => window.__shown.filter((n) => n.tag === 'away'))
+  const closed = () => page.evaluate(() => window.__closed)
+  const leave = () => page.evaluate(() => (window.__hidden = true) && document.dispatchEvent(new Event('visibilitychange')))
+  const back = () => page.evaluate(() => (window.__hidden = false) || document.dispatchEvent(new Event('visibilitychange')))
+  // 桌機才有這一列，預設關著；打開
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#tabRow')).toBeVisible()
+  await expect(page.locator('#tabBtn')).toHaveText('關')
+  await page.locator('#tabBtn').click()
+  await expect(page.locator('#tabBtn')).toHaveText('開')
+  // 專注中切到別的分頁：3 分鐘前不叫，過了 3 分鐘叫一次（寫著還剩幾分鐘），之後不再叫
+  await page.evaluate((id) => window.hiyori.ui.focus.startWith(id), id)
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await leave()
+  await page.clock.setFixedTime(T('10:02:50'))
+  await page.waitForTimeout(1500)
+  expect(await away()).toEqual([])
+  await page.clock.setFixedTime(T('10:03:01'))
+  await expect.poll(away).toEqual([{ title: 'ひより · 專注中', body: '「寫期末報告」還在專注中，還剩 22 分鐘。回來吧', tag: 'away' }])
+  await page.clock.setFixedTime(T('10:05:00'))
+  await page.waitForTimeout(1500)
+  expect(await away()).toHaveLength(1)
+  // 回到頁面：那一則收掉
+  await back()
+  await expect.poll(closed).toContain('away')
+  // 再切走，這段時間裡別的分頁看著 App（每分鐘記一次「還在看」）：從那之後算 3 分鐘才叫
+  await page.clock.setFixedTime(T('10:06:00'))
+  await leave()
+  await page.clock.setFixedTime(T('10:08:00'))
+  await page.evaluate(() => localStorage.setItem('hiyori-seen-at', String(Date.now())))
+  await page.clock.setFixedTime(T('10:09:30'))
+  await page.waitForTimeout(1500)
+  expect(await away()).toHaveLength(1)
+  await page.clock.setFixedTime(T('10:11:01'))
+  await expect.poll(async () => (await away()).length).toBe(2)
+  expect((await away())[1].body).toContain('還剩 14 分鐘')
+  await back()
+  // 限時去（說好 10:18 回來）的時候切走：過了 3 分鐘也不叫，到說好的時間才叫（「說好的 5 分鐘到了」）；回來時收掉
+  await page.clock.setFixedTime(T('10:12:00'))
+  await page.waitForTimeout(900)
+  await page.locator('#ffUrgeBtn').click()
+  await page.clock.setFixedTime(T('10:13:01'))
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
+  await expect(page.locator('#ffDetourT')).toHaveText('去一下・10:18 叫你回來')
+  await page.clock.setFixedTime(T('10:13:05'))
+  await leave()
+  await page.clock.setFixedTime(T('10:16:30'))
+  await page.waitForTimeout(1500)
+  expect(await away()).toHaveLength(2)
+  await page.clock.setFixedTime(T('10:18:05'))
+  await expect.poll(() => page.evaluate(() => window.__shown.filter((n) => n.tag === 'detour').length)).toBe(1)
+  // 叫過「說好的 5 分鐘到了」了：不再另外叫「回來吧」
+  await page.waitForTimeout(1500)
+  expect(await away()).toHaveLength(2)
+  await back()
+  await expect.poll(closed).toContain('detour')
+  // 這一輪 10:25 到點：快到點時才切走（3 分鐘後只剩 30 秒）不叫，到點的通知會叫你
+  await page.clock.setFixedTime(T('10:21:30'))
+  await leave()
+  await page.clock.setFixedTime(T('10:24:31'))
+  await page.waitForTimeout(1500)
+  expect(await away()).toHaveLength(2)
+  // 設定裡關掉：不叫
+  await back()
+  await page.evaluate((id) => {
+    window.hiyori.store.setSetting('tabNudge', false)
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.startWith(id)
+  }, id)
+  await leave()
+  await page.clock.setFixedTime(T('10:28:40'))
+  await page.waitForTimeout(1500)
+  expect(await away()).toHaveLength(2)
+})
+
 // 通知本身（Android 的 MottoNotice、Service Worker 的 notificationclick）在 tests/sw.test.js 測；這裡是打開 App 之後頁面照著做
 test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶ 開始專注」打開後照著做；瀏覽器照 Service Worker 留在快取裡的、傳過來的做，網址上的 ?act= 不算', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())

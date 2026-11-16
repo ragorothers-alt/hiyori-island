@@ -10,7 +10,7 @@ import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM, pullOf } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
-import { native, nativeMottos, nativeBack } from './native.js'
+import { native, nativeMottos, nativeBack, deskWeb } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
 import { parseQuick, describeQuick, parseSpend } from './parse.js'
 import { SHOP_ITEMS } from './data/shop.js'
@@ -506,6 +506,10 @@ export class UI {
   // 有人在看：記下現在（每分鐘、離開分頁時）。分頁在背景時不記，除非是剛要離開（leaving）
   markSeen(leaving = false) {
     if (leaving || !document.hidden) writeLocal(SEEN_KEY, Date.now())
+  }
+  // 上一次有人在看是什麼時候（看得到的分頁每分鐘記一次、離開時也記；別的分頁記的也算）
+  lastSeen() {
+    return readLocal(SEEN_KEY, 0)
   }
   // 回到 App：抄下離開的時間（還沒被下一次 markSeen 蓋掉）
   returned() {
@@ -2411,6 +2415,11 @@ export class UI {
     const awayOn = this.store.state.settings.awayNudge !== false
     setOn($('#awayBtn'), awayOn)
     $('#awayBtn').textContent = awayOn ? '開' : '關'
+    // 桌機的網頁：切到別的分頁太久叫你回來（手機的網頁分不出鎖螢幕和切走，沒有這一列；預設關著，見 main.js 的 tabNudge）
+    $('#tabRow').hidden = !deskWeb()
+    const tabOn = this.store.state.settings.tabNudge === true
+    setOn($('#tabBtn'), tabOn)
+    $('#tabBtn').textContent = tabOn ? '開' : '關'
     const backOn = this.store.state.settings.backNudge !== false
     setOn($('#backBtn'), backOn)
     $('#backBtn').textContent = backOn ? '開' : '關'
@@ -2889,6 +2898,16 @@ export class UI {
     }
     $('#awayBtn').onclick = () => {
       this.store.setSetting('awayNudge', this.store.state.settings.awayNudge === false)
+      this.renderSettings()
+    }
+    // 打開時還沒開系統通知：先問權限（叫你回來靠的是通知）；不允許就先不打開
+    $('#tabBtn').onclick = async () => {
+      const on = this.store.state.settings.tabNudge !== true
+      if (on && !(this.store.state.settings.notify && notifyPermission() === 'granted') && !(await this.enableNotify())) {
+        this.toast({ icon: '鐘', title: '要先允許通知才叫得到你', sub: '瀏覽器擋下了通知的話，到網址列左邊的網站設定打開' })
+        return this.renderSettings()
+      }
+      this.store.setSetting('tabNudge', on)
       this.renderSettings()
     }
     $('#backBtn').onclick = () => {

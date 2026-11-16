@@ -6,6 +6,9 @@
 //   awayLocked()：上一次離開 App 時手機是不是鎖著
 // 不在殼裡（瀏覽器、PWA）native 是 null，這個檔案什麼都不做。
 export const native = typeof window !== 'undefined' && window.HiyoriNative ? window.HiyoriNative : null
+// 桌機的瀏覽器（有滑鼠、游標停得住，不在 Android 殼裡）：切到別的分頁、縮小視窗就是 document.hidden，
+// 不會是鎖著手機在專心（手機的網頁分不出這兩種）
+export const deskWeb = () => !native && typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
 
 const hhmm = (ms) => {
   const d = new Date(ms)

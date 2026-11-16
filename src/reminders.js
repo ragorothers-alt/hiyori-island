@@ -311,6 +311,16 @@ export class Reminders {
   }
 }
 
+// 收掉這一類（tag）還留在通知中心的系統通知（例如回到頁面了，「回來吧」那一則不用留著）。
+// Android 殼的通知手機自己管；沒有 Service Worker 時用 new Notification 發的收不到
+export async function closeNotify(tag) {
+  if (native) return
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration()
+    for (const n of (await reg?.getNotifications({ tag })) || []) n.close()
+  } catch {}
+}
+
 // 系統通知：有 Service Worker 時用 showNotification（手機必需），否則用 Notification
 // extra：交給 Service Worker 顯示時多帶的（例如警語通知上的按鈕 actions、data）。
 // 沒有 Service Worker 時用的 new Notification 不能有按鈕，就不帶

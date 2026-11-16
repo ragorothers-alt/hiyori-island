@@ -4,9 +4,9 @@ import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
-import { Reminders, systemNotify, notifyPermission } from './reminders.js'
+import { Reminders, systemNotify, closeNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
-import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
+import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
 import { planKey, pauseOf, pauseText, pauseUntil, pausedUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt, activeMottos, windowEnd } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
@@ -1419,6 +1419,49 @@ async function boot() {
     return { at, title: 'ひより · 專注中', body, back: true }
   }
 
+  // ── 桌機的網頁：專注中切到別的分頁太久，叫你回來 ──
+  // 切到別的分頁（縮小視窗）AWAY_NUDGE 還沒回來、這段時間也沒有別的分頁看著 App（看得到的分頁每分鐘記一次「還在看」）：
+  // 系統通知叫你一次（同一段離開只叫一次，別的分頁叫過的也算：記在 TAB_NUDGE_KEY）。頁面在背景時計時器照樣每秒跑，叫得到。
+  // 工作本身就在別的分頁的人會被吵，預設關著（設定裡打開）；手機的網頁分不出鎖螢幕和切走，不做。
+  // 說好「去 5 分鐘就回來」的到說好的時間才叫（detourDue）；這一輪再一下就到點的不叫（到點的通知會叫你）
+  const TAB_NUDGE_KEY = 'hiyori-tab-nudge'
+  let tabMem = null
+  const tabLast = () => {
+    try {
+      return JSON.parse(localStorage.getItem(TAB_NUDGE_KEY) || 'null') || tabMem
+    } catch {
+      return tabMem
+    }
+  }
+  const tabNudge = () => {
+    if (store.state.settings.tabNudge !== true || !deskWeb() || !notifyOn()) return
+    if (!document.hidden || !awaySince || !focusing() || awaySid !== ui.focus.sid) return
+    const now = Date.now()
+    const seen = ui.lastSeen()
+    const since = Math.max(awaySince, seen)
+    // 限時去：說好的時間還沒到（到時會叫），或是這一段離開的時候已經叫過「說好的 5 分鐘到了」：不再叫
+    const d = ui.focus.detour
+    if (d && (!ui.focus.detourRang || d >= since)) return
+    if (now - since < AWAY_NUDGE) return
+    const end = ui.focus.boundary?.at || 0
+    if (!(end - now > 60000)) return
+    const last = tabLast()
+    if (last?.sid === ui.focus.sid && last.at >= seen) return
+    tabMem = { sid: ui.focus.sid, at: now }
+    try {
+      localStorage.setItem(TAB_NUDGE_KEY, JSON.stringify(tabMem))
+    } catch {}
+    const t = focusTarget()
+    const what = t ? `「${short(t, 16)}」` : ''
+    systemNotify('ひより · 專注中', ui.focus.counting ? `${what}還在專注中，回來接著做吧` : `${what}還在專注中，還剩 ${Math.max(1, Math.round((end - now) / 60000))} 分鐘。回來吧`, 'away')
+  }
+  // 回到頁面：還留在通知中心的「回來吧」「說好的 5 分鐘到了」收掉
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || native) return
+    closeNotify('away')
+    closeNotify('detour')
+  })
+
   // ── 警語交給別人排：App 關著、手機鎖著也照時間通知 ──
   // 排好接下來到明天就寢的每一則（幾點、念哪一句、現在該做哪一件）。專注中的那一段不排；剛到點、還沒人處理的那一則留著。
   //   Android 殼：整串交給手機，手機的鬧鐘一則一則發；App 在前面時手機不發，頁面自己念（離開 App 的那一刻還有到點沒念的，手機補發）
@@ -1516,6 +1559,7 @@ async function boot() {
     // 等於沒看到，警語還會被當成念過了（手機那邊也不再發）。開場一好，下一秒就照常檢查
     if (booted) reminders.check()
     syncMottos()
+    tabNudge()
     // Android 的 App：切到別的 App 時頁面不一定馬上變成看不到（document.hidden），照手機說的算——
     // 在背景時記下離開的時間、不再每分鐘記「還在看」；回到前景時當成回來了（離開夠久就提醒現在該做）
     if (native) {
