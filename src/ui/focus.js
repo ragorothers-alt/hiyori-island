@@ -310,7 +310,7 @@ export class FocusTimer {
     const el = $('#focusSet')
     const open = force ?? el.hidden
     el.hidden = !open
-    $('#focusTime').setAttribute('aria-expanded', open)
+    this._timeAria()
     if (!open) {
       this._asking = false
       return
@@ -319,6 +319,13 @@ export class FocusTimer {
     this._renderSet()
     this._syncRuler()
     this._fit(el)
+  }
+  // Dock 上的時間打開的是哪一個：App 模式計時中是專注頁，其他時候是計時設定的小視窗（螢幕閱讀器念的「展開／收合」跟著它）
+  _timeAria() {
+    const big = this.mode !== 'idle' && this.ui.appMode
+    const b = $('#focusTime')
+    b.setAttribute('aria-controls', big ? 'focusFull' : 'focusSet')
+    b.setAttribute('aria-expanded', String(!$(big ? '#focusFull' : '#focusSet').hidden))
   }
   // 視窗放不下（手機的小島模式只剩上半部、手機橫放）：頂到畫面外就改成從最上面排、裡面捲動
   _fit(el) {
@@ -445,11 +452,12 @@ export class FocusTimer {
         el.value = ''
         this._renderPark()
       })
-      // Esc：放開這一行就好（不要連專注頁、小視窗一起收起來）。輸入法選字中的 Esc 是取消選字，不放開
+      // Esc：放開這一行就好（不要連專注頁、小視窗一起收起來）：焦點移到旁邊的「記下」，不掉到頁面最外面
+      // （下一次 Tab 從這裡接著走）。輸入法選字中的 Esc 是取消選字，不放開
       el.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229) return
         e.stopPropagation()
-        el.blur()
+        $(`${form} button[type="submit"]`).focus()
       })
     }
   }
@@ -736,7 +744,8 @@ export class FocusTimer {
       return false
     }
     if (this.mode !== 'focus' || this.paused != null || clock.due(this, Date.now())) return false
-    const late = this.detourRang
+    // 過了說好的時間才回來（叫過你了；Android 在背景時是手機叫的，這邊沒響過）
+    const late = this.detourRang || Date.now() >= this.detour
     this.detour = 0
     this.detourRang = false
     this._persist()
@@ -1056,6 +1065,7 @@ export class FocusTimer {
   toggleBig(force) {
     const open = (force ?? $('#focusFull').hidden) && this.mode !== 'idle'
     $('#focusFull').hidden = !open
+    this._timeAria()
     // 縮小回來：手機上往下捲時讓開的 Dock 膠囊先回來（剛縮小就要按得到計時器）；右上的背景聲選單也收起來
     // （暫停中的計時不會重畫，不能等重畫時才收）
     if (!open) {
@@ -1246,6 +1256,7 @@ export class FocusTimer {
     }
     $('#focusTime').textContent = time
     $('#focusTime').title = this.mode === 'idle' ? '倒數或正向計時、長度、目標' : this.ui.appMode ? '打開全螢幕計時' : '換專注的目標'
+    this._timeAria()
     const box = $('#focusBox')
     box.classList.toggle('running', this.mode === 'focus')
     box.classList.toggle('break', this.mode === 'break')

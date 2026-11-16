@@ -154,8 +154,8 @@ body.night .ff-knob i { background: #1c1a2e; }
 /* 計時設定的小視窗裡的那一行（小島模式）：跟「先記下來」那一行一樣寬 */
 .fs-step { width: auto; margin: 8px 0 0; }
 .fs-step.add { margin-top: 6px; }
-/* 休息時：等等從這裡開始（留給等等的自己的那一步）用這段的顏色標出來 */
-.ff-step.resume .ff-step-t small { color: var(--ff-a); }
+/* 休息時：等等從這裡開始（留給等等的自己的那一步）用這段的顏色標出來（小字用深一點的那一色，淺色主題也看得清） */
+.ff-step.resume .ff-step-t small { color: var(--ff-ink); }
 .ff-step.resume .ff-step-open { border-color: color-mix(in srgb, var(--ff-a) 45%, var(--line)); color: var(--ink); }
 .ff-step-open { margin: 0 auto; height: 32px; padding: 0 16px; border-radius: 999px; border: 1px dashed var(--line); background: none; color: var(--ink-soft); font: inherit; font-size: 12.5px; letter-spacing: .04em; cursor: pointer; transition: color .2s, border-color .2s; }
 .ff-step-open:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ff-a) 55%, var(--line)); }

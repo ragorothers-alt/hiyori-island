@@ -210,20 +210,26 @@ async function boot() {
   // 一口氣勾掉好幾件（已經很順了）時不吵：NEXT_GAP 內只說一次；今天都做完了就不說（有自己的慶祝）。設定裡可以關
   const NEXT_GAP = 20 * 60000
   let nextAt = 0
+  // 現在可以說嗎：沒關掉這個提醒、沒在計時、今日摘要沒開著
+  const nextOk = () => store.state.settings.nextNudge !== false && ui.focus.mode === 'idle' && !ui.brief.open
   store.on('taskDone', (t) => {
-    if (store.state.settings.nextNudge === false || ui.focus.mode !== 'idle' || ui.brief.open) return
+    // 長期任務（專案裡慢慢推進的事）勾掉之前不在今天的清單上：不是「現在該做的那一件」
+    if (!nextOk() || t.ongoing) return
     if (Date.now() - nextAt < NEXT_GAP) return
-    const list = store.tasksOn(store.today)
+    const day = store.today
+    const list = store.tasksOn(day)
     if (!list.some((x) => x.id === t.id)) return
     // 勾掉之前它是不是排在最前面的那一件（在原本的位置當成還沒做完再排一次：一樣重要的照原本的先後）
     if (doFirst(list.map((x) => (x.id === t.id ? { ...x, done: false } : x)))[0]?.id !== t.id) return
-    const next = doFirst(list)[0]
-    if (!next) return
+    if (!doFirst(list)[0]) return
     nextAt = Date.now()
-    // 慶祝的那一句（もち）、花開的提示卡先出來
+    // 慶祝的那一句（もち）、花開的提示卡先出來。
+    // 這一下子裡又取消了完成（之後再勾掉時照樣說）、關掉了這個提醒、打開了今日摘要、開始計時了、過了午夜：不說。
+    // 下一件照現在的樣子重新挑（剛才排第二的那一件可能移到明天、做完了、刪掉了）
     setTimeout(() => {
-      if (ui.focus.mode !== 'idle') return
-      const cur = store.state.tasks.find((x) => x.id === next.id && !x.done)
+      if (!store.state.tasks.some((x) => x.id === t.id && x.done)) return (nextAt = 0)
+      if (!nextOk() || dateStr() !== day) return
+      const cur = doFirst(store.tasksOn(day))[0]
       if (!cur) return
       const step = nextStep(cur)
       talk('nextTask', { task: short(cur.title) }, 5200, `接下來做「${short(cur.title)}」吧，趁手感還在。`, 'fuji')
@@ -251,6 +257,8 @@ async function boot() {
   let syncMottos = () => {}
   // 這一輪到點時還在別的 App 裡（Android）：算一次中途離開，回傳有沒有算（下面「專注中離開 App」那一段接上）
   let awayAtEnd = () => false
+  // 叫你回來的那一則（backItem）交給手機排在幾點（Android；沒排著是 0）：限時去到了、App 在背景時，排著的就讓手機叫
+  let backSent = 0
   const timerPush = new TimerPush({
     enabled: notifyOn,
     // 推播排得上了（剛訂閱）：警語那邊也重新看一次有沒有訂閱
@@ -435,17 +443,19 @@ async function boot() {
       if (p) talk('focusDetourPull', { what: p.label, at }, 5200, `好，去${p.label}吧。${at} 叫你回來。`)
       else talk('focusDetour', { at }, 5200, `好，去吧。${at} 叫你回來。`)
     },
-    // 限時去的時間到了：叫你回來（提示卡上「我回來了」；網頁不在前面時系統通知）。
-    // Android 的 App 在背景：交給手機的那一則會在說好的時間叫你（見 backItem），這邊先不叫（回傳 false，回到 App 時再看），不會叫兩次
+    // 限時去的時間到了：叫你回來（提示卡上「我回來了」；網頁不在前面、Android 的 App 在背景時系統通知）。
+    // Android 的 App 在背景、叫你回來的那一則已經交給手機排在這個時間（見 backItem）：讓手機叫，這邊先不叫
+    // （回傳 false，回到 App 時再看），不會叫兩次；沒排到（舊版的殼、這一輪再一下就到點了）就這邊叫。
+    // 剛回到 App（下一秒的檢查就會當成回來了）：不叫
     detourDue: () => {
-      if (native && nativeAway()) return false
+      if (native && (nativeAway() ? backSent === ui.focus.detour : nativeOut)) return false
       const t = focusTarget()
       const task = t ? `「${short(t)}」` : ''
       sfx.chime()
       haptic('warn')
       talk('focusDetourDue', { task }, 6000, `說好的 5 分鐘到了，回來吧。${task}還在等你。`)
       ui.toast({ icon: '回', title: '說好的 5 分鐘到了，回來吧', sub: t ? `回到「${short(t, 12)}」` : '回到正事上', tag: 'detour', ms: 60000, actions: [{ label: '我回來了', run: () => ui.focus.detourBack() }] })
-      if (!native && store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 回來吧', `說好的 5 分鐘到了${t ? `，回到「${short(t, 16)}」` : ''}`, 'detour')
+      if (store.state.settings.notify && (native ? nativeAway() : document.hidden || !document.hasFocus())) systemNotify('ひより · 回來吧', `說好的 5 分鐘到了${t ? `，回到「${short(t, 16)}」` : ''}`, 'detour')
       return true
     },
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
@@ -1391,12 +1401,12 @@ async function boot() {
     return true
   }
   // 離開了 AWAY_NUDGE 還沒回來：通知叫你回來（一則；那時這一輪已經快結束的不用，到點的通知會叫你）。設定裡可以關。
-  // 限時去（說好「去 5 分鐘就回來」）：到說好的時間才叫；是自己要的，設定關著也叫。
+  // 限時去（說好「去 5 分鐘就回來」）：就在說好的時間叫（說好的前一下子才離開的也是）；是自己要的，設定關著也叫。
   // 已經在 App 裡叫過了（之後才離開的）：照一般的離開算
   const backItem = () => {
     const detour = ui.focus.detour && !ui.focus.detourRang ? ui.focus.detour : 0
     if (!awaySince || !focusing() || awaySid !== ui.focus.sid || !nativeBack() || (store.state.settings.awayNudge === false && !detour)) return null
-    const at = Math.max(awaySince + AWAY_NUDGE, detour)
+    const at = detour || awaySince + AWAY_NUDGE
     const end = ui.focus.boundary?.at || 0
     if (!(end - at > 60000)) return null
     const t = focusTarget()
@@ -1455,7 +1465,10 @@ async function boot() {
       if (mottoPush) {
         mottoItems = items
         mottoSig = sig
-      } else if (sendMottos(items)) mottoSig = sig // 沒送到（例如殼剛好出錯）：下一秒再試
+      } else if (sendMottos(items)) {
+        mottoSig = sig
+        backSent = back?.at || 0
+      } // 沒送到（例如殼剛好出錯）：下一秒再試
     }
     mottoPush?.sync(mottoItems, document.hidden || leaving, now)
   }

@@ -611,17 +611,34 @@ export class UI {
     else if (this.tab === 'projects' && this._project.view?.id) this._project.view.closeTask() || this.closeProject()
     else this.toggleFull(false)
   }
-  // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）
+  // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）。
+  // 浮在最上面的提示卡（例如限時去的「我回來了」）也轉得到：排在這一層的後面（在第一顆按 Shift+Tab 就到）
   _trapTab(e) {
     if (e.key !== 'Tab') return
     const top = this._topLayer()
     if (!top) return
-    const list = focusables(top)
+    const own = focusables(top)
+    const list = [...own, ...this._toastButtons()]
     if (!list.length) return e.preventDefault()
-    const i = list.indexOf(document.activeElement)
-    if (i >= 0 && !(e.shiftKey ? i === 0 : i === list.length - 1)) return
+    const a = document.activeElement
+    const i = own.indexOf(a)
+    // 在這一層的中間：交給瀏覽器（同一組的單選鈕之類照瀏覽器的規矩）
+    if (i >= 0 && !(e.shiftKey ? i === 0 : i === own.length - 1)) return
     e.preventDefault()
-    ;(e.shiftKey ? list.at(-1) : list[0]).focus()
+    const k = list.indexOf(a)
+    const step = e.shiftKey ? -1 : 1
+    ;(k < 0 ? (e.shiftKey ? list.at(-1) : list[0]) : list[(k + step + list.length) % list.length]).focus()
+  }
+  // 提示卡上按得到的按鈕（正在收起來的不算）
+  _toastButtons() {
+    return focusables($('#toasts')).filter((b) => !b.closest('.toast.out'))
+  }
+  // 提示卡收掉時焦點要去的地方：進來之前的地方（還在、看得到、在最上面那一層裡），不然是最上面那一層的第一顆
+  _toastHome(el) {
+    const from = el?._from
+    const top = this._topLayer()
+    if (from?.isConnected && from.getClientRects().length && !from.closest('.toast') && (!top || top.contains(from))) return from
+    return top ? focusables(top)[0] || top : null
   }
   // 對話框打開時把焦點移進去，關掉時還給打開前的地方（日曆自己會做）
   _bindLayers() {
@@ -3304,6 +3321,8 @@ export class UI {
   _dropToast(el, fast = false) {
     if (!el?.isConnected || el.classList.contains('out')) return
     clearTimeout(el._life)
+    // 焦點在這一張的按鈕上：先交回進來之前的地方（不然收掉時掉到 body，下一次 Tab 又從頭來）
+    if (el.contains(document.activeElement)) this._toastHome(el)?.focus({ preventScroll: true })
     el.classList.add('out')
     const done = () => el.remove()
     if (calmMotion()) return done()
@@ -3415,7 +3434,8 @@ export class UI {
       if (!drag && !e.target.closest('button')) drag = { id: e.pointerId, x: e.clientX, dx: 0 }
       hold('touch', true)
     })
-    sync()
+    // 開始倒數（換掉同一類的上一張時，焦點已經先交到這一張的按鈕上了：那就先停著）
+    focusCheck()
   }
 
   // ── 通知 ──
@@ -3448,13 +3468,25 @@ export class UI {
         b.className = `toast-act${a.soft ? ' soft' : ''}`
         b.textContent = a.label
         b.addEventListener('click', () => {
+          const home = el.contains(document.activeElement) ? this._toastHome(el) : null
           el.remove()
           a.run()
+          // 按下去的那顆跟著提示卡不見了、做的事也沒有把焦點移到別處（還掉在 body）：交回進來之前的地方
+          const f = document.activeElement
+          if (home?.isConnected && (!f || f === document.body)) home.focus({ preventScroll: true })
         })
         row.append(b)
       }
       el.append(row)
       el.classList.add('has-act', 'acts')
+    }
+    // 記下焦點是從哪裡移進這一張的（從另一張移過來的，接那一張記的）：收掉時交回那裡
+    if (el.classList.contains('has-act')) {
+      el.addEventListener('focusin', (e) => {
+        const r = e.relatedTarget
+        if (!r || el.contains(r)) return
+        el._from = r.closest?.('.toast') ? r.closest('.toast')._from : r
+      })
     }
     // 正在某個新增表單裡打字（任務、日程那一行）：提示放到表單下面，不要蓋住正在打的字
     const box = $('#toasts')
@@ -3467,7 +3499,11 @@ export class UI {
     }
     if (old?.isConnected) {
       clearTimeout(old._life)
+      // 焦點在舊的那一張的按鈕上：交給新的那一張同一個位置的按鈕（沒有按鈕就交回進來之前的地方）
+      const at = [...old.querySelectorAll('button')].indexOf(document.activeElement)
+      el._from = old._from
       old.replaceWith(el)
+      if (at >= 0) (el.querySelectorAll('button')[at] || el.querySelector('button') || this._toastHome(el))?.focus({ preventScroll: true })
     } else box.append(el)
     // 同時最多三張：一口氣來很多（升級、成就、新的花、每日任務…）時從最舊的開始收，不要疊滿半個畫面。
     // 有按鈕的（就寢提醒的「挑明天的第一件」、到點的「▶ 開始專注」）先不收：不會被一串慶祝擠掉、來不及按——
@@ -3481,6 +3517,9 @@ export class UI {
     }
     for (const x of free.filter((x) => x.classList.contains('has-act')).slice(0, Math.max(0, extra - 1))) this._dropToast(x, true)
     if (el.classList.contains('has-act')) {
+      // 正在用鍵盤操作（焦點畫著外框、不是在打字）：留久一點，來得及用 Tab 移過去（移進來之後就不會收）
+      const a = document.activeElement
+      if (a?.matches?.(':focus-visible') && !a.matches('input, textarea, select, [contenteditable]')) ms = Math.max(ms * 2, 20000)
       // 有按鈕、留得比較久的：下面一條細線慢慢縮短，看得出還剩多久
       if (ms >= 6000) {
         el.classList.add('timed')
