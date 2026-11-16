@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf, firstPickIn } from '../src/planner.js'
+import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf, firstPickIn, nextEvent } from '../src/planner.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 0 }
 const MON = '2026-10-26'
@@ -164,6 +164,29 @@ describe('今日總覽的「現在」（nowGuide）', () => {
     // 05:00 才睡、12:00 起床：晚上 9 點起一路到就寢都問，過了午夜不會斷掉；就寢後 4 小時內還沒睡也問，再晚就當成早起
     const late = { ...R, sleep: '05:00', wake: '12:00' }
     expect(['20:00', '21:00', '23:30', '00:00', '00:30', '01:00', '06:00', '10:00', '13:00'].map((s) => pick(late, s))).toEqual([null, 1, 1, 0, 0, 0, 0, null, null])
+  })
+
+  it('專注頁的「接下來」（nextEvent）：下一個還沒結束的日程；進行中的、會撞到這一輪的一定給，其他的 2 小時內才給', () => {
+    const ev = (id, start, end, o = {}) => ({ id, title: id, start, end, ...o })
+    const events = [ev('晨會', '09:00', '09:30'), ev('做完了', '10:00', '10:30', { done: true }), ev('設計週會', '10:30', '11:30'), ev('牙醫', '15:00', '15:30')]
+    const at = (s, end = null) => {
+      const r = nextEvent(events, m(s), end == null ? null : m(end))
+      return r && `${r.event.id}|${r.now ? 'now' : 'next'}|${r.until}|${r.clash}`
+    }
+    // 進行中：還有幾分鐘結束
+    expect(at('09:10')).toBe('晨會|now|20|false')
+    // 下一個（做完的跳過）：還有幾分鐘開始；這一輪 10:55 才結束，會撞到
+    expect(at('10:05')).toBe('設計週會|next|25|false')
+    expect(at('10:05', '10:55')).toBe('設計週會|next|25|true')
+    expect(at('10:05', '10:30')).toBe('設計週會|next|25|false')
+    // 太遠的不給（2 小時剛好算）；這一輪會撞到的話再遠也給
+    expect(at('12:50')).toBeNull()
+    expect(at('12:50', '15:10')).toBe('牙醫|next|130|true')
+    expect(at('13:00')).toBe('牙醫|next|120|false')
+    // 都結束了、怪怪的資料
+    expect(at('16:00')).toBeNull()
+    expect(nextEvent([null, ev('x', '25:00', '26:00'), ev('壞的', 'x', '10:00')], m('09:00'))).toBeNull()
+    expect(nextEvent(null, m('09:00'))).toBeNull()
   })
 })
 

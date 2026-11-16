@@ -135,6 +135,12 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-step-add input { flex: 1; min-width: 0; height: 38px; padding: 0 14px; border-radius: 999px; border: 1px dashed var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 13.5px; }
 .ff-step-add input::placeholder { color: var(--ink-faint); }
 .ff-step-add button { flex: none; height: 38px; margin: 0; padding: 0 14px; border-radius: 999px; font-size: 13px; }
+/* 接下來：今天下一個有時段的日程；這一輪結束前就要開始的用提醒的顏色 */
+.ff-next { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 8px; margin: -4px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-align: center; }
+.ff-next[hidden] { display: none; }
+.ff-next small { font-size: 11.5px; letter-spacing: .06em; color: var(--ink-faint); }
+.ff-next b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ff-next.clash small, .ff-next.clash b { color: var(--warn-ink); }
 /* 想分心了：先等一分鐘、跟著圓圈呼吸（打開時專注頁下面其他的按鈕先收起來，時間照樣走） */
 .ff-urge-btn { margin: -4px 0 0; padding: 4px 10px; border: 0; background: none; color: var(--ink-faint); font: inherit; font-size: 12.5px; letter-spacing: .04em; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .ff-urge-btn:hover { color: var(--ink-soft); }

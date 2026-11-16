@@ -303,6 +303,26 @@ export function firstPickIn(rhythm, date, nowMin) {
   return nowMin < wake ? 0 : 1
 }
 
+// ── 專注頁上的「接下來」（時間感：專心時很容易忘了等一下要開會）──
+// events：今天有時段的日程（照開始時間排好）；nowMin：現在幾分；roundEnd：這一輪專注幾點結束（分鐘，可以超過 1440；
+// 不知道、往上數的是 null）。回傳下一個還沒結束、還沒標成做完的日程：
+//   { event, now: 正在進行, until: 還有幾分鐘開始（進行中是還有幾分鐘結束）, clash: 會在這一輪結束前開始 }
+// 進行中的、會撞到這一輪的一定給；其他的 within 分鐘內才給，太遠的是 null
+export const NEXT_WITHIN = 120
+const TIME_OK = (v) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)
+export function nextEvent(events, nowMin, roundEnd = null, within = NEXT_WITHIN) {
+  for (const e of Array.isArray(events) ? events : []) {
+    if (!e || e.done || !TIME_OK(e.start) || !TIME_OK(e.end)) continue
+    const s = toM(e.start)
+    const end = toM(e.end)
+    if (end <= nowMin) continue
+    if (s <= nowMin) return { event: e, now: true, until: end - nowMin, clash: false }
+    const clash = roundEnd != null && s < roundEnd
+    return clash || s - nowMin <= within ? { event: e, now: false, until: s - nowMin, clash } : null
+  }
+  return null
+}
+
 // ── 睡眠 ──
 // 一筆睡眠紀錄記在「醒來那天」：{ bed: '23:40', wake: '07:10', q: 1–5 }
 export function sleepMinutes(e) {

@@ -351,6 +351,12 @@ async function boot() {
         else if (t || p) talk('focusTask', { task: short(t ? t.title : p.name) })
         else if (info.free) talk('focusFree', {}, undefined, '', 'fuji')
         else if (!duet('focusStart')) talk('focusStart')
+        // 這一輪結束前就有日程要開始（開會、上課）：ふじ提醒一聲記得提早收尾（專注頁上也寫著）
+        const next = ui.focus.nextUp()
+        if (next?.clash) {
+          const e = next.event
+          setTimeout(() => ui.focus.mode === 'focus' && talk('focusClash', { event: short(e.title), at: e.start }, 6000, `${e.start} 有「${short(e.title)}」，記得提早收尾。`, 'fuji'), 2600)
+        }
       }
     },
     focusTaskChanged: (taskId, projectId = null) => {

@@ -1189,6 +1189,43 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   await expect(page.locator('#coachRoot .wr-perf li', { hasText: '想分心時忍住' })).toContainText('3 次')
 })
 
+test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一輪結束前就要開始的寫「記得提早收尾」、ふじ提醒一聲；進行中的寫到幾點', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(`${ymd}T10:00:00+08:00`))
+  await page.goto(site.url)
+  await bootReady(page)
+  const id = await page.evaluate(() => {
+    const s = window.hiyori.store
+    // 範例的例行日程先拿掉，只留這一場
+    for (const e of s.eventsOn(s.today)) s.deleteEvent(e.id)
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    return s.addEvent({ title: '設計週會', date: s.today, start: '10:20', end: '11:00' }).id
+  })
+  const move = (start, end) => page.evaluate(([id, start, end]) => window.hiyori.store.updateEvent(id, { start, end }), [id, start, end])
+  // 10:00 開始 25 分鐘：10:20 的會議會在這一輪結束前開始
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  const next = page.locator('#ffNext')
+  await expect(next).toHaveText(/這一輪結束前\s*10:20 設計週會\s*還有 20 分鐘，記得提早收尾/)
+  await expect(next).toHaveClass(/clash/)
+  await expect(page.locator('#appChat')).toContainText('設計週會')
+  // 改到 10:40：不會撞到這一輪（10:25 結束），只寫接下來
+  await move('10:40', '11:20')
+  await expect(next).toHaveText(/接下來\s*10:40 設計週會\s*還有 40 分鐘/)
+  await expect(next).not.toHaveClass(/clash/)
+  // 改到 13:00：還早，不寫
+  await move('13:00', '14:00')
+  await expect(next).toBeHidden()
+  // 進行中：寫到幾點
+  await move('09:30', '10:30')
+  await expect(next).toHaveText(/進行中\s*設計週會\s*到 10:30/)
+  // 標成做完了（提早結束的會議）：不寫
+  await page.evaluate((id) => window.hiyori.store.toggleEvent(id), id)
+  await expect(next).toBeHidden()
+})
+
 test('提示卡一口氣來很多張：先收沒有按鈕的，有按鈕的留著來得及按；全都有按鈕時最多多留一張', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)

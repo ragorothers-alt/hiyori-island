@@ -127,6 +127,12 @@ export const COACH_FUJI = {
     '好，去吧。專注還在計時，記得回來。',
     '去一下也沒關係，到點會提醒你。',
   ],
+  // 開始專注時，這一輪結束前就有日程要開始：{at} 幾點、{event} 哪一場
+  focusClash: [
+    '{at} 有「{event}」，這一輪會撞到，記得提早收尾。',
+    '等一下 {at} 要「{event}」，到之前先收一收手上的事。',
+    '「{event}」{at} 開始，這一輪做到那之前就好。',
+  ],
   coachHello: {
     morning: [
       '早安，從下面的標籤挑件事吧。',
@@ -506,6 +512,10 @@ export const COACH_MOCHI = {
   focusGo: [
     '去吧～我在這裡等你回來！',
     '快去快回喔～',
+  ],
+  focusClash: [
+    '{at} 有「{event}」喔～記得提早收尾！',
+    '等等要「{event}」，我幫你看著時間～',
   ],
   coachApplied: [
     'ふじ排好 {count} 段，我陪你出發囉。',

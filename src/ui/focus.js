@@ -7,6 +7,7 @@ import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
 import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, tagOf } from '../theme.js'
 import { floating } from '../store.js'
 import { nextStep } from '../brief.js'
+import { nextEvent } from '../planner.js'
 import { PROJECT_LIMITS as PL } from '../projects.js'
 import { coatOfDay } from '../catWalk.js'
 import './focus.css'
@@ -25,6 +26,9 @@ const ARC = 540.4
 // 想分心了：先等多久、跟著圓圈呼吸的一個來回（吸氣、吐氣各一半；圓圈的大小也照它算，見 _renderUrge）
 const URGE_MS = 60000
 const BREATH_MS = 8000
+// 還有多久：45 分鐘、1 小時 5 分
+const span = (min) => (min >= 60 ? `${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}` : `${min} 分鐘`)
+const clip = (s, n = 16) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 // 字有變才換（每 250 毫秒重畫一次）
 const setText = (el, s) => {
   if (el.textContent !== s) el.textContent = s
@@ -1034,6 +1038,33 @@ export class FocusTimer {
     this._renderPark()
     this._renderStep()
     this._renderUrge()
+    this._renderNext()
+  }
+
+  // ── 接下來：今天下一個有時段的日程（專心時很容易忘了等一下要開會）──
+  // 這一輪幾點結束（分鐘，跨午夜照樣往上加）：倒數中、沒暫停的專注才算；休息、往上數的是 null
+  nextUp(now = Date.now()) {
+    const s = this.ui.store
+    const d = new Date(now)
+    const nowMin = d.getHours() * 60 + d.getMinutes()
+    const end = this.mode === 'focus' && !this.counting && this.paused == null && this.endAt > now ? nowMin + Math.ceil((this.endAt - now) / 60000) : null
+    return nextEvent(s.eventsOn(s.today), nowMin, end)
+  }
+  // 進行中的、這一輪結束前就要開始的一定寫（會撞到的寫「記得提早收尾」），其他的 2 小時內才寫（planner.js 的 nextEvent）
+  _renderNext() {
+    const el = $('#ffNext')
+    const n = this.mode === 'idle' ? null : this.nextUp()
+    let html = ''
+    if (n) {
+      const e = n.event
+      const name = esc(clip(String(e.title || '')))
+      if (n.now) html = `<small>進行中</small><b>${name}</b><small>到 ${e.end}</small>`
+      else if (n.clash) html = `<small>這一輪結束前</small><b>${e.start} ${name}</b><small>還有 ${span(n.until)}，記得提早收尾</small>`
+      else html = `<small>接下來</small><b>${e.start} ${name}</b><small>還有 ${span(n.until)}</small>`
+    }
+    el.hidden = !html
+    el.classList.toggle('clash', !!n?.clash)
+    put(el, html)
   }
 
   // 時間下面的一行小字：幾點結束、休息完接著什麼

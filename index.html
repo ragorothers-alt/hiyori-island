@@ -438,6 +438,8 @@
         <div class="ff-sub" id="ffSub"></div>
       </div>
       <div class="ff-ctl">
+      <!-- 接下來：今天下一個有時段的日程，這一輪結束前就要開始的寫「記得提早收尾」（src/ui/focus.js 的 _renderNext） -->
+      <p class="ff-next" id="ffNext" hidden></p>
       <div class="ff-task" id="ffTask"></div>
       <label class="ff-target-wrap" id="ffTargetWrap"><i id="ffTargetDot"></i><select class="ff-target" id="ffTarget" aria-label="專注的目標"></select><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></label>
       <!-- 這一件的下一步（第一個還沒勾的子任務）：做完了直接勾，換下一個；還沒寫的話先寫下最小的那一步（src/ui/focus.js 的 _renderStep） -->
