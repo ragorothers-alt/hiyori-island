@@ -1,9 +1,11 @@
 // ふじ的 AI：經過自己的 Worker（worker/src/ai.js）呼叫 Claude。
-// Claude API 金鑰放在 Worker 的 secret 裡；這裡只有使用者自己設的通行碼，只存在這台裝置（不同步、不匯出）。
+// Claude API 金鑰放在 Worker 的 secret 裡；這裡只有使用者自己設的通行碼：存在這台裝置，不匯出。
+// 開著線上同步時，通行碼放在加密的那一包裡跟著同步碼帶到別台（cloud.js 的 extras；伺服器看不到），別台輸入同步碼就能用，不用再填一次。
 import { SYNC_API } from './cloud.js'
 
 const PASS_KEY = 'hiyori-ai-pass'
 const MODEL_KEY = 'hiyori-ai-model'
+const PASS_AT_KEY = 'hiyori-ai-pass-at'
 
 export const AI_MODELS = [
   { id: 'claude-opus-5-5', label: 'Opus', sub: '想得最周到' },
@@ -25,7 +27,31 @@ const put = (k, v) => {
   } catch {}
 }
 export const aiPass = () => get(PASS_KEY)
-export const setAiPass = (v) => put(PASS_KEY, String(v || '').trim())
+// 通行碼是什麼時候設的（毫秒）：開著線上同步時，各台裝置用比較新的那一組。以前設的沒有記時間，算成最舊
+export const aiPassAt = () => {
+  const n = Number(get(PASS_AT_KEY))
+  return Number.isFinite(n) && n > 0 ? n : aiPass() ? 1 : 0
+}
+// at：這一組是什麼時候設的（別台同步過來的照它原本的時間；自己設的是現在，而且一定比之前那一組新）
+export const setAiPass = (v, at = 0) => {
+  const was = aiPassAt()
+  put(PASS_KEY, String(v || '').trim())
+  put(PASS_AT_KEY, String(at > 0 ? at : Math.max(Date.now(), was + 1)))
+}
+// 跟著線上同步帶到別台的那一包（放在加密的資料裡）：沒設通行碼就不帶
+export function aiShare() {
+  const pass = aiPass()
+  return pass ? { aiPass: pass, aiPassAt: aiPassAt() } : null
+}
+// 別台同步過來的通行碼：比這台的新才換（這台剛停用、剛改過的不會被舊的蓋回去）。回傳有沒有換
+export function aiAdopt(x) {
+  const pass = typeof x?.aiPass === 'string' ? x.aiPass.trim() : ''
+  const at = Number(x?.aiPassAt)
+  if (!pass || pass.length > 200 || !Number.isFinite(at) || at <= 0 || at <= aiPassAt()) return false
+  const same = pass === aiPass()
+  setAiPass(pass, at)
+  return !same
+}
 export const aiModel = () => (AI_MODELS.some((m) => m.id === get(MODEL_KEY)) ? get(MODEL_KEY) : AI_MODELS[0].id)
 export const setAiModel = (id) => put(MODEL_KEY, AI_MODELS.some((m) => m.id === id) ? id : '')
 // 設了通行碼才顯示 AI 的按鈕

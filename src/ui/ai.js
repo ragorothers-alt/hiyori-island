@@ -87,7 +87,7 @@ export class AiView {
     let info
     let btns
     if (this.editing) {
-      info = '填你在 Worker 設的通行碼（AI_PASS）。只存在這台裝置，不會同步也不會匯出'
+      info = '填你在 Worker 設的通行碼（AI_PASS）。開著線上同步的話，會跟著同步碼（加密後）帶到其他裝置，別台不用再填；不會匯出到檔案'
       btns = [['save', '儲存並測試', 1], ['cancel', '取消']]
     } else if (!on) {
       info = '接上自己 Claude Console 的 API：金鑰放在自己的 Worker 裡，這裡只填通行碼。設好後ふじ會自己動：早上排好今天、替新任務估時間和排空檔、進度落後時重排、晚上準備明天，也能用一句話請她做事（每次都可以撤銷）'

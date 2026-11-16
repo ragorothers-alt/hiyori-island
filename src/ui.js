@@ -303,10 +303,9 @@ export class UI {
       toast: (o) => this.toast(o),
       // 通行碼、模型改了：ふじ的卡片跟著出現或收起來，之前連不上的也再試
       changed: () => {
-        this.agent?.reset()
-        this.agentCard?.render()
-        this.agentView?.render()
-        this._coach.view?.aiChanged?.()
+        this._aiChanged()
+        // 開著線上同步的話，新的通行碼跟著送到別台
+        this.hooks.aiPassSet?.()
       },
     })
     this.applyFontScale()
@@ -317,6 +316,20 @@ export class UI {
     const q = new URLSearchParams(location.search)
     if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
     if (q.has('calendar')) this._use(this._calendar, (c) => c.open())
+  }
+
+  // 通行碼、模型變了：ふじ的卡片、教練分頁跟著出現或收起來，之前連不上的也再試
+  _aiChanged() {
+    this.agent?.reset()
+    this.agentCard?.render()
+    this.agentView?.render()
+    this._coach.view?.aiChanged?.()
+  }
+  // 別台設的通行碼同步過來了（main.js）
+  aiShared() {
+    this.aiView.result = ''
+    this.aiView.render()
+    this._aiChanged()
   }
 
   // 教練分頁的「ふじ」那一頁（對話和她自己整理的紀錄）

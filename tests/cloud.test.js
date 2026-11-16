@@ -159,6 +159,39 @@ describe('線上同步', () => {
     expect(JSON.stringify(calls.map((c) => c.body))).not.toContain(code.replace(/-/g, ''))
   })
 
+  it('跟著同步碼走的東西（AI 通行碼）：放在加密的那一包裡，別台拉到時交給 extras.set；伺服器和 state 裡都看不到', async () => {
+    const a = device()
+    a.sync.extras = { get: () => ({ aiPass: '春天的通行碼', aiPassAt: 5 }), sent: vi.fn() }
+    await a.run((s) => s.addTask({ title: 'A 的任務' }))
+    const code = await a.run((_s, sync) => sync.start())
+    expect(a.sync.extras.sent).toHaveBeenCalledWith({ aiPass: '春天的通行碼', aiPassAt: 5 })
+    later()
+    const b = device()
+    const got = []
+    b.sync.extras = { get: () => null, set: (x) => got.push(x) }
+    await b.run((_s, sync) => sync.join(code))
+    expect(got).toEqual([{ aiPass: '春天的通行碼', aiPassAt: 5 }])
+    expect(titles(b.store)).toContain('A 的任務')
+    // 伺服器存的是密文；小島的資料（匯出的就是它）裡沒有通行碼
+    expect(JSON.stringify(vaults())).not.toContain('春天的通行碼')
+    expect(b.store.exportJSON()).not.toContain('aiPass')
+    // 沒有通行碼的那台之後寫上去：那一包就不帶；拿通行碼的那邊出錯也不影響同步
+    later()
+    await b.run((s) => s.addTask({ title: 'B 的任務' }))
+    await b.run((_s, sync) => sync.sync())
+    a.sync.extras = { get: () => ({ aiPass: '春天的通行碼', aiPassAt: 5 }), set: vi.fn() }
+    await a.run((_s, sync) => sync.sync())
+    expect(a.sync.extras.set).not.toHaveBeenCalled()
+    expect(titles(a.store)).toContain('B 的任務')
+    later()
+    a.sync.extras = { get: () => { throw new Error('壞了') } }
+    await a.run((s) => s.addTask({ title: 'A 又加一件' }))
+    await a.run((_s, sync) => sync.sync())
+    b.sync.extras = { set: () => { throw new Error('壞了') } }
+    await b.run((_s, sync) => sync.sync())
+    expect(titles(b.store)).toContain('A 又加一件')
+  })
+
   it('全新裝置輸入同步碼直接載入，不會問衝突', async () => {
     const { b } = await pair()
     expect(b.sync.state).toBe('linked')

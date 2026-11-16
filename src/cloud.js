@@ -130,6 +130,9 @@ export class CloudSync extends SyncEngine {
   // state：off | linked | offline | conflict | error | unsupported
   constructor(store, opts = {}) {
     super(store, { delay: 1500, poll: 30000, ...opts, baseKey: 'hiyori-cloud-base', remote: 'cloud' })
+    // 跟著同步碼一起走、但不屬於小島資料的東西（ふじ的 AI 通行碼）：{ get(): 要帶上去的（沒有是 null）, set(收到的) }。
+    // 放在加密的那一包裡（伺服器看不到）；不會出現在匯出的檔案和資料夾同步的檔案裡
+    this.extras = opts.extras || null
     this.code = null
     this.keys = null
     if (!cloudSupported()) this.state = 'unsupported'
@@ -287,6 +290,12 @@ export class CloudSync extends SyncEngine {
       throw new Error(e instanceof SyntaxError ? '雲端的資料格式不對' : e.message)
     }
     if (data?.app !== 'hiyori' || !data.state) throw new Error('雲端的資料格式不對')
+    // 一起帶來的東西（通行碼）：這台要不要用由 extras.set 決定；出錯也不影響同步
+    if (data.extras && typeof data.extras === 'object' && !Array.isArray(data.extras)) {
+      try {
+        this.extras?.set?.(data.extras)
+      } catch {}
+    }
     // 加密內容裡的版本要跟伺服器說的一樣：伺服器（被入侵時）拿舊的一份冒充新版本，這裡就擋下來
     if (data.state.rev && data.state.rev !== r.rev) throw new Error('雲端的資料版本對不上，先不同步')
     return { rev: r.rev, savedAt: r.savedAt, state: data.state }
@@ -294,12 +303,22 @@ export class CloudSync extends SyncEngine {
 
   async _push(expect, { rev, savedAt }, json, { keepalive } = {}) {
     const { id, auth, key } = this.keys
-    const data = await seal(key, `{"app":"hiyori","version":1,"state":${json}}`)
+    let extras = null
+    try {
+      extras = this.extras?.get?.() || null
+    } catch {}
+    const data = await seal(key, `{"app":"hiyori","version":1,${extras ? `"extras":${JSON.stringify(extras)},` : ''}"state":${json}}`)
     try {
       await call('/v1/push', { id, auth, base: expect || null, rev, savedAt, data }, { keepalive })
     } catch (e) {
       if (e.status === 409) return false
       throw e
+    }
+    // 一起帶上去的東西送到了
+    if (extras) {
+      try {
+        this.extras?.sent?.(extras)
+      } catch {}
     }
     return true
   }
