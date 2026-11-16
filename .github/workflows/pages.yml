@@ -34,11 +34,16 @@ jobs:
         with:
           path: dist
 
-  # 瀏覽器端對端測試（離線、自動更新）：沒過就不發布
+  # 瀏覽器端對端測試（離線、自動更新）：沒過就不發布。
+  # CI 的機器一次只跑得動一個（見 playwright.config.js），整套一台跑要 20 分鐘以上：分成三台同時跑，每台一份
   e2e:
     runs-on: ubuntu-latest
-    # apt 偶爾卡住：裝瀏覽器最多等 8 分鐘、整個工作 20 分鐘，失敗了重跑就好，不要卡到預設的 6 小時
-    timeout-minutes: 20
+    # apt 偶爾卡住：裝瀏覽器最多等 8 分鐘、整個工作 25 分鐘，失敗了重跑就好，不要卡到預設的 6 小時
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -49,11 +54,11 @@ jobs:
       - run: npx playwright install --with-deps --only-shell chromium
         timeout-minutes: 8
       - name: 端對端測試
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.shard }}
           path: e2e/.out/results
           retention-days: 7
 
