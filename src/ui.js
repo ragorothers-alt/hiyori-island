@@ -406,6 +406,8 @@ export class UI {
       this.store.setSetting('sound', on)
       this.hooks.setSound(on)
       this.renderChrome()
+      // 專注時的背景聲跟著音效一起開、關
+      this.focus?._noiseSync()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
     // 轉向、拉寬視窗時版面會換（手機的底部面板 ↔ 桌面的側邊面板）：收起的面板要不要 inert 跟著重算
@@ -587,7 +589,7 @@ export class UI {
         focusSet: () => this.focus.toggleSet(false),
         focusPick: () => this.focus.togglePicker(false),
         // 正在「先等一分鐘」：先只收起那一塊（焦點用 Tab 移到別顆上了也一樣），不縮小專注頁
-        focusFull: () => this.focus.urge(false) || this.focus.toggleBig(false),
+        focusFull: () => this.focus.noisePanel(false) || this.focus.urge(false) || this.focus.toggleBig(false),
         shop: () => this.toggleShop(false),
         placeBar: () => $('#placeCancel').click(),
         calendar: () => this._calendar.view?.close(),
@@ -3430,14 +3432,15 @@ export class UI {
     } else box.append(el)
     // 同時最多三張：一口氣來很多（升級、成就、新的花、每日任務…）時從最舊的開始收，不要疊滿半個畫面。
     // 有按鈕的（就寢提醒的「挑明天的第一件」、到點的「▶ 開始專注」）先不收：不會被一串慶祝擠掉、來不及按——
-    // 都是有按鈕的時候最多多留一張，再多才從最舊的收。正停在上面、手指按著、焦點在裡面的（held）不收
-    const others = $$('#toasts .toast:not(.out):not(.busy):not(.held)').filter((x) => x !== el)
-    let extra = others.length + 1 - 3
-    for (const x of others.filter((x) => !x.classList.contains('has-act')).slice(0, Math.max(0, extra))) {
+    // 都是有按鈕的時候最多多留一張，再多才從最舊的收。正停在上面、手指按著、焦點在裡面的（held）不收，但照樣算一張
+    const shown = $$('#toasts .toast:not(.out):not(.busy)').filter((x) => x !== el)
+    const free = shown.filter((x) => !x.classList.contains('held'))
+    let extra = shown.length + 1 - 3
+    for (const x of free.filter((x) => !x.classList.contains('has-act')).slice(0, Math.max(0, extra))) {
       this._dropToast(x, true)
       extra--
     }
-    for (const x of others.filter((x) => x.classList.contains('has-act')).slice(0, Math.max(0, extra - 1))) this._dropToast(x, true)
+    for (const x of free.filter((x) => x.classList.contains('has-act')).slice(0, Math.max(0, extra - 1))) this._dropToast(x, true)
     if (el.classList.contains('has-act')) {
       // 有按鈕、留得比較久的：下面一條細線慢慢縮短，看得出還剩多久
       if (ms >= 6000) {

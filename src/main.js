@@ -3,7 +3,7 @@ import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr } f
 import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
-import { sfx } from './audio.js'
+import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
 import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
@@ -303,6 +303,8 @@ async function boot() {
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => scene?.modalClosed(),
     setSound: (on) => sfx.setEnabled(on),
+    // 專注時的背景聲（雨聲、褐噪音、粉紅噪音）：專注那邊決定現在該放什麼、多大聲
+    noise: (kind, vol) => noise.want(kind, vol),
     // 省電和畫質只跟小島有關：小島建好時會照設定套上
     setPowerSave: (on) => scene?.setPowerSave(on),
     setQuality: (q) => scene?.setQuality(q),
@@ -1364,7 +1366,7 @@ async function boot() {
       }))
 
   // 方便除錯：在 console 用 hiyori.store；小島建好後還有 hiyori.sky.hourOverride = 20、hiyori.world…
-  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland }
+  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise }
 
   // ── PWA：正式版註冊 Service Worker（開發時不註冊，避免快取干擾） ──
   if ('serviceWorker' in navigator && import.meta.env.PROD) {

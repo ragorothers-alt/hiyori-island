@@ -1246,7 +1246,7 @@ export class Store {
   }
 }
 
-export { DATA_VERSION, newerData, REVIEW_TEXT, ALLDAY_MAX, dateStr, parseDate, addDays, toMin, uid, REPEAT_TYPES, repeatMatches, seasonKey, daysBetween, DEFAULT_SETTINGS, FONT_SCALES, QUALITIES, minToHHMM } from './store/util.js'
+export { DATA_VERSION, newerData, REVIEW_TEXT, ALLDAY_MAX, dateStr, parseDate, addDays, toMin, uid, REPEAT_TYPES, repeatMatches, seasonKey, daysBetween, DEFAULT_SETTINGS, FONT_SCALES, QUALITIES, NOISES, minToHHMM } from './store/util.js'
 
 export { floating, DATES_MAX, SUBS_MAX, httpUrl, blankTask, cleanRhythm } from './store/migrate.js'
 

@@ -5,7 +5,7 @@ import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
 import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, tagOf } from '../theme.js'
-import { floating } from '../store.js'
+import { floating, NOISES } from '../store.js'
 import { nextStep } from '../brief.js'
 import { nextEvent } from '../planner.js'
 import { PROJECT_LIMITS as PL } from '../projects.js'
@@ -26,6 +26,8 @@ const ARC = 540.4
 // 想分心了：先等多久、跟著圓圈呼吸的一個來回（吸氣、吐氣各一半；圓圈的大小也照它算，見 _renderUrge）
 const URGE_MS = 60000
 const BREATH_MS = 8000
+// 背景聲的名字（按鈕的說明、選單下面那一行）
+const NOISE_NAMES = { rain: '雨聲', brown: '褐噪音', pink: '粉紅噪音' }
 // 還有多久：45 分鐘、1 小時 5 分
 const span = (min) => (min >= 60 ? `${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}` : `${min} 分鐘`)
 // 照字數截（emoji 這種兩個字元組成的字不會被切成一半）
@@ -117,6 +119,7 @@ export class FocusTimer {
     this._bindPark()
     this._bindStep()
     this._bindUrge()
+    this._bindNoise()
     setInterval(() => this.tick(), 250)
     this.render()
     if (this.mode === 'focus' && this.paused == null && !this._stale() && (this.up || this.endAt > Date.now())) hooks.focusStarted(true, this.task?.id || null, this.info)
@@ -648,6 +651,86 @@ export class FocusTimer {
     alt.dataset.urge = ask ? 'go' : 'park'
   }
 
+  // ── 背景聲：專注時放雨聲、褐噪音、粉紅噪音蓋掉周圍的聲音（src/audio.js 的 noise）。
+  // 計時設定裡、專注頁右上的耳機都可以選；只在專注中、沒暫停、音效開著時放，休息、暫停、結束時淡出 ──
+  _bindNoise() {
+    for (const seg of $$('.noise-seg')) {
+      seg.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-noise]')
+        if (b) this._setNoise('focusNoise', b.dataset.noise)
+      })
+    }
+    for (const r of $$('[data-noise-vol]')) {
+      // 拖的時候音量跟著變，放開才存（不用每一格都存一次）
+      r.addEventListener('input', () => {
+        this._volDraft = +r.value
+        this._noiseSync()
+      })
+      r.addEventListener('change', () => {
+        this._volDraft = null
+        this._setNoise('noiseVol', +r.value)
+      })
+    }
+    $('#ffNoiseBtn').onclick = () => this.noisePanel()
+    addEventListener('pointerdown', (e) => {
+      if (!$('#ffNoise').hidden && !e.target.closest('#ffNoise, #ffNoiseBtn')) this.noisePanel(false)
+    })
+  }
+  _setNoise(key, v) {
+    if (this.ui.store.state.settings[key] !== v) this.ui.store.setSetting(key, v)
+    this._noiseSync()
+  }
+  // 專注頁右上的背景聲選單。回傳有沒有收起來（Esc 先收它，再收專注頁）
+  noisePanel(force) {
+    const el = $('#ffNoise')
+    const open = force ?? el.hidden
+    if (!open && el.hidden) return false
+    const had = el.contains(document.activeElement)
+    el.hidden = !open
+    $('#ffNoiseBtn').setAttribute('aria-expanded', String(open))
+    if (open) {
+      this._renderNoise()
+      ;(el.querySelector('.noise-seg .on') || el.querySelector('[data-noise]')).focus()
+    } else if (had) $('#ffNoiseBtn').focus()
+    return true
+  }
+  _renderNoise() {
+    const st = this.ui.store.state.settings
+    const kind = NOISES.includes(st.focusNoise) ? st.focusNoise : 'off'
+    const mute = st.sound === false
+    pickOne($$('.noise-seg [data-noise]'), (b) => b.dataset.noise === kind)
+    for (const r of $$('[data-noise-vol]')) {
+      // 正在拖的那一條不動它
+      if (document.activeElement !== r) r.value = st.noiseVol
+      r.closest('.noise-vol').hidden = kind === 'off'
+    }
+    const hint = mute ? '音效關著，聽不到背景聲：打開音效才會放' : kind === 'off' ? '專注時放一點聲音，蓋掉周圍的雜音' : `專注時放${NOISE_NAMES[kind]}，休息、暫停時會停`
+    for (const p of $$('.noise-hint')) setText(p, hint)
+    // 計時設定裡只在選了、音效卻關著時說一聲（平常不多佔一行）
+    $('.fs-noise-hint').hidden = !mute || kind === 'off'
+    const btn = $('#ffNoiseBtn')
+    btn.classList.toggle('on', kind !== 'off' && !mute)
+    const label = kind === 'off' ? '背景聲：關' : `背景聲：${NOISE_NAMES[kind]}${mute ? '（音效關著）' : ''}`
+    btn.title = label
+    btn.setAttribute('aria-label', label)
+  }
+  // 每次重畫都對一次：設定（另一個分頁改的也算）、計時的狀態變了才換。拖著音量時照拖到的大小
+  _noiseSync() {
+    const st = this.ui.store.state.settings
+    const set = NOISES.includes(st.focusNoise) ? st.focusNoise : 'off'
+    const look = `${set}:${st.noiseVol}:${st.sound !== false}`
+    if (look !== this._noiseLook) {
+      this._noiseLook = look
+      this._renderNoise()
+    }
+    const kind = this.mode === 'focus' && this.paused == null && st.sound !== false ? set : 'off'
+    const vol = this._volDraft ?? st.noiseVol
+    const key = `${kind}:${vol}`
+    if (key === this._noiseKey) return
+    this._noiseKey = key
+    this.hooks.noise?.(kind, vol)
+  }
+
   _setLength(v) {
     if (this.ui.store.state.settings.focusMin === v) return
     this._setOption('focusMin', v)
@@ -682,6 +765,7 @@ export class FocusTimer {
     $('#fsPark').hidden = !(this.mode === 'focus' && !this._asking)
     this._renderMore($('#fsExtend'), $('#fsAddRound'))
     if (!live) $('#fsMore').hidden = true
+    this._noiseSync()
     pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
     pickOne($$('#fsBreak button'), (b) => +b.dataset.v === st.breakMin)
     const target = this.project ? `，時間記進「${this.project.name}」` : ''
@@ -907,6 +991,8 @@ export class FocusTimer {
 
   tick() {
     if (this.mode === 'idle') return
+    // 背景聲：設定在別處改了（另一個分頁、音效開關）也馬上跟著換（沒變就什麼都不做）
+    this._noiseSync()
     if (this.paused != null) {
       // 暫停中計時停著，時間照走：專注頁開著時每秒照真的時間重寫「接下來」（會議開始了、結束了、日程改了）
       const sec = Math.floor(Date.now() / 1000)
@@ -987,6 +1073,7 @@ export class FocusTimer {
     $('#focusArc').style.strokeDashoffset = 119.4 * (1 - frac)
     document.title = this.mode === 'idle' ? 'ひより日和 · 日程小島' : `${time} ${this.mode === 'focus' ? '專注中' : '休息中'} · ひより`
     this._renderBig(time, frac, label)
+    this._noiseSync()
   }
 
   _renderBig(time, frac, label) {
@@ -996,6 +1083,8 @@ export class FocusTimer {
     this._catSync()
     if (el.hidden) {
       this._bigMode = null
+      // 專注頁收起來了：右上的背景聲選單也收起來（下次打開時不會一開始就是打開的）
+      if (!$('#ffNoise').hidden) this.noisePanel(false)
       return
     }
     const paused = this.paused != null

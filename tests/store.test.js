@@ -2367,6 +2367,20 @@ describe('卡關提醒與設定', () => {
     store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { glass: 'x' } }))
     expect(store.state.settings.glass).toBe(50)
   })
+
+  it('專注時的背景聲預設關著、音量 50；匯出匯入後還在；不認得的種類當成關，音量夾回 5～100、每 5 一格', () => {
+    expect(store.state.settings).toMatchObject({ focusNoise: 'off', noiseVol: 50 })
+    store.setSetting('focusNoise', 'rain')
+    store.setSetting('noiseVol', 35)
+    store.importJSON(store.exportJSON())
+    expect(store.state.settings).toMatchObject({ focusNoise: 'rain', noiseVol: 35 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusNoise: 'thunder', noiseVol: 180 } }))
+    expect(store.state.settings).toMatchObject({ focusNoise: 'off', noiseVol: 100 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusNoise: 'brown', noiseVol: 2 } }))
+    expect(store.state.settings).toMatchObject({ focusNoise: 'brown', noiseVol: 5 })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusNoise: 7, noiseVol: 43 } }))
+    expect(store.state.settings).toMatchObject({ focusNoise: 'off', noiseVol: 45 })
+  })
 })
 
 describe('整天的日程', () => {

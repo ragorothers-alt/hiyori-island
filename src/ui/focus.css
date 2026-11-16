@@ -28,12 +28,23 @@ body.night .focus-full.ext { --ff-ink: #f0c36a; }
 body.night .focus-full.paused { --ff-ink: var(--ink-faint); }
 
 .ff-min { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 12px; }
-/* 最上面中間：今天已經專注了多久 */
-.ff-today { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 60px; right: 60px; height: 38px; z-index: 1; line-height: 38px; text-align: center; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; letter-spacing: .06em; color: var(--ink-faint); pointer-events: none; white-space: nowrap; }
+/* 左上：到小木屋（跟右上的背景聲左右對稱） */
+.ff-cabin { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 56px; }
+/* 右上：背景聲（耳機）在貓咪的左邊，放著的時候右上角亮一個小點；點了在下面打開選單 */
+.ff-noisebtn { position: absolute; top: calc(12px + env(safe-area-inset-top)); right: 56px; }
+.ff-noisebtn.on::after { content: ''; position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ff-ink); }
+.ff-noise { position: absolute; top: calc(56px + env(safe-area-inset-top)); right: 12px; z-index: 3; width: min(300px, calc(100% - 24px)); padding: 12px 14px; text-align: left; background: var(--lg-bg-strong); animation: riseIn .25s var(--ease); }
+.ff-noise h4 { margin: 0 2px 10px; font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: .08em; display: flex; gap: 8px; align-items: baseline; }
+.ff-noise h4 small { font-size: 10.5px; color: var(--ink-deco); }
+.ff-noise .seg button { flex: 1; white-space: nowrap; padding: 6px; }
+.ff-noise .noise-vol { margin-top: 12px; }
+/* 最上面中間：今天已經專注了多久（左右讓開縮小、背景聲和貓咪的按鈕） */
+.ff-today { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 104px; right: 104px; height: 38px; z-index: 1; line-height: 38px; text-align: center; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; letter-spacing: .06em; color: var(--ink-faint); pointer-events: none; white-space: nowrap; }
 .ff-today[hidden] { display: none; }
 .ff-today b { font-family: var(--font-num); font-weight: 700; color: var(--ink-soft); }
 
-.ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(50dvh - 104px - var(--ff-ring) / 2)); }
+/* 圓環的中心大約在畫面 46% 的高度：下面一排排的東西（接下來、目標、按鈕、先記下來、想分心了？）放完，筆電的畫面（860 高）底下還留得出地板給貓咪 */
+.ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(46dvh - 104px - var(--ff-ring) / 2)); }
 .ff-ctl { display: contents; }
 /* 字距會在最後一個字後面多留一格：左邊補回來，整行才置中 */
 .ff-kicker { font-family: var(--font-display); font-size: 15px; line-height: 24px; letter-spacing: .3em; padding-left: .3em; color: var(--ff-ink); }
@@ -108,7 +119,6 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-more[hidden] { display: none; }
 .ff-more button { padding: 8px 15px; border-radius: 14px; font-size: 13px; line-height: 1.35; color: var(--ink); }
 .ff-more button small { display: block; font-size: 11px; color: var(--ink-faint); }
-.ff-cabin { font-size: 12.5px; }
 /* 先記下來：專注時腦中冒出別的事，一行字記下（專注頁和計時設定的小視窗） */
 .ff-park, .fs-park { display: flex; gap: 6px; width: min(320px, 100%); }
 .ff-park[hidden], .fs-park[hidden] { display: none; }

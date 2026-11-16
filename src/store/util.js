@@ -78,14 +78,16 @@ export const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 
 // mottoPauseCut：自己按了「現在就恢復」（停到的時間改成按下去的那一刻，停完不補那一則）
 // focusCat：App 模式的專注頁上有一隻貓咪散步；brief：每天第一次打開時貓咪出來說今日摘要；
 // awayNudge：專注中切去用別的 App 太久時，用通知叫你回來（Android 的 App 才有：分得出鎖著手機和切走）；
-// mottoEvents：日程中（開會、上課這些排了時段的）先不提醒警語
+// mottoEvents：日程中（開會、上課這些排了時段的）先不提醒警語；
+// focusNoise：專注時的背景聲（off／rain 雨聲／brown 褐噪音／pink 粉紅噪音，休息、暫停時不放）；noiseVol：背景聲的音量（5～100）
 export const DEFAULT_SETTINGS = {
   sound: true, remindLead: 10, notify: false, powerSave: true, theme: 'auto', quality: 'auto',
   focusUp: false, focusMin: FOCUS_MIN, breakMin: BREAK_MIN, focusRounds: 1, fontScale: 1, stuckNudge: true, glass: 50,
   mottoEvery: 60, mottoPause: 0, mottoPauseFrom: 0, mottoPauseCut: false, mottoBar: true, focusCat: true, brief: true, awayNudge: true,
-  mottoEvents: true,
+  mottoEvents: true, focusNoise: 'off', noiseVol: 50,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
+export const NOISES = ['off', 'rain', 'brown', 'pink']
 // 畫質：auto＝桌機高、觸控手機標準
 export const QUALITIES = ['auto', 'high', 'standard']
 

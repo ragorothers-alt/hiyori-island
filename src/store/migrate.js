@@ -1,4 +1,4 @@
-import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
+import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
 import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
@@ -653,6 +653,9 @@ function migrate(s) {
   settings.mottoPauseFrom = pauseFrom && pauseFrom <= settings.mottoPause ? Math.round(pauseFrom) : 0
   if (THEMES.includes(s.settings?.theme)) settings.theme = s.settings.theme
   if (QUALITIES.includes(s.settings?.quality)) settings.quality = s.settings.quality
+  if (NOISES.includes(s.settings?.focusNoise)) settings.focusNoise = s.settings.focusNoise
+  // 跟音量滑桿同一個範圍（5～100、每 5 一格）
+  settings.noiseVol = Math.round(num(settings.noiseVol, 5, 100, DEFAULT_SETTINGS.noiseVol) / 5) * 5
 
   // 睡眠：{ 醒來那天: { bed, wake, q } }
   const sleep = {}

@@ -406,6 +406,10 @@
     <div class="fs-row"><label for="fsTarget">目標</label><select class="fs-target" id="fsTarget"></select></div>
     <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds" role="group" aria-label="輪數"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
     <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak" role="group" aria-label="休息"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
+    <!-- 專注時的背景聲（雨聲、褐噪音、粉紅噪音，src/audio.js 的 noise）：休息、暫停時不放；計時中也可以換、調音量 -->
+    <div class="fs-row" id="fsNoiseRow"><span>背景聲</span><div class="seg noise-seg" role="group" aria-label="專注時的背景聲"><button type="button" data-noise="off">關</button><button type="button" data-noise="rain">雨聲</button><button type="button" data-noise="brown">褐噪音</button><button type="button" data-noise="pink">粉紅噪音</button></div></div>
+    <label class="fs-row noise-vol" hidden><span>音量</span><input type="range" min="5" max="100" step="5" data-noise-vol aria-label="背景聲的音量"></label>
+    <p class="noise-hint fs-noise-hint" hidden></p>
     <!-- 計時中：腦中冒出別的事，一行字先記下來（跟專注頁的那一行一樣） -->
     <form class="fs-park" id="fsPark" autocomplete="off" hidden><input id="fsParkText" maxlength="80" placeholder="腦中冒出別的事？先記下來" aria-label="先記下來：腦中冒出的別的事" enterkeyhint="done"><button type="submit" class="btn-ghost">記下</button></form>
     <p class="fs-sum" id="fsSum"></p>
@@ -419,7 +423,17 @@
     <!-- 在計時卡片下面散步的貓咪（src/ui/focusCat.js） -->
     <div class="ff-cat" id="ffCat" aria-hidden="true" hidden></div>
     <button class="icon-btn ff-min" id="ffMin" title="縮小（計時繼續）"><svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6"/></svg></button>
+    <!-- 到小木屋看兩人陪你讀書（換成小島模式）：放在左上角，下面的地板留給散步的貓咪 -->
+    <button class="icon-btn ff-cabin" id="ffCabin" title="到小木屋看兩人陪你讀書（換成小島模式）" aria-label="到小木屋看兩人陪你讀書" hidden><svg viewBox="0 0 24 24"><path d="M3.8 11.6 12 4.8l8.2 6.8"/><path d="M6.3 9.8v9h11.4v-9"/><path d="M10.4 18.8v-4.6h3.2v4.6"/></svg></button>
     <button class="icon-btn ff-catbtn" id="ffCatBtn" aria-pressed="true" title="散步的貓咪：點一下請牠先離開" aria-label="散步的貓咪"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="15.6" rx="4.3" ry="3.6"/><circle cx="6.3" cy="10.4" r="1.9"/><circle cx="9.7" cy="6.6" r="1.9"/><circle cx="14.3" cy="6.6" r="1.9"/><circle cx="17.7" cy="10.4" r="1.9"/></svg></button>
+    <!-- 專注時的背景聲：右上的耳機打開選單（src/ui/focus.js 的 noisePanel；計時設定裡也有同一組） -->
+    <button class="icon-btn ff-noisebtn" id="ffNoiseBtn" aria-expanded="false" aria-controls="ffNoise" title="專注時的背景聲" aria-label="背景聲"><svg viewBox="0 0 24 24"><path d="M4.5 15.5V12a7.5 7.5 0 0 1 15 0v3.5"/><rect x="3.5" y="14" width="4.2" height="6.2" rx="1.7"/><rect x="16.3" y="14" width="4.2" height="6.2" rx="1.7"/></svg></button>
+    <div class="ff-noise glass" id="ffNoise" role="group" aria-labelledby="ffNoiseT" hidden>
+      <h4 id="ffNoiseT">背景聲<small>はいけいおん</small></h4>
+      <div class="seg noise-seg" role="group" aria-label="背景聲的種類"><button type="button" data-noise="off">關</button><button type="button" data-noise="rain">雨聲</button><button type="button" data-noise="brown">褐噪音</button><button type="button" data-noise="pink">粉紅噪音</button></div>
+      <label class="noise-vol" hidden><span>音量</span><input type="range" min="5" max="100" step="5" data-noise-vol aria-label="背景聲的音量"></label>
+      <p class="noise-hint"></p>
+    </div>
     <!-- 今天已經專注了多久（還沒有紀錄時不顯示） -->
     <div class="ff-today" id="ffToday" hidden></div>
     <div class="ff-card">
@@ -459,7 +473,6 @@
       </section>
       <!-- 休息時：還沒做完就延長（從到點那時接著正計時）、最後一輪做完了還想繼續就再加一輪 -->
       <div class="ff-more" hidden><button type="button" class="btn-ghost" id="ffExtend" hidden>還沒做完，延長</button><button type="button" class="btn-ghost" id="ffAddRound" hidden>＋ 再加一輪</button></div>
-      <button class="cm-link ff-cabin" id="ffCabin">到小木屋看兩人陪你讀書</button>
       </div>
     </div>
   </div>

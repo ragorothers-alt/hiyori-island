@@ -864,6 +864,11 @@ body.night .fs-time.up::after { color: #ffd38f; }
 .fs-row .seg { flex: 1; max-width: 250px; }
 .fs-row .seg button { flex: 1; white-space: nowrap; padding: 5px 6px; }
 .fs-row .seg button:disabled { opacity: .4; cursor: default; }
+/* 背景聲的音量滑桿和說明（計時設定、專注頁右上的選單共用） */
+.noise-vol { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-soft); }
+.noise-vol input { flex: 1; max-width: 250px; min-width: 0; height: 24px; margin: 0; accent-color: var(--tint, var(--focus)); cursor: pointer; }
+.noise-hint { margin: 8px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--ink-faint); }
+.fs-noise-hint { text-align: right; }
 .fs-sum { margin: 12px 0 10px; font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
 #fsStart { width: 100%; margin: 0; padding: 9px; }
 /* 提不起勁？只做 5 分鐘：「開始專注」下面的一行小字 */

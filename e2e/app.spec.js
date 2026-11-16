@@ -1,5 +1,5 @@
 // App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
-import { bootReady, expect, swReady, test, toastSeen, useAppMode } from './fixtures.js'
+import { bootReady, chatSaid, expect, swReady, test, toastSeen, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -1058,6 +1058,8 @@ test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下�
 })
 
 test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按鈕先收起來）；算了回來做、寫下來等等再做都記一次忍住了，一分鐘後還想去也沒關係；週報看得到', async ({ page, context, site }) => {
+  // 每次重開前都要等過「剛收起來的那一下」（0.9 秒），一共好幾次：機器忙的時候給多一點時間
+  test.setTimeout(120000)
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
@@ -1085,9 +1087,16 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   expect(await holds()).toBe(1)
   await expect(btn).toBeFocused()
   await expect(page.locator('#ffStop')).toBeVisible()
-  // 剛收起來的那一下按不開（連按 Enter 不會又打開）；過一下再按
-  await btn.click()
-  await expect(box).toBeHidden()
+  // 剛收起來的那一下按不開（連按 Enter 不會又打開）；過一下再按。
+  // 收起來和再按一次在同一個瞬間做：測試的機器很忙時，點一下本身就可能超過那一下
+  await page.waitForTimeout(900)
+  expect(await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.urge(true)
+    f.urge(false)
+    document.getElementById('ffUrgeBtn').click()
+    return document.getElementById('ffUrge').hidden
+  })).toBe(true)
   await page.waitForTimeout(900)
   // Esc：只收起來（不算忍住），專注頁還開著
   await btn.click()
@@ -1112,14 +1121,19 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   await expect(box).toBeHidden()
   await expect(page.locator('#ffParkText')).toBeFocused()
   expect(await holds()).toBe(2)
-  // 連按 Enter：第一下回到正事（記一次），剛收起來時接著按的不會又打開、又記一次
+  // 連按 Enter：第一下回到正事（記一次），焦點到「想分心了？」上；剛收起來時接著按的不會又打開、又記一次。
+  // 三下在同一個瞬間按在焦點所在的那一顆上（跟按 Enter 走同一條路）：機器忙的時候按鍵之間就可能超過那一下
   await page.waitForTimeout(900)
   await btn.click()
   await expect(page.locator('#ffUrgeBack')).toBeFocused()
-  await page.keyboard.press('Enter')
-  await page.keyboard.press('Enter')
-  await page.keyboard.press('Enter')
-  await expect(box).toBeHidden()
+  expect(await page.evaluate(() => {
+    const at = []
+    for (let i = 0; i < 3; i++) {
+      at.push(document.activeElement?.id)
+      document.activeElement.click()
+    }
+    return { at, hidden: document.getElementById('ffUrge').hidden }
+  })).toEqual({ at: ['ffUrgeBack', 'ffUrgeBtn', 'ffUrgeBtn'], hidden: true })
   expect(await holds()).toBe(3)
   // 用 Shift+Tab 移到別顆上再按 Esc：也是只收起來，不縮小專注頁
   await page.waitForTimeout(900)
@@ -1210,7 +1224,7 @@ test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一
   const next = page.locator('#ffNext')
   await expect(next).toHaveText(/這一輪結束前\s*10:20 設計週會\s*還有 20 分鐘，記得提早收尾/)
   await expect(next).toHaveClass(/clash/)
-  await expect(page.locator('#appChat')).toContainText('設計週會')
+  await expect.poll(() => chatSaid(page, '設計週會')).toBe(true)
   // 改到 10:40：不會撞到這一輪（10:25 結束），只寫接下來
   await move('10:40', '11:20')
   await expect(next).toHaveText(/接下來\s*10:40 設計週會\s*還有 40 分鐘/)
@@ -1245,7 +1259,7 @@ test('接下來：帶著秒數開始也算得準（10:00:30 開始的 25 分鐘�
   const next = page.locator('#ffNext')
   // 這一輪結束在 10:25:30：會撞到 10:25 的會議
   await expect(next).toHaveClass(/clash/)
-  await expect(page.locator('#appChat')).toContainText('設計週會')
+  await expect.poll(() => chatSaid(page, '設計週會')).toBe(true)
   // 過了一分鐘（10:01:30）還是會撞到：不會每過半分鐘就變一次
   await page.clock.setFixedTime(T('10:01:30'))
   await expect(next).toHaveText(/這一輪結束前\s*10:25 設計週會\s*還有 24 分鐘/)
@@ -1274,8 +1288,86 @@ test('接下來：帶著秒數開始也算得準（10:00:30 開始的 25 分鐘�
     h.ui.focus.toggle()
   }, tooth.id)
   await page.waitForTimeout(3200)
-  await expect(page.locator('#appChat')).not.toContainText('看牙醫')
+  expect(await chatSaid(page, '看牙醫')).toBe(false)
   await page.evaluate(() => window.hiyori.ui.focus.stop())
+})
+
+test('專注時的背景聲：計時設定、專注頁右上的耳機都可以選；只在專注中放，暫停、休息、結束時停；音效關著不放；Esc 先收選單', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await useAppMode(context)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const state = () => page.evaluate(() => window.hiyori.noise.state())
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    window.hiyori.ui.focus.toggleSet(true)
+  })
+  // 計時設定：預設關著；選雨聲（還沒開始，不放）
+  const row = page.locator('#fsNoiseRow')
+  await expect(row.getByRole('button', { name: '關' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('#focusSet .noise-vol')).toBeHidden()
+  await row.getByRole('button', { name: '雨聲' }).click()
+  await expect(row.getByRole('button', { name: '雨聲' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('#focusSet .noise-vol')).toBeVisible()
+  expect(await state()).toMatchObject({ want: 'off', playing: 'off' })
+  // 開始專注：放雨聲
+  await page.locator('#fsStart').click()
+  await expect.poll(state).toMatchObject({ want: 'rain', playing: 'rain', mine: true })
+  // 專注頁右上的耳機：亮著；打開選單（焦點在選著的那一個），換成褐噪音、調音量（放開才存）
+  const btn = page.locator('#ffNoiseBtn')
+  await expect(btn).toHaveClass(/\bon\b/)
+  await expect(btn).toHaveAttribute('aria-label', '背景聲：雨聲')
+  await btn.click()
+  const panel = page.locator('#ffNoise')
+  await expect(panel).toBeVisible()
+  await expect(btn).toHaveAttribute('aria-expanded', 'true')
+  await expect(panel.getByRole('button', { name: '雨聲' })).toBeFocused()
+  await panel.getByRole('button', { name: '褐噪音' }).click()
+  await expect.poll(state).toMatchObject({ want: 'brown', playing: 'brown' })
+  // 計時設定裡的那一組也跟著換（藏著的時候也一樣）
+  await expect(page.locator('#fsNoiseRow [data-noise="brown"]')).toHaveAttribute('aria-pressed', 'true')
+  await panel.locator('[data-noise-vol]').fill('80')
+  await expect.poll(state).toMatchObject({ vol: 80 })
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.settings.noiseVol)).toBe(80)
+  await expect(panel.locator('.noise-hint')).toHaveText('專注時放褐噪音，休息、暫停時會停')
+  // Esc 先收選單、焦點回到耳機；專注頁還開著
+  await page.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  await expect(btn).toBeFocused()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  // 點選單外面也會收
+  await btn.click()
+  await expect(panel).toBeVisible()
+  await page.locator('#ffTime').click()
+  await expect(panel).toBeHidden()
+  // 暫停：停；繼續：再放
+  await page.locator('#ffToggle').click()
+  await expect.poll(state).toMatchObject({ want: 'off', playing: 'off' })
+  await page.locator('#ffToggle').click()
+  await expect.poll(state).toMatchObject({ want: 'brown', playing: 'brown' })
+  // 音效關著：不放，選單裡說一聲；打開音效又放
+  await page.evaluate(() => window.hiyori.store.setSetting('sound', false))
+  await expect.poll(state).toMatchObject({ want: 'off', playing: 'off' })
+  await expect(btn).not.toHaveClass(/\bon\b/)
+  await btn.click()
+  await expect(panel.locator('.noise-hint')).toContainText('音效關著')
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => window.hiyori.store.setSetting('sound', true))
+  await expect.poll(state).toMatchObject({ want: 'brown', playing: 'brown' })
+  // 到點、進到休息：停
+  await page.clock.setFixedTime(T('10:25:01'))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  await expect.poll(state).toMatchObject({ want: 'off', playing: 'off' })
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 重新整理之後設定還在
+  await page.reload()
+  await bootReady(page)
+  expect(await page.evaluate(() => window.hiyori.store.state.settings)).toMatchObject({ focusNoise: 'brown', noiseVol: 80 })
 })
 
 test('提示卡一口氣來很多張：先收沒有按鈕的，有按鈕的留著來得及按；全都有按鈕時最多多留一張', async ({ page, context, site }) => {

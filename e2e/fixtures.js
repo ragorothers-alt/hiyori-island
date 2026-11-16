@@ -14,14 +14,22 @@ export const test = base.extend({
       })
     }
     // 出現過的提示卡（標題和小字）都記在 window.__toasts：只留幾秒的那幾張，機器忙的時候輪詢可能剛好錯過（見 toastSeen）
+    // App 模式畫面下方もち和ふじ說的話也一樣，每一句都記在 window.__chats（開機後的招呼可能緊接著把剛說的那句換掉，見 chatSaid）
     await context.addInitScript(() => {
       window.__toasts = []
+      window.__chats = []
       const watch = () => {
         const box = document.getElementById('toasts')
         if (!box) return
         new MutationObserver((list) => {
           for (const m of list) for (const n of m.addedNodes) if (n.classList?.contains('toast')) window.__toasts.push(n.textContent.replace(/\s+/g, ' ').trim())
         }).observe(box, { childList: true })
+        const chat = document.getElementById('appChat')
+        if (!chat) return
+        new MutationObserver(() => {
+          const t = chat.textContent.replace(/\s+/g, ' ').trim()
+          if (t && window.__chats.at(-1) !== t) window.__chats.push(t)
+        }).observe(chat, { childList: true, subtree: true, characterData: true })
       }
       if (document.readyState === 'loading') addEventListener('DOMContentLoaded', watch)
       else watch()
@@ -45,6 +53,8 @@ export const useAppMode = (context) =>
 // 有沒有出現過含 text 的提示卡（就算已經收掉了）：只是要確認「有說一聲」的地方用這個，
 // 不用 toBeVisible——一口氣來好幾張時，只留幾秒的那張可能在兩次輪詢之間就收掉了
 export const toastSeen = (page, text) => expect.poll(() => page.evaluate((t) => (window.__toasts || []).some((x) => x.includes(t)), text)).toBe(true)
+// App 模式下方的對話框有沒有說過含 text 的話（就算已經被下一句換掉了）
+export const chatSaid = (page, text) => page.evaluate((t) => (window.__chats || []).some((x) => x.includes(t)), text)
 
 // 開機跑完（window.hiyori 有了），而且頁面已經由 Service Worker 接手
 // （CI 的機器慢，等久一點）
