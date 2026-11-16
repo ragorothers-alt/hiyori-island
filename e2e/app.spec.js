@@ -1460,6 +1460,77 @@ test('休息前留一步：到點時還沒寫下一步的那件，提示卡上�
   await page.evaluate(() => window.hiyori.ui.focus.stop())
 })
 
+test('回來了，現在該做：離開 20 分鐘以上再回到 App、沒在計時時，提示卡寫現在該做的那一件和下一步，一鍵開始專注；一陣子內只說一次、離開不久不說、專注中不說；設定裡可以關', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => !!window.__hidden, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [{ id: 'e2e-b1', title: '寫期末報告', priority: 3, date: ymd, star: true, subs: [{ id: 'e2e-s1', title: '列出三個重點', done: false }] }]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: {} }))
+    }
+  }, { ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const away = async (from, to) => {
+    await page.clock.setFixedTime(T(from))
+    await page.evaluate(() => {
+      window.__hidden = true
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await page.clock.setFixedTime(T(to))
+    await page.evaluate(() => {
+      window.__hidden = false
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+  }
+  const welcomes = () => page.evaluate(() => (window.__toasts || []).filter((x) => x.includes('歡迎回來')).length)
+  const mode = () => page.evaluate(() => [window.hiyori.ui.focus.mode, window.hiyori.ui.focus.taskId])
+  // 剛打開（之前沒離開過的紀錄）：不說
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(0)
+  // 離開 30 分鐘回來：提示卡寫現在該做的那一件和下一步，ふじ說一聲；按「▶ 開始專注」開始專注那一件
+  await away('10:00:00', '10:30:00')
+  const card = page.locator('#toasts .toast', { hasText: '歡迎回來' })
+  await expect(card).toContainText('現在該做：寫期末報告・下一步：列出三個重點')
+  await expect.poll(() => chatSaid(page, '寫期末報告')).toBe(true)
+  await card.getByRole('button', { name: '▶ 開始專注' }).click()
+  await expect.poll(mode).toEqual(['focus', 'e2e-b1'])
+  // 專注中離開又回來：交給「回來了，還剩幾分鐘」那一句，不放這張
+  await away('10:31:00', '10:52:00')
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(1)
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 一個半小時內只說一次：40 分鐘後又離開半小時回來，不說
+  await away('10:53:00', '11:30:00')
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(1)
+  // 過了一個半小時：離開不久（10 分鐘）不說；離開半小時才說
+  await away('12:05:00', '12:15:00')
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(1)
+  await away('12:15:00', '12:45:00')
+  await expect.poll(welcomes).toBe(2)
+  await expect(card.getByRole('button', { name: '只做 5 分鐘' })).toBeVisible()
+  // 設定裡關掉：不說
+  await page.evaluate(() => window.hiyori.store.setSetting('backNudge', false))
+  await away('14:30:00', '15:10:00')
+  await page.waitForTimeout(1500)
+  expect(await welcomes()).toBe(2)
+  // 重新打開（App 被收掉了）也一樣：今天看過摘要、離開一陣子才打開，打開時就說（打招呼換成那一句）
+  await page.evaluate(() => window.hiyori.store.setSetting('backNudge', true))
+  // 先離開（關掉頁面時記下 15:10 還在看），17:00 再打開
+  await page.goto('about:blank')
+  await page.clock.setFixedTime(T('17:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  await expect.poll(welcomes).toBe(1)
+  await expect(page.locator('#toasts .toast', { hasText: '歡迎回來' })).toContainText('現在該做：寫期末報告')
+})
+
 test('專注時的背景聲：計時設定、專注頁右上的耳機都可以選；只在專注中放，暫停、休息、結束時停；音效關著不放；Esc 先收選單', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = (hms) => new Date(`${ymd}T${hms}+08:00`)

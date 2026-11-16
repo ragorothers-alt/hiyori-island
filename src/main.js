@@ -7,7 +7,7 @@ import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
 import { native, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
-import { planKey, pauseOf, pauseText, pauseUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet } from './mottos.js'
+import { planKey, pauseOf, pauseText, pauseUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
@@ -141,6 +141,48 @@ async function boot() {
     for (let d = dateStr(new Date(now)), k = 0; d <= to && k < 4; d = addDays(d, 1), k++) out.push(...eventQuiet(store.timedEventsOn(d), d))
     return out
   }
+  // ── 回來了，現在該做：離開 App 一陣子（BACK_MIN）才回來、沒在計時（專注、休息、暫停都不算）、醒著、不在日程中、警語沒先停：
+  // 提示卡寫現在該做的那一件（和下一步），一鍵開始專注或只做 5 分鐘，ふじ說一聲。剛從別的事回來的那一刻最好接回正事。
+  // 今天第一次打開有今日摘要（裡面就寫了），不再說；BACK_GAP 內只說一次（切來切去不會一直跳）；設定裡可以關 ──
+  const BACK_MIN = 20 * 60000
+  const BACK_GAP = 90 * 60000
+  const BACK_KEY = 'hiyori-back-at'
+  // 回傳有沒有說
+  const welcomeBack = () => {
+    const now = Date.now()
+    const st = store.state.settings
+    if (st.backNudge === false || ui.awayMs() < BACK_MIN || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer()) return false
+    const p = pauseOf(st)
+    if (!awakeAt(store.state.rhythm, now) || (p.until > now && p.from <= now) || inQuiet(eventsQuiet(now), now)) return false
+    // 警語的提示卡還在（上面就寫著現在該做）、正在打字：不疊上去
+    if (ui.hasToast('motto') || document.activeElement?.closest?.('input, textarea, select, [contenteditable]')) return false
+    let last = 0
+    try {
+      last = Number(JSON.parse(localStorage.getItem(BACK_KEY) || '0')) || 0
+    } catch {}
+    if (Math.abs(now - last) < BACK_GAP) return false
+    const t = nowTask()
+    if (!t) return false
+    try {
+      localStorage.setItem(BACK_KEY, JSON.stringify(now))
+    } catch {}
+    const step = nextStep(t)
+    talk('welcomeBack', { task: short(t.title) }, 5200, `回來啦。接下來先做「${short(t.title)}」好嗎？`, 'fuji')
+    // 按的時候已經在計時了（別的分頁開始了）就不動
+    const go = (fn) => () => ui.focus.mode === 'idle' && fn(t.id)
+    ui.toast({
+      icon: '回', title: '歡迎回來', sub: `現在該做：${t.title}${step ? `・下一步：${short(step.title, 16)}` : ''}`, ms: 12000, tag: 'back',
+      actions: [
+        { label: '▶ 開始專注', run: go((id) => ui.focus.startWith(id)) },
+        { label: '只做 5 分鐘', soft: true, run: go((id) => ui.focus.startSmall(id)) },
+      ],
+    })
+    return true
+  }
+  // 回到 App：今日摘要（400 毫秒時看要不要出來）出來了就不說
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) setTimeout(() => !ui.brief.open && welcomeBack(), 700)
+  })
   // 警語通知上的按鈕（跟 public/sw.js 的 mottoActions、Android 殼的 MottoNotice 一樣）：有現在該做的那一件才有「開始專注」。
   // 按了打開 App，由下面的 doAct 去做
   const mottoActions = (task) => [...(task ? [{ action: 'focus', title: '▶ 開始專注' }] : []), { action: 'pause', title: '先停 1 小時' }]
@@ -1519,8 +1561,10 @@ async function boot() {
         const night = scene ? scene.night() : lookNight()
         const skyDiffers = night > 0.5 !== nightAt(((h % 24) + 24) % 24) > 0.5
         const avoid = skyDiffers ? SKY_WORDS : null
-        // 今天第一次打開：貓咪走進來說今日摘要（牠在說的時候兩人先不搶話）
-        if (!(ui.maybeShowBrief() || ui.brief.open) && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
+        // 今天第一次打開：貓咪走進來說今日摘要（牠在說的時候兩人先不搶話）。
+        // 今天看過摘要、離開一陣子才又打開（App 被收掉了、關掉分頁）：提示卡寫現在該做的那一件，ふじ那一句代替打招呼
+        const brief = ui.maybeShowBrief() || ui.brief.open
+        if (!brief && !welcomeBack() && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
         scene?.greet()
       }, 900)
       // 摘要還開著就等它關掉：回顧和提醒不要疊在上面

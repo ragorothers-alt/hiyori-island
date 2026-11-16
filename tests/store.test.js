@@ -2399,14 +2399,15 @@ describe('卡關提醒與設定', () => {
     expect(store.starsOn(TODAY)).toHaveLength(MAX_STARS)
   })
 
-  it('字體大小和卡關提醒存在設定裡；不在選項裡的倍率回到標準', () => {
-    expect(store.state.settings).toMatchObject({ fontScale: 1, stuckNudge: true })
+  it('字體大小、卡關提醒、回來時提醒現在該做存在設定裡；不在選項裡的倍率回到標準', () => {
+    expect(store.state.settings).toMatchObject({ fontScale: 1, stuckNudge: true, backNudge: true })
     store.setSetting('fontScale', 1.25)
     store.setSetting('stuckNudge', false)
+    store.setSetting('backNudge', false)
     store.importJSON(store.exportJSON())
-    expect(store.state.settings).toMatchObject({ fontScale: 1.25, stuckNudge: false })
-    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { fontScale: 3 } }))
-    expect(store.state.settings.fontScale).toBe(1)
+    expect(store.state.settings).toMatchObject({ fontScale: 1.25, stuckNudge: false, backNudge: false })
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { fontScale: 3, backNudge: 'no' } }))
+    expect(store.state.settings).toMatchObject({ fontScale: 1, backNudge: true })
   })
 
   it('Liquid Glass 的透明度預設 50，匯出匯入後還在，超出 0～100 的夾回範圍', () => {

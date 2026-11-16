@@ -506,6 +506,11 @@ export class UI {
   returned() {
     this._left = { since: readLocal(SEEN_KEY, 0), at: Date.now() }
   }
+  // 剛回到 App、剛打開（這 3 分鐘內）的話，離開了多久（毫秒）；一直開著在看、沒有離開過的紀錄是 0
+  awayMs() {
+    const c = this._left
+    return c.since > 0 && Date.now() - c.at < 3 * 60000 ? Math.max(0, c.at - c.since) : 0
+  }
   // 「你不在的時候」從什麼時候算起：剛打開、剛回來那幾分鐘內的摘要才算（一直開著在看、過了午夜的那次沒有離開過）；
   // 同一天再按「現在看」沿用那一次的
   _awaySince() {
@@ -2384,6 +2389,9 @@ export class UI {
     const awayOn = this.store.state.settings.awayNudge !== false
     setOn($('#awayBtn'), awayOn)
     $('#awayBtn').textContent = awayOn ? '開' : '關'
+    const backOn = this.store.state.settings.backNudge !== false
+    setOn($('#backBtn'), backOn)
+    $('#backBtn').textContent = backOn ? '開' : '關'
     const brief = this.store.state.settings.brief !== false
     setOn($('#briefBtn'), brief)
     $('#briefBtn').textContent = brief ? '開' : '關'
@@ -2847,6 +2855,10 @@ export class UI {
       this.store.setSetting('awayNudge', this.store.state.settings.awayNudge === false)
       this.renderSettings()
     }
+    $('#backBtn').onclick = () => {
+      this.store.setSetting('backNudge', this.store.state.settings.backNudge === false)
+      this.renderSettings()
+    }
     $('#briefBtn').onclick = () => {
       this.store.setSetting('brief', this.store.state.settings.brief === false)
       this.renderSettings()
@@ -3258,6 +3270,10 @@ export class UI {
   }
 
   // 收掉某一類的提示卡
+  // 畫面上有沒有這一類（tag）的提示卡
+  hasToast(tag) {
+    return $$('#toasts .toast:not(.out)').some((el) => el.dataset.tag === tag)
+  }
   dropToasts(tag) {
     for (const el of $$('#toasts .toast')) if (el.dataset.tag === tag) this._dropToast(el, true)
   }
