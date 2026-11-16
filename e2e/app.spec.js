@@ -1267,6 +1267,9 @@ test('想分心時說出想去做什麼：點一下選起來（再點取消）�
   await tip.locator('[data-act="focusMin"]').click()
   await expect.poll(() => page.evaluate(() => window.hiyori.store.state.settings.focusMin)).toBe(20)
   await toastSeen(page, '專注一輪改成 20 分鐘')
+  // 同一批紀錄不會接著又建議縮成 15 分：洞察還在，按鈕收起來、說一聲先照這樣看幾天
+  await expect(page.locator('#coachRoot [data-act="focusMin"]')).toHaveCount(0)
+  await expect(page.locator('#coachRoot .wr-ins li', { hasText: '最常想去休息一下' })).toContainText('先照這樣再看幾天')
 })
 
 test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一輪結束前就要開始的寫「記得提早收尾」、ふじ提醒一聲；進行中的寫到幾點', async ({ page, context, site }) => {
@@ -2989,6 +2992,7 @@ test('回神紀錄：警語提示卡上按「✓ 在做了」記一筆、誇一�
   await ins.locator('[data-act="mottoEvery"]').click()
   expect(await page.evaluate(() => window.hiyori.store.state.settings.mottoEvery)).toBe(20)
   await expect(page.locator('#toasts .toast', { hasText: '警語改成每 20 分鐘提醒一次' })).toBeVisible()
-  // 已經改成 20 分了：建議改成下一段（30 分）
-  await expect(page.locator('#coachRoot [data-act="mottoEvery"]')).toHaveText('改成每 30 分鐘提醒一次')
+  // 已經改成 20 分了：同一批紀錄不會接著又建議再拉長（之後又提醒夠多次才會），洞察本身還在
+  await expect(ins).toContainText('提醒了 11 次，有 9 次你本來就在做')
+  await expect(page.locator('#coachRoot [data-act="mottoEvery"]')).toHaveCount(0)
 })

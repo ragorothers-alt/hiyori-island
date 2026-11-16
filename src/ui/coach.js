@@ -368,12 +368,15 @@ export class CoachView {
       // 警語的提醒間隔拉長（週報的回神紀錄看得出多半本來就在做正事時）
       const v = +b.dataset.v
       if (!MOTTO_EVERY.includes(v) || !v) return
+      // 記下照建議調整的那天：同一批紀錄不會接著又建議再拉長一格
+      this.store.setSetting('mottoActed', this.store.today)
       this.store.setSetting('mottoEvery', v)
       this.hooks.toast?.({ icon: '戒', title: `警語改成${v >= 60 ? `每 ${v / 60} 小時` : `每 ${v} 分鐘`}提醒一次`, sub: '紀錄頁的警語卡上可以再改' })
     } else if (act === 'focusMin') {
       // 想分心時最常想休息：專注一輪縮短一點（跟計時設定的刻度尺同一個範圍，10～90 分、每 5 分一格）
       const v = +b.dataset.v
       if (!(v >= 10 && v <= 90) || v % 5) return
+      this.store.setSetting('pullActed', this.store.today)
       this.store.setSetting('focusMin', v)
       this.hooks.toast?.({ icon: '時', title: `專注一輪改成 ${v} 分鐘`, sub: '點 Dock 上的時間可以再改' })
     } else return
@@ -674,8 +677,7 @@ export class CoachView {
     parts.push(this._aiWeekHTML(w.week))
 
     // 習慣洞察
-    const st = s.state.settings
-    const list = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today, mottoEvery: st.mottoEvery, focusMin: st.focusUp ? 0 : st.focusMin })
+    const list = buildInsights(this._insightArgs(today))
     const guess = list.some((x) => x.guess)
     parts.push(`<section class="wr-card">
       <h3>習慣洞察${guess ? '<em class="wr-badge">部分依作息推測</em>' : ''}</h3>
@@ -742,6 +744,16 @@ export class CoachView {
     </section>`
   }
 
+  // 習慣洞察要的資料（週報上的、交給 Claude 的同一份）：正向計時沒有「一輪幾分鐘」；上次照建議調整過的日子
+  _insightArgs(today) {
+    const s = this.store
+    const st = s.state.settings
+    return {
+      tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today,
+      mottoEvery: st.mottoEvery, focusMin: st.focusUp ? 0 : st.focusMin, acted: { pull: st.pullActed, motto: st.mottoActed },
+    }
+  }
+
   // ふじ的週報洞察（Claude）：設了通行碼才出現；每週存一份在這台裝置，想更新再按
   _aiWeekHTML(week) {
     if (!aiReady()) return ''
@@ -769,7 +781,7 @@ export class CoachView {
       rate: r2(r.rate), done: r.done, total: r.total, focus: r.focus, pomodoros: r.pomodoros,
       stars: r.stars, starTotal: r.starTotal, habitRate: r2(r.habitRate), activeDays: r.active, moods: r.moods,
     })
-    const ins = buildInsights({ tasks: s.state.tasks, history: s.state.history, habits: s.state.habits, rhythm: s.state.rhythm, today: s.today, mottoEvery: s.state.settings.mottoEvery })
+    const ins = buildInsights(this._insightArgs(s.today))
     const data = {
       today: s.today, daysSoFar: w.days, streak: s.streak, usedDays: s.usedDays(),
       week: nums(w), prev: nums(p), insights: ins.map((x) => ({ title: x.title, text: x.text, guess: !!x.guess })),

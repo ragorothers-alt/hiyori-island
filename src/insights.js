@@ -13,6 +13,13 @@ const addDays = (date, n) => {
   return ymd(d)
 }
 const pct = (v) => Math.round(v * 100)
+// 照建議調整過（acted：調整的那天）：只有之後的紀錄算新的證據。回傳要往回看幾天（今天算一天、調整那天不算），最多 days。
+// 不然同一批紀錄會在按下去之後馬上又建議下一格（25 → 20 → 15 分），一路調下去
+const freshDays = (today, acted, days) => {
+  if (!acted) return days
+  const n = Math.round((new Date(today + 'T00:00:00') - new Date(acted + 'T00:00:00')) / 864e5)
+  return Math.max(0, Math.min(days, n))
+}
 
 // 一天分四段：早上 5–12、下午 12–18、晚上 18–24、深夜 0–5；peak 對到作息裡「精神最好的時段」
 export const BUCKETS = [
@@ -82,8 +89,9 @@ export function activeDays(history, today, days = 28) {
 
 // 回傳 [{ id, kanji, title, text, guess?, action? }]；action：{ kind: 'peak', value, label } 一鍵把作息的精神時段改掉、
 // { kind: 'mottoEvery', value, label } 一鍵把警語的提醒間隔拉長、{ kind: 'focusMin', value, label } 一鍵把專注一輪縮短。
-// mottoEvery：現在幾分鐘提醒一次（0 是不提醒）；focusMin：倒數計時一輪幾分鐘（正向計時是 0）
-export function buildInsights({ tasks, history, habits, rhythm, today, mottoEvery = 0, focusMin = 0 }) {
+// mottoEvery：現在幾分鐘提醒一次（0 是不提醒）；focusMin：倒數計時一輪幾分鐘（正向計時是 0）；
+// acted：{ pull, motto } 上次照建議縮短一輪、拉長間隔的那天（設定的 pullActed、mottoActed）
+export function buildInsights({ tasks, history, habits, rhythm, today, mottoEvery = 0, focusMin = 0, acted = {} }) {
   const out = []
   const guess = activeDays(history, today) < 5
   const peak = PEAKS[rhythm.peak]
@@ -158,7 +166,10 @@ export function buildInsights({ tasks, history, habits, rhythm, today, mottoEver
   const m = mottoStats(history, today)
   if (m.nudges >= MOTTO_ENOUGH) {
     const back = Math.min(m.nudges, m.backs + m.onTask)
-    const longer = mottoEvery > 0 ? MOTTO_EVERY.find((v) => v > mottoEvery) : null
+    // 照這裡拉長過間隔：之後又提醒了夠多次才再建議拉長
+    const since = freshDays(today, acted.motto, 14)
+    const again = since >= 14 || mottoStats(history, today, since).nudges >= MOTTO_ENOUGH
+    const longer = mottoEvery > 0 && again ? MOTTO_EVERY.find((v) => v > mottoEvery) : null
     const longerAction = longer ? { kind: 'mottoEvery', value: longer, label: `改成${everyText(longer)}提醒一次` } : null
     if (m.onTask / m.nudges >= 0.6) {
       out.push({
@@ -186,10 +197,14 @@ export function buildInsights({ tasks, history, habits, rhythm, today, mottoEver
   const most = top(pulls)
   if (most && most[1] >= PULL_ENOUGH) {
     const p = pullOf(most[0])
-    const shorter = p.id === 'rest' && focusMin >= 20 ? focusMin - 5 : 0
+    // 照這裡縮短過一輪：之後又記了夠多次「休息一下」才再建議縮短
+    const since = freshDays(today, acted.pull, 14)
+    const again = since >= 14 || (pullStats(history, today, since).rest || 0) >= PULL_ENOUGH
+    const shorter = p.id === 'rest' && focusMin >= 20 && again ? focusMin - 5 : 0
+    const wait = p.id === 'rest' && focusMin >= 20 && !again
     out.push({
       id: 'pull', kanji: '念', title: `想分心時，最常想去${p.label}`,
-      text: `最近兩週有 ${most[1]} 次。${p.tip}`,
+      text: `最近兩週有 ${most[1]} 次。${p.tip}${wait ? '一輪的長度前陣子調整過了，先照這樣再看幾天。' : ''}`,
       action: shorter ? { kind: 'focusMin', value: shorter, label: `一輪改成 ${shorter} 分鐘` } : null,
     })
   }

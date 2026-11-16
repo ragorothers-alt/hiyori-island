@@ -2221,10 +2221,29 @@ describe('週報', () => {
     // 讀存檔時清洗：不認得的、不是正整數的拿掉，一個都不剩就整個拿掉（不會被當成之後的版本多加的欄位原樣留下來）
     const base = JSON.parse(JSON.stringify(store.state))
     const clean = (pulls) => migrate({ ...base, history: { '2026-10-21': { holds: 1, pulls } } }).history['2026-10-21']
-    expect(clean({ phone: 2.6, msg: -1, video: 'x', nope: 5, rest: 0 }).pulls).toEqual({ phone: 3 })
+    // 不幫它進位、不把字串、true、陣列換成數字；換不成數字的物件（valueOf、toString 都是 null）也不會讓整份清理停下來
+    expect(clean({ phone: 2.6, msg: -1, video: 'x', nope: 5, rest: 0, snack: 4 }).pulls).toEqual({ snack: 4 })
+    expect('pulls' in clean({ phone: '2', msg: true, video: [3], web: { valueOf: null, toString: null } })).toBe(false)
     expect('pulls' in clean({ nope: 3 })).toBe(false)
     expect('pulls' in clean('phone')).toBe(false)
     expect('pulls' in clean(null)).toBe(false)
+    // 別的數字欄位碰到換不成數字的物件：當成壞掉的值（用預設），不丟例外
+    const odd = { valueOf: null, toString: null }
+    expect(() => migrate({ ...base, settings: { ...base.settings, noiseVol: odd, focusMin: odd } })).not.toThrow()
+    expect(migrate({ ...base, settings: { ...base.settings, noiseVol: odd } }).settings.noiseVol).toBe(50)
+  })
+
+  it('照週報洞察的建議調整過的那天（縮短一輪、拉長警語間隔）：照實留著；不是日期的、遠在明天以後的當成沒調整過', () => {
+    const base = JSON.parse(JSON.stringify(store.state))
+    const acted = (pullActed, mottoActed) => {
+      const st = migrate({ ...base, settings: { ...base.settings, pullActed, mottoActed } }).settings
+      return [st.pullActed, st.mottoActed]
+    }
+    expect(store.state.settings).toMatchObject({ pullActed: '', mottoActed: '' })
+    setDate('2026-10-21')
+    expect(acted('2026-10-20', '2026-10-22')).toEqual(['2026-10-20', '2026-10-22'])
+    expect(acted('2026-10-24', '2026-02-30')).toEqual(['', ''])
+    expect(acted(20261020, { d: 1 })).toEqual(['', ''])
   })
 
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {

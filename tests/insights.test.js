@@ -90,6 +90,21 @@ describe('洞察', () => {
     expect(motto(hist([['2026-11-01', { nudges: 8, backs: 12 }]])).title).toBe('警語幫你回神了 8 次')
   })
 
+  it('照建議拉長過警語的間隔：同一批紀錄不會接著又建議再拉長；之後又提醒了 8 次以上才再建議', () => {
+    const hist = (rows) => Object.fromEntries(rows.map(([date, o]) => [date, day(o)]))
+    const motto = (history, mottoEvery, acted) => buildInsights({ tasks: [], history, habits: [], rhythm: R, today: TODAY, mottoEvery, acted }).find((x) => x.id === 'motto')
+    const busy = hist([['2026-10-30', { nudges: 6, onTask: 4, backs: 1 }], ['2026-10-31', { nudges: 4, onTask: 3 }]])
+    expect(motto(busy, 15, {}).action.value).toBe(20)
+    // 今天按了（15 → 20 分）：還是看得到這張洞察，只是不再給按鈕
+    expect(motto(busy, 20, { motto: TODAY })).toMatchObject({ title: '提醒的時候，你多半已經在做正事了', action: null })
+    expect(motto(busy, 20, { motto: TODAY }).text).toMatch(/照這個節奏就好/)
+    // 前天按的，之後（昨天、今天）又提醒了 8 次、多半本來就在做：再建議拉長一格
+    const more = hist([['2026-10-30', { nudges: 6, onTask: 4 }], ['2026-10-31', { nudges: 5, onTask: 4 }], ['2026-11-01', { nudges: 3, onTask: 2 }]])
+    expect(motto(more, 20, { motto: '2026-10-30' }).action.value).toBe(30)
+    // 兩週以前按的：不影響
+    expect(motto(busy, 20, { motto: '2026-10-01' }).action.value).toBe(30)
+  })
+
   it('想分心時最常想去做什麼：最近兩週 3 次以上才說，給對應的建議；最常想休息、倒數計時的話一鍵把一輪縮短 5 分鐘', () => {
     const hist = (rows) => Object.fromEntries(rows.map(([date, o]) => [date, day(o)]))
     const pull = (history, focusMin = 25) => buildInsights({ tasks: [], history, habits: [], rhythm: R, today: TODAY, focusMin }).find((x) => x.id === 'pull')
@@ -105,5 +120,23 @@ describe('洞察', () => {
     expect(pull(rest)).toMatchObject({ title: '想分心時，最常想去休息一下', action: { kind: 'focusMin', value: 20, label: '一輪改成 20 分鐘' } })
     expect(pull(rest, 15).action).toBeNull()
     expect(pull(rest, 0).action).toBeNull()
+  })
+
+  it('照建議縮短過一輪：同一批「休息一下」不會接著又建議再縮（25 → 20 → 15）；之後又記了 3 次以上才再建議', () => {
+    const hist = (rows) => Object.fromEntries(rows.map(([date, o]) => [date, day(o)]))
+    const pull = (history, focusMin, acted) => buildInsights({ tasks: [], history, habits: [], rhythm: R, today: TODAY, focusMin, acted }).find((x) => x.id === 'pull')
+    const rest = hist([['2026-10-31', { pulls: { rest: 3 } }]])
+    expect(pull(rest, 25, {}).action.value).toBe(20)
+    // 今天按了（25 → 20）：洞察還在，不再給按鈕，說一聲先照這樣看幾天
+    const after = pull(rest, 20, { pull: TODAY })
+    expect(after.action).toBeNull()
+    expect(after.text).toMatch(/前陣子調整過了，先照這樣再看幾天/)
+    // 按了之後（昨天、今天）又想休息 3 次：再建議縮短一格；別的念頭不算
+    const again = hist([['2026-10-31', { pulls: { rest: 3 } }], ['2026-11-01', { pulls: { rest: 3, phone: 1 } }]])
+    expect(pull(again, 20, { pull: '2026-10-31' }).action.value).toBe(15)
+    const other = pull(hist([['2026-10-31', { pulls: { rest: 4 } }], ['2026-11-01', { pulls: { phone: 3 } }]]), 20, { pull: '2026-10-31' })
+    expect(other).toMatchObject({ title: '想分心時，最常想去休息一下', action: null })
+    // 兩週以前按的：不影響
+    expect(pull(rest, 20, { pull: '2026-10-01' }).action.value).toBe(15)
   })
 })

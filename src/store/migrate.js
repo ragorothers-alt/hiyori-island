@@ -41,14 +41,13 @@ const DAY_NUMS = [
 // sleep：那天的睡眠已經給過獎勵
 const DAY_FLAGS = ['perfect', 'starAll', 'habitAll', 'sleep']
 // pulls：專注中想分心時想去做什麼（theme.js 的 PULLS 的 id → 次數；用過才有這個欄位）。
-// 不認得的、不是正的整數拿掉，一個都沒有就是 null
+// 不認得的、不是正的整數（2.6、"2"、true 都不算，不幫它進位或換成數字）拿掉，一個都沒有就是 null
 const PULL_IDS = new Set(PULLS.map((p) => p.id))
 export function cleanPulls(v) {
   if (!isObj(v)) return null
   const out = {}
   for (const [k, n] of Object.entries(v)) {
-    const c = PULL_IDS.has(k) ? num(n, 0, 1e5, 0) : 0
-    if (c > 0) out[k] = c
+    if (PULL_IDS.has(k) && Number.isInteger(n) && n > 0) out[k] = Math.min(n, 1e5)
   }
   return Object.keys(out).length ? out : null
 }
@@ -157,8 +156,22 @@ const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
 // 不出現在每天的任務、花圃和排程裡，也不會逾期；完成的那天才記在那天
 export const floating = (t) => !!t?.ongoing && !t.done
 const str = (v, max = 120) => (typeof v === 'string' ? v.slice(0, max) : '')
-const num = (v, min, max, dflt) => (Number.isFinite(+v) ? Math.min(max, Math.max(min, Math.round(+v))) : dflt)
-const ts = (v) => (Number.isFinite(+v) && +v > 0 ? +v : null)
+// 換成數字；換不了（valueOf、toString 都被蓋成 null 的物件會丟例外）的當成 NaN，整份存檔清理不會因為一個欄位停下來
+const toNum = (v) => {
+  try {
+    return +v
+  } catch {
+    return NaN
+  }
+}
+const num = (v, min, max, dflt) => {
+  const n = toNum(v)
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : dflt
+}
+const ts = (v) => {
+  const n = toNum(v)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 const ymd = (v, dflt) => (DATE_RE.test(v) ? v : dflt)
 // 欄位清空了（不是打了看不懂的東西）
 const blank = (v) => v == null || (typeof v === 'string' && !v.trim())
@@ -646,8 +659,14 @@ function migrate(s) {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
       const raw = s.settings[k]
       if (typeof v === 'boolean' && typeof raw === 'boolean') settings[k] = raw
-      if (typeof v === 'number' && Number.isFinite(+raw)) settings[k] = +raw
+      if (typeof v === 'number' && Number.isFinite(toNum(raw))) settings[k] = toNum(raw)
     }
+  }
+  // 照週報洞察的建議調整過的那天（縮短一輪、拉長警語的間隔）：之後的紀錄夠多了才再建議。
+  // 不是日期的、遠在明天以後的（時鐘被調過）當成沒調整過
+  for (const k of ['pullActed', 'mottoActed']) {
+    const d = ymd(s.settings?.[k], '')
+    settings[k] = d && d <= addDays(today, 1) ? d : ''
   }
   settings.remindLead = num(settings.remindLead, -1, 120, DEFAULT_SETTINGS.remindLead)
   // 舊版用長度 0 代表往上數：換成正向計時，倒數的長度回到預設
