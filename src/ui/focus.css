@@ -173,6 +173,11 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-urge-btn { margin: -4px 0 0; padding: 4px 10px; border: 0; background: none; color: var(--ink-faint); font: inherit; font-size: 12.5px; letter-spacing: .04em; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .ff-urge-btn:hover { color: var(--ink-soft); }
 .ff-urge-btn[hidden] { display: none; }
+/* 限時去：去一下・幾點叫你回來，旁邊「我回來了」；時間到了換成提醒的顏色 */
+.ff-detour { display: flex; align-items: center; gap: 10px; margin: -4px 0 0; padding: 4px 4px 4px 14px; border-radius: 999px; background: var(--field); border: 1px solid var(--line); font-size: 12.5px; letter-spacing: .04em; color: var(--ink-soft); animation: fadeIn .3s var(--ease); }
+.ff-detour[hidden] { display: none; }
+.ff-detour.due { border-color: color-mix(in srgb, var(--ff-a) 60%, var(--line)); background: color-mix(in srgb, var(--ff-a) 12%, var(--field)); color: var(--ink); }
+.ff-detour button { min-height: 32px; margin: 0; padding: 0 14px; border-radius: 999px; font-size: 12.5px; }
 .focus-full.urging .ff-ctl > :not(.ff-urge) { display: none; }
 .ff-urge { display: grid; justify-items: center; gap: 8px; width: min(360px, 100%); padding: 16px 18px 18px; border-radius: 22px; background: var(--field); border: 1px solid var(--line); text-align: center; animation: fadeIn .3s var(--ease); }
 .ff-urge[hidden] { display: none; }

@@ -311,14 +311,22 @@ async function boot() {
     swAct({ id: String(e.data.id || ''), act: String(e.data.act || ''), slot: Number(e.data.slot) > 0 ? Number(e.data.slot) : 0 })
   })
 
+  // 那一刻（毫秒）是幾點幾分：「10:06」
+  const clockOf = (t) => {
+    const d = new Date(t)
+    return minToHHMM(d.getHours() * 60 + d.getMinutes())
+  }
   // 每天的專注目標：這一輪記進去之後剛好跨過去，慶祝一下。was：記之前那天專注了幾分、day：那是哪一天
   // （記的時候換日了：今天是從 0 開始的）。等到點的那一句和提示卡先出來再說
   const goalDone = (was, day) => {
     const goal = store.state.settings.focusGoal || 0
-    const before = day === store.today ? was : 0
-    const now = store.peekDay(store.today).focus || 0
+    const today = store.today
+    const before = day === today ? was : 0
+    const now = store.peekDay(today).focus || 0
     if (!goal || before >= goal || now < goal) return
     setTimeout(() => {
+      // 等的這一下剛好過了午夜：已經是隔天了，不說「今天」達成（那天的已經記下了）
+      if (dateStr() !== today) return
       sfx.fanfare()
       haptic('party')
       talk('focusGoalDone', { goal: goalText(goal) }, 6000, `今天的專注目標 ${goalText(goal)} 達成了！`)
@@ -380,11 +388,22 @@ async function boot() {
     // 想分心了：打開「先等一分鐘」時陪一句；一分鐘到了輕輕響一聲；還是想去也不責備（專注照常計時）
     urgeOpen: () => talk('focusUrge', {}, 5200, '想分心很正常，我們一起等一分鐘。'),
     urgeAsk: () => sfx.chime(),
-    // 點了想去做什麼的話，說到那件事（「去滑手機吧，計時還在走」）
-    urgeGo: (pull) => {
+    // 等完還是想去：去 5 分鐘就回來（限時去），說好幾點叫你回來；點了想去做什麼的話說到那件事
+    urgeGo: (pull, until) => {
       const p = pullOf(pull)
-      if (p) talk('focusGoPull', { what: p.label }, 4600, `好，去${p.label}吧。專注還在計時，記得回來。`)
-      else talk('focusGo', {}, 4600, '好，去吧。專注還在計時，記得回來。')
+      const at = clockOf(until)
+      if (p) talk('focusDetourPull', { what: p.label, at }, 5200, `好，去${p.label}吧。${at} 叫你回來。`)
+      else talk('focusDetour', { at }, 5200, `好，去吧。${at} 叫你回來。`)
+    },
+    // 限時去的時間到了：叫你回來（提示卡上「我回來了」；頁面不在前面時系統通知。Android 的 App 是交給手機的那一則，見 backItem）
+    detourDue: () => {
+      const t = focusTarget()
+      const task = t ? `「${short(t)}」` : ''
+      sfx.chime()
+      haptic('warn')
+      talk('focusDetourDue', { task }, 6000, `說好的 5 分鐘到了，回來吧。${task}還在等你。`)
+      ui.toast({ icon: '回', title: '說好的 5 分鐘到了，回來吧', sub: t ? `回到「${short(t, 12)}」` : '回到正事上', tag: 'detour', ms: 60000, actions: [{ label: '我回來了', run: () => ui.focus.detourBack() }] })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 回來吧', `說好的 5 分鐘到了${t ? `，回到「${short(t, 16)}」` : ''}`, 'detour')
     },
     reviewOpened: () => talk('reviewAsk', {}, 4200, '今天過得怎麼樣？'),
     modalClosed: () => scene?.modalClosed(),
@@ -919,6 +938,15 @@ async function boot() {
     haptic('tick')
     talk('urgeResisted', { habit: short(habit.name), days }, 3800)
   })
+  // 限時去之後回來了（按了「我回來了」、切走之後回到 App）：叫了才回來的也一樣歡迎
+  store.on('focusReturned', ({ late }) => {
+    sfx.pop()
+    haptic('tick')
+    const t = focusTarget()
+    const task = t ? `「${short(t)}」` : ''
+    if (late) talk('focusDetourLate', { task }, 4600, `回來了就好。接著做${task}吧。`)
+    else talk('focusDetourBack', { task }, 4600, `說到做到，回來了。接著做${task}吧。`)
+  })
   // 專注中想分心時先等了一分鐘、回到正事（專注頁的「想分心了？」）
   store.on('focusHeld', ({ count, pull }) => {
     sfx.pop()
@@ -1274,8 +1302,9 @@ async function boot() {
   // 這一輪中途切去用別的 App 了嗎（Android 的 App 才分得出來）
   // until：算到幾點（到點時還在外面的那一次算到本來到點的時間：頁面晚一點才醒來的話，到點之後的那段不算）
   const leftApp = (since, until = Date.now()) => !!since && Math.min(until, Date.now()) - since >= AWAY_MIN && nativeAwayLocked() === false
-  // 回到 App（頁面看得到了、重新打開）：離開 1 分鐘以上的說一聲還剩多久；切去用別的 App 的記一次中途離開
-  const cameBack = () => {
+  // 回到 App（頁面看得到了、重新打開）：離開 1 分鐘以上的說一聲還剩多久；切去用別的 App 的記一次中途離開。
+  // quiet：剛從限時去回來（那邊已經說了「回來了」），這裡不再說還剩幾分鐘
+  const cameBack = (quiet = false) => {
     const since = awaySince
     if (!since) return
     const same = focusing() && awaySid === ui.focus.sid
@@ -1287,6 +1316,7 @@ async function boot() {
       ui.focus.noteAway()
       store.focusLeft()
     }
+    if (quiet) return
     const t = focusTarget()
     const task = t ? `「${short(t)}」` : ''
     if (ui.focus.counting) {
@@ -1298,7 +1328,8 @@ async function boot() {
     }
   }
   // 離開：同一輪已經記著幾點離開的就不改（Android 的 App 在背景時先記下的那一刻比較準；關掉頁面時又會再收到一次）
-  document.addEventListener('visibilitychange', () => (document.hidden ? trackAway(true) : cameBack()))
+  // 限時去（去 5 分鐘就回來）的時候切走又回來：就是回來了（記一次、說一聲，不另外說還剩幾分鐘）
+  document.addEventListener('visibilitychange', () => (document.hidden ? trackAway(true) : cameBack(ui.focus.detourBack(true))))
   // 重新打開時（Android 在背景把 App 收掉了）：接著算剛才那一次
   if (!document.hidden) cameBack()
   // 一輪專注結束（sid 是那一輪）：那時還在別的 App 裡的算一次中途離開，回傳有沒有算
@@ -1312,15 +1343,21 @@ async function boot() {
     store.focusLeft()
     return true
   }
-  // 離開了 AWAY_NUDGE 還沒回來：通知叫你回來（一則；那時這一輪已經快結束的不用，到點的通知會叫你）。設定裡可以關
+  // 離開了 AWAY_NUDGE 還沒回來：通知叫你回來（一則；那時這一輪已經快結束的不用，到點的通知會叫你）。設定裡可以關。
+  // 限時去（說好「去 5 分鐘就回來」）：到說好的時間才叫；是自己要的，設定關著也叫
   const backItem = () => {
-    if (!awaySince || !focusing() || awaySid !== ui.focus.sid || !nativeBack() || store.state.settings.awayNudge === false) return null
-    const at = awaySince + AWAY_NUDGE
+    const detour = ui.focus.detour || 0
+    if (!awaySince || !focusing() || awaySid !== ui.focus.sid || !nativeBack() || (store.state.settings.awayNudge === false && !detour)) return null
+    const at = Math.max(awaySince + AWAY_NUDGE, detour)
     const end = ui.focus.boundary?.at || 0
     if (!(end - at > 60000)) return null
     const t = focusTarget()
     const what = t ? `「${short(t, 16)}」` : ''
-    const body = ui.focus.counting ? `${what}還在專注中，回來接著做吧` : `${what}還在專注中，還剩 ${Math.round((end - at) / 60000)} 分鐘。回來吧`
+    const body = detour
+      ? `說好的 5 分鐘到了，回來接著做${what || '正事'}吧`
+      : ui.focus.counting
+        ? `${what}還在專注中，回來接著做吧`
+        : `${what}還在專注中，還剩 ${Math.round((end - at) / 60000)} 分鐘。回來吧`
     return { at, title: 'ひより · 專注中', body, back: true }
   }
 
@@ -1332,8 +1369,9 @@ async function boot() {
   // 每秒看一次；改了資料、專注開始或結束、離開頁面時馬上看一次。leaving：頁面正要關掉（pagehide 時還不一定是 hidden）
   let mottoSig = ''
   let mottoItems = []
-  // 上一次看的時候提醒是不是關著、停著（網頁版：剛關掉、剛按先停的那一刻叫 mottoPush.hush）
-  let mottoHushed = false
+  // 上一次看的時候提醒是不是關著、停著（網頁版：剛關掉、剛按先停的那一刻叫 mottoPush.hush）。
+  // 開機時是 null：開機那一刻本來就關著的不算「剛關掉」（沒開通知的裝置不用為此建推播的快取）
+  let mottoHushed = null
   syncMottos = (leaving = false) => {
     if (!mottoPush && !nativeMottos()) return
     const now = Date.now()
@@ -1342,7 +1380,7 @@ async function boot() {
     if (mottoPush?.rewind(now)) mottoSig = ''
     // 網頁版：自己關掉了提醒（間隔改成不提醒、警語都收起來了）、按了先停的那一刻，已經到點、推播還在路上的那幾則晚到時不出聲
     const hushed = !(s.settings.mottoEvery > 0) || !activeMottos(s.mottos).length || pausedUntil(s.settings, now) > 0
-    if (mottoPush && hushed && !mottoHushed) mottoPush.hush(now)
+    if (mottoPush && hushed && mottoHushed === false) mottoPush.hush(now)
     mottoHushed = hushed
     const on = mottoExternal()
     const quietUntil = ui.focus.mode === 'focus' ? ui.focus.boundary?.at || 0 : 0
@@ -1424,6 +1462,8 @@ async function boot() {
       if (out && !nativeOut && !document.hidden) ui.markSeen(true)
       if (!out && nativeOut && !document.hidden) {
         ui.returned()
+        // 限時去的時候切去用別的 App、又回來了
+        ui.focus.detourBack(true)
         setTimeout(() => !ui.brief.open && welcomeBack(), 700)
       }
       nativeOut = out

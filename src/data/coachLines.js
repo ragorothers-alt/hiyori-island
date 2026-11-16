@@ -157,6 +157,32 @@ export const COACH_FUJI = {
     '去{what}吧，計時還在走，回來接著做。',
     '好，去{what}。記得回來，這一輪還在走。',
   ],
+  // 限時去：等完還是想去，說好「去 5 分鐘就回來」。{at} 幾點叫你回來，{what} 想去做什麼（focusDetourPull 才有）
+  focusDetour: [
+    '好，去吧。{at} 我叫你回來。',
+    '去一下沒關係，{at} 回來就好。',
+    '說好了，{at} 回來。計時還在走。',
+  ],
+  focusDetourPull: [
+    '好，去{what}吧。{at} 我叫你回來。',
+    '{what}五分鐘就好，{at} 回來。',
+  ],
+  // 限時去的時間到了：{task}（「寫報告」，沒有目標是空的）
+  focusDetourDue: [
+    '說好的 5 分鐘到了。回來吧，{task}還在等你。',
+    '時間到了，先放下手上的，回到{task}。',
+    '5 分鐘到了。現在回來，剛剛好。',
+  ],
+  // 限時去之後回來了：{task}。focusDetourLate 是叫了才回來的
+  focusDetourBack: [
+    '說到做到，回來了。接著做{task}吧。',
+    '準時回來了，很好。我們繼續。',
+    '回來了。這樣去一下又回來，就是把自己拉回來。',
+  ],
+  focusDetourLate: [
+    '回來了就好。接著做{task}吧。',
+    '晚一點也沒關係，回來最重要。',
+  ],
   // 排定的任務排的時間到了還沒做完：{task}
   taskEnd: [
     '「{task}」排的時間到了，做完了嗎？',
@@ -569,6 +595,26 @@ export const COACH_MOCHI = {
   focusGoPull: [
     '去{what}吧～記得回來喔，我們在這等你。',
     '{what}的時候也想著回來喔～計時沒停！',
+  ],
+  focusDetour: [
+    '去吧～{at} 我會叫你喔！',
+    '好～{at} 見！我們在這等你。',
+  ],
+  focusDetourPull: [
+    '{what}五分鐘就好喔～{at} 叫你！',
+    '去{what}吧，{at} 回來一起做～',
+  ],
+  focusDetourDue: [
+    '時間到了～回來一起做{task}吧！',
+    '叮咚～5 分鐘到了，回來囉！',
+  ],
+  focusDetourBack: [
+    '歡迎回來～說到做到耶！',
+    '回來了！我們接著做{task}～',
+  ],
+  focusDetourLate: [
+    '回來了就好～一起加油！',
+    '歡迎回來～從現在開始也很好！',
   ],
   focusClash: [
     '{at} 有「{event}」喔～記得提早收尾！',

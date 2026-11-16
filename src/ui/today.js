@@ -752,23 +752,28 @@ export class TodayView {
     const d = this.store.peekDay(today)
     const focus = d.focus || 0
     const holds = d.holds || 0
+    // 等完還是想去、說好「去 5 分鐘就回來」之後回來了的（限時去）
+    const returns = d.returns || 0
     const nudges = d.nudges || 0
     // 提醒之後回到正事的、提醒時本來就在做的（跟週報的「警語回神」一樣，不超過提醒的次數）
     const back = Math.min(nudges, (d.backs || 0) + (d.onTask || 0))
-    if (!focus && !holds && !back) return ''
+    if (!focus && !holds && !returns && !back) return ''
     const top = Object.entries(d.pulls || {}).sort((a, b) => b[1] - a[1])[0]
     const most = top && pullOf(top[0])
+    const mostNote = most ? `<small>最常想去${esc(most.label)}</small>` : ''
     // 設了每天的專注目標：寫著目標、達成了沒
     const goal = this.store.state.settings.focusGoal || 0
     const reached = !!goal && focus >= goal
     const goalNote = goal ? `<small>${reached ? `達成每天的目標 ${goalText(goal)}` : `目標 ${goalText(goal)}`}</small>` : ''
     const items = [
       focus ? `<li>專注 <b>${hm(focus)}</b>${goalNote}</li>` : '',
-      holds ? `<li>想分心時忍住 <b>${holds}</b> 次${most ? `<small>最常想去${esc(most.label)}</small>` : ''}</li>` : '',
+      // 最常想去做什麼：寫在忍住的那一行，沒有忍住過就寫在去一下就回來的那一行
+      holds ? `<li>想分心時忍住 <b>${holds}</b> 次${mostNote}</li>` : '',
+      returns ? `<li>去一下就回來 <b>${returns}</b> 次${holds ? '' : mostNote}</li>` : '',
       back ? `<li>警語提醒時回神 <b>${back}</b>／${nudges} 次</li>` : '',
     ].join('')
-    // 拉回來的次數：忍住的、提醒之後回到正事的（本來就在做的不算「拉回來」）
-    const pulled = holds + Math.min(nudges, d.backs || 0)
+    // 拉回來的次數：忍住的、限時去之後回來的、提醒之後回到正事的（本來就在做的不算「拉回來」）
+    const pulled = holds + returns + Math.min(nudges, d.backs || 0)
     const praise = pulled
       ? `今天把自己拉回來 ${pulled} 次，很不容易。`
       : reached

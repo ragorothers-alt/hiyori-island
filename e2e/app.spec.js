@@ -1128,16 +1128,18 @@ test('想分心了：專注中先等一分鐘、跟著圓圈呼吸（其他按�
   await expect(box).toBeHidden()
   await expect(page.locator('#focusFull')).toBeVisible()
   expect(await holds()).toBe(1)
-  // 一分鐘過了：問還想不想去；「還是想去」也沒關係，不算忍住，專注照常
+  // 一分鐘過了：問還想不想去；想去也沒關係——「去 5 分鐘就回來」不算忍住，專注照常（回來了按「我回來了」，見限時去的測試）
   await page.waitForTimeout(900)
   await btn.click()
   await page.evaluate(() => (window.hiyori.ui.focus.urgeAt -= 61000))
   await expect(page.locator('#ffUrgeT')).toHaveText('一分鐘過了')
   await expect(page.locator('#ffUrgeBack')).toHaveText('回來做正事')
-  await page.locator('#ffUrgeAlt', { hasText: '還是想去' }).click()
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
   await expect(box).toBeHidden()
   expect(await holds()).toBe(1)
   expect(await page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
+  await page.locator('#ffDetourBack').click()
+  await expect(btn).toBeVisible()
   // 等的時候按 N（或「寫下來，等等再做」）：收起來、到「先記下來」那一行，也算忍住了一次
   await page.waitForTimeout(900)
   await btn.click()
@@ -1270,10 +1272,11 @@ test('想分心時說出想去做什麼：點一下選起來（再點取消）�
   await expect(page.locator('#ffUrgePulls [aria-pressed="true"]')).toHaveCount(0)
   await chip('休息一下').click()
   await page.evaluate(() => (window.hiyori.ui.focus.urgeAt -= 61000))
-  await page.locator('#ffUrgeAlt', { hasText: '還是想去' }).click()
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
   await expect(box).toBeHidden()
   expect(await day()).toEqual({ pulls: { phone: 1, rest: 1 }, holds: 1 })
   await expect.poll(() => chatSaid(page, '休息一下')).toBe(true)
+  await page.locator('#ffDetourBack').click()
   // 選了但按 Esc 只收起來：什麼都不記
   await page.waitForTimeout(900)
   await btn.click()
@@ -1299,6 +1302,97 @@ test('想分心時說出想去做什麼：點一下選起來（再點取消）�
   // 同一批紀錄不會接著又建議縮成 15 分：洞察還在，按鈕收起來、說一聲先照這樣看幾天
   await expect(page.locator('#coachRoot [data-act="focusMin"]')).toHaveCount(0)
   await expect(page.locator('#coachRoot .wr-ins li', { hasText: '最常想去休息一下' })).toContainText('先照這樣再看幾天')
+})
+
+test('限時去：等完一分鐘還是想去時「去 5 分鐘就回來」，專注頁寫著幾點叫你回來（重新整理也記得）；時間到了提示卡叫你一次，按「我回來了」記一次；切走再回到 App 也算回來了；今日反思寫著', async ({ page, context, site }) => {
+  test.setTimeout(120000)
+  await useAppMode(context)
+  // 切到別的分頁：設了 window.__hidden 就照它算「頁面看不看得到」，沒設照瀏覽器的
+  // （重新整理時頁面真的變成看不到：不能被當成「回到頁面」）
+  await context.addInitScript(() => {
+    const real = (k) => Object.getOwnPropertyDescriptor(Document.prototype, k).get
+    const hidden = real('hidden')
+    const state = real('visibilityState')
+    Object.defineProperty(Document.prototype, 'hidden', { get() { return window.__hidden ?? hidden.call(this) }, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get() { return window.__hidden == null ? state.call(this) : window.__hidden ? 'hidden' : 'visible' }, configurable: true })
+  })
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const returns = () => page.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).returns || 0)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    const t = s.addTask({ title: '寫期末報告', date: s.today })
+    window.hiyori.ui.focus.startWith(t.id)
+  })
+  const btn = page.locator('#ffUrgeBtn')
+  const detour = page.locator('#ffDetour')
+  // 想分心了，等完一分鐘還是想去：去 5 分鐘就回來。那一行寫著幾點叫你回來，焦點在「我回來了」上
+  await btn.click()
+  await page.clock.setFixedTime(T('10:01:01'))
+  await expect(page.locator('#ffUrgeT')).toHaveText('一分鐘過了')
+  await expect(page.locator('#ffUrgeP')).toContainText('去 5 分鐘，時間到了叫你回來')
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
+  await expect(detour).toBeVisible()
+  await expect(page.locator('#ffDetourT')).toHaveText('去一下・10:06 叫你回來')
+  await expect(page.locator('#ffDetourBack')).toBeFocused()
+  await expect(btn).toBeHidden()
+  await expect.poll(() => chatSaid(page, '10:06')).toBe(true)
+  // 重新整理之後也記得（存在計時的狀態裡）
+  await page.reload()
+  await bootReady(page)
+  await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
+  await expect(page.locator('#ffDetourT')).toHaveText('去一下・10:06 叫你回來')
+  // 時間到了：提示卡叫你回來，那一行換成「說好的 5 分鐘到了」；只叫一次
+  await page.clock.setFixedTime(T('10:06:02'))
+  await toastSeen(page, '說好的 5 分鐘到了，回來吧')
+  await expect(page.locator('#ffDetourT')).toHaveText('說好的 5 分鐘到了，回來吧')
+  await expect(detour).toHaveClass(/due/)
+  await page.waitForTimeout(1300)
+  expect(await page.evaluate(() => (window.__toasts || []).filter((x) => x.includes('說好的 5 分鐘到了')).length)).toBe(1)
+  // 提示卡上按「我回來了」：記一次，那一行收起來，「想分心了？」回來
+  await page.locator('#toasts .toast', { hasText: '說好的 5 分鐘到了' }).getByRole('button', { name: '我回來了' }).click()
+  await expect(detour).toBeHidden()
+  await expect(btn).toBeVisible()
+  expect(await returns()).toBe(1)
+  // 再去一次，這次切到別的分頁、過一會兒回來：回到 App 就算回來了
+  await btn.click()
+  await page.clock.setFixedTime(T('10:07:05'))
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
+  await expect(page.locator('#ffDetourT')).toHaveText('去一下・10:12 叫你回來')
+  await page.evaluate(() => {
+    window.__hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.setFixedTime(T('10:09:00'))
+  await page.evaluate(() => {
+    window.__hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect(detour).toBeHidden()
+  expect(await returns()).toBe(2)
+  // 限時去的時候按了暫停：自己停下來了，那一行收起來、不再叫你回來
+  await page.waitForTimeout(900)
+  await btn.click()
+  await page.clock.setFixedTime(T('10:10:05'))
+  await page.locator('#ffUrgeAlt', { hasText: '去 5 分鐘就回來' }).click()
+  await expect(detour).toBeVisible()
+  await page.evaluate(() => window.hiyori.ui.focus.toggle())
+  await expect(detour).toBeHidden()
+  expect(await page.evaluate(() => window.hiyori.ui.focus.detour)).toBe(0)
+  // 今日反思：寫著去一下就回來幾次，也算進「把自己拉回來」
+  await page.evaluate(() => {
+    window.hiyori.ui.focus.stop()
+    window.hiyori.ui.setTab('today')
+  })
+  const back = page.locator('#todayRoot .td-back')
+  await expect(back.locator('li', { hasText: '去一下就回來' })).toHaveText('去一下就回來 2 次')
+  await expect(back.locator('p')).toHaveText('今天把自己拉回來 2 次，很不容易。')
 })
 
 test('上週回顧卡：寫著那週把自己拉回來幾次（忍住分心、警語提醒時回到正事；本來就在做的不算）和最常想去做什麼', async ({ page, context, site }) => {
@@ -1676,7 +1770,8 @@ test('休息前留一步（小島模式）：提示卡上按「留一步給等�
   const first = page.locator('#toasts .toast', { hasText: '專注完成' })
   await expect(first.getByRole('button', { name: '留一步給等等' })).toBeVisible()
   await page.evaluate((b) => window.hiyori.ui.focus.setTarget(`t:${b}`), b)
-  await first.getByRole('button', { name: '留一步給等等' }).click()
+  // （直接送點擊：小島一直在畫，機器很忙的時候等「捲到看得到、不再動」可能等到逾時）
+  await first.getByRole('button', { name: '留一步給等等' }).dispatchEvent('click')
   await expect(page.locator('#focusSet')).toBeHidden()
   expect(await subs(b)).toEqual([])
   expect(await subs(a)).toEqual([])
@@ -1688,7 +1783,7 @@ test('休息前留一步（小島模式）：提示卡上按「留一步給等�
   }, a)
   await page.clock.setFixedTime(T('10:50:02'))
   await expect.poll(mode, { timeout: 30000 }).toBe('break')
-  await page.locator('#toasts .toast', { hasText: '專注完成' }).getByRole('button', { name: '留一步給等等' }).click()
+  await page.locator('#toasts .toast', { hasText: '專注完成' }).getByRole('button', { name: '留一步給等等' }).dispatchEvent('click')
   await expect(page.locator('#focusSet')).toBeVisible()
   const input = page.locator('#fsStepText')
   await expect(input).toBeFocused()

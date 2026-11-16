@@ -156,7 +156,7 @@ describe('時間到了還沒做完：加時；輪數做完了還想繼續：再�
 describe('重新整理後接回計時', () => {
   it('好好的存檔照原樣接回來', () => {
     const saved = { mode: 'focus', endAt: 1_000_000, paused: null, taskId: 't1', projectId: 'p1', up: false, focusMin: 50, breakMin: 10, round: 2, rounds: 3, sid: 'abc-123' }
-    expect(restoreState(saved)).toEqual({ ...saved, projectId: null, ext: false, doneAt: null, small: false, away: 0 })
+    expect(restoreState(saved)).toEqual({ ...saved, projectId: null, ext: false, doneAt: null, small: false, away: 0, detour: 0, detourRang: false })
     // 中途離開了幾次：接著算（壞掉的是 0，取整數、最多 999）
     expect(restoreState({ ...saved, away: 2 }).away).toBe(2)
     expect(restoreState({ ...saved, away: 'x' }).away).toBe(0)
@@ -171,13 +171,21 @@ describe('重新整理後接回計時', () => {
 
   it('壞掉的欄位換成安全的值：長度用現在的、輪數夾在範圍裡、id 不是字串就不要', () => {
     const r = restoreState({ mode: 'break', endAt: 'x', paused: -5, taskId: 5, projectId: 'p2', up: 'yes', focusMin: NaN, breakMin: 999, round: 9, rounds: 7, sid: '<script>' }, { focusMin: 30, breakMin: 5 })
-    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, ext: false, small: false, away: 0, doneAt: null, focusMin: 30, breakMin: 60, round: 7, rounds: 7, sid: null })
+    expect(r).toEqual({ mode: 'break', endAt: 0, paused: 0, taskId: null, projectId: 'p2', up: false, ext: false, small: false, away: 0, detour: 0, detourRang: false, doneAt: null, focusMin: 30, breakMin: 60, round: 7, rounds: 7, sid: null })
     expect(restoreState({ rounds: 99, round: 50 })).toMatchObject({ rounds: MAX_ROUNDS, round: MAX_ROUNDS })
     // 加時的標記對不上（不是往上數、不是專注中）就不算；doneAt 壞掉也不要
     expect(restoreState({ mode: 'focus', up: false, ext: true }).ext).toBe(false)
     expect(restoreState({ mode: 'break', up: true, ext: true, doneAt: 'x' })).toMatchObject({ ext: false, doneAt: null })
     expect(restoreState({ focusMin: 9999 }).focusMin).toBe(FREE_MAX)
     expect(restoreState(null)).toMatchObject({ endAt: 0, paused: null, rounds: 1, round: 1, focusMin: 25, breakMin: 5 })
+  })
+
+  it('限時去（去 5 分鐘就回來）：專注中記著幾點叫你回來、叫過了沒；休息中、壞掉的時間、不是 true 的不算', () => {
+    const saved = { mode: 'focus', endAt: 1_000_000, paused: null, focusMin: 25, breakMin: 5, round: 1, rounds: 1, sid: 's1', detour: 1_300_000, detourRang: true }
+    expect(restoreState(saved)).toMatchObject({ detour: 1_300_000, detourRang: true })
+    expect(restoreState({ ...saved, detourRang: 'yes' })).toMatchObject({ detour: 1_300_000, detourRang: false })
+    expect(restoreState({ ...saved, mode: 'break' })).toMatchObject({ detour: 0, detourRang: false })
+    for (const bad of ['x', -5, 0, null]) expect(restoreState({ ...saved, detour: bad })).toMatchObject({ detour: 0, detourRang: false })
   })
 
   it('只做 5 分鐘：倒數中、休息中、到點後接著做下去（加時）都還記著；正向計時的、不是 true 的不算', () => {

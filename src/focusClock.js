@@ -105,6 +105,9 @@ export function restoreState(saved, dflt = {}) {
     small: saved?.small === true && (!up || ext),
     // 這一輪中途離開了幾次
     away: Math.round(n(saved?.away, 0, 999, 0)),
+    // 限時去（想分心、等完還是想去時「去 5 分鐘就回來」）：幾點叫你回來（0 是沒有）、叫過了沒。只在專注中有
+    detour: saved?.mode === 'focus' && Number.isFinite(saved?.detour) && saved.detour > 0 ? saved.detour : 0,
+    detourRang: saved?.mode === 'focus' && Number.isFinite(saved?.detour) && saved.detour > 0 && saved?.detourRang === true,
     doneAt: saved?.mode === 'break' && Number.isFinite(saved?.doneAt) && saved.doneAt > 0 ? saved.doneAt : null,
     focusMin: n(saved?.focusMin, 0.05, FREE_MAX, dflt.focusMin ?? 25),
     breakMin: n(saved?.breakMin, 0.05, 60, dflt.breakMin ?? 5),

@@ -2194,6 +2194,33 @@ describe('週報', () => {
     expect(migrate({ ...JSON.parse(JSON.stringify(store.state)), history: { '2026-10-21': { holds: 'x' } } }).history['2026-10-21'].holds).toBe(0)
   })
 
+  it('限時去之後回來了（去 5 分鐘就回來）：記在今天、週報加起來，每天前 3 次有經驗值；不算忍住；存檔清洗', () => {
+    setDate('2026-10-21')
+    const events = []
+    store.on('focusReturned', (x) => events.push(x))
+    const xp = store.state.player.xp
+    const urges = store.stats.urgesResisted
+    store.focusReturned()
+    store.focusReturned({ late: true })
+    store.focusReturned({ auto: true })
+    store.focusReturned()
+    expect(events).toEqual([
+      { count: 1, late: false, auto: false },
+      { count: 2, late: true, auto: false },
+      { count: 3, late: false, auto: true },
+      { count: 4, late: false, auto: false },
+    ])
+    expect(store.peekDay('2026-10-21')).toMatchObject({ returns: 4, holds: 0 })
+    expect(store.stats.urgesResisted).toBe(urges)
+    expect(store.state.player.xp - xp).toBe(3 * XP.urge)
+    setDate('2026-10-22')
+    store.focusReturned()
+    expect(store.weekReport()).toMatchObject({ returns: 5 })
+    store.importJSON(store.exportJSON())
+    expect(store.peekDay('2026-10-21').returns).toBe(4)
+    expect(migrate({ ...JSON.parse(JSON.stringify(store.state)), history: { '2026-10-21': { returns: -2 } } }).history['2026-10-21'].returns).toBe(0)
+  })
+
   it('想分心時想去做什麼：忍住的、還是去了的都記在那天的 pulls，週報加起來；沒點、不認得的不記；存檔清洗', () => {
     setDate('2026-10-21')
     const held = []

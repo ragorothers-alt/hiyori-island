@@ -163,7 +163,15 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
     expect(q.done).toBe(NOW + 15 * MIN)
   })
 
-  it('自己關掉提醒、按了先停：念到哪推到現在（快取裡的也是），已經到點、推播還在路上的那幾則晚到時當成念過了；已經比較後面就不動', async () => {
+  it('自己關掉提醒、按了先停：念到哪推到現在（快取裡的也是），已經到點、推播還在路上的那幾則晚到時當成念過了；已經比較後面就不動；沒訂閱推播的裝置什麼都不做', async () => {
+    // 沒訂閱推播：不會有推播來，什麼都不做（也不建推播的快取）
+    sub = null
+    const none = await boot()
+    none.hush(NOW + 20 * MIN)
+    await flush()
+    expect(none.done).toBe(0)
+    expect(await caches.has(PLAN_CACHE)).toBe(false)
+    sub = mkSub(KEY1, 1)
     const p = await boot()
     p.hush(NOW + 20 * MIN)
     await flush()

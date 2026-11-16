@@ -4,12 +4,14 @@ import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS, XP, pullOf } from '../theme.js'
 
-// 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），照記下的先後只留最近的幾十則
+// 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），照記下的先後只留最近的 TALLY_KEEP 則
 // （不照提醒的時間排：時鐘被往回調過的話，剛記的那一則會被當成最舊的丟掉）。
 // 存成 { gen, keys }，keys 的每一筆是「時間、'n' 或 'a'」兩個值的陣列；gen 是這份紀錄跟著哪一份資料
-// （匯入、還原備份換了一份就不算數，見 store.js 的 sameGen）
+// （匯入、還原備份換了一份就不算數，見 store.js 的 sameGen）。
+// 要比推播留的那幾則（push.js 的 MOTTO_LOG_KEEP，150）多：「看過哪幾筆」那張表（SHOWN_KEY）寫不進去時，
+// 一口氣算進來的那一整批還認得出來，不會重算
 export const TALLY_KEY = 'hiyori-motto-tally'
-const TALLY_KEEP = 40
+export const TALLY_KEEP = 200
 const RANK = { n: 1, a: 2 }
 const tallyKey = (at) => (Number.isFinite(at) && at > 0 ? String(Math.round(at)) : '')
 // 記在那一則的那一天；時間不知道、或怪怪的（未來、一週以前）就記在今天
@@ -264,7 +266,8 @@ export const extrasMethods = {
   // 已經算過的（頁面念的、按了通知上按鈕的）不重算，一週以前的不算。回傳算了幾則
   mottosShown(src, list) {
     const all = readShown()
-    const seen = Array.isArray(all[src]) ? all[src].filter((x) => typeof x === 'string') : []
+    // 存著的，加上寫不進去（空間滿了）時這個分頁記在記憶體裡的
+    const seen = [...new Set([...(Array.isArray(all[src]) ? all[src] : []), ...(this._shownMem?.[src] || [])])].filter((x) => typeof x === 'string')
     const items = (Array.isArray(list) ? list : []).filter((x) => x && typeof x.id === 'string' && x.id && !seen.includes(x.id))
     if (!items.length) return 0
     this._refreshToday()
@@ -282,7 +285,11 @@ export const extrasMethods = {
       all[src] = [...new Set([...seen, ...items.map((x) => x.id)])].slice(-SHOWN_KEEP)
       try {
         localStorage.setItem(SHOWN_KEY, JSON.stringify(all))
-      } catch {}
+        if (this._shownMem) delete this._shownMem[src]
+      } catch {
+        // 寫不進去：這個分頁記在記憶體裡（同一批不會一直重算；去重表 TALLY_KEY 也認得這一批）
+        ;(this._shownMem ||= {})[src] = all[src]
+      }
     }
     return fresh.length
   },
@@ -333,6 +340,17 @@ export const extrasMethods = {
     if (d.holds <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
     this._finish(fx)
     return d.holds
+  },
+  // 限時去（等完還是想去時「去 5 分鐘就回來」）之後回來了：記一次（今天的回神、週報的「把自己拉回來」都算），
+  // 每天前 3 次有一點經驗值。late：叫你回來之後才回來的；auto：切走之後回到 App 就算回來了。發 focusReturned
+  focusReturned({ late = false, auto = false } = {}) {
+    this._refreshToday()
+    const d = this.day()
+    d.returns = (d.returns || 0) + 1
+    const fx = [['focusReturned', { count: d.returns, late: !!late, auto: !!auto }]]
+    if (d.returns <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
+    this._finish(fx)
+    return d.returns
   },
   // 等了之後還是想去（不算忍住）：點了想去做什麼的話也記下來，週報看得出最常把你拉走的是什麼。回傳有沒有記
   focusWent(pull) {

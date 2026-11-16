@@ -26,6 +26,8 @@ const ARC = 540.4
 // 想分心了：先等多久、跟著圓圈呼吸的一個來回（吸氣、吐氣各一半；圓圈的大小也照它算，見 _renderUrge）
 const URGE_MS = 60000
 const BREATH_MS = 8000
+// 限時去：等完一分鐘還是想去時，去多久叫你回來
+export const DETOUR_MS = 5 * 60000
 // 背景聲的名字（按鈕的說明、選單下面那一行）
 const NOISE_NAMES = { rain: '雨聲', brown: '褐噪音', pink: '粉紅噪音' }
 // 還有多久：45 分鐘、1 小時 5 分
@@ -158,6 +160,8 @@ export class FocusTimer {
     this.ext = false
     this.doneAt = null
     this.small = false
+    this.detour = 0
+    this.detourRang = false
   }
 
   // 重新整理前的計時：每個欄位都檢查過才用（壞掉的數字會一路變成 NaN 分鐘）
@@ -177,9 +181,9 @@ export class FocusTimer {
   }
   // 只寫進 localStorage（重新整理、另一個分頁接得回來），不重排通知
   _persist() {
-    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away } = this
+    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, detour, detourRang } = this
     try {
-      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away }))
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, ...(detour ? { detour, detourRang } : {}) }))
     } catch {}
   }
   // 這一輪專注中切去用別的 App 一陣子（main.js 量的）：記一次，到點的提示卡上寫中途離開了幾次。
@@ -640,6 +644,7 @@ export class FocusTimer {
   // 回到正事、或先寫下來等等再做：記一次忍住了（store 的 focusHold）。還是想去也沒關係，專注照常計時 ──
   _bindUrge() {
     $('#ffUrgeBtn').onclick = () => this.urge(true)
+    $('#ffDetourBack').onclick = () => this.detourBack()
     for (const id of ['#ffUrgeBack', '#ffUrgeAlt']) $(id).onclick = (e) => this._urgeDo(e.currentTarget.dataset.urge)
     // 想去做什麼：點一下選起來（再點一下取消），回到正事、寫下來、還是想去的時候一起記下來
     $('#ffUrgePulls .ff-urge-chips').innerHTML = PULLS.map((p) => `<button type="button" class="chip-toggle" data-pull="${p.id}" aria-pressed="false">${esc(p.label)}</button>`).join('')
@@ -679,7 +684,7 @@ export class FocusTimer {
     } else this._urgeFocus()
     return true
   }
-  // back：回到正事；park：先寫下來等等再做（焦點到「先記下來」那一行）；go：還是想去。
+  // back：回到正事；park：先寫下來等等再做（焦點到「先記下來」那一行）；go：還是想去——去 5 分鐘就回來（限時去）。
   // 等的時候點了想去做什麼的話，一起記下來（忍住的、去了的都算）
   _urgeDo(act) {
     if (!this._urgeLive()) return
@@ -687,16 +692,37 @@ export class FocusTimer {
     this.urgeAt = 0
     this.urgePull = null
     this._urgeShut = Date.now()
-    this._renderUrge()
     if (act === 'go') {
       if (pull) this.ui.store.focusWent(pull)
-      this.hooks.urgeGo?.(pull)
-      return this._urgeFocus()
+      // 限時去：想去也沒關係，但說好幾點回來。時間到了叫你回來（提示卡、系統通知；Android 的 App 是叫你回來的那一則通知），
+      // 切走之後回到 App 就算回來了（main.js）。專注照常計時
+      this.detour = Date.now() + DETOUR_MS
+      this.detourRang = false
+      this._persist()
+      this._renderUrge()
+      this.hooks.urgeGo?.(pull, this.detour)
+      return $('#ffDetourBack').focus()
     }
+    this._renderUrge()
     this.ui.store.focusHold(pull)
     if (act !== 'park') return this._urgeFocus()
     this._renderPark()
     $('#ffParkText').focus()
+  }
+  // 限時去之後回來了：按了「我回來了」、提示卡上的按鈕，或切走之後回到 App（auto）。記一次回來了（今天的回神、週報），
+  // もち／ふじ說一聲。回傳剛才是不是在限時去
+  detourBack(auto = false) {
+    if (!this.detour) return false
+    const late = this.detourRang
+    this.detour = 0
+    this.detourRang = false
+    this._persist()
+    const had = $('#ffDetour').contains(document.activeElement)
+    this._renderUrge()
+    if (had) this._urgeFocus()
+    this.ui.dropToasts?.('detour')
+    this.ui.store.focusReturned({ late, auto })
+    return true
   }
   // 收起來之後焦點回到「想分心了？」；沒有那一顆（休息中、暫停了）就交給專注頁本身
   _urgeFocus() {
@@ -716,10 +742,19 @@ export class FocusTimer {
     const on = !!this.urgeAt
     // 自己收起來的（到點、暫停）時焦點在裡面：接到看得到的地方，不會掉到看不見的地方
     const had = !on && !box.hidden && box.contains(document.activeElement)
+    // 限時去中：「想分心了？」那一行換成「去一下・幾點叫你回來」和「我回來了」
+    const det = !!this.detour && this.mode === 'focus' && this.paused == null
+    const dbox = $('#ffDetour')
+    const hadDet = !det && !dbox.hidden && dbox.contains(document.activeElement)
+    dbox.hidden = !det
+    if (det) {
+      dbox.classList.toggle('due', !!this.detourRang)
+      setText($('#ffDetourT'), this.detourRang ? '說好的 5 分鐘到了，回來吧' : `去一下・${hhmm(this.detour)} 叫你回來`)
+    }
     $('#focusFull').classList.toggle('urging', on)
-    $('#ffUrgeBtn').hidden = on || !this._urgeCan()
+    $('#ffUrgeBtn').hidden = on || det || !this._urgeCan()
     box.hidden = !on
-    if (had) this._urgeFocus()
+    if (had || hadDet) this._urgeFocus()
     if (!on) return
     const gone = Date.now() - this.urgeAt
     // 圓圈跟「吸氣」「吐氣」照同一個時間縮放（縮小專注頁再打開也對得上）；減少動態效果時不動
@@ -737,12 +772,12 @@ export class FocusTimer {
     }
     box.classList.toggle('ask', ask)
     setText($('#ffUrgeT'), ask ? '一分鐘過了' : '先等一分鐘')
-    setText($('#ffUrgeP'), ask ? '還想去嗎？想去也沒關係，專注會繼續計時。' : '想去做別的事很正常。跟著圓圈呼吸，一分鐘後還想去，再去。')
+    setText($('#ffUrgeP'), ask ? '還想去嗎？想去也沒關係：去 5 分鐘，時間到了叫你回來（專注照常計時）。' : '想去做別的事很正常。跟著圓圈呼吸，一分鐘後還想去，再去。')
     setText($('#ffUrgeLeft'), ask ? '' : `還有 ${Math.ceil((URGE_MS - gone) / 1000)} 秒`)
     setText($('#ffUrgeBreath'), ask ? '' : gone % BREATH_MS < BREATH_MS / 2 ? '吸氣' : '吐氣')
     setText($('#ffUrgeBack'), ask ? '回來做正事' : '算了，回來做')
     const alt = $('#ffUrgeAlt')
-    setText(alt, ask ? '還是想去' : '寫下來，等等再做')
+    setText(alt, ask ? '去 5 分鐘就回來' : '寫下來，等等再做')
     alt.dataset.urge = ask ? 'go' : 'park'
     pickOne($$('#ffUrgePulls [data-pull]'), (b) => b.dataset.pull === this.urgePull)
     // 點了想去做什麼：寫一件現在就做得到的小事（把手機翻過來、先記下來…）
@@ -969,6 +1004,8 @@ export class FocusTimer {
       return
     }
     Object.assign(this, clock.pauseToggle(this, Date.now()))
+    // 限時去的時候按了暫停：自己停下來了，不再叫你回來
+    if (this.paused != null) this.detour = 0
     this._save()
     this.render()
   }
@@ -979,6 +1016,8 @@ export class FocusTimer {
     this.sid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
     // 這一輪中途離開了幾次（新的一輪從 0 開始；延長是同一輪，接著算）
     this.away = 0
+    this.detour = 0
+    this.detourRang = false
     if (!this.task) this.taskId = null
     if (this.taskId || !this.project) this.projectId = null
     this.togglePicker(false)
@@ -1036,6 +1075,9 @@ export class FocusTimer {
     this.toggleSet(false)
     const now = Date.now()
     Object.assign(this, clock.breakStart(this, now, at ?? now))
+    // 限時去的時候這一輪到點了：到點的提示卡會叫你，限時去就不用了
+    this.detour = 0
+    this.detourRang = false
     this._save()
     this.hooks.focusFinished(minutes, this.task?.id || null, info)
     this.render()
@@ -1051,6 +1093,8 @@ export class FocusTimer {
     const was = this.sid
     Object.assign(this, clock.extendStart(this, Date.now()))
     this.sid = `-${Math.random().toString(36).slice(2, 10)}`
+    this.detour = 0
+    this.detourRang = false
     // 延長是同一輪接著做：這一輪按過 × 不指定目標的，延長時也不再問「要專注這一件嗎？」
     if (this._noPick != null && this._noPick === was) this._noPick = this.sid
     this._asking = false
@@ -1116,6 +1160,13 @@ export class FocusTimer {
         this._renderNext()
       }
       return
+    }
+    // 限時去的時間到了：叫你回來（一次；另一個分頁叫過了就不再叫）
+    if (this.detour && !this.detourRang && this.mode === 'focus' && Date.now() >= this.detour) {
+      this.detourRang = true
+      this._persist()
+      if (!$('#focusFull').hidden) this._renderUrge()
+      this.hooks.detourDue?.()
     }
     const step = clock.due(this, Date.now())
     if (step?.do === 'expire') return this._expire()

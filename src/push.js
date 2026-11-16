@@ -562,9 +562,10 @@ export class MottoPush extends PushBase {
   }
 
   // 自己關掉了提醒（間隔改成不提醒、警語都收起來了）、按了先停：已經到點、推播還在路上的那幾則晚到時不出聲
-  // （念到哪推到現在，Service Worker 收到時當成念過了，不出聲地放，也不算進回神紀錄）
+  // （念到哪推到現在，Service Worker 收到時當成念過了，不出聲地放，也不算進回神紀錄）。
+  // 這台沒訂閱推播的話不會有推播來：什麼都不做（也不建推播的快取）
   hush(now = this.now()) {
-    if (!(now > this.done)) return
+    if (!this.sub || !(now > this.done)) return
     this.done = now
     this._writeDone(now)
   }

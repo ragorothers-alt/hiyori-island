@@ -46,6 +46,7 @@ export const EVENTS = {
   mottoPause: '警語的提醒先停一下（停到幾點，0 是恢復）',
   parked: '專注時先記下了一件別的事（{ id, text, at }）',
   focusHeld: '專注中想分心時先等了一分鐘、回到正事（{ count } 今天第幾次）',
+  focusReturned: '等完還是想去、說好「去 5 分鐘就回來」之後回來了（{ count } 今天第幾次，late 叫了才回來，auto 切回 App 就算）',
   sleepLogged: '記下睡眠',
 
   // ── 專注 ──

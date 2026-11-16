@@ -6,6 +6,8 @@ const NEXT = DATA_VERSION + 1
 import { Reminders } from '../src/reminders.js'
 import { planRules } from '../src/coach.js'
 import { FileSync } from '../src/sync.js'
+import { TALLY_KEEP } from '../src/store/extras.js'
+import { MOTTO_LOG_KEEP } from '../src/push.js'
 
 const KEY = 'hiyori-daily-v1'
 let store
@@ -186,17 +188,36 @@ describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調'
     expect(day(store).nudges).toBe(3)
   })
 
-  it('算過的那幾筆記著（來源不清掉）：去重表只留最近 40 則，還在來源裡的舊通知也不會重算', () => {
+  it('算過的那幾筆記著（來源不清掉）：去重表只留最近 TALLY_KEEP 則，還在來源裡的舊通知也不會重算', () => {
     const base = Date.now() - 6 * 3600000
     const first = { id: 'sw-1', at: base }
     expect(store.mottosShown('sw', [first])).toBe(1)
-    // 之後頁面又念了 45 則：去重表上已經沒有 first 那一則了
-    for (let i = 1; i <= 45; i++) store.mottoNudged(base + i * 60000)
+    // 之後頁面又念了 TALLY_KEEP + 5 則：去重表上已經沒有 first 那一則了
+    for (let i = 1; i <= TALLY_KEEP + 5; i++) store.mottoNudged(base + i * 60000)
     expect(JSON.parse(localStorage.getItem(TALLY)).keys.map((x) => x[0])).not.toContain(String(base))
     // 推播那邊還留著 first：不重算
-    expect(store.mottosShown('sw', [first, { id: 'sw-2', at: base + 50 * 60000 }])).toBe(1)
-    expect(day(store).nudges).toBe(47)
+    expect(store.mottosShown('sw', [first, { id: 'sw-2', at: base + (TALLY_KEEP + 10) * 60000 }])).toBe(1)
+    expect(day(store).nudges).toBe(TALLY_KEEP + 7)
     expect(new Store().mottosShown('sw', [first])).toBe(0)
+  })
+
+  it('推播留下的一整批（MOTTO_LOG_KEEP 則）一口氣算進來、「看過哪幾筆」卻寫不進去（空間滿了）：同一批不會重算，重新打開也一樣', () => {
+    expect(TALLY_KEEP).toBeGreaterThan(MOTTO_LOG_KEEP)
+    const base = Date.now() - 3 * 3600000
+    const list = Array.from({ length: MOTTO_LOG_KEEP }, (_, i) => ({ id: `${base + i * 60000}:${base + i * 60000}`, at: base + i * 60000 }))
+    const real = localStorage.setItem
+    localStorage.setItem = function (k, v) {
+      if (k === SHOWN) throw new Error('QuotaExceededError')
+      return real.call(this, k, v)
+    }
+    try {
+      expect(store.mottosShown('sw', list)).toBe(MOTTO_LOG_KEEP)
+      expect(store.mottosShown('sw', list)).toBe(0)
+      expect(new Store().mottosShown('sw', list)).toBe(0)
+    } finally {
+      localStorage.setItem = real
+    }
+    expect(day(store).nudges).toBe(MOTTO_LOG_KEEP)
   })
 
   it('時鐘被往回調過：送到的時間比上一筆早的新通知照樣算得到（照代號認，不照時間）', () => {
@@ -297,15 +318,15 @@ describe('回神紀錄：多分頁、匯入、存不進去、時鐘被往回調'
     }
   })
 
-  it('時鐘被往回調過：剛記的那一則不會被當成最舊的丟掉（照記下的先後留最近 40 則）；舊格式的去重表還認得', () => {
+  it('時鐘被往回調過：剛記的那一則不會被當成最舊的丟掉（照記下的先後留最近 TALLY_KEEP 則）；舊格式的去重表還認得', () => {
     const base = Date.now()
-    for (let i = 0; i < 40; i++) store.mottoNudged(base + 86400000 + i * 60000)
+    for (let i = 0; i < TALLY_KEEP; i++) store.mottoNudged(base + 86400000 + i * 60000)
     const at = base - 3600000
     expect(store.mottoNudged(at)).toBe(true)
     expect(store.mottoAnswered('back', at)).toBe(true)
     expect(store.mottoNudged(at)).toBe(false)
     expect(store.mottoAnswered('on', at)).toBe(false)
-    expect(JSON.parse(localStorage.getItem(TALLY)).keys).toHaveLength(40)
+    expect(JSON.parse(localStorage.getItem(TALLY)).keys).toHaveLength(TALLY_KEEP)
     // 重新打開也認得
     expect(new Store().mottoAnswered('on', at)).toBe(false)
     // 上一版存的格式（{ 時間: 'n' }）：跟著還沒有 gen 的資料
