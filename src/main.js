@@ -1426,6 +1426,8 @@ async function boot() {
   // 說好「去 5 分鐘就回來」的到說好的時間才叫（detourDue）；這一輪再一下就到點的不叫（到點的通知會叫你）
   const TAB_NUDGE_KEY = 'hiyori-tab-nudge'
   let tabMem = null
+  // 正在等鎖（同一個分頁不疊好幾個要求）
+  let tabBusy = false
   const tabLast = () => {
     try {
       return JSON.parse(localStorage.getItem(TAB_NUDGE_KEY) || 'null') || tabMem
@@ -1445,15 +1447,35 @@ async function boot() {
     if (now - since < AWAY_NUDGE) return
     const end = ui.focus.boundary?.at || 0
     if (!(end - now > 60000)) return
-    const last = tabLast()
-    if (last?.sid === ui.focus.sid && last.at >= seen) return
-    tabMem = { sid: ui.focus.sid, at: now }
-    try {
-      localStorage.setItem(TAB_NUDGE_KEY, JSON.stringify(tabMem))
-    } catch {}
-    const t = focusTarget()
-    const what = t ? `「${short(t, 16)}」` : ''
-    systemNotify('ひより · 專注中', ui.focus.counting ? `${what}還在專注中，回來接著做吧` : `${what}還在專注中，還剩 ${Math.max(1, Math.round((end - now) / 60000))} 分鐘。回來吧`, 'away')
+    const sid = ui.focus.sid
+    // 這一段離開還沒叫過（別的分頁叫過的也算）：記下來、叫一次。回傳有沒有輪到這邊叫
+    const claim = () => {
+      const last = tabLast()
+      if (last?.sid === sid && last.at >= ui.lastSeen()) return false
+      tabMem = { sid, at: Date.now() }
+      try {
+        localStorage.setItem(TAB_NUDGE_KEY, JSON.stringify(tabMem))
+      } catch {}
+      return true
+    }
+    const send = () => {
+      if (ui.focus.sid !== sid || !focusing()) return
+      const t = focusTarget()
+      const what = t ? `「${short(t, 16)}」` : ''
+      const left = Math.max(1, Math.round(((ui.focus.boundary?.at || end) - Date.now()) / 60000))
+      systemNotify('ひより · 專注中', ui.focus.counting ? `${what}還在專注中，回來接著做吧` : `${what}還在專注中，還剩 ${left} 分鐘。回來吧`, 'away')
+    }
+    // 背景的分頁計時器會對齊在整秒上，兩個分頁可能同一刻都看到「還沒叫過」：拿到鎖的那一邊在鎖裡再看一次才叫
+    // （拿不到的這一秒先不看，下一秒會看到記錄）。沒有 Web Locks 的瀏覽器照舊直接看
+    if (!navigator.locks?.request) return claim() && send()
+    if (tabBusy) return
+    tabBusy = true
+    navigator.locks
+      .request(TAB_NUDGE_KEY, { ifAvailable: true }, (lock) => {
+        if (lock && claim()) send()
+      })
+      .catch(() => {})
+      .finally(() => (tabBusy = false))
   }
   // 回到頁面：還留在通知中心的「回來吧」「說好的 5 分鐘到了」收掉
   document.addEventListener('visibilitychange', () => {

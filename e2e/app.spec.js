@@ -2154,10 +2154,34 @@ test('專注頁的鍵盤：有按鈕的提示卡用 Tab 轉得到（在第一顆
   await page.keyboard.press('Enter')
   await expect.poll(() => page.evaluate(() => window.__ran)).toBe('好')
   expect(await page.evaluate(() => document.activeElement.id || document.activeElement.textContent)).toBe(last)
+  // 焦點在上面時換成新的一張、之後才移出去：照完整的時間倒數（不會被當成已經過了很久、一下子就收掉）
+  await show('好')
+  await page.keyboard.press('Tab')
+  await expect(card.getByRole('button', { name: '好' })).toBeFocused()
+  await page.waitForTimeout(800)
+  await show('知道了')
+  await expect(card.getByRole('button', { name: '知道了' })).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(card.getByRole('button', { name: '知道了' })).not.toBeFocused()
+  await expect.poll(() => card.evaluate((el) => el.style.getPropertyValue('--from'))).toBe('1.000')
+  await page.waitForTimeout(1600)
+  await expect(card).toBeVisible()
   // 縮小專注頁：Dock 上的時間寫著收起來了
   await min.click()
   await expect(full).toBeHidden()
   await expect(time).toHaveAttribute('aria-expanded', 'false')
+  // 對話框（這一版的新功能）比提示卡高一層：開著時提示卡在遮罩後面，Tab 只在對話框裡轉
+  await page.evaluate(() => window.hiyori.ui.openNews())
+  const news = page.locator('#newsModal')
+  await expect(news).toBeVisible()
+  await page.evaluate(() => {
+    const sel = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ;[...document.querySelectorAll(`#newsModal :is(${sel})`)].filter((el) => el.getClientRects().length)[0].focus()
+  })
+  await page.keyboard.press('Shift+Tab')
+  expect(await page.evaluate(() => document.getElementById('newsModal').contains(document.activeElement))).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(news).toBeHidden()
 })
 
 test('專注時的背景聲：計時設定、專注頁右上的耳機都可以選；只在專注中放，暫停、休息、結束時停；音效關著不放；Esc 先收選單', async ({ page, context, site }) => {
@@ -2377,6 +2401,8 @@ test.describe('手機的觸控', () => {
     await bootReady(page)
     await page.evaluate(() => {
       const s = window.hiyori.store
+      // 勾掉現在該做的那一件時「下一件：…」的提示卡（有按鈕、接得到手指）不出來：機器忙的時候它可能剛好蓋在要滑的那一列上
+      s.setSetting('nextNudge', false)
       for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
       for (const title of ['寫信給老師', '洗衣服', '讀一章小說']) s.addTask({ title, date: s.today })
       const y = new Date(Date.now() - 86400000)
@@ -2388,6 +2414,8 @@ test.describe('手機的觸控', () => {
     await expect(page.locator('#toasts')).toContainText('任務可以左右滑')
     const cdp = await context.newCDPSession(page)
     const swipe = async (title, dx) => {
+      // 有按鈕的提示卡接得到手指（也可以左右滑掉）：先收掉，手指才會落在那一列上
+      await page.evaluate(() => document.querySelectorAll('#toasts .toast').forEach((t) => t.remove()))
       const row = page.locator('.item', { hasText: title }).first()
       await row.scrollIntoViewIfNeeded()
       const b = await row.boundingBox()
@@ -2443,6 +2471,7 @@ test.describe('手機的觸控', () => {
     await expect.poll(async () => (await task('寫信給老師')).done).toBe(false)
 
     // 滑到一半整串被重畫（同步、別的分頁、計時器）：這一次作罷，之後照樣滑得動
+    await page.evaluate(() => document.querySelectorAll('#toasts .toast').forEach((t) => t.remove()))
     const row = page.locator('#taskList .item', { hasText: '讀一章小說' })
     const b = await row.boundingBox()
     const x = b.x + b.width / 2

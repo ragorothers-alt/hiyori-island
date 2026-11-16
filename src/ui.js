@@ -99,6 +99,11 @@ const writeLocal = (k, v) => {
 // 鍵盤可以停的地方（看得到的）
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 const focusables = (root) => [...root.querySelectorAll(FOCUSABLE)].filter((el) => el.getClientRects().length)
+// 疊在畫面的第幾層：body 底下的那一個（對話框、提示卡、專注頁…都是）的 z-index
+const layerZ = (el) => {
+  while (el.parentElement && el.parentElement !== document.body) el = el.parentElement
+  return parseInt(getComputedStyle(el).zIndex, 10) || 0
+}
 // 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
 const LAYOUT_KEY = 'hiyori-layout'
 // 這台裝置上次選的是 App 模式（開機時決定要不要先載入小島）
@@ -622,7 +627,7 @@ export class UI {
     const top = this._topLayer()
     if (!top) return
     const own = focusables(top)
-    const list = [...own, ...this._toastButtons()]
+    const list = [...own, ...this._toastButtons(top)]
     if (!list.length) return e.preventDefault()
     const a = document.activeElement
     const i = own.indexOf(a)
@@ -633,8 +638,10 @@ export class UI {
     const step = e.shiftKey ? -1 : 1
     ;(k < 0 ? (e.shiftKey ? list.at(-1) : list[0]) : list[(k + step + list.length) % list.length]).focus()
   }
-  // 提示卡上按得到的按鈕（正在收起來的不算）
-  _toastButtons() {
+  // 提示卡上按得到的按鈕（正在收起來的不算）。最上面那一層疊得比提示卡高（對話框、今日摘要）時，
+  // 提示卡在它的遮罩後面，一顆都不算
+  _toastButtons(top) {
+    if (top && layerZ(top) > layerZ($('#toasts'))) return []
     return focusables($('#toasts')).filter((b) => !b.closest('.toast.out'))
   }
   // 提示卡收掉時焦點要去的地方：進來之前的地方（還在、看得到、在最上面那一層裡），不然是最上面那一層的第一顆
@@ -3372,7 +3379,8 @@ export class UI {
       const held = el.classList.contains('held')
       if (why.size && !held) {
         clearTimeout(el._life)
-        const gone = performance.now() - at
+        // 還沒開始倒數就先停住（換掉同一類的上一張時，焦點一開始就在這一張上）：一點都還沒過
+        const gone = at ? performance.now() - at : 0
         frac *= Math.max(0, 1 - gone / left)
         left = Math.max(1200, left - gone)
         el.classList.add('held')
