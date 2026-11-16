@@ -295,7 +295,11 @@ async function boot() {
       haptic('tick')
       talk('stepDone', { step: short(step, 14), next: short(next, 14) }, 4200, `接著是「${short(next, 14)}」。`)
     },
-    stepSet: (step) => talk('stepSet', { step: short(step, 16) }, 4200, `先從「${short(step, 16)}」開始就好。`),
+    // brk：休息時留給等等的自己的那一步
+    stepSet: (step, brk) =>
+      brk
+        ? talk('stepLeft', { step: short(step, 16) }, 4600, `記下了，休息完從「${short(step, 16)}」開始。`)
+        : talk('stepSet', { step: short(step, 16) }, 4200, `先從「${short(step, 16)}」開始就好。`),
     // 想分心了：打開「先等一分鐘」時陪一句；一分鐘到了輕輕響一聲；還是想去也不責備（專注照常計時）
     urgeOpen: () => talk('focusUrge', {}, 5200, '想分心很正常，我們一起等一分鐘。'),
     urgeAsk: () => sfx.chime(),
@@ -385,6 +389,9 @@ async function boot() {
       // 這一輪中途切去用別的 App 幾次（Android 的 App 才分得出來；到點時還在別的 App 裡的也算一次）
       const away = (info.away || 0) + (awayAtEnd(info.sid, info.at) ? 1 : 0)
       const awayNote = away ? `・中途離開 ${away} 次` : ''
+      // 專注的那件還沒寫下一步：休息前留一步給等等的自己（打開專注頁直接寫；專注頁開著的話頁面上就有那一行）。
+      // 按的時候別的分頁已經寫好了：打開專注頁看那一步
+      const leave = () => (!ui.focus.bigOpen && ui.focus.canLeaveStep ? [{ label: '留一步給等等', soft: true, run: () => ui.focus.leaveStep() || ui.focus.toggleBig(true) }] : [])
       const more = () => [
         ...(ui.focus.bigOpen
           ? []
@@ -393,6 +400,7 @@ async function boot() {
               ...(ui.focus.canAddRound ? [{ label: '再加一輪', soft: true, run: () => ui.focus.addRound() }] : []),
             ]),
         ...(parked ? [{ label: `看記下的 ${parked} 件`, soft: true, run: () => ui.openParked() }] : []),
+        ...leave(),
       ]
       // 加時做完：多做的分鐘記進去（不多算一顆番茄）；不到 1 分鐘就不另外記
       if (info.ext) {
@@ -429,6 +437,7 @@ async function boot() {
           actions: [
             ...(ui.focus.bigOpen ? [] : [...(ui.focus.canExtend ? [{ label: '繼續做下去', run: () => ui.focus.extend() }] : []), { label: '休息一下', soft: true, run: () => {} }]),
             ...(parked ? [{ label: `看記下的 ${parked} 件`, soft: true, run: () => ui.openParked() }] : []),
+            ...leave(),
           ],
         })
         return

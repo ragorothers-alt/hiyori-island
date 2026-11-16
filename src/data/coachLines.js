@@ -104,6 +104,12 @@ export const COACH_FUJI = {
     '第一步「{step}」，小小的就好。',
     '記下了，先做「{step}」。',
   ],
+  // 休息時留了一步給等等的自己：{step}
+  stepLeft: [
+    '記下了，休息完從「{step}」開始。',
+    '好，等等回來先做「{step}」，現在好好休息。',
+    '「{step}」幫你留著，回來就不用再想要從哪裡開始。',
+  ],
   // 開始專注一件拆成了小步驟的任務：{task}、{step} 下一步
   focusStep: [
     '先從「{step}」開始，其他的等一下再說。',
@@ -510,6 +516,10 @@ export const COACH_MOCHI = {
   stepSet: [
     '先做「{step}」，我在旁邊陪你～',
     'よし，從「{step}」開始！',
+  ],
+  stepLeft: [
+    '記好了～休息完一起從「{step}」開始！',
+    '等等先做「{step}」，現在先去喝口水吧～',
   ],
   focusStep: [
     '先做「{step}」就好，我陪你～',
