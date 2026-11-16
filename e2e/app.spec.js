@@ -835,6 +835,9 @@ test('到點自動延長：原定的照常記下、不休息，接著往上數�
     }, ms)
   await page.evaluate(() => {
     const s = window.hiyori.store
+    // 範例島上的日程和例行公事先拿掉：之後一小時內有日程的話延長會被縮短（晚上八點左右跑，會碰到範例裡 21:00 的日程）
+    for (const r of [...s.state.routines]) s.deleteRoutine(r.id)
+    for (const e of [...s.state.events]) s.deleteEvent(e.id)
     s.setSetting('focusRounds', 1)
     s.setSetting('focusUp', false)
     s.setSetting('focusMin', 25)
