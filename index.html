@@ -407,6 +407,8 @@
     <div class="fs-row"><label for="fsTarget">目標</label><select class="fs-target" id="fsTarget"></select></div>
     <div class="fs-row" id="fsRoundsRow"><span>輪數</span><div class="seg" id="fsRounds" role="group" aria-label="輪數"><button type="button" data-v="1">一次做完</button><button type="button" data-v="2">2 輪</button><button type="button" data-v="3">3 輪</button><button type="button" data-v="4">4 輪</button></div></div>
     <div class="fs-row" id="fsBreakRow"><span>休息</span><div class="seg" id="fsBreak" role="group" aria-label="休息"><button type="button" data-v="5">5 分</button><button type="button" data-v="10">10 分</button><button type="button" data-v="15">15 分</button></div></div>
+    <!-- 每天的專注目標（theme.js 的 FOCUS_GOALS）：專注頁上方寫著已專注多少／目標，跨過去的那一輪慶祝一下 -->
+    <div class="fs-row" id="fsGoalRow"><span>每天目標</span><div class="seg fs-goal" id="fsGoal" role="group" aria-label="每天的專注目標"><button type="button" data-v="0">不設</button><button type="button" data-v="60">1 小時</button><button type="button" data-v="90">1.5 小時</button><button type="button" data-v="120">2 小時</button><button type="button" data-v="180">3 小時</button></div></div>
     <!-- 專注時的背景聲（雨聲、褐噪音、粉紅噪音，src/audio.js 的 noise）：休息、暫停時不放；計時中也可以換、調音量 -->
     <div class="fs-row" id="fsNoiseRow"><span>背景聲</span><div class="seg noise-seg" role="group" aria-label="專注時的背景聲"><button type="button" data-noise="off">關</button><button type="button" data-noise="rain">雨聲</button><button type="button" data-noise="brown">褐噪音</button><button type="button" data-noise="pink">粉紅噪音</button></div></div>
     <label class="fs-row noise-vol" hidden><span>音量</span><input type="range" min="5" max="100" step="5" data-noise-vol aria-label="背景聲的音量"></label>

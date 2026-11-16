@@ -1349,6 +1349,66 @@ test('今天的回神：今日反思最上面寫今天專注了多久、想分�
   await expect(back.locator('p')).toHaveText('今天把自己拉回來 4 次，很不容易。')
 })
 
+test('每天的專注目標：計時設定裡選每天專注多久；專注頁上方寫著今天已專注多少／目標和一條進度，跨過目標的那一輪慶祝一下（之後的不再）；今日反思寫著達成了', async ({ page, context, site }) => {
+  await useAppMode(context)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setSetting('focusRounds', 1)
+    s.setSetting('focusUp', false)
+    s.setSetting('focusMin', 25)
+    s.setSetting('breakMin', 5)
+    // 今天已經專注了 40 分
+    s.completePomodoro(40)
+    window.hiyori.ui.focus.setTarget('')
+    window.hiyori.ui.focus.toggleSet(true)
+  })
+  // 預設不設；選「1 小時」存進設定
+  const goal = page.locator('#fsGoal')
+  await expect(goal.getByRole('button', { name: '不設' })).toHaveAttribute('aria-pressed', 'true')
+  await goal.getByRole('button', { name: '1 小時', exact: true }).click()
+  await expect(goal.getByRole('button', { name: '1 小時', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.focusGoal)).toBe(60)
+  // 開始專注：專注頁上方寫著還差多少，進度條走到三分之二
+  await page.locator('#fsStart').click()
+  await expect(page.locator('#focusFull')).toBeVisible()
+  // 計時中不能改目標（那一列收起來）
+  await page.evaluate(() => window.hiyori.ui.focus.toggleSet(true))
+  await expect(page.locator('#fsGoalRow')).toBeHidden()
+  await page.evaluate(() => window.hiyori.ui.focus.toggleSet(false))
+  const today = page.locator('#ffToday')
+  await expect(today).toHaveText('今天 40 分／目標 1 小時')
+  await expect(today.locator('.ff-goal b')).toHaveAttribute('style', /width:\s*67%/)
+  await expect(today).not.toHaveClass(/goal-done/)
+  // 這一輪到點：跨過 1 小時，提示卡寫著、ふじ／もち說一聲；專注頁上換成達成了
+  await page.clock.setFixedTime(T('10:25:01'))
+  await toastSeen(page, '今天的專注目標達成了')
+  await toastSeen(page, '已專注 1 小時 5 分・目標 1 小時')
+  await expect.poll(() => chatSaid(page, '1 小時')).toBe(true)
+  await expect(today).toHaveText('目標達成・今天 1 小時 5 分')
+  await expect(today).toHaveClass(/goal-done/)
+  // 已經達成之後的那一輪：不再慶祝一次
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.stop()
+    f.toggle()
+  })
+  await page.clock.setFixedTime(T('10:50:02'))
+  await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('break')
+  await page.waitForTimeout(3500)
+  expect(await page.evaluate(() => (window.__toasts || []).filter((x) => x.includes('今天的專注目標達成了')).length)).toBe(1)
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  // 今日反思：寫著達成了每天的目標
+  await page.evaluate(() => window.hiyori.ui.setTab('today'))
+  const back = page.locator('#todayRoot .td-back')
+  await expect(back.locator('li')).toHaveText(['專注 1 小時 30 分達成每天的目標 1 小時'])
+  await expect(back.locator('p')).toHaveText('今天的專注目標 1 小時 達成了，辛苦了。')
+})
+
 test('接下來：專注頁寫著今天下一個日程（2 小時內）；這一輪結束前就要開始的寫「記得提早收尾」、ふじ提醒一聲；進行中的寫到幾點', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   await useAppMode(context)

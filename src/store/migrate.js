@@ -1,5 +1,5 @@
 import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
-import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS } from '../theme.js'
+import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS, FOCUS_GOALS } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
 import { MOTTO_LEN, MOTTO_MAX, MOTTO_EVERY, PAUSE_MAX } from '../mottos.js'
@@ -675,6 +675,8 @@ function migrate(s) {
   settings.focusMin = Math.round(num(settings.focusMin || FOCUS_MIN, 10, 90, FOCUS_MIN) / 5) * 5
   settings.breakMin = num(settings.breakMin, 1, 30, BREAK_MIN)
   settings.focusRounds = num(settings.focusRounds, 1, 4, 1)
+  // 每天的專注目標：只收選項裡的（匯入的 75 分不會在計時設定裡對不到任何一顆）
+  if (!FOCUS_GOALS.includes(settings.focusGoal)) settings.focusGoal = 0
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
   if (!MOTTO_EVERY.includes(settings.mottoEvery)) settings.mottoEvery = DEFAULT_SETTINGS.mottoEvery

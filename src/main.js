@@ -13,7 +13,7 @@ import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
 import { FileSync } from './sync.js'
 import { CloudSync, codeFromHash } from './cloud.js'
 import { DUETS } from './data/lines.js'
-import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf, pullOf } from './theme.js'
+import { UNLOCKS, XP, MAX_STARS, SOFT_CAP, DATE_KINDS, DUE_KINDS, tagOf, pullOf, goalText, minText } from './theme.js'
 import { burst, floatText, petalRain, tapPoint, trackTaps, calmMotion } from './ui/motion.js'
 import { haptic } from './ui/haptics.js'
 import { RARITIES } from './data/flowers.js'
@@ -311,6 +311,21 @@ async function boot() {
     swAct({ id: String(e.data.id || ''), act: String(e.data.act || ''), slot: Number(e.data.slot) > 0 ? Number(e.data.slot) : 0 })
   })
 
+  // 每天的專注目標：這一輪記進去之後剛好跨過去，慶祝一下。was：記之前那天專注了幾分、day：那是哪一天
+  // （記的時候換日了：今天是從 0 開始的）。等到點的那一句和提示卡先出來再說
+  const goalDone = (was, day) => {
+    const goal = store.state.settings.focusGoal || 0
+    const before = day === store.today ? was : 0
+    const now = store.peekDay(store.today).focus || 0
+    if (!goal || before >= goal || now < goal) return
+    setTimeout(() => {
+      sfx.fanfare()
+      haptic('party')
+      talk('focusGoalDone', { goal: goalText(goal) }, 6000, `今天的專注目標 ${goalText(goal)} 達成了！`)
+      ui.toast({ icon: '標', title: '今天的專注目標達成了', sub: `已專注 ${minText(now)}・目標 ${goalText(goal)}`, ms: 6000 })
+    }, 2600)
+  }
+
   // ── UI 掛鉤 ──
   const hooks = {
     // 計時的狀態變了：b 是下一次到點的時間和狀況（沒在計時、暫停中是 null），到點的推播跟著重排
@@ -448,6 +463,9 @@ async function boot() {
       // 專注頁開著的時候頁面上就有這兩顆，提示卡只說一聲，不再放一次（不然會蓋住計時）。
       // 專注時先記下了別的事：「看記下的 N 件」到今日總覽決定什麼時候做
       const parked = store.state.parked.length
+      // 記進去之前今天專注了幾分（這一輪跨過每天的目標時慶祝）
+      const day0 = store.today
+      const was = store.peekDay(day0).focus || 0
       // 這一輪中途切去用別的 App 幾次（Android 的 App 才分得出來；到點時還在別的 App 裡的也算一次）
       const away = (info.away || 0) + (awayAtEnd(info.sid, info.at) ? 1 : 0)
       const awayNote = away ? `・中途離開 ${away} 次` : ''
@@ -476,6 +494,7 @@ async function boot() {
         }
         sfx.temple()
         haptic('end')
+        goalDone(was, day0)
         if (info.at) timerNotify({ at: info.at, mode: 'focus', up: true, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target })
         scene?.focusFinished(taskId, info.projectId)
         talk('focusEnd')
@@ -487,6 +506,7 @@ async function boot() {
       if (store.completePomodoro(minutes, taskId, info.projectId, info.sid) === false) return scene?.focusStopped()
       sfx.temple()
       haptic('end')
+      goalDone(was, day0)
       // 推播沒排上、沒送到時頁面自己補發：跟伺服器那邊同一套字（只做 5 分鐘的寫「5 分鐘到了」）
       timerNotify({ at: info.at, mode: 'focus', up: info.free, focusMin: minutes, breakMin: info.breakMin, round: info.round, rounds: info.rounds, target: info.target, small: !!info.small })
       // 兩人出屋、天燈從小木屋屋頂升起；目標是專案的話，那棟房子泛起一圈光

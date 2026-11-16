@@ -88,6 +88,8 @@ export const DEFAULT_SETTINGS = {
   mottoEvents: true, focusNoise: 'off', noiseVol: 50,
   // 照週報洞察的建議調整過的那天（YYYY-MM-DD，沒有是空字串）：pull＝縮短一輪、motto＝拉長警語的間隔
   pullActed: '', mottoActed: '',
+  // 每天的專注目標（分鐘，theme.js 的 FOCUS_GOALS；0 是不設）
+  focusGoal: 0,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 export const NOISES = ['off', 'rain', 'brown', 'pink']

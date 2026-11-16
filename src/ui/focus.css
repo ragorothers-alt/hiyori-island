@@ -43,6 +43,13 @@ body.night .focus-full.paused { --ff-ink: var(--ink-faint); }
 .ff-today { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 104px; right: 104px; height: 38px; z-index: 1; line-height: 38px; text-align: center; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; letter-spacing: .06em; color: var(--ink-faint); pointer-events: none; white-space: nowrap; }
 .ff-today[hidden] { display: none; }
 .ff-today b { font-family: var(--font-num); font-weight: 700; color: var(--ink-soft); }
+/* 每天的專注目標：那一行字下面一條小小的進度條；達成了字換成這一段的顏色 */
+.ff-goal { position: absolute; left: 50%; bottom: 4px; width: 72px; height: 3px; margin-left: -36px; border-radius: 3px; background: color-mix(in srgb, var(--ink) 10%, transparent); overflow: hidden; }
+.ff-goal b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--ff-a), var(--ff-b)); transition: width .6s ease; }
+.ff-today.goal-done { color: var(--ff-ink); }
+/* 寫著目標的時候字比較多：字距收一點，手機上才放得下「今天 1 小時 29 分／目標 1.5 小時」 */
+.ff-today.has-goal { letter-spacing: .01em; }
+@media (max-width: 380px) { .ff-goal-w { display: none; } .ff-today.has-goal { font-size: 11.5px; } }
 
 /* 圓環的中心大約在畫面 46% 的高度：下面一排排的東西（接下來、目標、按鈕、先記下來、想分心了？）放完，筆電的畫面（860 高）底下還留得出地板給貓咪 */
 .ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(46dvh - 104px - var(--ff-ring) / 2)); }

@@ -1,7 +1,7 @@
 import './today.css'
 import { $, $$, esc, ICON } from './dom.js'
 import { calmMotion, countUp } from './motion.js'
-import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS, pullOf } from '../theme.js'
+import { tagOf, EVENT_COLORS, XP, WEEK_ZH, MOODS, pullOf, goalText } from '../theme.js'
 import { TODAY_QUOTES, TODAY_LEADS } from '../data/todayLines.js'
 import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
 import { applies, countOn, doneOn, streak } from '../habits.js'
@@ -758,14 +758,22 @@ export class TodayView {
     if (!focus && !holds && !back) return ''
     const top = Object.entries(d.pulls || {}).sort((a, b) => b[1] - a[1])[0]
     const most = top && pullOf(top[0])
+    // 設了每天的專注目標：寫著目標、達成了沒
+    const goal = this.store.state.settings.focusGoal || 0
+    const reached = !!goal && focus >= goal
+    const goalNote = goal ? `<small>${reached ? `達成每天的目標 ${goalText(goal)}` : `目標 ${goalText(goal)}`}</small>` : ''
     const items = [
-      focus ? `<li>專注 <b>${hm(focus)}</b></li>` : '',
+      focus ? `<li>專注 <b>${hm(focus)}</b>${goalNote}</li>` : '',
       holds ? `<li>想分心時忍住 <b>${holds}</b> 次${most ? `<small>最常想去${esc(most.label)}</small>` : ''}</li>` : '',
       back ? `<li>警語提醒時回神 <b>${back}</b>／${nudges} 次</li>` : '',
     ].join('')
     // 拉回來的次數：忍住的、提醒之後回到正事的（本來就在做的不算「拉回來」）
     const pulled = holds + Math.min(nudges, d.backs || 0)
-    const praise = pulled ? `今天把自己拉回來 ${pulled} 次，很不容易。` : `今天專注了 ${hm(focus)}，辛苦了。`
+    const praise = pulled
+      ? `今天把自己拉回來 ${pulled} 次，很不容易。`
+      : reached
+        ? `今天的專注目標 ${goalText(goal)} 達成了，辛苦了。`
+        : `今天專注了 ${hm(focus)}，辛苦了。`
     return `<div class="td-back" aria-label="今天的回神"><ul>${items}</ul><p>${praise}</p></div>`
   }
 

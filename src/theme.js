@@ -79,6 +79,15 @@ export const DATE_KINDS = {
 export const DUE_KINDS = { ...DATE_KINDS, milestone: { label: '里程碑', kanji: '標' } }
 export const FOCUS_MIN = 25
 export const BREAK_MIN = 5
+// 每天的專注目標（分鐘；0 是不設）：計時設定裡選，專注頁上方寫著還差多少，跨過去的那一輪慶祝一下
+export const FOCUS_GOALS = [0, 60, 90, 120, 180]
+// 「1 小時」「1.5 小時」「45 分」
+export const goalText = (m) => (m >= 60 ? `${Math.round((m / 60) * 10) / 10} 小時` : `${m} 分`)
+// 專注了多久：「1 小時 15 分」「2 小時」「45 分」
+export const minText = (m) => {
+  const h = Math.floor(m / 60)
+  return h ? `${h} 小時${m % 60 ? ` ${m % 60} 分` : ''}` : `${m} 分`
+}
 // 同時進行的專案上限；專案町最多 TOWER_SLOTS 塊地（data/projectTown.js，隨城鎮等級陸續開放），其他專案先在清單裡等空地
 export const MAX_PROJECTS = 30
 export const TOWER_SLOTS = PLAN.lots.length

@@ -2246,6 +2246,20 @@ describe('週報', () => {
     expect(acted(20261020, { d: 1 })).toEqual(['', ''])
   })
 
+  it('每天的專注目標：預設不設；選項裡的分鐘數匯出匯入後還在，不在選項裡的（亂填的、不是數字）回到不設', () => {
+    expect(store.state.settings.focusGoal).toBe(0)
+    store.setSetting('focusGoal', 90)
+    store.importJSON(store.exportJSON())
+    expect(store.state.settings.focusGoal).toBe(90)
+    // 寫成字串的數字跟其他數字設定一樣照數字讀
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusGoal: '120' } }))
+    expect(store.state.settings.focusGoal).toBe(120)
+    for (const bad of [45, -60, 'x', 1e9, null]) {
+      store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusGoal: bad } }))
+      expect(store.state.settings.focusGoal).toBe(0)
+    }
+  })
+
   it('本命的完成數和總數從同一批任務算：完成後刪掉，不會變成「1 / 0」', () => {
     setDate('2026-10-21')
     const s1 = store.addTask({ title: '本命一', date: '2026-10-21' })

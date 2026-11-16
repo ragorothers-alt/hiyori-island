@@ -4,7 +4,7 @@ import { calmMotion } from './motion.js'
 import { FocusCat } from './focusCat.js'
 import * as clock from '../focusClock.js'
 import { FREE_MIN, FREE_MAX, SMALL_MIN } from '../focusClock.js'
-import { FOCUS_MIN, BREAK_MIN, PROJECT_COLORS, PULLS, pullOf, tagOf } from '../theme.js'
+import { FOCUS_MIN, BREAK_MIN, FOCUS_GOALS, goalText, PROJECT_COLORS, PULLS, pullOf, tagOf } from '../theme.js'
 import { floating, NOISES } from '../store.js'
 import { nextStep, order as doFirst } from '../brief.js'
 import { nextEvent } from '../planner.js'
@@ -397,6 +397,10 @@ export class FocusTimer {
     $('#fsBreak').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (b) this._setOption('breakMin', +b.dataset.v)
+    })
+    $('#fsGoal').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]')
+      if (b && FOCUS_GOALS.includes(+b.dataset.v)) this._setOption('focusGoal', +b.dataset.v)
     })
     // 倒數計時／正向計時
     $('#fsMode').addEventListener('click', (e) => {
@@ -853,6 +857,7 @@ export class FocusTimer {
     $('#fsRwrap').hidden = up || live
     $('#fsRoundsRow').hidden = up || live
     $('#fsBreakRow').hidden = live
+    $('#fsGoalRow').hidden = live
     $('#fsStart').hidden = live
     $('#fsSmall').hidden = live
     // 專注中：腦中冒出別的事，在這裡先記下來
@@ -864,6 +869,7 @@ export class FocusTimer {
     this._noiseSync()
     pickOne($$('#fsRounds button'), (b) => +b.dataset.v === st.focusRounds)
     pickOne($$('#fsBreak button'), (b) => +b.dataset.v === st.breakMin)
+    pickOne($$('#fsGoal button'), (b) => +b.dataset.v === (st.focusGoal || 0))
     const target = this.project ? `，時間記進「${this.project.name}」` : ''
     const small = this.small ? `只做 ${this.focusMin} 分鐘，到點時再決定要不要繼續。` : ''
     $('#fsSum').textContent = live
@@ -1211,11 +1217,21 @@ export class FocusTimer {
     put(dots, this.rounds > 1 ? Array.from({ length: this.rounds }, (_, i) => `<i class="${dot(i + 1)}"></i>`).join('') : '')
     dots.hidden = this.rounds <= 1
     put($('#ffSub'), this._subLine())
-    // 今天已經專注了多久（一輪做完才會變）
+    // 今天已經專注了多久（一輪做完才會變）；設了每天的目標的話寫著目標和一條小進度條，達成了換一句。
+    // 上面左右各有兩顆按鈕，手機上只剩一小段：寫短一點（很窄的畫面連「目標」兩個字也收起來）
     const mins = this.ui.store.peekDay(this.ui.store.today).focus || 0
+    const goal = this.ui.store.state.settings.focusGoal || 0
     const h = Math.floor(mins / 60)
-    put($('#ffToday'), mins ? `今天已專注 ${[h ? `<b>${h}</b> 小時` : '', mins % 60 ? `<b>${mins % 60}</b> 分` : ''].filter(Boolean).join(' ')}` : '')
-    $('#ffToday').hidden = !mins
+    const done = [h ? `<b>${h}</b> 小時` : '', mins % 60 ? `<b>${mins % 60}</b> 分` : ''].filter(Boolean).join(' ') || '<b>0</b> 分'
+    const bar = `<i class="ff-goal" aria-hidden="true"><b style="width:${Math.min(100, Math.round((mins / (goal || 1)) * 100))}%"></b></i>`
+    const today = $('#ffToday')
+    put(
+      today,
+      !goal ? (mins ? `今天已專注 ${done}` : '') : mins >= goal ? `目標達成・今天 ${done}${bar}` : `今天 ${done}／<span class="ff-goal-w">目標 </span>${goalText(goal)}${bar}`,
+    )
+    today.hidden = !mins && !goal
+    today.classList.toggle('has-goal', !!goal)
+    today.classList.toggle('goal-done', !!goal && mins >= goal)
     // 專注中可以直接在這裡換目標；休息時寫一句話
     $('#ffTask').hidden = !brk
     $('#ffTask').textContent = this.round >= this.rounds && this.rounds > 1 ? '這一組做完了，起來動一動、喝口水' : '起來動一動、喝口水'
