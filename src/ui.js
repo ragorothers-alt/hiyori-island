@@ -308,6 +308,10 @@ export class UI {
         this.hooks.aiPassSet?.()
       },
     })
+    // 另一個分頁（或同一個網站的另一個視窗）設了、換了通行碼或模型：這邊的設定列和ふじ的卡片跟著變
+    addEventListener('storage', (e) => {
+      if (e.key === null || e.key === 'hiyori-ai-pass' || e.key === 'hiyori-ai-model') this.aiShared()
+    })
     this.applyFontScale()
     this.applyGlass()
     this.renderNewsDot()
@@ -328,7 +332,7 @@ export class UI {
   // 別台設的通行碼同步過來了（main.js）
   aiShared() {
     this.aiView.result = ''
-    this.aiView.render()
+    this.aiView.refresh()
     this._aiChanged()
   }
 
@@ -2443,6 +2447,8 @@ export class UI {
 
   // ── 紀錄 ──
   renderSettings() {
+    // ふじ的 AI 那一列照現在存著的通行碼畫（別的地方設好的，打開設定就看得到）
+    this.aiView?.refresh()
     const on = this.store.state.settings.powerSave
     setOn($('#powerBtn'), on)
     $('#powerBtn').textContent = on ? '開' : '關'

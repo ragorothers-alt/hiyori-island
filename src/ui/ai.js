@@ -58,8 +58,17 @@ export class AiView {
 
   _edit(on) {
     this.editing = on
+    // 開始填的時候這台的通行碼是什麼（見 refresh）
+    this._editFrom = aiPass()
     this.render()
     if (on) this.$('.ai-pass')?.focus()
+  }
+
+  // 通行碼、模型在別的地方變了（別台同步過來、另一個分頁改的）：照現在存著的重畫。
+  // 正打開著要填通行碼、還沒打字，通行碼卻已經到了：不用填了，收起輸入框（才看得到「已設定」和選模型）
+  refresh() {
+    if (this.editing && aiPass() !== this._editFrom && !this.$('.ai-pass')?.value.trim()) this.editing = false
+    this.render()
   }
 
   // 測試連線：Worker 查一次模型資料（不產生文字、不花 token）

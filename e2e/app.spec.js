@@ -4259,3 +4259,49 @@ test('自主的ふじ：早上打開自己把今天排好（可以整批撤銷�
   await page.locator('#coachRoot [data-act="view"][data-v="plan"]').click()
   await expect(page.locator('#coachRoot form[data-r="ask"]')).toBeVisible()
 })
+
+test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的）：設定裡那一列跟著變成已設定、可以選模型；正打開著要填、還沒打字的輸入框自己收起來', async ({ page, context, site }) => {
+  await useAppMode(context)
+  // 不讓ふじ真的去叫 Claude（這個測試只看設定列）
+  await context.route(/\/v1\/ai$/, (route) => route.fulfill({ status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, contentType: 'application/json', body: JSON.stringify({ ok: true, model: 'mock', out: {} }) }))
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    window.hiyori.store.setSetting('agentMode', 'off')
+    window.hiyori.ui.setTab('records')
+  })
+  const row = page.locator('#aiRow')
+  await row.scrollIntoViewIfNeeded()
+  await expect(row.locator('[data-ai="edit"]')).toHaveText('設定通行碼')
+  // 按了「設定通行碼」、輸入框開著還沒打字時，別台設好的通行碼同步過來了
+  await row.locator('[data-ai="edit"]').click()
+  await expect(row.locator('.ai-pass')).toBeVisible()
+  await page.evaluate(() => window.hiyori.cloudSync.extras.set({ aiPass: 'e2e-synced-pass', aiPassAt: Date.now() }))
+  await toastSeen(page, 'ふじ的 AI 通行碼同步過來了')
+  await expect(row.locator('.ai-pass')).toHaveCount(0)
+  await expect(row.locator('.ai-info')).toContainText('已設定')
+  await expect(row.locator('.ai-btns button')).toHaveText(['測試連線', '改通行碼', '停用'])
+  // 可以換模型
+  await row.locator('[data-ai="model"][data-v="claude-sonnet-5-5"]').click()
+  await expect(row.locator('.ai-info')).toContainText('用 Sonnet')
+  // 自己正在打新的通行碼時，別處又變了：打到一半的字留著
+  await row.locator('[data-ai="edit"]').click()
+  await row.locator('.ai-pass').fill('打到一半')
+  await page.evaluate(() => window.hiyori.cloudSync.extras.set({ aiPass: 'e2e-newer-pass', aiPassAt: Date.now() + 1000 }))
+  await expect(row.locator('.ai-pass')).toHaveValue('打到一半')
+  await row.locator('[data-ai="cancel"]').click()
+  // 另一個分頁停用了（localStorage 變了）：這邊回到還沒設定的樣子，ふじ的卡片也收起來
+  await page.evaluate(() => {
+    localStorage.removeItem('hiyori-ai-pass')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'hiyori-ai-pass' }))
+  })
+  await expect(row.locator('[data-ai="edit"]')).toHaveText('設定通行碼')
+  await expect(row.locator('.ai-models')).toHaveCount(0)
+  // 在別處設好之後才打開設定：一打開就是已設定
+  await page.evaluate(() => {
+    window.hiyori.ui.setTab('today')
+    localStorage.setItem('hiyori-ai-pass', 'e2e-other-tab')
+    window.hiyori.ui.setTab('records')
+  })
+  await expect(row.locator('.ai-btns button')).toHaveText(['測試連線', '改通行碼', '停用'])
+})
