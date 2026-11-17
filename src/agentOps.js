@@ -23,7 +23,7 @@ export const SETTING_KEYS = [
   'mottoEvents', 'sound', 'remindLead', 'theme', 'fontScale', 'stuckNudge', 'brief', 'backNudge', 'nextNudge', 'focusCat', 'agentMode',
 ]
 export const RHYTHM_KEYS = ['wake', 'sleep', 'peak', 'buffer', 'work', 'meals']
-// set、create 的 fields 能寫的欄位名稱（Worker 的 schema 用同一份 enum）
+// set、create 的 fields 能寫的欄位名稱（Worker 的格式不限定名稱，寫在提示詞裡；tests/ai.test.js 檢查每一個都有寫到）
 export const FIELDS = [
   'title', 'date', 'at', 'dur', 'priority', 'tag', 'note', 'project', 'star', 'first', 'done', 'start', 'end', 'allDay', 'endDate', 'kind',
   'deadline', 'goal', 'status', 'due', 'target', 'unit', 'days', 'text', 'on', 'price', 'cur', 'every', 'amount',
@@ -66,7 +66,8 @@ const timeOrNone = (v) => (txt(v, 6) === '' ? null : time(v))
 const ON = ['true', 'on', '1', 'yes', '是', '開', '打開', '要', '開啟']
 const OFF = ['false', 'off', '0', 'no', '否', '關', '關掉', '不要', '關閉']
 const bool = (v) => {
-  const s = txt(v, 8).toLowerCase()
+  // 照提示詞寫格式時（Worker 的備援）可能直接寫 true／false
+  const s = typeof v === 'boolean' ? String(v) : txt(v, 8).toLowerCase()
   return ON.includes(s) ? true : OFF.includes(s) ? false : undefined
 }
 // 數字（允許「50 分」「1.5 小時」這種寫法；小時換成分鐘只在 hours 時）
@@ -310,7 +311,8 @@ export function cleanOps(out, ids) {
     c.start = time(x.start) || ''
     c.end = time(x.end) || ''
     for (const f of arr(x.fields, 12)) {
-      const clean = CREATE_FIELDS[kind][f?.field]
+      // 欄位名稱是 Claude 寫的字（Worker 的格式沒有限定），只認自己的欄位（不要被 'constructor' 這類繼承來的騙過）
+      const clean = Object.hasOwn(CREATE_FIELDS[kind], f?.field) ? CREATE_FIELDS[kind][f.field] : null
       const v = clean ? clean(f.value) : undefined
       if (v !== undefined) c.fields[f.field] = v
     }

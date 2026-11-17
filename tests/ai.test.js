@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 import worker from '../worker/src/index.js'
-import { AI_FAILS, AI_FAILS_ALL, ipKey, FIELDS, CREATE_KINDS } from '../worker/src/ai.js'
+import { AI_FAILS, AI_FAILS_ALL, ipKey, CREATE_KINDS } from '../worker/src/ai.js'
+import { FIELDS } from '../src/agentOps.js'
 import { createD1 } from './helpers/d1.js'
 
 // Worker 的 /v1/ai：Claude 的用戶端換成假的（env.AI_CLIENT），只檢查送出去的參數和回應的處理
@@ -171,7 +172,7 @@ describe('送給 Claude 的參數', () => {
     expect(morning.system).toContain('日程管家')
   })
 
-  it('對話時什麼都能改：schema 多了 set、create、go（欄位名稱是固定的 enum），max_tokens 給多一點；自己整理時沒有', async () => {
+  it('對話時什麼都能改：schema 多了 set、create、go（欄位名稱只寫在提示詞，不放 enum），max_tokens 給多一點；自己整理時沒有', async () => {
     const c = fakeClient({ out: { say: '好了' } })
     const data = { run: 'chat', today: '2026-11-16', days: [], overdue: [], projects: [], message: '專注改成 50 分鐘' }
     await call(envOf(c), { task: 'agent', data })
@@ -182,10 +183,22 @@ describe('送給 Claude 的參數', () => {
     const schema = chat.output_config.format.schema
     expect(Object.keys(schema.properties).slice(-3)).toEqual(['set', 'create', 'go'])
     expect(evening.output_config.format.schema.properties).not.toHaveProperty('set')
-    expect(schema.properties.set.items.properties.field.enum).toEqual(FIELDS)
+    // 五十幾個欄位名稱寫成 enum（用兩次）時，Claude 回「compiled grammar is too large」整個拒絕
+    expect(schema.properties.set.items.properties.field).toEqual({ type: 'string' })
+    expect(schema.properties.create.items.properties.fields.items.properties.field).toEqual({ type: 'string' })
     expect(schema.properties.create.items.properties.kind.enum).toEqual(CREATE_KINDS)
-    expect(schema.properties.create.items.properties.fields.items.properties.field.enum).toEqual(FIELDS)
     expect(schema.properties.go.properties.do.enum).toEqual(['', 'focus', 'open'])
+    // 前端認得的每一個欄位名稱，提示詞裡都有寫到
+    for (const f of FIELDS) expect(chat.system).toMatch(new RegExp(`(^|[^A-Za-z])${f}([^A-Za-z]|$)`))
+    // 整份格式裡的 enum 都很短（大的 enum 會讓編出來的格式變得很大）
+    const enums = []
+    const collect = (s) => {
+      if (s.enum) enums.push(s.enum.length)
+      if (s.type === 'object') Object.values(s.properties).forEach(collect)
+      if (s.type === 'array') collect(s.items)
+    }
+    collect(schema)
+    expect(Math.max(...enums)).toBeLessThanOrEqual(CREATE_KINDS.length)
     // structured outputs 的限制：沒有 anyOf、沒有選填的欄位
     const walk = (s) => {
       expect(s).not.toHaveProperty('anyOf')
@@ -269,6 +282,7 @@ describe('Claude 的回應', () => {
     [{ stop_reason: 'refusal' }, 422, 'refused'],
     [{ stop_reason: 'max_tokens' }, 502, 'too long'],
     [{ content: [{ type: 'text', text: '不是 JSON' }] }, 502, 'bad output'],
+    [{ content: [{ type: 'text', text: '[1, 2]' }] }, 502, 'bad output'],
   ])('%o → %i', async (reply, status, error) => {
     const r = await call(envOf(fakeClient(reply)), { task: 'insight', data: {} })
     expect(r.status).toBe(status)
@@ -294,5 +308,34 @@ describe('Claude 的回應', () => {
     c.create.mockRejectedValueOnce(err(400, 'invalid_request_error', 'Your credit balance is too low'))
     const r = await call(envOf(c), { task: 'summary', data: {} })
     expect(r.body).toEqual({ error: 'claude rejected', detail: 'Your credit balance is too low' })
+    expect(c.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('格式太大、Claude 編不出來：改成把格式寫進提示詞再問一次，之後同一份格式直接這樣問', async () => {
+    const big = Anthropic.APIError.generate(
+      400,
+      { type: 'error', error: { type: 'invalid_request_error', message: 'The compiled grammar is too large, which would cause performance issues. Simplify your tool schemas or reduce the number of strict tools.' } },
+      undefined,
+      new Headers(),
+    )
+    // 照提示詞寫的可能前後多了字、包了 ```
+    const c = fakeClient({ content: [{ type: 'text', text: '好的：\n```json\n{"steps":["列出問題"],"tip":"先從第一步"}\n```' }] })
+    c.create.mockRejectedValueOnce(big)
+    // 換一個模型：記著的「編不出來」照模型和格式分開，不會影響其他測試
+    const body = { task: 'steps', model: 'claude-haiku-5-5', data: { milestone: '訪談' } }
+    const r = await call(envOf(c), body)
+    expect(r.body).toEqual({ ok: true, model: 'claude-opus-5-5', out: { steps: ['列出問題'], tip: '先從第一步' } })
+    const [strict, retry] = c.create.mock.calls.map((x) => x[0])
+    expect(strict.output_config.format.type).toBe('json_schema')
+    expect(retry.output_config).toEqual({ effort: 'low' })
+    expect(retry.system).toContain(JSON.stringify(strict.output_config.format.schema))
+    expect(retry.messages).toEqual(strict.messages)
+    expect(retry.max_tokens).toBe(strict.max_tokens)
+    await call(envOf(c), body)
+    expect(c.create).toHaveBeenCalledTimes(3)
+    expect(c.create.mock.calls[2][0].output_config).toEqual({ effort: 'low' })
+    // 別的模型還是先照格式問
+    await call(envOf(c), { ...body, model: 'claude-sonnet-5-5' })
+    expect(c.create.mock.calls[3][0].output_config.format.type).toBe('json_schema')
   })
 })

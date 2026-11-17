@@ -40,8 +40,9 @@ afterEach(() => {
 })
 
 describe('前端和 Worker 的格式一樣', () => {
-  it('欄位名稱、新增的種類、go 的種類兩邊是同一份', () => {
-    expect(worker.FIELDS).toEqual(FIELDS)
+  it('新增的種類、go 的種類兩邊是同一份（欄位名稱 Worker 不限定，提示詞裡要寫到：tests/ai.test.js）', () => {
+    expect(worker).not.toHaveProperty('FIELDS')
+    expect(FIELDS.length).toBeGreaterThan(50)
     expect(worker.CREATE_KINDS).toEqual(CREATE_KINDS)
     expect(worker.GO_KINDS).toEqual(GO_KINDS)
   })
@@ -408,6 +409,22 @@ describe('壞掉的資料、store 順便動到的、同一批的先後', () => {
   it('「banana」「off」這種看不懂的數字不做（不會變成最小值）', () => {
     const ops = cleanOps({ set: [{ id: 'settings', field: 'focusMin', value: 'banana' }, { id: 'settings', field: 'fontScale', value: 'default' }, { id: 'settings', field: 'noiseVol', value: 'off' }] }, { real: () => null })
     expect(ops.set).toEqual([])
+  })
+
+  it('欄位名稱是 Claude 自己寫的字（格式不限定）：認不得的、繼承來的名字都不做；照提示詞寫時的 true／false 也認', () => {
+    const odd = ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'Title', 'nope', 3, null]
+    const ops = cleanOps(
+      {
+        set: [...odd.map((field) => ({ id: 'settings', field, value: '50' })), { id: 'settings', field: 'sound', value: false }],
+        create: [{ kind: 'habit', ref: '', parent: '', title: '喝水', date: '', start: '', end: '', fields: [...odd.map((field) => ({ field, value: '8' })), { field: 'target', value: 8 }] }],
+      },
+      { real: () => null },
+    )
+    expect(ops.set.map((x) => [x.field, x.value])).toEqual([['sound', false]])
+    expect(ops.create).toHaveLength(1)
+    expect(Object.keys(ops.create[0].fields)).toEqual(['target'])
+    expect(ops.create[0].fields.target).toBe(8)
+    expect(Object.getPrototypeOf(ops.create[0].fields)).toBe(Object.prototype)
   })
 
   it('放回去的那一筆照讀存檔的規則清過（壞掉的細項不會讓之後出錯）；id 對不上不放', () => {

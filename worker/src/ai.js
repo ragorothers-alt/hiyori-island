@@ -207,32 +207,56 @@ const TASKS = {
         ask: strs,
       }
       if (d.run !== 'chat') return obj(base)
-      // 對話時多的：改任何一筆的欄位、新增任務以外的東西、做完後打開的畫面（欄位名稱跟前端 src/agentOps.js 的 FIELDS 一樣）
-      const field = { type: 'string', enum: FIELDS }
+      // 對話時多的：改任何一筆的欄位、新增任務以外的東西、做完後打開的畫面。
+      // 欄位名稱不寫成 enum：五十幾個名稱、用兩次，編出來的格式太大，Claude 會整個拒絕（"compiled grammar is too large"）。
+      // 能用的名稱寫在提示詞裡，前端（src/agentOps.js 的 cleanOps）照那一種東西逐欄檢查，認不得的那一項不做
       return obj({
         ...base,
-        set: arr(obj({ id: str, field, value: str })),
-        create: arr(obj({ kind: { type: 'string', enum: CREATE_KINDS }, ref: str, parent: str, title: str, date: str, start: str, end: str, fields: arr(obj({ field, value: str })) })),
+        set: arr(obj({ id: str, field: str, value: str })),
+        create: arr(obj({ kind: { type: 'string', enum: CREATE_KINDS }, ref: str, parent: str, title: str, date: str, start: str, end: str, fields: arr(obj({ field: str, value: str })) })),
         go: obj({ do: { type: 'string', enum: GO_KINDS }, id: str }),
       })
     },
   },
 }
-// 對話時 set、create 的欄位名稱和新增的種類：前端 src/agentOps.js 有同一份（tests/agentOps.test.js 會比對兩邊）
-const SETTING_KEYS = [
-  'focusMin', 'breakMin', 'focusRounds', 'focusUp', 'flowMax', 'catMotto', 'focusGoal', 'focusNoise', 'noiseVol', 'mottoEvery', 'mottoBar',
-  'mottoEvents', 'sound', 'remindLead', 'theme', 'fontScale', 'stuckNudge', 'brief', 'backNudge', 'nextNudge', 'focusCat', 'agentMode',
-]
-export const FIELDS = [
-  'title', 'date', 'at', 'dur', 'priority', 'tag', 'note', 'project', 'star', 'first', 'done', 'start', 'end', 'allDay', 'endDate', 'kind',
-  'deadline', 'goal', 'status', 'due', 'target', 'unit', 'days', 'text', 'on', 'price', 'cur', 'every', 'amount',
-  'wake', 'sleep', 'peak', 'buffer', 'work', 'meals', ...SETTING_KEYS,
-]
+// 對話時 create 新增的種類：前端 src/agentOps.js 有同一份（tests/agentOps.test.js 會比對兩邊；set 的欄位名稱也會比對提示詞裡有沒有寫到）
 export const CREATE_KINDS = ['project', 'milestone', 'step', 'habit', 'routine', 'motto', 'subscription', 'log', 'note', 'life', 'sleep']
 export const GO_KINDS = ['', 'focus', 'open']
 const RUNS = ['morning', 'replan', 'capture', 'evening', 'chat']
 // 工作的設定可以照資料決定（effort、問句）
 const pickBy = (v, data) => (typeof v === 'function' ? v(data) : v)
+
+// 格式太大、編不出來時 Claude 回的 400（格式本身沒錯，只是太大）。這時改成把格式寫進提示詞、讓 Claude 照著寫：
+// 回的東西前端本來就會逐項檢查，不會因為少了強制格式就存進壞掉的值
+const TOO_BIG = /grammar is too large|too complex for compilation/i
+// 編不出來的格式記著（同一個 Worker 執行個體裡），下次直接用提示詞，不用再白問一次
+const tooBig = new Set()
+const errText = (e) => String(e?.error?.error?.message || e?.message || '')
+function loose(params, schema) {
+  return {
+    ...params,
+    system: `${params.system}\n\n輸出格式：只輸出一個 JSON 物件，不要加任何說明文字，也不要用 \`\`\` 包起來。這個物件照下面的 JSON Schema，每個欄位都要有：\n${JSON.stringify(schema)}`,
+    output_config: { effort: params.output_config.effort },
+  }
+}
+// 照格式的回應本來就是純 JSON；照提示詞寫的可能前後多了字，取第一個 { 到最後一個 }。一定要是一個物件
+function parseOut(text) {
+  const tryParse = (s) => {
+    try {
+      return JSON.parse(s)
+    } catch {
+      return undefined
+    }
+  }
+  let out = tryParse(text)
+  if (out === undefined) {
+    const a = text.indexOf('{')
+    const b = text.lastIndexOf('}')
+    if (a >= 0 && b > a) out = tryParse(text.slice(a, b + 1))
+  }
+  if (!out || typeof out !== 'object' || Array.isArray(out)) throw new HttpError(502, 'bad output')
+  return out
+}
 
 const sha = async (s) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))
 // 通行碼：前端用 encodeURIComponent 包過（標頭只能放 ASCII，通行碼可以是中文）；比對雜湊，花的時間跟哪裡不一樣無關
@@ -302,28 +326,34 @@ export async function askAI(env, body) {
     const data = body.data
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new HttpError(400, 'bad data')
     if (name === 'agent' && !RUNS.includes(data.run)) throw new HttpError(400, 'bad data')
+    const schema = task.schema(data)
     const params = {
       model,
       max_tokens: pickBy(task.maxTokens, data),
       system: `${PERSONA}\n\n${task.system}`,
-      output_config: { effort: pickBy(task.effort, data), format: { type: 'json_schema', schema: task.schema(data) } },
+      output_config: { effort: pickBy(task.effort, data), format: { type: 'json_schema', schema } },
       messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${pickBy(task.ask, data)}` }],
     }
-    const res = FALLBACK.has(model)
-      ? await client.beta.messages.create({ ...params, betas: [FALLBACK_BETA], fallbacks: 'default' })
-      : await client.messages.create(params)
+    const send = (p) => (FALLBACK.has(model) ? client.beta.messages.create({ ...p, betas: [FALLBACK_BETA], fallbacks: 'default' }) : client.messages.create(p))
+    const key = `${model}:${JSON.stringify(schema)}`
+    let res
+    if (tooBig.has(key)) res = await send(loose(params, schema))
+    else {
+      try {
+        res = await send(params)
+      } catch (e) {
+        if (!(e instanceof Anthropic.BadRequestError) || !TOO_BIG.test(errText(e))) throw e
+        if (tooBig.size >= 50) tooBig.clear()
+        tooBig.add(key)
+        res = await send(loose(params, schema))
+      }
+    }
     if (res.stop_reason === 'refusal') throw new HttpError(422, 'refused')
     if (res.stop_reason === 'max_tokens') throw new HttpError(502, 'too long')
     // 換過備援模型時只看最後一段（非串流的回應本來就不會留被擋下的那一半，這裡多保險一層）
     const last = res.content.findLastIndex((b) => b.type === 'fallback')
     const text = res.content.slice(last + 1).filter((b) => b.type === 'text').map((b) => b.text).join('')
-    let out
-    try {
-      out = JSON.parse(text)
-    } catch {
-      throw new HttpError(502, 'bad output')
-    }
-    return { ok: true, model: res.model, out }
+    return { ok: true, model: res.model, out: parseOut(text) }
   } catch (e) {
     if (e instanceof HttpError) throw e
     // 從最具體的錯誤往下比對
@@ -332,7 +362,7 @@ export async function askAI(env, body) {
     if (e instanceof Anthropic.NotFoundError) throw new HttpError(502, 'no model', { model })
     if (e instanceof Anthropic.RateLimitError) throw new HttpError(429, 'claude busy')
     // 額度用完、請求被拒：原因直接給使用者看（金鑰是自己的）
-    if (e instanceof Anthropic.BadRequestError) throw new HttpError(502, 'claude rejected', { detail: String(e.error?.error?.message || e.message).slice(0, 300) })
+    if (e instanceof Anthropic.BadRequestError) throw new HttpError(502, 'claude rejected', { detail: errText(e).slice(0, 300) })
     if (e instanceof Anthropic.APIConnectionError) throw new HttpError(504, 'claude unreachable')
     if (e instanceof Anthropic.APIError) throw new HttpError(503, 'claude error', { status: e.status ?? null })
     throw e
