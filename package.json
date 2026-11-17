@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "try:fuji": "vitest run --config vitest.live.config.js",
+    "try:fuji:local": "node live/local.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },

@@ -6,3 +6,8 @@ art
 e2e/.out
 android/build
 .codegraph
+# 本機 Worker 的金鑰（wrangler dev 讀的），絕對不能進版本庫
+.dev.vars
+.dev.vars.*
+.env
+.env.*

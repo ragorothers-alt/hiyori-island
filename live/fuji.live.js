@@ -7,6 +7,9 @@ import { agentContext, cleanOut, describe as describeActions } from '../src/agen
 import { SYNC_API } from '../src/cloud.js'
 
 const dry = process.env.HIYORI_AI_DRY === '1'
+// local：npm run try:fuji:local 開的本機 Worker（臨時的通行碼）。一定要送到本機，不然就停（不讓臨時通行碼送去線上）
+const local = process.env.HIYORI_AI_TARGET === 'local'
+if (local && !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(SYNC_API)) throw new Error(`本機模式卻要送到 ${SYNC_API}，停下來`)
 const pass = process.env.HIYORI_AI_PASS || ''
 const model = process.env.HIYORI_AI_MODEL || 'claude-opus-5-5'
 const enabled = dry || !!pass
@@ -212,7 +215,7 @@ describe.skipIf(!enabled)('ふじ真人試跑報告', () => {
       ...rows.map((row) => `| ${Object.values(row).map((v) => String(v).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')).join(' | ')} |`)].join('\n')
     print(`\n總表（${dry ? 'DRY，未呼叫 Claude' : '真實 Worker'}）\n${table}`)
     const details = results.map((r, i) => `## ${i + 1}. ${r.message}\n\n完整結果：\n\n\`\`\`json\n${json(r)}\n\`\`\``).join('\n\n')
-    await writeFile(reportPath, redact(`# ふじ live 報告\n\n時間：${new Date().toISOString()}\n\n模式：${dry ? 'DRY（空動作，無網路）' : '真實 Worker'}；指定模型：${model}\n\n${table}\n\n比較忽略時間戳、統計／獎勵進度、同步版本與 agent 紀錄，保留 agent.memory。清洗統計以整個動作為單位，欄位修正請對照原始及清洗 JSON。\n\n${details}\n`), 'utf8')
+    await writeFile(reportPath, redact(`# ふじ live 報告\n\n時間：${new Date().toISOString()}\n\n模式：${dry ? 'DRY（空動作，無網路）' : local ? '本機 Worker（wrangler dev，真的 Claude）' : '真實 Worker'}；指定模型：${model}\n\n${table}\n\n比較忽略時間戳、統計／獎勵進度、同步版本與 agent 紀錄，保留 agent.memory。清洗統計以整個動作為單位，欄位修正請對照原始及清洗 JSON。\n\n${details}\n`), 'utf8')
     print(`\n報告：${reportPath}`)
   })
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import worker, { MAX_DATA } from '../worker/src/index.js'
+import worker from '../worker/src/index.js'
+import { MAX_DATA } from '../worker/src/limits.js'
 import { Store } from '../src/store.js'
 import { CloudSync, codeFromHash, deriveKeys, newCode, normalizeCode, seal, shareLink, unseal } from '../src/cloud.js'
 import { FileSync } from '../src/sync.js'

@@ -8,6 +8,18 @@ npm run try:fuji
 Remove-Item Env:HIYORI_AI_PASS
 ```
 
+## 用本機的 Worker（不用線上的通行碼）
+
+把 Claude API 金鑰放在 `worker/.dev.vars`（自己建，一行 `ANTHROPIC_API_KEY=…`；這個檔案在 `.gitignore` 裡，不會進版本庫），然後：
+
+```powershell
+npm run try:fuji:local
+```
+
+`live/local.mjs` 會先確認 `.dev.vars` 被 git 忽略、裡面有那一行（不讀出、不印出金鑰），建好本機模擬的資料庫，用 `wrangler dev` 在 `127.0.0.1:8799` 開一個本機 Worker，通行碼每次臨時產生（只在記憶體裡、跟線上的無關），先 ping 一次確認接上 Claude，再跑下面同一份試跑。線上的 Worker 和資料都不會碰到；本機模式下要送去的網址不是本機就直接停。`.dev.vars` 裡不要放 `AI_PASS`。花的是那把金鑰的額度。
+
+## 用線上的 Worker
+
 可先設 `$env:HIYORI_AI_MODEL = 'claude-sonnet-5-5'` 選模型；只接受 `claude-opus-5-5`（預設）、`claude-sonnet-5-5`、`claude-haiku-5-5`。
 
 不用通行碼也能檢查腳本：
