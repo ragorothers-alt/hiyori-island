@@ -6,7 +6,7 @@
 // 每一次是一個請求（askAI('agent')）：整理好的資料送給 Claude，回來的那批動作檢查過才做（store.agentApply），整批可以撤銷。
 // 設定的 agentMode：auto 直接做、ask 先放著等使用者按「套用」、off 只在開口時動。
 import { aiReady, askAI } from './ai.js'
-import { agentContext, cleanOut, dueRun, hasActions, describe, weekOf, saneAct, AGENT_DAYS } from './agent.js'
+import { agentContext, cleanOut, dueRun, hasActions, describe, weekOf, saneAct, partialSay, AGENT_DAYS } from './agent.js'
 import { addDays, dateStr } from './store/util.js'
 import { floating } from './store/migrate.js'
 
@@ -61,6 +61,8 @@ export function createAgent(store, hooks = {}) {
     error: '',
     // 自己整理（不是對話）上一次沒做成：{ run, at, text, code }。今日總覽的卡片和ふじ那一頁會顯示，下一次做成了就清掉
     failed: null,
+    // 對話時她正在寫的那句話（邊寫邊顯示；寫完、出錯就清掉）
+    partial: '',
     // 對話（這台裝置）：[{ who: 'me'|'fuji', text, at, entry: 那次記下的 id, ask: [可以直接點的回答] }]
     chat: Array.isArray(local.chat) ? local.chat.filter((m) => m && typeof m.text === 'string').slice(-CHAT_KEEP) : [],
   }
@@ -107,7 +109,16 @@ export function createAgent(store, hooks = {}) {
       // 對話時：使用者正在看哪一頁（「這個專案」「這天」指的是什麼）
       const here = chat ? hooks.here?.() || null : null
       const { data, ids } = agentContext(store, kind, { ...extra, mode: mode(), weekStart, focusing: hooks.focusing?.() || null, here })
-      const out = await askAI('agent', data, { signal: extra.signal })
+      // 對話時邊寫邊顯示：她要說的話寫出來多少就先顯示多少（後面的動作寫完才一起套用）
+      const onText = chat
+        ? (text) => {
+            const s = partialSay(text)
+            if (s === agent.partial) return
+            agent.partial = s
+            changed()
+          }
+        : undefined
+      const out = await askAI('agent', data, { signal: extra.signal, onText })
       // 自己整理的：等回應的這段時間裡關掉了、換了設定、過了午夜，或別的分頁／別台已經做完同一種，這次就不算
       if (!chat && !extra.manual && (!agent.auto() || gen !== from.gen || dateStr() !== from.day)) return null
       if (!chat && (kind === 'morning' || kind === 'evening') && store.state.agent.ran[kind] === store.today && from.ran !== store.today) return null
@@ -139,6 +150,7 @@ export function createAgent(store, hooks = {}) {
       throw err
     } finally {
       agent.thinking = null
+      agent.partial = ''
       changed()
     }
   }

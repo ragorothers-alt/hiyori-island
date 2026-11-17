@@ -22,6 +22,8 @@ const when = (at, today) => {
 }
 const short = (s, n = 16) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const DOTS = '<span class="cm-dots" aria-hidden="true"><i></i><i></i><i></i></span>'
+// 正在想的那一則：對話時她寫出來多少就先顯示多少（邊寫邊送），還沒開始寫是「我想一下」；自己整理時寫在做什麼
+const thinkText = (agent) => (agent.thinking === 'chat' ? (agent.partial ? esc(agent.partial) : '我想一下') : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`)
 
 // 對話和紀錄排成一條：這台的對話，加上不是從這台對話來的紀錄（她自己整理的、別台做的）
 export function agentFeed(agent, store, limit = 40) {
@@ -172,7 +174,7 @@ export class AgentCard extends Base {
     this.el.querySelector('h3 small').textContent = mode === 'off' ? '我開口才動' : mode === 'ask' ? '整理前先問我' : '會自己整理'
     const fail = failOf(agent, today0, last?.at || 0)
     let html
-    if (agent.thinking) html = `<p class="ag-say think">${agent.thinking === 'chat' ? '我想一下' : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`}${DOTS}</p>`
+    if (agent.thinking) html = `<p class="ag-say ${agent.partial ? 'live' : 'think'}">${thinkText(agent)}${DOTS}</p>`
     else if (agent.pending) html = pendingHTML(agent.pending, store)
     else if (fail) html = failHTML(fail, store)
     else if (last) html = fujiHTML(last, store, { open: this.opened.has(last.e?.id), max: 3, last: true })
@@ -263,10 +265,10 @@ export class AgentView extends Base {
     if (agent.pending) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${pendingHTML(agent.pending, store)}</div></div>`)
     const fail = !agent.thinking && failOf(agent, new Date(`${store.today}T00:00:00`).getTime(), items.at(-1)?.at || 0)
     if (fail) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${failHTML(fail, store)}</div></div>`)
-    if (agent.thinking) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say think">${agent.thinking === 'chat' ? '我想一下' : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`}${DOTS}${agent.thinking === 'chat' ? ' <button type="button" class="cm-link" data-ag="stop">停</button>' : ''}</p></div></div>`)
+    if (agent.thinking) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say ${agent.partial ? 'live' : 'think'}">${thinkText(agent)}${DOTS}${agent.thinking === 'chat' ? ' <button type="button" class="cm-link" data-ag="stop">停</button>' : ''}</p></div></div>`)
     if (!rows.length) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say">${mode === 'off' ? '想調整什麼就跟我說一聲。' : '我會自己把今天排好、盯著進度。想加什麼、改什麼，直接跟我說就好。'}</p>${mode === 'off' ? '' : '<div class="ag-acts"><button type="button" class="btn-ghost" data-ag="now">現在整理今天</button></div>'}</div></div>`)
     const feed = $('.ag-feed')
-    const sig = `${items.length}:${items.at(-1)?.at || 0}:${agent.thinking || ''}:${agent.pending?.id || ''}`
+    const sig = `${items.length}:${items.at(-1)?.at || 0}:${agent.thinking || ''}:${agent.pending?.id || ''}:${agent.partial.length}`
     feed.innerHTML = rows.join('')
     $('.ag-hints').innerHTML = HINTS.map((h) => `<button type="button" class="chip-toggle" data-av="hint" data-v="${esc(h)}"${agent.thinking ? ' disabled' : ''}>${h}</button>`).join('')
     $('.ag-form button').disabled = !!agent.thinking
@@ -364,9 +366,9 @@ export class AgentDock extends Base {
         ? `<div class="cmsg me"><p>${esc(m.text)}</p></div>`
         : `<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${fujiHTML(m, store, { open: this.opened.has(m.e?.id), max: 6, last: m === lastFuji && !agent.thinking })}</div></div>`,
     )
-    if (agent.thinking) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say think">${agent.thinking === 'chat' ? '我想一下' : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`}${DOTS}${agent.thinking === 'chat' ? ' <button type="button" class="cm-link" data-ag="stop">停</button>' : ''}</p></div></div>`)
+    if (agent.thinking) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say ${agent.partial ? 'live' : 'think'}">${thinkText(agent)}${DOTS}${agent.thinking === 'chat' ? ' <button type="button" class="cm-link" data-ag="stop">停</button>' : ''}</p></div></div>`)
     if (!rows.length) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say">想改什麼？任務、日程、專案、習慣、作息、設定都可以，直接說就好。</p></div></div>`)
-    const sig = `${show.length}:${show.at(-1)?.at || 0}:${agent.thinking || ''}`
+    const sig = `${show.length}:${show.at(-1)?.at || 0}:${agent.thinking || ''}:${agent.partial.length}`
     feed.innerHTML = rows.join('')
     $('.agd-hints').innerHTML = (PAGE_HINTS[page] || PAGE_HINTS.today)
       .map((h) => `<button type="button" class="chip-toggle" data-agd="hint" data-v="${esc(h)}"${agent.thinking ? ' disabled' : ''}>${esc(h)}</button>`)

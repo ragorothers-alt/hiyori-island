@@ -228,6 +228,34 @@ export function adjustedOf(state, now = Date.now()) {
   return out.slice(-8)
 }
 
+// 回答寫到一半的 JSON 裡，「say」（ふじ說的話，格式裡排第一個）目前寫到哪裡：對話時邊寫邊顯示用。還沒寫到是 ''
+export function partialSay(text) {
+  const m = /^\s*\{\s*"say"\s*:\s*"/.exec(String(text || ''))
+  if (!m) return ''
+  let out = ''
+  for (let i = m[0].length; i < text.length; ) {
+    const c = text[i]
+    if (c === '"') break
+    if (c !== '\\') {
+      out += c
+      i++
+      continue
+    }
+    const n = text[i + 1]
+    if (n === undefined) break
+    if (n === 'u') {
+      const hex = text.slice(i + 2, i + 6)
+      if (!/^[0-9a-f]{4}$/i.test(hex)) break
+      out += String.fromCharCode(parseInt(hex, 16))
+      i += 6
+      continue
+    }
+    out += { n: '\n', t: ' ', r: '', b: '', f: '' }[n] ?? n
+    i += 2
+  }
+  return out
+}
+
 // 送給 Worker 的資料有上限（worker/src/ai.js 的 AI_MAX，120 KB）：用了很久、專案很多時，先拿掉比較不要緊的，再縮短
 export const DATA_MAX = 100_000
 export function fitData(data, max = DATA_MAX) {

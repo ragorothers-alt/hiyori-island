@@ -315,8 +315,35 @@ export async function aiCount(env, body, now) {
   if ((await bump(env.DB, 'ai-day', DAY, now)) > limit) throw new HttpError(429, 'daily limit')
 }
 
-// 通行碼已經檢查過（checkAI）
-export async function askAI(env, body) {
+// 邊寫邊送（body.stream 是 true 時；對話用，ふじ說的話先出來）：回應是 NDJSON，一行一個事件：
+//   { t: 'd', s: 剛寫出來的一小段 }、{ t: 'reset' }（換成備援模型從頭寫，前面送過的不算）、
+//   最後一行 { t: 'end', ok, model, out } 或 { t: 'error', error, ...detail }
+export function askAIStream(env, body, headers = {}) {
+  const enc = new TextEncoder()
+  const { readable, writable } = new TransformStream()
+  const w = writable.getWriter()
+  // 使用者按了停、關掉頁面（讀的那一端斷了）：Claude 那邊也停掉，不再白寫
+  let gone = false
+  const line = (o) => w.write(enc.encode(`${JSON.stringify(o)}\n`)).catch(() => (gone = true))
+  ;(async () => {
+    try {
+      const res = await askAI(env, body, { text: (s) => line({ t: 'd', s }), reset: () => line({ t: 'reset' }), gone: () => gone })
+      await line({ t: 'end', ...res })
+    } catch (e) {
+      if (e instanceof HttpError) await line({ t: 'error', error: e.message, ...e.extra })
+      else {
+        console.error('[hiyori-ai]', e)
+        await line({ t: 'error', error: 'server error' })
+      }
+    } finally {
+      await w.close().catch(() => {})
+    }
+  })()
+  return new Response(readable, { headers: { ...headers, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' } })
+}
+
+// 通行碼已經檢查過（checkAI）。live：{ text(一小段), reset() }，有的話邊寫邊送（askAIStream）
+export async function askAI(env, body, live = null) {
   const name = typeof body.task === 'string' ? body.task : ''
   // 只認自己的工作（不要被 'constructor' 這類繼承來的屬性騙過）
   const task = Object.hasOwn(TASKS, name) ? TASKS[name] : null
@@ -341,7 +368,19 @@ export async function askAI(env, body) {
       output_config: { effort: pickBy(task.effort, data), format: { type: 'json_schema', schema } },
       messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${pickBy(task.ask, data)}` }],
     }
-    const send = (p) => (FALLBACK.has(model) ? client.beta.messages.create({ ...p, betas: [FALLBACK_BETA], fallbacks: 'default' }) : client.messages.create(p))
+    const send = (p) => {
+      const fb = FALLBACK.has(model)
+      const q = fb ? { ...p, betas: [FALLBACK_BETA], fallbacks: 'default' } : p
+      if (!live) return fb ? client.beta.messages.create(q) : client.messages.create(q)
+      const s = fb ? client.beta.messages.stream(q) : client.messages.stream(q)
+      s.on('streamEvent', (ev) => {
+        if (live.gone?.()) return s.abort()
+        // 被安全機制擋下、換成備援模型接著寫：前面那段（寫到一半的 JSON）不算
+        if (ev.type === 'content_block_start' && ev.content_block?.type === 'fallback') live.reset()
+        else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') live.text(ev.delta.text)
+      })
+      return s.finalMessage()
+    }
     const key = `${model}:${JSON.stringify(schema)}`
     let res
     if (tooBig.has(key)) res = await send(loose(params, schema))
@@ -352,6 +391,7 @@ export async function askAI(env, body) {
         if (!(e instanceof Anthropic.BadRequestError) || !TOO_BIG.test(errText(e))) throw e
         if (tooBig.size >= 50) tooBig.clear()
         tooBig.add(key)
+        live?.reset()
         res = await send(loose(params, schema))
       }
     }

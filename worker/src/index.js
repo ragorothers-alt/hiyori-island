@@ -10,7 +10,7 @@
 // /v1/ai：ふじ的 AI，經過這裡呼叫 Claude（見 ai.js；金鑰和通行碼都是 Worker 的 secret）。
 // /v1/push/*：番茄鐘到點、警語定時提醒的推播（見 push.js；跟同步碼無關，沒開線上同步也能用）。
 import { HttpError } from './http.js'
-import { askAI, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
+import { askAI, askAIStream, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
 import { pushKey, pushTimer, pushMottos } from './push.js'
 import { fetchICS } from './ics.js'
 
@@ -72,6 +72,8 @@ export default {
       if (!body || typeof body !== 'object') throw new HttpError(400, 'bad request')
       if (ai) {
         await aiCount(env, body, now)
+        // 對話：邊寫邊送（ふじ說的話先出來）
+        if (body.stream === true && body.task !== 'ping') return askAIStream(env, body, CORS)
         return json(await askAI(env, body))
       }
       if (pathname === '/v1/create') return json(await create(env, body, now))

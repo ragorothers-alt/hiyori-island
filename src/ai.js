@@ -118,6 +118,7 @@ const TEXT = {
   'claude unreachable': 'Worker 連不上 Claude，等一下再試',
   'claude error': 'Claude 那邊出了點狀況，等一下再試',
   'claude rejected': 'Claude 沒有接受這次的請求',
+  cut: '寫到一半連線斷了，再試一次',
   refused: '這次的內容 Claude 沒辦法回答',
   'too long': '回答太長被截斷了，再試一次',
   'bad output': '回答的格式不對，再試一次',
@@ -136,22 +137,70 @@ export class AiError extends Error {
   }
 }
 
-// task：ping／coach／steps／summary／insight；回傳 Claude 照格式寫好的 JSON（ping 回傳模型資訊）
-export async function askAI(task, data, { signal } = {}) {
+// 讀邊寫邊送的回應（Worker 的 askAIStream，一行一個事件）：每一小段交給 onText(目前整段)，最後回傳 Claude 寫好的 JSON
+async function readStream(res, onText) {
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  let text = ''
+  let end = null
+  const take = (line) => {
+    if (!line.trim()) return
+    let ev
+    try {
+      ev = JSON.parse(line)
+    } catch {
+      return
+    }
+    if (ev.t === 'd' && typeof ev.s === 'string') text += ev.s
+    else if (ev.t === 'reset') text = ''
+    else if (ev.t === 'end' || ev.t === 'error') end = ev
+    else return
+    if (ev.t !== 'end' && ev.t !== 'error') onText(text)
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    for (let i; (i = buf.indexOf('\n')) >= 0; ) {
+      take(buf.slice(0, i))
+      buf = buf.slice(i + 1)
+    }
+  }
+  take(buf + dec.decode())
+  // 還沒寫完連線就斷了
+  if (!end) throw new AiError('cut')
+  if (end.t === 'error' || !end.ok) throw new AiError(end.error || 'server error', end.detail || '')
+  return end.out
+}
+
+// task：ping／coach／steps／summary／insight／agent；回傳 Claude 照格式寫好的 JSON（ping 回傳模型資訊）。
+// onText(目前寫到的整段)：有的話邊寫邊送（對話時ふじ說的話先出來）
+export async function askAI(task, data, { signal, onText } = {}) {
   const pass = aiPass()
   if (!pass) throw new AiError('no pass')
+  const stream = typeof onText === 'function' && task !== 'ping'
   let res
   try {
     res = await fetch(`${SYNC_API}/v1/ai`, {
       method: 'POST',
       // 標頭只能放 ASCII：中文通行碼先編碼，Worker 那邊再解開
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${encodeURIComponent(pass)}` },
-      body: JSON.stringify({ task, model: aiModel(), data }),
+      body: JSON.stringify({ task, model: aiModel(), data, ...(stream ? { stream: true } : {}) }),
       signal,
     })
   } catch (err) {
     if (err?.name === 'AbortError') throw err
     throw new AiError('offline')
+  }
+  // 通行碼不對、太頻繁這些還沒開始寫就擋下的，照一般的回應處理
+  if (stream && res.ok && /ndjson/.test(res.headers.get('Content-Type') || '')) {
+    try {
+      return await readStream(res, onText)
+    } catch (err) {
+      if (err?.name === 'AbortError' || err instanceof AiError) throw err
+      throw new AiError('cut')
+    }
   }
   let body = null
   try {

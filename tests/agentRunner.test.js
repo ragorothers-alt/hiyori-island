@@ -68,6 +68,28 @@ describe('自己整理', () => {
     expect(agent.failed).toBeNull()
   })
 
+  it('對話時邊寫邊顯示：她要說的話寫出來多少就先放在 partial，寫完清掉；自己整理時不用', async () => {
+    const seen = []
+    agent.subscribe((a) => seen.push(a.partial))
+    ai.ask = vi.fn(async (task, data, opts) => {
+      opts.onText('{"say":"明天')
+      opts.onText('{"say":"明天三點')
+      opts.onText('{"say":"明天三點')
+      return blank({ say: '明天三點，記好了' })
+    })
+    const reply = await agent.say('明天三點看牙醫')
+    expect(reply.text).toBe('明天三點，記好了')
+    expect(seen.filter(Boolean)).toEqual(['明天', '明天三點'])
+    expect(agent.partial).toBe('')
+    store.addTask({ title: '寫報告', date: TODAY })
+    ai.ask = vi.fn(async (task, data, opts) => {
+      expect(opts.onText).toBeUndefined()
+      return blank()
+    })
+    await agent.now('morning')
+    expect(ai.ask).toHaveBeenCalledTimes(1)
+  })
+
   it('她排好之後自己又改掉的、撤銷了的，下一次都告訴她（看出偏好）', async () => {
     const a = store.addTask({ title: '寫報告', date: TODAY })
     const b = store.addTask({ title: '回信', date: TODAY })
