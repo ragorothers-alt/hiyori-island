@@ -1,7 +1,7 @@
 // 週報的習慣洞察：從任務的完成時間、每天的專注紀錄、習慣打卡看出你的步調。純函式，方便測試。
 // 資料不夠（最近四週有在用的日子少於 5 天）時，改成依作息推測，並標上 guess。
 import { rate, streak } from './habits.js'
-import { PEAKS } from './planner.js'
+import { PEAKS, estimateRatio } from './planner.js'
 import { WEEK_ZH, pullOf } from './theme.js'
 import { MOTTO_EVERY } from './mottos.js'
 
@@ -232,6 +232,18 @@ export function buildInsights({ tasks, history, habits, rhythm, today, mottoEver
     out.push({
       id: 'urgeHour', kanji: '散', title: `最常在${b.label}想分心`,
       text: `最近兩週按了 ${nUrges} 次「想分心了」，${n} 次在${b.label}（${b.range}）${perHour != null ? `，大約每專注一小時 ${perHour} 次` : ''}。${b.urgeTip}`,
+    })
+  }
+
+  // 9. 預估準不準（有填預估、用專注計時做完的任務 5 件以上才說）：差兩成以上才提，排程已經自動照比例多留時間
+  const est = estimateRatio(tasks, new Date(today + 'T00:00:00').getTime() + 86400000)
+  if (est && Math.abs(est.ratio - 1) >= 0.2) {
+    const more = est.ratio > 1
+    out.push({
+      id: 'estimate', kanji: '估', title: more ? `實際花的時間大約是預估的 ${est.ratio} 倍` : '你常常比預估的還快做完',
+      text: more
+        ? `最近 ${est.n} 件用番茄鐘做完的任務，估 30 分的事大約要 ${Math.round(30 * est.ratio)} 分。最佳化時程和ふじ排時間時，已經照這個比例多留一點。`
+        : `最近 ${est.n} 件用番茄鐘做完的任務，實際大約只花了預估的 ${Math.round(est.ratio * 100)}%。估的時候可以大膽一點，一天多放一件也沒關係。`,
     })
   }
   return out

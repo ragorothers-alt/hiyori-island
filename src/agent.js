@@ -3,7 +3,7 @@
 //     任務、專案、里程碑的 id 換成短代號（t1、p1、m1）：省字，也認得出 Claude 編出來的 id。
 //   cleanOut(out, ids)：Claude 回的那批動作換回真正的 id，格式不對的丟掉。真的動資料之前 store.agentApply 會再檢查一次。
 //   dueRun(...)：現在該不該自己整理一次（早上、晚上、進度落後）。
-import { toM, toHHMM, gaps, busyOf, awake, bedAt, taskDur, PEAKS } from './planner.js'
+import { toM, toHHMM, gaps, busyOf, awake, bedAt, taskDur, PEAKS, SPLIT_MAX } from './planner.js'
 import { addDays, parseDate, daysBetween } from './store/util.js'
 import { projectStats } from './projects.js'
 import { worldOf, cleanOps, saneOps, hasOps } from './agentOps.js'
@@ -70,6 +70,10 @@ function taskOf(t, ids, fresh) {
   if (t.star) o.star = true
   if (t.first) o.first = true
   if (t.moved) o.moved = t.moved
+  // 截止日（跟打算哪天做分開）
+  if (t.due) o.due = t.due
+  // 用專注計時已經做了幾分鐘
+  if (t.spent) o.spent = t.spent
   if (t.subs?.length) o.steps = `${t.subs.filter((x) => x.done).length}/${t.subs.length}`
   if (t.note) o.note = clip(t.note, 50)
   if (fresh.has(t.id)) o.new = true
@@ -154,6 +158,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
       peak: PEAKS[r.peak] ? `${PEAKS[r.peak].label} ${toHHMM(PEAKS[r.peak].range[0])}-${toHHMM(PEAKS[r.peak].range[1])}` : '',
       buffer: r.buffer || 0,
       focusMin: s.settings.focusMin || 25,
+      // 平常實際花的時間是預估的幾倍（最近做完的任務算的，n 是幾件）；資料不夠時不帶
+      ...(store.estimate?.() ? { estimate: store.estimate() } : {}),
     },
     memory: [...(s.agent?.memory || [])],
     days,
@@ -278,7 +284,7 @@ export function cleanOut(out, ids, run = 'chat') {
   const act = {
     // 對話時可能是在回答問題（這週專注了多久…），可以說長一點
     say: text(o.say, chat ? 600 : 300),
-    schedule: [], add: [], steps: [], edit: [], star: [], first: null, msteps: [], next: null,
+    schedule: [], add: [], steps: [], edit: [], star: [], first: null, msteps: [], next: null, split: [],
     remember: texts(o.remember, 80, 5), forget: texts(o.forget, 80, 5),
     done: [], drop: [], events: [], dates: [],
     ask: chat ? texts(o.ask, 16, 3) : [],
@@ -298,7 +304,7 @@ export function cleanOut(out, ids, run = 'chat') {
     if (!title) continue
     const a = {
       title, date: DATE.test(x.date) ? x.date : '', at: time(x.at), dur: mins(x.dur), tag: TAG_IDS.includes(x.tag) ? x.tag : 'life',
-      project: ids.real(x.project, 'p')?.id || null, steps: texts(x.steps, 80, 8), star: !!x.star,
+      project: ids.real(x.project, 'p')?.id || null, steps: texts(x.steps, 80, 8), star: !!x.star, due: DATE.test(x.due) ? x.due : '',
     }
     // 歸進這一次剛建的專案（create 的 ref）
     if (!a.project && made.has(text(x.project, 16))) a.projectRef = text(x.project, 16)
@@ -324,6 +330,15 @@ export function cleanOut(out, ids, run = 'chat') {
   for (const x of arr(o.star)) {
     const id = tid(x?.id)
     if (id) act.star.push({ id, on: !!x.on })
+  }
+  // 太大的任務分成幾段（parts 2～8；0 或看不懂是照專注長度算）
+  const splitSeen = new Set()
+  for (const x of arr(o.split, 5)) {
+    const id = tid(x?.id)
+    if (!id || splitSeen.has(id)) continue
+    splitSeen.add(id)
+    const n = Math.round(+x.parts)
+    act.split.push({ id, parts: n >= 2 && n <= SPLIT_MAX ? n : 0 })
   }
   act.first = tid(o.first)
   act.next = tid(o.next)
@@ -363,6 +378,9 @@ export function saneAct(a) {
     (a.first === null || isS(a.first)) &&
     (a.next === null || isS(a.next)) &&
     every(a.msteps, (x) => isO(x) && isS(x.pid) && isS(x.mid) && every(x.steps, isS)) &&
+    // 分段是後來才有的：之前存著、等使用者決定的那一份沒有這一項
+    (a.split === undefined || every(a.split, (x) => isO(x) && isS(x.id) && Number.isInteger(x.parts))) &&
+    every(a.add, (x) => x.due === undefined || isS(x.due)) &&
     every(a.remember, isS) && every(a.forget, isS) && every(a.done, isS) && every(a.drop, isS) &&
     every(a.events, (x) => isO(x) && isS(x.title) && isS(x.date) && TIME.test(x.start) && hhmm(x.end)) &&
     every(a.dates, (x) => isO(x) && isS(x.title) && isS(x.date) && isS(x.kind)) &&
@@ -371,7 +389,7 @@ export function saneAct(a) {
 }
 // 這批動作裡有沒有要動資料的（只有一句話、建議先做哪一件不算）
 export const hasActions = (a) =>
-  (!!a && ['schedule', 'add', 'steps', 'edit', 'star', 'msteps', 'remember', 'forget', 'done', 'drop', 'events', 'dates'].some((k) => a[k]?.length)) || !!a?.first || hasOps(a?.ops)
+  (!!a && ['schedule', 'add', 'steps', 'edit', 'star', 'msteps', 'split', 'remember', 'forget', 'done', 'drop', 'events', 'dates'].some((k) => a[k]?.length)) || !!a?.first || hasOps(a?.ops)
 
 // 在那天找一個放得下的位置：want 是想放的開始時間（分鐘）、dur 是長度、busy 是已經佔掉的區間、[lo, hi] 是可以排的範圍。
 // 想放的位置可以就用它；不行就找最近的空檔。放不下回 null
@@ -460,6 +478,7 @@ export function describe(act, store) {
   }
   for (const x of act.add) out.push(`新增「${clip(x.title, 22)}」${x.date ? `（${dayWord(x.date, today)}${x.at ? ` ${x.at}` : ''}）` : ''}`)
   for (const x of act.steps) out.push(`「${title(x.id)}」拆成 ${x.steps.length} 個小步驟`)
+  for (const x of act.split || []) out.push(`「${title(x.id)}」分成${x.parts ? ` ${x.parts} ` : '幾'}段、分到幾天做`)
   for (const x of act.edit) out.push(`調整「${title(x.id)}」`)
   for (const x of act.star) out.push(`${x.on ? '本命' : '取消本命'}：「${title(x.id)}」`)
   if (act.first) out.push(`先做「${title(act.first)}」`)

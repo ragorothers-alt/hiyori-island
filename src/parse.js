@@ -22,6 +22,8 @@ const PERIOD = '(上午|早上|早晨|中午|下午|傍晚|晚上|凌晨|夜裡)
 const HOUR = '(\\d{1,2}|十[一二]?|[一二兩两三四五六七八九十])'
 // 一個時間點：14:30、下午3點、3點半、3點15分、晚上8點、9am
 const TIME = `${PERIOD}\\s*(?:${HOUR}\\s*[:：]\\s*(\\d{2})|${HOUR}\\s*[點点時时](半|\\d{1,2}\\s*分?)?|(\\d{1,2})\\s*(am|pm|AM|PM))`
+// 截止日能寫的日子（跟下面解析日期的寫法一樣）
+const DUE_DAY = '大後天|大后天|後天|后天|明天|明日|今天|今日|\\d{1,2}\\s*天後|下?(?:週|周|星期|禮拜|礼拜)[一二三四五六日天]|\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}|\\d{1,2}\\s*(?:\\/|月)\\s*\\d{1,2}\\s*(?:日|號|号)?'
 // 幾小時（可以接著幾分）：1.5小時、2個半小時、半小時、1小時30分鐘、1小時30分、2h、1hr 15min
 const HOURS = /(?:(\d+(?:\.\d+)?)\s*(?:個)?\s*(半)?|(半)\s*(?:個)?)\s*(?:小時|hr|h)(?![a-z])(?:\s*(\d+)\s*(?:分鐘|分钟|分|min|m)(?![a-z]))?/gi
 
@@ -119,6 +121,15 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
     const days = [...new Set([...ds].filter((c) => c in WD).map((c) => WD[c]))]
     if (!days.length) return false
     out.repeat = { type: 'weekly', days }
+  })
+
+  // 截止日：「週五前」「11/20 之前」「截止 11/20」「明天到期」。先拿掉，剩下的日期才是打算哪天做。
+  // 日子的寫法跟下面一樣，交給同一個函式解析（只丟那一段進去）
+  // 「明天前往台北」「週五前面那段」的「前」不是截止
+  take(new RegExp(`(?:截止|期限|到期|(?<![a-z])due|deadline)\\s*[:：]?\\s*(${DUE_DAY})|(${DUE_DAY})\\s*(?:之前|以前|前(?![往面後后進进去來来夕年天晚])|截止|到期)`, 'gi'), (_, a, b) => {
+    const d = parseQuick(a || b, { today }).date
+    if (!d) return false
+    out.due = d
   })
 
   // 日期
@@ -261,6 +272,8 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
     // 沒寫日期時跟任務一樣，加在上面選的那天
     out.kind = 'event'
   }
+  // 截止日只有任務有
+  if (out.kind === 'event') delete out.due
   out.title = text.replace(/\s+/g, ' ').replace(/^[\s,，、:：]+|[\s,，、:：]+$/g, '').trim()
   return out
 }
@@ -301,6 +314,10 @@ export function describeQuick(p, today) {
   // 整天的日程不會重複（例行公事只有有時段的）：不顯示「↻ 每天」免得以為會重複
   if (p.repeat && !p.allDay) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
   if (p.priority && p.kind === 'task') chips.push(['', '低', '中', '高'][p.priority] + '優先')
+  if (p.due && p.kind === 'task') {
+    const d = parseDate(p.due)
+    chips.push(`截止 ${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`)
+  }
   if (p.dur && p.kind === 'task') chips.push(`預估 ${p.dur >= 60 ? `${+(p.dur / 60).toFixed(1)} 小時` : `${p.dur} 分鐘`}`)
   if (p.star && p.kind === 'task') chips.push('★ 本命')
   if (p.projectName && p.kind === 'task') chips.push(`專案・${p.projectName}`)

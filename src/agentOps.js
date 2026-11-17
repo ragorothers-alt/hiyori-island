@@ -168,6 +168,8 @@ export const SPEC = {
   task: {
     title: TITLE, date: okDate, at: timeOrNone, dur: (v) => (txt(v, 8) === '' || txt(v, 8) === '0' ? null : mins(5, 600)(v)), priority, tag,
     note: str(500, false), project: null, star: bool, first: bool, done: bool,
+    // 截止日（跟打算哪天做分開）；"" 是不設
+    due: dateOrNone,
   },
   event: { title: TITLE, date: okDate, start: time, end: time, note: str(200, false), allDay: bool, endDate: dateOrNone, done: bool },
   date: { title: str(30), date: okDate, kind: words(Object.keys(DATE_KINDS), { due: 'deadline', 考試: 'exam', 截止: 'deadline', 紀念: 'day', 紀念日: 'day' }) },
@@ -232,7 +234,7 @@ export function okVal(kind, field, v) {
   if (kind === 'task' && (field === 'project' || field === 'msAuto')) return v === null || isId(v)
   // 任務完成的時間（取消完成再撤銷時放回去）
   if (kind === 'task' && field === 'doneAt') return v === null || (typeof v === 'number' && Number.isFinite(v) && v > 0)
-  if (v === null) return (kind === 'task' && (field === 'at' || field === 'dur')) || (kind === 'rhythm' && field === 'work')
+  if (v === null) return (kind === 'task' && (field === 'at' || field === 'dur' || field === 'due')) || (kind === 'rhythm' && field === 'work')
   // 任務的長度存得下 5～600 的任何整數（不一定是 5 的倍數）
   if (kind === 'task' && field === 'dur') return Number.isInteger(v) && v >= 5 && v <= 600
   if (kind === 'rhythm' && field === 'work') return isO(v) && isTime(v.start) && isTime(v.end) && v.start < v.end && isDays(v.days)

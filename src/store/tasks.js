@@ -1,6 +1,7 @@
-import { blankTask, TIME_RE, newTempo, isObj, floating, cleanPatch, TASK_PATCH, DATE_RE, str, TEMPLATES_MAX, blank } from './migrate.js'
+import { blankTask, TIME_RE, newTempo, isObj, floating, cleanPatch, TASK_PATCH, DATE_RE, str, TEMPLATES_MAX, blank, taskSig } from './migrate.js'
 import { PROJECT_LIMITS as PL, taskMilestone, unitOf, bpmOf } from '../projects.js'
-import { uid, seasonKey, daysBetween, dateStr } from './util.js'
+import { uid, seasonKey, daysBetween, dateStr, addDays } from './util.js'
+import { taskDur, sessionLen, SPLIT_MAX } from '../planner.js'
 import { MAX_STARS, TAGS, PRIORITIES, SOFT_CAP, XP } from '../theme.js'
 import { BOND_POINTS } from '../data/bond.js'
 import { rollFlower, flowerOf } from '../data/flowers.js'
@@ -8,11 +9,12 @@ export const tasksMethods = {
   // ── 任務 ──
   // ongoing：長期任務（要歸在專案裡才算），日期記成今天、不排時段；subs：一起建好的子任務（標題）；
   // tempo：要記數字進度，先開好、還沒填。true＝節拍器速度（練習曲），{ unit } 是別的單位
-  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [], tempo = false }) {
+  // due：截止日（一定要做完的那天，可以比 date 晚）
+  addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [], tempo = false, due = null }) {
     const p = project ? this._find('projects', project) : null
     const long = !!ongoing && !!p
     const t = blankTask({
-      title: String(title || '').trim(), date: long ? this.today : date, priority, tag,
+      title: String(title || '').trim(), date: long ? this.today : date, priority, tag, due: DATE_RE.test(due) ? due : null,
       dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: !long && TIME_RE.test(at) ? at : null,
       project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null, ongoing: long,
       subs: (Array.isArray(subs) ? subs : [])
@@ -303,6 +305,71 @@ export const tasksMethods = {
     this.state.tasks = this.state.tasks.filter((t) => t.id !== id)
     this._dropTaskRefs()
     this._finish([['taskDeleted', id]])
+  },
+  // ── 大任務分段：一次做不完、空檔放不下的（寫報告 3 小時），分成幾段、一天一段 ──
+  // 原本那件變成第一段（子任務、說明、專注紀錄都留在它身上），其他段是新的任務（同一個專案、分類、優先度、截止日），
+  // 標題加「（1/3）」。從原本那天（過去的話從今天）起一天一段；有截止日、天數不夠時幾段排在同一天。
+  // parts：幾段（沒給就照專注長度算：一段大約一兩輪專注）。回傳撤銷用的紀錄 { k: 'split', id, before, after, made }，沒分是 null
+  splitSessions(id, parts = null) {
+    this._refreshToday()
+    const t = this._find('tasks', id)
+    if (!t || t.done || floating(t) || t.routineId) return null
+    const total = taskDur(t)
+    const n = Math.max(2, Math.min(SPLIT_MAX, Number.isFinite(+parts) && +parts >= 2 ? Math.round(+parts) : Math.ceil(total / sessionLen(this.state.settings.focusMin))))
+    const each = Math.max(15, Math.round(total / n / 5) * 5)
+    const base = t.title.replace(/\s*（\d+\/\d+）$/, '') || t.title
+    const start = t.date < this.today ? this.today : t.date
+    const room = t.due && t.due >= start ? daysBetween(start, t.due) + 1 : n
+    const span = Math.max(1, Math.min(n, room))
+    const dayOf = (i) => addDays(start, Math.floor((i * span) / n))
+    const before = { title: t.title, date: t.date, at: t.at ?? null, dur: t.dur ?? null }
+    this._editedTask(t)
+    t.title = str(`${base}（1/${n}）`)
+    t.dur = each
+    t.at = null
+    t.date = dayOf(0)
+    this._fitStar(t)
+    this._editedTask(t)
+    const made = []
+    for (let i = 1; i < n; i++) {
+      const x = blankTask({ title: str(`${base}（${i + 1}/${n}）`), date: dayOf(i), priority: t.priority, tag: t.tag, dur: each, project: t.project, ms: t.ms, due: t.due })
+      this.state.tasks.push(x)
+      this._editedTask(x)
+      made.push({ id: x.id, sig: taskSig(x) })
+    }
+    this._finish()
+    return { k: 'split', id: t.id, before, after: { title: t.title, date: t.date, at: null, dur: each }, made }
+  },
+  // 復原分段：還是剛分好樣子的那幾段拿掉；全部都拿掉了，原本那件才變回分段前的樣子（有一段做了、改過，就留著現在的分法）。回傳有沒有改
+  undoSplit(u) {
+    if (!u || u.k !== 'split' || !Array.isArray(u.made)) return false
+    let gone = 0
+    for (const m of u.made) {
+      const x = this._find('tasks', m.id)
+      if (!x || x.done || taskSig(x) !== m.sig) continue
+      this._editedTask(x)
+      this.state.tasks = this.state.tasks.filter((y) => y !== x)
+      gone++
+    }
+    const t = this._find('tasks', u.id)
+    let back = false
+    if (gone === u.made.length && t && !t.done && t.title === u.after.title && (t.dur ?? null) === u.after.dur) {
+      this._editedTask(t)
+      t.title = u.before.title
+      t.dur = u.before.dur
+      // 日子、時段還是分完的樣子（還沒排時段）才放回原本的
+      if (t.date === u.after.date && !t.at && DATE_RE.test(u.before.date)) {
+        t.date = u.before.date
+        t.at = TIME_RE.test(u.before.at) ? u.before.at : null
+      }
+      this._fitStar(t)
+      this._editedTask(t)
+      back = true
+    }
+    if (!gone && !back) return false
+    if (gone) this._dropTaskRefs()
+    this._finish()
+    return true
   },
   moveToToday(ids) {
     for (const id of ids) {

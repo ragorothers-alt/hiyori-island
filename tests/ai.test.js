@@ -156,7 +156,7 @@ describe('送給 Claude 的參數', () => {
     expect([morning, capture, chat].map((p) => p.output_config.effort)).toEqual(['medium', 'low', 'medium'])
     expect(morning.max_tokens).toBe(10000)
     const schema = morning.output_config.format.schema
-    expect(Object.keys(schema.properties)).toEqual(['say', 'schedule', 'add', 'steps', 'edit', 'star', 'first', 'msteps', 'next', 'remember', 'forget', 'done', 'drop', 'events', 'dates', 'ask'])
+    expect(Object.keys(schema.properties)).toEqual(['say', 'schedule', 'add', 'steps', 'split', 'edit', 'star', 'first', 'msteps', 'next', 'remember', 'forget', 'done', 'drop', 'events', 'dates', 'ask'])
     const walk = (s) => {
       if (s.type === 'object') {
         expect(s.additionalProperties).toBe(false)

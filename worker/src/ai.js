@@ -123,14 +123,16 @@ const TASKS = {
 - user：作息。wake／sleep 起床和就寢、meals 三餐、work 工作或上課的時段、peak 精神最好的時段、buffer 行程之間要留的分鐘、focusMin 專注一輪的長度。
 - memory：你之前記下的、關於這位使用者的事，照著做。
 - days：今天起的 7 天。free 是那天還能排的空檔（"HH:MM-HH:MM"，已經扣掉睡眠、三餐、日程和排好的任務；今天只算現在以後）；events 是日程；tasks 是那天的任務。
-- 任務的欄位：id、title、at（排好的開始時間，沒有就是還沒排）、dur（預估分鐘，沒有就是沒填）、pri（3 高、2 中、1 低）、tag（work 工作、study 學習、life 生活、health 健康、idea 靈感）、star（本命：當天最重要的事，一天最多 3 件）、first（那天先做的那一件）、done（做完了）、moved（被往後挪過幾次）、project（歸在哪個專案）、steps（子任務「做完/全部」）、new（剛加的）、mine（你之前加的）。
+- 任務的欄位：id、title、at（排好的開始時間，沒有就是還沒排）、dur（預估分鐘，沒有就是沒填）、pri（3 高、2 中、1 低）、tag（work 工作、study 學習、life 生活、health 健康、idea 靈感）、star（本命：當天最重要的事，一天最多 3 件）、first（那天先做的那一件）、done（做完了）、moved（被往後挪過幾次）、due（截止日：一定要做完的那天；任務所在的日子是打算哪天做，可以比截止日早）、spent（用專注計時已經做了幾分鐘）、project（歸在哪個專案）、steps（子任務「做完/全部」）、new（剛加的）、mine（你之前加的）。
+- user.estimate：這位使用者實際花的時間平常是預估的幾倍（ratio；n 是根據幾件做完的任務算的）。ratio 大於 1 時，估 dur、排時間都照比例放寬（例如 1.5 倍：他寫 40 分的事當 60 分排），段落之間也多留一點。
 - overdue：逾期還沒做的任務（date 是原本的日子，late 是逾期幾天）。
 - projects：進行中的專案。daysLeft 是離期限幾天；next 是下一個還沒完成的里程碑（steps 是細項「做完/全部」）；idle 是幾天沒推進；open 是還沒做完的任務數。
 - dates：快到的重要日子。habits：今天要做的習慣。stats：最近的狀況。focusing：正在專注的任務（不要動它）。recent：你最近做過的調整，不要來回改同一件事；有 undone 的是使用者撤銷了的，表示他不要那樣的安排，不要再做一樣的事。
 - adjusted：你排好之後、使用者自己又改掉的（fuji 是你排的、now 是現在的樣子）。看得出固定的偏好（例如你排早上、他都挪到晚上；某類事他總是往後挪）就照著排；同樣的情況有 2 次以上、memory 裡又還沒有，用 remember 記成一句話。
 能做的事（寫在輸出的 JSON 裡；用不到的給空陣列或空字串）：
 - schedule：替任務排時間或改日子。at 是 "HH:MM"（5 分鐘為單位），"" 代表只改日子、不排時段；dur 是預估分鐘，0 代表不改。
-- add：新增任務。date 必填；at 可以是 ""；dur 是預估分鐘；project 是專案的 id 或 ""；steps 是一起建好的子任務（沒有給空陣列）；star 是要不要當本命。
+- add：新增任務。date 必填；at 可以是 ""；dur 是預估分鐘；project 是專案的 id 或 ""；steps 是一起建好的子任務（沒有給空陣列）；star 是要不要當本命；due 是截止日（使用者說了「週五前」「11/20 要交」才給，沒有給 ""）。
+- split：把太大的任務分成幾段、分到幾天做（parts 是段數 2～8，0 讓 App 照專注長度決定；一天一段，有截止日的分在截止日前）。dur 90 分鐘以上、那天又沒有那麼大的空檔時用；標題已經有「（1/3）」這種的不要再分。分好之後的那幾段下一次再排時間。
 - steps：替現有的任務加子任務（把大任務拆成做得下去的小步驟，每步動詞開頭、20 字以內）。
 - edit：改任務。title ""、tag ""、pri 0、project "" 都代表不改。
 - star：設定或取消本命。first：那天先做的那一件的 id（不改給 ""）。
@@ -144,6 +146,7 @@ const TASKS = {
 - 重要、要動腦的事放在 peak；有 work 時段的日子，工作和學習盡量排在 work 裡，生活瑣事排在外面。
 - 不要把一天排滿：任務的總時間最多用掉空檔的七成，留白給休息和突發的事。排不下的往後幾天分，不重要的先讓。
 - 使用者自己排好時間、還沒過的任務不要動，除非撞到日程或他要求。
+- 有 due 的任務：截止日越近越優先；不要把它挪到截止日之後；很大的事（加起來要好幾個小時）從截止日往回推，提早幾天開始、每天做一段（用 split）。過了截止日還沒做完的，在 say 裡提一句。
 - 沒有需要調整的事就全部給空（say 也給 ""），不要為了做事而做事。
 各種 run：
 - morning：把今天整理好。今天還沒排時間的任務排進空檔；逾期的任務，今天放得下就拉到今天排好，放不下的分到之後幾天。今天沒有本命就挑 1～3 件最重要的；first 給最該先做的那一件。被挪了 2 次以上或逾期 3 天以上、又沒有子任務的任務，替它拆 2～4 個小步驟。專案的期限快到、或停了 5 天以上，今天又有空檔時，加一件 25～50 分鐘、具體的下一步任務（一次最多加 2 件；已經有還沒做的任務的專案不用加）；下一個里程碑沒有細項時用 msteps 拆 3～5 個。weekStart 是 true 時，再看一下這一週：重要日子前的準備、專案的下一步，分散排進這幾天（一天不要多加超過 2 件）。
@@ -159,7 +162,7 @@ const TASKS = {
 - 每一筆的 id 是短代號，第一個字母是種類：t 任務、e 日程、d 重要日子、p 專案、m 里程碑、s 細項、u 子任務、h 習慣、r 例行公事、w 警語、b 訂閱、k 先記下來的事、l 專案的進度、n 專案的筆記、f 生活記錄。只用資料裡有的代號。
 - 任務照上面的 schedule、add、steps、edit、star、first、done、drop 做；也可以用 set 改任務的欄位。
 - set：改某一筆的某個欄位，value 一律寫成字串。id 是那一筆的代號；改設定時 id 寫 "settings"，改作息寫 "rhythm"。同一筆改好幾個欄位就寫好幾項（例如日程換時間：date、start、end 各一項）。能改的欄位：
-  任務 t：title、date、at（"" 是取消時段）、dur（分鐘）、priority（1～3）、tag、note、project（專案的代號，"" 是移出專案）、star、first、done（"false" 是取消完成）
+  任務 t：title、date（打算哪天做）、at（"" 是取消時段）、dur（分鐘）、priority（1～3）、tag、note、project（專案的代號，"" 是移出專案）、star、first、done（"false" 是取消完成）、due（截止日，"" 是不設）
   日程 e：title、date、start、end、note、allDay、endDate、done
   重要日子 d：title、date、kind（exam 考試、deadline 截止、day 紀念）
   專案 p：title、deadline（"" 是不設）、goal、status（active、paused、archived）
@@ -192,8 +195,9 @@ const TASKS = {
       const base = {
         say: str,
         schedule: arr(obj({ id: str, date: str, at: str, dur: int })),
-        add: arr(obj({ title: str, date: str, at: str, dur: int, tag, project: str, steps: strs, star: bool })),
+        add: arr(obj({ title: str, date: str, at: str, dur: int, tag, project: str, steps: strs, star: bool, due: str })),
         steps: arr(obj({ id: str, steps: strs })),
+        split: arr(obj({ id: str, parts: int })),
         edit: arr(obj({ id: str, title: str, tag: { type: 'string', enum: [...tag.enum, ''] }, pri: int, project: str })),
         star: arr(obj({ id: str, on: bool })),
         first: str,

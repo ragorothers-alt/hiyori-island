@@ -33,6 +33,39 @@ export const PEAKS = {
 export const TASK_DUR = { 1: 15, 2: 30, 3: 50 }
 export const taskDur = (t) => t.dur || TASK_DUR[t.priority] || 30
 
+// ── 大任務分段 ──
+// 預估這麼長（分鐘）以上的任務可以分成幾段、分到幾天做；最多分幾段
+export const SPLIT_MIN = 90
+export const SPLIT_MAX = 8
+// 一段大約多長：專注一輪 25 分的人一段兩輪（50 分），長的一輪就一段
+export const sessionLen = (focusMin) => {
+  const f = Number.isFinite(+focusMin) && +focusMin >= 10 ? +focusMin : 25
+  return f <= 30 ? f * 2 : f
+}
+
+// ── 預估準不準 ──
+// 最近做完、有填預估、又用專注計時做過的任務：實際專注的分鐘 ÷ 預估，取中位數（一兩件特別久的不會帶偏）。
+// 至少 5 件才算；回傳 { ratio, n }，資料不夠是 null。ratio 1.4＝平常實際花的時間是預估的 1.4 倍
+export const ESTIMATE_MIN = 5
+export function estimateRatio(tasks, now = Date.now(), days = 60) {
+  const since = now - days * 86400000
+  const r = []
+  for (const t of tasks || []) {
+    if (!t?.done || !(t.doneAt >= since) || !(t.dur >= 10) || !(t.spent >= 5)) continue
+    const x = t.spent / t.dur
+    // 只專注了一小段、其他時間沒計時（或忘了停）的不算
+    if (x >= 0.25 && x <= 4) r.push(x)
+  }
+  if (r.length < ESTIMATE_MIN) return null
+  r.sort((a, b) => a - b)
+  const mid = r.length % 2 ? r[(r.length - 1) / 2] : (r[r.length / 2 - 1] + r[r.length / 2]) / 2
+  return { ratio: Math.round(mid * 20) / 20, n: r.length }
+}
+// 排時間時替一件任務留多久：平常會超時的人照比例多留（最多兩倍），平常提早做完的不縮
+export const stretchDur = (dur, stretch = 1) => (stretch > 1.05 ? Math.min(dur * 2, Math.round((dur * stretch) / 5) * 5) : dur)
+// 自動排程最多用掉空檔的幾成：留白給休息和突發的事（跟ふじ的說明一樣是七成）
+export const FILL = 0.7
+
 export function fmtDur(min) {
   const m = Math.max(0, Math.round(min))
   const h = Math.floor(m / 60)
@@ -164,22 +197,36 @@ export function busyOf({ rhythm, date, events, tasks, skip }) {
   return busy
 }
 
-// 排序：本命 → 高優先 → 逾期越久越前 → 長的先排（大石頭先放）→ 建立順序
+// 排序：本命 → 截止日快到的 → 高優先 → 逾期越久越前 → 長的先排（大石頭先放）→ 建立順序
 export function planOrder(tasks, date) {
-  const score = (t) => (t.star ? 1000 : 0) + t.priority * 100 + Math.min(30, Math.max(0, daysBefore(t.date, date))) * 10
+  const score = (t) => (t.star ? 1000 : 0) + dueUrgency(t, date) + t.priority * 100 + Math.min(30, Math.max(0, daysBefore(t.date, date))) * 10
   return [...tasks].sort((a, b) => score(b) - score(a) || taskDur(b) - taskDur(a) || (a.createdAt || 0) - (b.createdAt || 0))
+}
+// 截止日越近越前面：當天或過了 +500、剩一天 +350、三天內 +200、一週內 +80
+function dueUrgency(t, date) {
+  if (!t.due) return 0
+  const left = daysBefore(date, t.due)
+  return left <= 0 ? 500 : left === 1 ? 350 : left <= 3 ? 200 : left <= 7 ? 80 : 0
 }
 const daysBefore = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000)
 
-// 偏好：重要的放在精神最好的時段、低優先避開它；工作與學習在工作日盡量放進工作時段。數字越小越好
+// 午後容易沒精神的時段（13–15 點）：要動腦的避開，輕鬆的小事放這裡
+export const DIP = [13 * 60, 15 * 60]
+// 偏好：重要的放在精神最好的時段、低優先避開它；工作與學習在工作日盡量放進工作時段；
+// 午後低潮放低優先的小事、重的避開。數字越小越好
 function preference(t, start, rhythm, date) {
   let p = 0
   const peak = PEAKS[rhythm.peak]?.range
+  const heavy = t.star || t.priority === 3
   if (peak) {
     const inPeak = start >= peak[0] && start < peak[1]
-    if (t.star || t.priority === 3) p += inPeak ? 0 : 1
+    if (heavy) p += inPeak ? 0 : 1
     else if (t.priority === 1) p += inPeak ? 1 : 0
   }
+  // 精神最好的時段本來就在午後的不算（那個人下午最有精神）
+  const inDip = start >= DIP[0] && start < DIP[1] && !(peak && peak[0] < DIP[1] && peak[1] > DIP[0])
+  if (inDip && (heavy || taskDur(t) >= 50)) p += 1
+  else if (!inDip && t.priority === 1 && taskDur(t) <= 30 && !(peak && peak[0] < DIP[1] && peak[1] > DIP[0])) p += 0.5
   const work = rhythm.work
   if (work && work.days?.includes(weekday(date)) && (t.tag === 'work' || t.tag === 'study')) {
     const inWork = start >= toM(work.start) && start < toM(work.end)
@@ -190,7 +237,7 @@ function preference(t, start, rhythm, date) {
 
 // 在空檔裡找一個位置：候選起點是每段空檔的開頭、精神時段與工作時段的開頭
 function bestStart(t, dur, free, rhythm, date) {
-  const marks = [PEAKS[rhythm.peak]?.range[0], rhythm.work ? toM(rhythm.work.start) : null].filter((v) => v != null)
+  const marks = [PEAKS[rhythm.peak]?.range[0], rhythm.work ? toM(rhythm.work.start) : null, DIP[0], DIP[1]].filter((v) => v != null)
   let best = null
   for (const [a, b] of free) {
     for (const s of [a, ...marks.filter((m) => m > a && m + dur <= b)]) {
@@ -203,37 +250,54 @@ function bestStart(t, dur, free, rhythm, date) {
 }
 
 // 最佳化時程：把還沒排時段（replan 時連同還沒開始的）任務放進空檔。
-// 回傳 plan：[{ id, at, dur }]、left：放不下的任務、load：當天已排的總分鐘、free：剩下的空檔分鐘、endAt：最後一件結束的時間
-export function optimizeDay({ tasks, events, rhythm, date, today, nowMin = null, replan = false }) {
+// stretch：平常實際花的時間是預估的幾倍（estimateRatio）：會超時的人每件後面多留一點（任務的長度不改，多的是空白）。
+// fill：最多用掉空檔的幾成（本命、高優先的不受限），超過的留到別天。
+// 回傳 plan：[{ id, at, dur }]、left：放不下的任務、full：其中因為不想排太滿而沒排的、big：其中比哪一段空檔都長、可以分段做的、
+// load：當天已排的總分鐘、free：剩下的空檔分鐘、endAt：最後一件結束的時間
+export function optimizeDay({ tasks, events, rhythm, date, today, nowMin = null, replan = false, stretch = 1, fill = FILL }) {
   const [from, to] = windowOf({ rhythm, date, today, nowMin })
   const movable = (t) => !t.done && (!t.at || (replan && toM(t.at) >= from))
   const pending = planOrder(tasks.filter(movable), date)
   const skip = new Set(pending.map((t) => t.id))
   const busy = busyOf({ rhythm, date, events, tasks, skip })
   const buf = rhythm.buffer || 0
+  const room = gaps(from, to, busy).reduce((a, [x, y]) => a + (y - x), 0)
+  const budget = fill >= 1 ? Infinity : room * fill
+  let used = 0
   const plan = []
   const left = []
+  const full = []
+  const big = []
   for (const t of pending) {
     const dur = taskDur(t)
+    const need = stretchDur(dur, stretch)
+    // 一般的任務：再排下去就太滿了，留到別天（本命、高優先的一定排）
+    if (used + need > budget && !(t.star || t.priority === 3)) {
+      left.push(t.id)
+      full.push(t.id)
+      continue
+    }
     const free = gaps(from, to, busy)
-    const s = bestStart(t, dur, free, rhythm, date)
+    const s = bestStart(t, need, free, rhythm, date)
     if (s == null) {
       left.push(t.id)
+      if (dur >= SPLIT_MIN && !free.some(([a, b]) => b - a >= need)) big.push(t.id)
       continue
     }
     plan.push({ id: t.id, at: toHHMM(s), dur })
-    busy.push([s - buf, s + dur + buf])
+    busy.push([s - buf, s + need + buf])
+    used += need + buf
   }
   const placed = tasks.filter((t) => !t.done && t.at && !skip.has(t.id))
   const load = [...placed.map(taskDur), ...plan.map((p) => p.dur)].reduce((a, b) => a + b, 0)
   const freeLeft = gaps(from, to, busy).reduce((a, [x, y]) => a + (y - x), 0)
   const ends = [...placed.map((t) => toM(t.at) + taskDur(t)), ...plan.map((p) => toM(p.at) + p.dur)]
-  return { plan, left, load, free: freeLeft, endAt: ends.length ? toHHMM(Math.max(...ends)) : null, from: toHHMM(from), to: toHHMM(to) }
+  return { plan, left, full, big, load, free: freeLeft, endAt: ends.length ? toHHMM(Math.max(...ends)) : null, from: toHHMM(from), to: toHHMM(to) }
 }
 
-// 單一任務：找最近的空檔
+// 單一任務：找最近的空檔（使用者自己要排的，不管排得滿不滿）
 export function nearestSlot({ task, tasks, events, rhythm, date, today, nowMin = null }) {
-  const r = optimizeDay({ tasks: [...tasks.filter((t) => t.id !== task.id), { ...task, at: null }], events, rhythm, date, today, nowMin })
+  const r = optimizeDay({ tasks: [...tasks.filter((t) => t.id !== task.id), { ...task, at: null }], events, rhythm, date, today, nowMin, fill: 1 })
   return r.plan.find((p) => p.id === task.id) || null
 }
 

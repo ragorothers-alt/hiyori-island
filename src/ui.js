@@ -22,7 +22,7 @@ import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm, inlineEdit, editing, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
-import { firstPickIn } from './planner.js'
+import { firstPickIn, taskDur, SPLIT_MIN } from './planner.js'
 import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -1297,7 +1297,7 @@ export class UI {
         undo: made ? () => (routine ? this._undoRoutine(made.id) : s.deleteEvent(made.id)) : null,
       }
     }
-    const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur }
+    const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur, due: p.due || null }
     // 「@專案」優先，沒打就用下拉選的專案（例行任務不歸專案）
     const proj = p.project ? { id: p.project, name: p.projectName } : pickedProj
     let made
@@ -1537,6 +1537,8 @@ export class UI {
         const i = TAGS.findIndex((x) => x.id === t.tag)
         s.updateTask(id, { tag: TAGS[(i + 1) % TAGS.length].id })
       } else if (act === 'today') s.moveToToday([id])
+      else if (act === 'due') this._pickDue(id, e.target.closest('button'))
+      else if (act === 'split') this._split(id)
       else if (act === 'proj') this.openProject(s.state.tasks.find((x) => x.id === id)?.project, undefined, id)
       else if (act === 'focus') this.focus.ask(id)
       else if (act === 'subs') {
@@ -1736,6 +1738,54 @@ export class UI {
     })
   }
 
+  // 截止日：用瀏覽器自己的日期選擇器（一個藏起來的 <input type="date">，放在按鈕旁邊）。清掉＝不設
+  _pickDue(id, btn) {
+    const s = this.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    if (!t) return
+    let input = this._dueInput
+    if (!input) {
+      input = this._dueInput = document.createElement('input')
+      input.type = 'date'
+      input.className = 'due-pick'
+      input.setAttribute('aria-label', '截止日')
+      input.tabIndex = -1
+      document.body.appendChild(input)
+      input.addEventListener('change', () => {
+        const tid = input.dataset.id
+        const v = input.value || null
+        const was = s.state.tasks.find((x) => x.id === tid)
+        if (!was || (was.due ?? null) === v) return
+        s.updateTask(tid, { due: v })
+        this.toast({ icon: '旗', title: v ? `截止日 ${+v.slice(5, 7)}/${+v.slice(8)}` : '不設截止日了', sub: was.title, ms: 2800 })
+      })
+    }
+    input.dataset.id = id
+    input.value = t.due || ''
+    const r = btn?.getBoundingClientRect()
+    input.style.left = `${Math.round(r?.left ?? innerWidth / 2)}px`
+    input.style.top = `${Math.round(r?.bottom ?? innerHeight / 2)}px`
+    try {
+      input.showPicker()
+    } catch {
+      input.focus()
+      input.click()
+    }
+  }
+  // 大任務分成幾段、分到幾天做（一天一段，有截止日的分在截止日前）；可以復原
+  _split(id) {
+    const s = this.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    const u = t && s.splitSessions(id)
+    if (!u) return
+    const days = [u.after.date, ...u.made.map((m) => s.state.tasks.find((x) => x.id === m.id)?.date)].filter(Boolean)
+    const md = (d) => (d === s.today ? '今天' : `${+d.slice(5, 7)}/${+d.slice(8)}`)
+    this.toast({
+      icon: '分', title: `分成 ${u.made.length + 1} 段，每段 ${u.after.dur} 分鐘`, sub: [...new Set(days)].map(md).join('、'), ms: 6000,
+      actions: [{ label: '復原', run: () => s.undoSplit(u) || this.toast({ icon: '分', title: '分出來的那幾段之後改過了', sub: '就留著現在的樣子', ms: 3400 }) }],
+    })
+  }
+
   _taskItem(t, overdue = false) {
     const tag = tagOf(t.tag)
     const pri = PRIORITIES[t.priority] || PRIORITIES[2]
@@ -1757,6 +1807,16 @@ export class UI {
     if (rt) meta.push(`<span class="rep">↻ ${esc(repeatLabel(rt.repeat))}</span>`)
     if (t.done && t.doneAt) meta.push(`<span>${hhmm(t.doneAt)} 綻放</span>`)
     if (overdue) meta.push(`<span>${esc(t.date.slice(5).replace('-', '/'))}</span>`)
+    // 截止日（跟打算哪天做分開）：快到了、過了、排在截止日之後都標出來
+    if (t.due && !t.done) {
+      const left = Math.round((parseDate(t.due) - parseDate(this.store.today)) / 86400000)
+      const md = `${+t.due.slice(5, 7)}/${+t.due.slice(8)}`
+      const after = !floating(t) && t.date > t.due
+      const word = left < 0 ? `過了 ${-left} 天` : left === 0 ? '今天截止' : left === 1 ? '明天截止' : `還有 ${left} 天`
+      const cls = left < 0 || after ? ' late' : left <= 2 ? ' soon' : ''
+      meta.push(`<button class="due-tag${cls}" data-act="due" title="截止日 ${md}${after ? '（排在截止日之後了）' : ''}。點一下改">⚑ ${md}・${word}</button>`)
+    }
+    if (t.spent && t.dur) meta.push(`<span class="spent" title="用專注計時做了 ${t.spent} 分鐘（預估 ${t.dur} 分鐘）">做了 ${t.spent}／估 ${t.dur} 分</span>`)
     const subs = t.subs || []
     const open = this._subsOpen(t)
     const sd = subs.filter((x) => x.done).length
@@ -1774,6 +1834,8 @@ export class UI {
         ${overdue ? `<button class="mini" data-act="today" title="移到今天">${ICON.today}</button>` : ''}
         ${!t.done && !overdue && t.date === this.store.today ? `<button class="mini" data-act="focus" title="專注在這件事上">${ICON.play}</button>` : ''}
         ${subs.length ? '' : `<button class="mini" data-act="subs" aria-expanded="${open}" title="${open ? '收起子任務' : '拆成子任務'}">${ICON.subs}</button>`}
+        ${!t.done && !t.due ? `<button class="mini" data-act="due" title="設截止日（一定要做完的那天）">${ICON.flag}</button>` : ''}
+        ${!t.done && !t.routineId && !floating(t) && taskDur(t) >= SPLIT_MIN ? `<button class="mini" data-act="split" title="分成幾段，分到幾天做">${ICON.split}</button>` : ''}
         <button class="mini" data-act="edit" title="編輯">${ICON.edit}</button>
         <button class="mini" data-act="delete" title="刪除">${ICON.del}</button>
       </div>

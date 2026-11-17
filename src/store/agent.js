@@ -1,4 +1,4 @@
-import { floating, DATE_RE, blankTask, str, cleanTask } from './migrate.js'
+import { floating, DATE_RE, blankTask, str, cleanTask, taskSig as sigOf } from './migrate.js'
 import { busyOf, awake, taskDur, toHHMM } from '../planner.js'
 import { toMin, uid, addDays } from './util.js'
 import { MAX_STARS, TAGS } from '../theme.js'
@@ -15,12 +15,7 @@ export const AGENT_LOG_MAX = 30
 export const AGENT_MEMORY_MAX = 30
 const short = (s, n = 22) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 const roundUp = (m) => Math.ceil(m / 5) * 5
-// ふじ剛加好的任務長什麼樣子：撤銷時還是這個樣子才刪（之後改過標題、時間、寫了說明、勾了子任務的就留著）
-const sigOf = (t) =>
-  JSON.stringify([
-    t.title, t.date, t.at ?? null, t.dur ?? null, t.priority, t.tag, t.note || '', t.project || null, t.ms || null, !!t.ongoing, !!t.star, !!t.first, t.pomos || 0,
-    (t.subs || []).map((s) => [s.title, !!s.done]), t.tempo ? [t.tempo.unit, t.tempo.goal, t.tempo.log.length] : null,
-  ])
+// ふじ剛加好的任務長什麼樣子（sigOf＝migrate.js 的 taskSig）：撤銷時還是這個樣子才刪
 const slotOf = (t) => ({ date: t.date, at: t.at ?? null, dur: t.dur ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first })
 
 export const agentMethods = {
@@ -100,6 +95,8 @@ export const agentMethods = {
       const t = find(x?.id)
       if (!movable(t)) continue
       const date = okDate(x.date) ? x.date : t.date < today ? today : t.date
+      // 自己整理時不把任務挪過它的截止日（使用者開口要的照做）
+      if (!chat && t.due && t.due >= today && date > t.due) continue
       const before = slotOf(t)
       let at = null
       let dur = x.dur ? x.dur : t.dur ?? null
@@ -132,7 +129,7 @@ export const agentMethods = {
       const p = pid ? this._find('projects', pid) : null
       const dur = x.dur || 30
       const t = blankTask({
-        title: x.title, date, tag: x.tag, dur, at: x.at ? place(date, x.at, dur) : null, coach: `a-${runId}`,
+        title: x.title, date, tag: x.tag, dur, at: x.at ? place(date, x.at, dur) : null, coach: `a-${runId}`, due: DATE_RE.test(x.due) ? x.due : null,
         project: p && !p.archived && !p.completedAt ? p.id : null,
         subs: (x.steps || []).slice(0, PL.subs).map((s) => ({ id: uid(), title: str(s, PL.subTitle), done: false })),
       })
@@ -141,6 +138,17 @@ export const agentMethods = {
       this._editedTask(t)
       fx.push(['taskAdded', t])
       note(`新增「${short(t.title)}」（${day(date)}${t.at ? ` ${t.at}` : ''}）`, { k: 'add', id: t.id, sig: sigOf(t) })
+    }
+
+    // ── 太大的任務分成幾段、分到幾天做（store/tasks.js 的 splitSessions）──
+    for (const x of act.split || []) {
+      const t = find(x?.id)
+      if (!movable(t)) continue
+      const was = t.title
+      const u = this.splitSessions(t.id, x.parts || null)
+      if (!u) continue
+      const days = [...new Set([u.after.date, ...u.made.map((m) => find(m.id)?.date).filter(Boolean)])].map(day)
+      note(`「${short(was)}」分成 ${u.made.length + 1} 段（${days.join('、')}）`, u)
     }
 
     // ── 拆小步驟 ──
@@ -313,6 +321,8 @@ export const agentMethods = {
         this.state.tasks = this.state.tasks.filter((x) => x !== t)
         this._dropTaskRefs()
         n++
+      } else if (u.k === 'split') {
+        if (this.undoSplit(u)) n++
       } else if (u.k === 'subs' || u.k === 'msteps') {
         const p = u.k === 'msteps' ? this._find('projects', u.pid) : null
         const owner = u.k === 'subs' ? t : p?.milestones.find((y) => y.id === u.mid)

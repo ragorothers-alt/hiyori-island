@@ -6,6 +6,8 @@ import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, 
 import { taskMilestone } from '../projects.js'
 import { haptic } from './haptics.js'
 
+const clipTitle = (s, n = 14) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+
 // 日程分頁：週條、早晨的睡眠小卡、排程列、還沒排時段的任務、可拖曳的一日時間軸、作息設定與編輯面板
 
 const PX = 1.1 // 時間軸每分鐘幾像素
@@ -164,7 +166,8 @@ export class ScheduleView {
     if (p) {
       html = `<div class="pb-preview">
         <div class="pb-msg">${ICON.spark}<div><b>${p.plan.length ? `預覽：排入 ${p.plan.length} 件` : '暫時沒有可排入的任務'}</b>${p.endAt ? `<small>預計 ${p.endAt} 任務結束・虛線是預覽</small>` : ''}
-          ${p.left.length ? `<small class="warn">還有 ${p.left.length} 件未排入，改天安排也可以</small>` : ''}</div></div>
+          ${p.left.length ? `<small class="warn">還有 ${p.left.length} 件未排入${p.full?.length ? `（其中 ${p.full.length} 件是為了留白、不排太滿）` : ''}，改天安排也可以</small>` : ''}
+          ${p.big?.length ? `<small class="warn">${p.big.map((id) => `「${esc(clipTitle(s.state.tasks.find((t) => t.id === id)?.title || ''))}」`).join('')}比這天哪一段空檔都長 <button type="button" class="cm-link" data-plan="split">分成幾段、分到幾天做</button></small>` : ''}</div></div>
         <div class="pb-btns"><button class="btn-ghost" data-plan="cancel">取消</button>
           ${placed.length && !this.preview.replan ? '<button class="btn-ghost" data-plan="replan">重排未開始的任務</button>' : ''}
           <button class="btn-primary" data-plan="apply" ${p.plan.length ? '' : 'disabled'}>套用</button></div></div>`
@@ -536,6 +539,19 @@ export class ScheduleView {
         this.preview = null
         s.applyPlan(p.date, p.result.plan, p.result.left.length)
         if (p?.result.left.length) this.hooks.toast({ icon: '満', title: `還有 ${p.result.left.length} 件未排入`, sub: '這天的空檔有點滿，改天安排也沒關係' })
+      } else if (act === 'split') {
+        // 放不下的大任務分段，再照新的樣子預覽一次
+        const p = this.preview
+        const undo = (p?.result.big || []).map((id) => s.splitSessions(id)).filter(Boolean)
+        if (!undo.length) return
+        this.preview = p.date >= s.today ? { ...p, result: s.planDay(p.date, { replan: p.replan }) } : null
+        this.render(false)
+        const days = [...new Set(undo.flatMap((u) => [u.after.date, ...u.made.map((m) => s.state.tasks.find((t) => t.id === m.id)?.date)]).filter(Boolean))].sort()
+        const md = (d) => (d === s.today ? '今天' : `${+d.slice(5, 7)}/${+d.slice(8)}`)
+        this.hooks.toast({
+          icon: '分', title: `分成 ${undo.reduce((a, u) => a + u.made.length + 1, 0)} 段了`, sub: `排在 ${days.map(md).join('、')}，有截止日的都在截止日前`, ms: 5200,
+          actions: [{ label: '復原', run: () => { undo.forEach((u) => s.undoSplit(u)); this.preview = null; this.render(false) } }],
+        })
       } else if (act === 'cancel') {
         this.preview = null
         this.render(false)

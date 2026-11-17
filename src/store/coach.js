@@ -1,5 +1,5 @@
 import { floating, TIME_RE, cleanRhythm, num, DATE_RE, str, blankTask } from './migrate.js'
-import { optimizeDay, sleepMinutes, busyOf } from '../planner.js'
+import { optimizeDay, sleepMinutes, busyOf, estimateRatio } from '../planner.js'
 import { toMin, repeatMatches, uid } from './util.js'
 import { XP, TAGS } from '../theme.js'
 export const coachMethods = {
@@ -19,12 +19,17 @@ export const coachMethods = {
     return date === this.today ? [...list, ...this.overdue()] : list
   },
   // 最佳化時程的預覽（不會改資料）
+  // 平常會超時的人（實際花的時間比預估多），每件後面多留一點
   planDay(date = this.selectedDate, { replan = false } = {}) {
     const n = new Date()
     return optimizeDay({
       tasks: this.planTasks(date), events: this._busyEvents(date), rhythm: this.state.rhythm, date, today: this.today,
-      nowMin: date === this.today ? n.getHours() * 60 + n.getMinutes() : null, replan,
+      nowMin: date === this.today ? n.getHours() * 60 + n.getMinutes() : null, replan, stretch: this.estimate()?.ratio || 1,
     })
+  },
+  // 預估準不準（planner.js 的 estimateRatio）：{ ratio, n }，資料不夠是 null
+  estimate() {
+    return estimateRatio(this.state.tasks)
   },
   // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數
   applyPlan(date, plan, left = 0) {

@@ -1079,6 +1079,8 @@ export class Store {
     const task = taskId ? this._find('tasks', taskId) : null
     if (task) {
       if (!extra) task.pomos = (task.pomos || 0) + 1
+      // 實際做了幾分鐘（跟預估比，看得出平常估得準不準）
+      task.spent = Math.min(99999, (task.spent || 0) + Math.round(minutes))
       task.touched = Date.now()
     }
     // 任務歸在某個專案、或目標就是專案：專注的分鐘記到專案上（專案的時間軸和統計用）

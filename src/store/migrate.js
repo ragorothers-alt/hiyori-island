@@ -200,6 +200,7 @@ const TASK_PATCH = {
   ms: (v) => (ID_RE.test(v) ? v : null),
   note: (v) => str(v, PL.taskNote).trim(),
   ongoing: (v) => !!v,
+  due: (v) => (DATE_RE.test(v) ? v : null),
 }
 const EVENT_PATCH = {
   title: (v, e) => str(v).trim() || e.title,
@@ -263,6 +264,12 @@ const fieldsOf = (v) => {
   if (DATE_RE.test(v.date)) o.date = v.date
   return Object.keys(o).length ? o : null
 }
+// 分段前後的樣子：{ title, date, at, dur }
+const SPLIT_UNDO_MAX = 12
+const splitShape = (v) =>
+  isObj(v) && typeof v.title === 'string' && v.title.trim() && DATE_RE.test(v.date)
+    ? { title: str(v.title).trim(), date: v.date, at: TIME_RE.test(v.at) ? v.at : null, dur: v.dur ? num(v.dur, 5, 600, 30) : null }
+    : null
 // 加進去的子任務、細項：[{ id, title }]
 const addedOf = (v) => (Array.isArray(v) ? v.slice(0, 40).map((x) => (isObj(x) && ID_RE.test(x.id) ? { id: x.id, title: str(x.title, 80) } : null)).filter(Boolean) : [])
 function cleanUndo(u) {
@@ -281,6 +288,13 @@ function cleanUndo(u) {
     }
     // sig：剛加好時的樣子（之後被改過就不刪）
     case 'add': return id && typeof u.sig === 'string' ? { k: 'add', id, sig: u.sig.slice(0, 4000) } : null
+    // 大任務分成幾段：原本那件分段前後的樣子、多出來的那幾段（剛建好時的樣子）
+    case 'split': {
+      const before = splitShape(u.before)
+      const after = splitShape(u.after)
+      const made = (Array.isArray(u.made) ? u.made : []).slice(0, SPLIT_UNDO_MAX).filter((x) => isObj(x) && ID_RE.test(x.id) && typeof x.sig === 'string').map((x) => ({ id: x.id, sig: x.sig.slice(0, 4000) }))
+      return id && before && after && made.length ? { k: 'split', id, before, after, made } : null
+    }
     case 'done': case 'event': case 'date': return id ? { k: u.k, id } : null
     case 'star': return id && typeof u.on === 'boolean' ? { k: 'star', id, on: u.on } : null
     case 'first': return id ? { k: 'first', id, was: oid(u.was) } : null
@@ -530,9 +544,16 @@ const newTempo = (unit = '') => ({ unit: unitOf(unit), goal: null, log: [], met:
 export const blankTask = (o = {}) => ({
   id: uid(), title: '', date: dateStr(), priority: 2, tag: 'life', done: false, rewarded: false, createdAt: Date.now(), doneAt: null,
   routineId: null, pomos: 0, star: false, first: false, flower: null, dur: null, at: null, coach: null, moved: 0,
-  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null,
+  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null, due: null, spent: 0,
   ...o,
 })
+
+// 一件任務剛建好時的樣子（ふじ加的、分段做出來的）：撤銷時還是這個樣子才刪（之後改過標題、時間、寫了說明、勾了子任務、專注過的就留著）
+export const taskSig = (t) =>
+  JSON.stringify([
+    t.title, t.date, t.at ?? null, t.dur ?? null, t.priority, t.tag, t.note || '', t.project || null, t.ms || null, !!t.ongoing, !!t.star, !!t.first, t.pomos || 0,
+    (t.subs || []).map((s) => [s.title, !!s.done]), t.tempo ? [t.tempo.unit, t.tempo.goal, t.tempo.log.length] : null,
+  ])
 
 // 任務範本：常用的一組設定（長期、分類、子任務、要不要記數字），新增任務時選了就照著建。例如「練習曲」
 const TEMPLATES_MAX = 20
@@ -593,6 +614,10 @@ export function cleanTask(t, today = dateStr()) {
     tempo: cleanTempo(t.tempo),
     // touched：最後一次推進這件事的時間（勾子任務、寫紀錄、記數字、專注）；長期任務太久沒碰時提醒用
     touched: ts(t.touched),
+    // due：截止日（一定要做完的那天），跟 date（打算哪天做）分開：週五交的報告可以排在週三做。沒有是 null
+    due: DATE_RE.test(t.due) ? t.due : null,
+    // spent：用專注計時實際做了幾分鐘（加總）。跟預估（dur）比，看得出平常估得準不準
+    spent: num(t.spent, 0, 99999, 0),
   }
 }
 
