@@ -16,6 +16,9 @@ const LOG_FILE = '__push-log'
 const MOTTO_FILE = '__motto-plan'
 const MOTTO_DONE = '__motto-done'
 const MOTTO_LOG = '__motto-log'
+// ふじ在 App 關著時的通知（早上、截止日有風險、睡前；src/fujiNotes.js）：跟警語排在同一串（fuji: true），
+// 自己一個 tag、沒有按鈕，送到的記在這裡（不算進回神紀錄的「提醒了幾次」）
+const FUJI_LOG = '__fuji-log'
 // 按了警語通知上的哪一顆按鈕 { id, act, at }：頁面開好了拿走（src/push.js 的 takeNoticeAct）
 const ACT_FILE = '__act'
 // 到點晚了這麼久的警語就不顯示了（src/mottos.js 的 MOTTO_LATE，兩邊要一樣）
@@ -237,7 +240,8 @@ async function showPush() {
   let cache = null
   // 這次要顯示的：計時器、警語（各自只看還沒顯示過的）；都顯示過了的話，最近的那一則（again）
   let timer = null
-  let motto = null
+  // 警語和ふじ的那一則（跟警語排在同一串，fuji: true）各挑各的：推播晚到時其中一種不會把另一種吞掉
+  let fresh = []
   let again = null
   const repeat = (x, tag, log) => {
     if (!again || x.at > again.at) again = { ...x, tag, log }
@@ -259,30 +263,33 @@ async function showPush() {
       repeat(timer, `hiyori-focus-${timer.at}`, LOG_FILE)
       timer = null
     }
-    motto = latestDue(mottos, now, MOTTO_LATE)
+    const list = Array.isArray(mottos) ? mottos : []
+    const picks = [latestDue(list.filter((x) => !x?.fuji), now, MOTTO_LATE), latestDue(list.filter((x) => x?.fuji), now, MOTTO_LATE)].filter(Boolean)
+    const again1 = (x) => (x.fuji ? repeat(x, 'fuji', FUJI_LOG) : repeat(x, 'motto', MOTTO_LOG))
+    // 已經念過、顯示過的（念到哪一則的記號以後的才算新的）
+    const keepNew = (d) => (x) => (x.at > d ? true : (again1(x), false))
     doneBefore = await readJSON(cache, MOTTO_DONE)
-    if (motto && motto.at <= (Number(doneBefore?.at) || 0)) {
-      repeat(motto, 'motto', MOTTO_LOG)
-      motto = null
-    }
+    fresh = picks.filter(keepNew(Number(doneBefore?.at) || 0))
     // 先記下這一次通知過了，再顯示（頁面醒著的話，看了就不用自己再發一次）。
     // 警語寫之前再讀一次：頁面剛好在這之間念了同一句，就改成不出聲地放（不會畫面上念一次、通知又響一次）
     if (timer) await putJSON(cache, SHOWN_FILE, { at: timer.at })
-    if (motto) {
+    if (fresh.length) {
       doneBefore = await readJSON(cache, MOTTO_DONE)
-      if (Number(doneBefore?.at) >= motto.at) {
-        repeat(motto, 'motto', MOTTO_LOG)
-        motto = null
-      } else await putJSON(cache, MOTTO_DONE, { at: motto.at })
+      fresh = fresh.filter(keepNew(Number(doneBefore?.at) || 0))
+      if (fresh.length) await putJSON(cache, MOTTO_DONE, { at: Math.max(...fresh.map((x) => x.at)) })
     }
   } catch {}
   const shows = []
   // 同一次到點，頁面自己發的通知也用同一個 tag（計時器：hiyori-focus-到點的時間；警語：motto）
   if (timer) shows.push({ ...timer, tag: `hiyori-focus-${timer.at}`, log: LOG_FILE, kind: 'timer' })
   // 推播晚到、已經過了那一段醒著的時間（頁面排的時候記下的就寢時間 sleep）：不出聲地放（已經在睡了），也不算進回神紀錄
-  if (motto) {
-    const asleep = Number.isFinite(motto.sleep) && now >= motto.sleep
-    shows.push({ ...motto, tag: 'motto', log: MOTTO_LOG, kind: 'motto', ...(asleep ? { silent: true, asleep: true } : { fresh: true }) })
+  for (const m of fresh) {
+    if (m.fuji) {
+      shows.push({ ...m, tag: 'fuji', log: FUJI_LOG, kind: 'motto', fresh: true })
+      continue
+    }
+    const asleep = Number.isFinite(m.sleep) && now >= m.sleep
+    shows.push({ ...m, tag: 'motto', log: MOTTO_LOG, kind: 'motto', ...(asleep ? { silent: true, asleep: true } : { fresh: true }) })
   }
   if (!shows.length) {
     if (again) shows.push({ ...again, silent: true })
@@ -316,7 +323,7 @@ async function showPush() {
   }
   if (!out.length && failed) throw failed
   // 開著的頁面（在背景、JavaScript 還在跑）馬上知道念到這一則了
-  const said = out.find((s) => s.kind === 'motto')
+  const said = out.filter((s) => s.kind === 'motto').reduce((a, s) => (!a || s.at > a.at ? s : a), null)
   if (said) {
     try {
       for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'hiyori-motto-shown', at: said.at })

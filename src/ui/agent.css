@@ -33,7 +33,9 @@
 .ag-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ag-top:empty { display: none; }
 .ag-mode button { font-size: 12.5px; padding: 5px 11px; }
-.ag-mode-sub { flex: 1; min-width: 0; font-size: 11.5px; color: var(--ink-faint); }
+.ag-mode-sub, .ag-notes-sub { flex: 1; min-width: 0; font-size: 11.5px; color: var(--ink-faint); }
+/* 「這台接收通知」那一顆換到下一行 */
+.ag-break { flex-basis: 100%; height: 0; }
 .ag-panel { padding: 12px 14px; border-radius: 18px; background: var(--glass-strong); border: 1px solid var(--glass-border); display: grid; gap: 8px; animation: fadeUp .3s var(--ease); }
 .ag-panel[hidden] { display: none; }
 .ag-panel h3 { margin: 0; font-size: 13px; font-weight: 600; }

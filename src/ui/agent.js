@@ -25,6 +25,23 @@ const DOTS = '<span class="cm-dots" aria-hidden="true"><i></i><i></i><i></i></sp
 // 正在想的那一則：對話時她寫出來多少就先顯示多少（邊寫邊送），還沒開始寫是「我想一下」；自己整理時寫在做什麼
 const thinkText = (agent) => (agent.thinking === 'chat' ? (agent.partial ? esc(agent.partial) : '我想一下') : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`)
 
+// 「這台接收ふじ的通知」那一顆（App 關著時：早上、截止日有風險、睡前；只從一台送）和它下面那一行說明
+const NOTES_WHY = {
+  notify: '要先開系統通知才收得到',
+  push: '現在連不上通知伺服器，App 關著時可能收不到',
+  'old-app': '要更新 Android App 才收得到',
+  none: '這個瀏覽器收不到 App 關著時的通知',
+}
+function notesHTML(n, mode) {
+  if (!n || mode === 'off') return ''
+  const reach = n.reach()
+  const on = n.here() && reach === 'ok'
+  const owner = n.owner()
+  const why = n.here() && reach !== 'ok' ? NOTES_WHY[reach] : owner === 'other' ? '現在是另一台在接收；按一下改成這台' : on ? '早上、截止日有風險時、睡前，一天最多 3 則' : 'App 關著時不通知'
+  const dis = reach === 'old-app' || reach === 'none'
+  return `<i class="ag-break" aria-hidden="true"></i><button type="button" class="chip-toggle${on ? ' on' : ''}" data-av="notes" aria-pressed="${on}"${dis ? ' disabled' : ''}>這台接收通知</button><small class="ag-notes-sub">${esc(why)}</small>`
+}
+
 // 對話和紀錄排成一條：這台的對話，加上不是從這台對話來的紀錄（她自己整理的、別台做的）
 export function agentFeed(agent, store, limit = 40) {
   const log = store.state.agent.log
@@ -196,7 +213,12 @@ export class AgentView extends Base {
       if (!b) return
       const v = b.dataset.av
       if (v === 'panel') this.panel = !this.panel
-      else if (v === 'mode') {
+      else if (v === 'notes') {
+        // 這台接收／不接收 App 關著時的通知（打開時還沒開系統通知會先問）
+        const n = this.hooks.fujiNotes
+        if (n) n.set(!(n.here() && n.reach() === 'ok')).then(() => this.render())
+        return
+      } else if (v === 'mode') {
         this.store.setSetting('agentMode', b.dataset.v)
         this.agent.reset()
       } else if (v === 'forget') this.store.agentForget(+b.dataset.i)
@@ -237,7 +259,7 @@ export class AgentView extends Base {
     $('.ag-top').innerHTML = `<div class="seg ag-mode" role="group" aria-label="ふじ自己整理的方式">${AGENT_MODES.map(
       (m) => `<button type="button" data-av="mode" data-v="${m}" class="${m === mode ? 'on' : ''}" aria-pressed="${m === mode}" title="${MODE_LABEL[m][1]}">${MODE_LABEL[m][0]}</button>`,
     ).join('')}</div><small class="ag-mode-sub">${MODE_LABEL[mode][1]}</small>
-      <button type="button" class="chip-toggle${this.panel ? ' on' : ''}" data-av="panel" aria-expanded="${this.panel}">記得的事${mem.length ? ` ${mem.length}` : ''}</button>`
+      <button type="button" class="chip-toggle${this.panel ? ' on' : ''}" data-av="panel" aria-expanded="${this.panel}">記得的事${mem.length ? ` ${mem.length}` : ''}</button>${notesHTML(this.hooks.fujiNotes, mode)}`
     const panel = $('.ag-panel')
     panel.hidden = !this.panel
     // 記得的事那一塊：開著的時候只在內容變了才重畫（裡面有輸入框）

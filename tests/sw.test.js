@@ -358,6 +358,43 @@ describe('Service Worker：警語的推播', () => {
       expect(await s.log()).toBeUndefined()
     }))
 
+  it('ふじ在 App 關著時的通知（跟警語排在同一串，fuji: true）：自己的 tag、沒有按鈕、不算進回神紀錄；同一則再來不出聲', () =>
+    withClock(async () => {
+      const note = { at: NOW + 17000, title: 'ふじ · 今天的安排', body: '今天 3 件事，先做「寫報告」。', fuji: true }
+      const s = setup({ mottos: [m(0), note], windows: () => [{ looking: false }] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      expect(s.shown()).toEqual([expect.objectContaining({ tag: 'motto' })])
+      vi.setSystemTime(NOW + 17000)
+      await run(s.on.push, { data: null })
+      const fuji = s.shown().find((n) => n.tag === 'fuji')
+      expect(fuji).toMatchObject({ title: 'ふじ · 今天的安排', body: note.body, renotify: true, silent: false })
+      expect(fuji.actions).toBeUndefined()
+      // 警語那一則留著（不同 tag，不會被換掉）
+      expect(s.shown().map((n) => n.tag).sort()).toEqual(['fuji', 'motto'])
+      expect(await s.done()).toEqual({ at: NOW + 17000 })
+      expect(await s.mottoLog()).toEqual([{ got: NOW, at: NOW, closed: false }])
+      expect(await (await (await s.caches.open('hiyoripush')).match(SCOPE + '__fuji-log'))?.json()).toEqual([{ got: NOW + 17000, at: NOW + 17000, closed: false }])
+      vi.setSystemTime(NOW + 20000)
+      await run(s.on.push, { data: null })
+      expect(s.shown().find((n) => n.tag === 'fuji')).toMatchObject({ silent: true })
+      expect(s.alerts).toEqual(['ひより · 給自己的警語', 'ふじ · 今天的安排'])
+    }))
+
+  it('推播晚到、警語和ふじ的那一則都到點了：各自顯示（不會只顯示最晚的那一則，把另一種吞掉）', () =>
+    withClock(async () => {
+      const note = { at: NOW + 17000, title: 'ふじ · 今天的安排', body: '今天 3 件事', fuji: true }
+      const s = setup({ mottos: [m(0), note], windows: () => [{ looking: false }] })
+      await s.ready
+      vi.setSystemTime(NOW + 40000)
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.tag).sort()).toEqual(['fuji', 'motto'])
+      expect(s.alerts).toEqual(['ひより · 給自己的警語', 'ふじ · 今天的安排'])
+      expect(await s.done()).toEqual({ at: NOW + 17000 })
+      expect(await s.mottoLog()).toEqual([{ got: NOW + 40000, at: NOW, closed: false }])
+      expect(s.messages).toEqual([{ type: 'hiyori-motto-shown', at: NOW + 17000 }])
+    }))
+
   it('推播晚到、錯過好幾則：只顯示最近的那一則；晚了 10 分鐘以上的不顯示', () =>
     withClock(async () => {
       const s = setup({ mottos: [m(-30), m(-20), m(-10), m(0, '舊'), m(10)] })

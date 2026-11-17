@@ -1,6 +1,6 @@
 // Android 殼的即時倒數通知：計時的狀態 → 通知上的樣子（src/native.js）
 import { describe, expect, it } from 'vitest'
-import { liveTimer, native } from '../src/native.js'
+import { liveTimer, native, nativeFujiNotes, sendFujiNotes } from '../src/native.js'
 
 const AT = new Date(2026, 10, 10, 17, 25).getTime()
 const done = { at: AT, title: 'ひより · 專注結束', body: '25 分鐘完成，休息一下吧' }
@@ -49,5 +49,20 @@ describe('Android 殼的即時倒數', () => {
     const p = liveTimer({ ...base, paused: true, at: null, leftMs: 12 * 60000 + 5000, target: '寫報告' }, null)
     expect(p).toEqual({ title: '暫停中 · 寫報告', text: '還剩 12:05，回到 App 繼續', chip: '暫停' })
     expect(liveTimer({ ...base, paused: true, counting: true, at: null, leftMs: 65000 }).text).toBe('已經 1:05，回到 App 繼續')
+  })
+})
+
+describe('ふじ在 App 關著時的通知交給手機', () => {
+  it('舊版的殼沒有 fujiNotes：不送；新版只送 at／title／body，內容沒變不重送，空的是取消', () => {
+    expect(nativeFujiNotes({})).toBe(false)
+    expect(sendFujiNotes([{ at: 1, title: 'a', body: 'b' }], {})).toBe(false)
+    const got = []
+    const bridge = { fujiNotes: (j) => got.push(j) }
+    const items = [{ at: AT, title: 'ふじ · 今天的安排', body: '今天 1 件事', kind: 'morning', fuji: true }]
+    expect(sendFujiNotes(items, bridge)).toBe(true)
+    expect(sendFujiNotes([...items], bridge)).toBe(true)
+    expect(got).toEqual([JSON.stringify({ items: [{ at: AT, title: 'ふじ · 今天的安排', body: '今天 1 件事' }] })])
+    sendFujiNotes([], bridge)
+    expect(got.at(-1)).toBe('')
   })
 })

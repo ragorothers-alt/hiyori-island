@@ -5,6 +5,7 @@
     <string name="ch_done">計時到點</string>
     <string name="ch_remind">提醒</string>
     <string name="ch_motto">警語提醒</string>
+    <string name="ch_fuji">ふじ的通知</string>
     <string name="act_focus">▶ 開始專注</string>
     <string name="act_pause">先停 1 小時</string>
     <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">

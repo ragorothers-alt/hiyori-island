@@ -891,6 +891,9 @@ function migrate(s) {
   if (!CAT_MOTTOS.includes(settings.catMotto)) settings.catMotto = DEFAULT_SETTINGS.catMotto
   // ふじ自己整理的方式：只收選項裡的
   settings.agentMode = AGENT_MODES.includes(s.settings?.agentMode) ? s.settings.agentMode : DEFAULT_SETTINGS.agentMode
+  // ふじ的通知從哪一台送：裝置的代號或 'off'，看不懂的當成還沒選
+  const notifyAt = s.settings?.fujiNotify
+  settings.fujiNotify = typeof notifyAt === 'string' && /^(off|[a-z0-9]{8,24})$/.test(notifyAt) ? notifyAt : ''
   if (!FONT_SCALES.includes(settings.fontScale)) settings.fontScale = 1
   settings.glass = num(settings.glass, 0, 100, DEFAULT_SETTINGS.glass)
   if (!MOTTO_EVERY.includes(settings.mottoEvery)) settings.mottoEvery = DEFAULT_SETTINGS.mottoEvery

@@ -156,6 +156,24 @@ export function nativeAwayLocked(bridge = native) {
   }
 }
 
+// ふじ在 App 關著時的通知（fujiNotes.js 排的）交給手機的鬧鐘：舊版的殼（6 以前）沒有這個，那時只在 App 開著時說
+export const nativeFujiNotes = (bridge = native) => typeof bridge?.fujiNotes === 'function'
+// items：[{ at, title, body }]（照時間排好），空的是不送了。內容沒變就不重送。回傳送到了沒
+let lastFuji = null
+export function sendFujiNotes(items, bridge = native) {
+  if (!nativeFujiNotes(bridge)) return false
+  const json = items?.length ? JSON.stringify({ items: items.map(({ at, title, body }) => ({ at, title, body })) }) : ''
+  if (json === lastFuji) return true
+  try {
+    bridge.fujiNotes(json)
+    lastFuji = json
+    return true
+  } catch (e) {
+    console.warn('[hiyori] ふじ的通知沒送到原生', e)
+    return false
+  }
+}
+
 // 通知權限：殼裡沒有瀏覽器的 Notification，問原生
 export const nativeCanNotify = () => {
   try {

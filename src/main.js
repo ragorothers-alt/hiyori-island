@@ -5,8 +5,8 @@ import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, closeNotify, notifyPermission } from './reminders.js'
-import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct } from './push.js'
-import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked } from './native.js'
+import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct, pushSupported } from './push.js'
+import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes } from './native.js'
 import { planKey, pauseOf, pauseText, pauseUntil, pausedUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt, activeMottos, windowEnd } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
@@ -26,6 +26,7 @@ import { pick, short, fill, line } from './voice.js'
 import { createAgent } from './agentRunner.js'
 import { dayWord } from './agent.js'
 import { createRiskWatch } from './riskWatch.js'
+import { planNotes, deviceId, notesHere } from './fujiNotes.js'
 import { createCalendars } from './calendars.js'
 import { AI_MODELS, aiModel, aiExtras, aiUnshared } from './ai.js'
 
@@ -778,6 +779,32 @@ async function boot() {
   hooks.calendars = calendars
   calendars.sync()
   store.on('change', () => calendars.sync())
+  // ── ふじ在 App 關著時的通知（src/fujiNotes.js）：只從一台送（settings.fujiNotify 是那一台的代號，'off' 是不送），
+  // 還沒選過的話手機（Android 殼、手機的瀏覽器）先送 ──
+  const myDevice = deviceId()
+  const phoneLike = !!native || !deskWeb()
+  const fujiNotes = {
+    // 這台送得出去嗎：ok／notify 還沒開系統通知／push 連不上通知伺服器／old-app 舊版的 Android 殼／none 這個瀏覽器收不到推播
+    reach: () => {
+      if (native) return !nativeFujiNotes() ? 'old-app' : notifyOn() ? 'ok' : 'notify'
+      if (!pushSupported()) return 'none'
+      return !notifyOn() ? 'notify' : mottoPush?.ready() ? 'ok' : 'push'
+    },
+    here: () => notesHere(store.state.settings.fujiNotify, myDevice, phoneLike),
+    // 'mine' 這台、'other' 別台、'off' 關著、'' 還沒選
+    owner: () => {
+      const v = store.state.settings.fujiNotify || ''
+      return v === myDevice ? 'mine' : v === 'off' || !v ? v : 'other'
+    },
+    // 改成這台接收／不接收。打開時還沒開系統通知就先問，不允許就不改
+    set: async (on) => {
+      if (on && !notifyOn() && !(await ui.enableNotify())) return false
+      store.setSetting('fujiNotify', on ? myDevice : 'off')
+      syncMottos()
+      return true
+    },
+  }
+  hooks.fujiNotes = fujiNotes
   const ui = new UI(store, hooks)
   chatter = (who, text, ms) => ui.chatter(who, text, ms)
   // ふじ在對話裡改了設定（或撤銷了）：外觀、字的大小、音效、計時跟著換
@@ -1713,7 +1740,86 @@ async function boot() {
         backSent = back?.at || 0
       } // 沒送到（例如殼剛好出錯）：下一秒再試
     }
-    mottoPush?.sync(mottoItems, document.hidden || leaving, now)
+    const hidden = document.hidden || leaving
+    // ふじ在 App 關著時的通知：網頁跟警語排在同一串交給伺服器（伺服器只知道幾點），Android 殼交給手機的鬧鐘
+    const notes = planFuji(now, hidden)
+    if (native) sendFujiNotes(notes)
+    mottoPush?.sync(withNotes(mottoItems, notes, hidden, now), hidden, now)
+  }
+  // ── ふじ在 App 關著時的通知（src/fujiNotes.js）：照現在的資料先寫好。資料變了、每分鐘、看得到和看不到頁面之間換了時重寫 ──
+  let fujiList = []
+  let fujiAt = 0
+  let fujiDirty = true
+  let fujiHidden = null
+  // 最後一次正看著 App 的時間：那之前已經打開過 App，今天早上那則就不送
+  let lookedAt = Date.now()
+  store.on('dirty', () => (fujiDirty = true))
+  // 排好的風險那則（RISK_NOTES_KEY，這台的）：到點了就當成說過了（推播、手機都是照時間送，不用等送到的回音），
+  // 記進風險的紀錄（riskWatch.mark）：App 開著時、下一次重算時不再為同一件事說一次；那天也不再排第二則（days）
+  const RISK_NOTES_KEY = 'hiyori-fuji-risk'
+  const readRiskNotes = () => {
+    try {
+      const v = JSON.parse(localStorage.getItem(RISK_NOTES_KEY) || 'null')
+      return { notes: Array.isArray(v?.notes) ? v.notes.filter((n) => Number.isFinite(n?.at)) : [], days: Array.isArray(v?.days) ? v.days : [] }
+    } catch {
+      return { notes: [], days: [] }
+    }
+  }
+  const writeRiskNotes = (v) => {
+    try {
+      localStorage.setItem(RISK_NOTES_KEY, JSON.stringify(v))
+    } catch {}
+  }
+  const settleRisk = (now) => {
+    const r = readRiskNotes()
+    const past = r.notes.filter((n) => n.at <= now)
+    if (!past.length) return r.days
+    for (const n of past) if (typeof n.due === 'string') risk.mark(n.due, n.level)
+    const days = [...new Set([...r.days, ...past.map((n) => dateStr(new Date(n.at)))])].slice(-6)
+    writeRiskNotes({ notes: r.notes.filter((n) => n.at > now), days })
+    fujiDirty = true
+    return days
+  }
+  const fujiOn = () => {
+    const s = store.state.settings
+    return agent.ready() && s.agentMode !== 'off' && fujiNotes.here() && fujiNotes.reach() === 'ok'
+  }
+  const planFuji = (now, hidden) => {
+    if (!hidden && !(native && nativeAway())) lookedAt = now
+    if (!fujiDirty && hidden === fujiHidden && now - fujiAt < 60000) return fujiList
+    const riskDays = settleRisk(now)
+    fujiDirty = false
+    fujiHidden = hidden
+    fujiAt = now
+    const saveRisk = () => writeRiskNotes({ notes: fujiList.filter((n) => n.kind === 'risk').map(({ at, due, level }) => ({ at, due, level })), days: riskDays })
+    if (!fujiOn()) {
+      fujiList = fujiList.length ? [] : fujiList
+      saveRisk()
+      return fujiList
+    }
+    try {
+      fujiList = planNotes({
+        riskDays,
+        // 別的分頁看過的也算（ui.lastSeen：看得到的分頁每分鐘記一次）：在背景很久的分頁不會把今天早上那則又排回去
+        today: store.today, now, seen: Math.max(lookedAt, ui.lastSeen()), rhythm: store.state.rhythm, tasks: store.state.tasks,
+        tasksOn: (d) => store.tasksOn(d), eventsOn: (d) => store.timedEventsOn(d), ratio: store.estimate()?.ratio || 1,
+        memo: risk.memo(), quietUntil: ui.focus.mode === 'focus' ? ui.focus.boundary?.at || 0 : 0, auto: agent.auto(),
+      })
+    } catch (e) {
+      console.warn('[hiyori] ふじ的通知沒排好', e)
+    }
+    saveRisk()
+    return fujiList
+  }
+  // 跟警語併成一串（照時間排：伺服器照第一則排鬧鐘）。看得到頁面時，已經過了的那幾則拿掉（使用者正看著，不用再推；
+  // 不然離開頁面時會被當成剛到點、還沒送的補推）。fuji：Service Worker 用ふじ自己的通知顯示
+  let mixed = { m: null, n: null, k: -1, list: [] }
+  const withNotes = (items, notes, hidden, now) => {
+    const keep = hidden ? notes : notes.filter((n) => n.at > now)
+    if (mixed.m === items && mixed.n === notes && mixed.k === keep.length) return mixed.list
+    const list = keep.length ? [...items, ...keep.map((n) => ({ at: n.at, title: n.title, body: n.body, fuji: true }))].sort((a, b) => a.at - b.at) : items
+    mixed = { m: items, n: notes, k: keep.length, list }
+    return list
   }
   store.on('dirty', () => syncMottos())
   document.addEventListener('visibilitychange', () => document.hidden && syncMottos())
@@ -1776,7 +1882,11 @@ async function boot() {
     const mins = n.getHours() * 60 + n.getMinutes()
     if (mins < 480 || mins >= Math.min(bedAt(store.state.rhythm), 1440)) return
     riskAt = Date.now()
+    // App 關著時已經用通知說過的，先記成說過了（打開時不再說一次）
+    settleRisk(riskAt)
     const got = risk.check()
+    // 說過的等級變了：ふじ的通知照新的重排
+    if (got.due.length || got.projects.length) fujiDirty = true
     const name = (id) => store.state.tasks.find((t) => t.id === id)?.title || ''
     const day = (d) => dayWord(d, store.today)
     const ask = (text) => (agent.ready() ? [{ label: '跟ふじ商量', run: () => ui.openFuji(text) }] : [])
@@ -1819,6 +1929,33 @@ async function boot() {
       })
     }
   }
+  // ── 第一次：問一聲要不要在 App 關著時通知（還沒選過、這台是手機、接著 Claude、ふじ會自己動、送得出去）。
+  // 沒回答的話照預設送（手機先送），一天最多問一次；打開 App 半分鐘後才問（不跟開場的提示卡擠在一起）──
+  const NOTES_ASK_KEY = 'hiyori-fuji-notes-asked'
+  const notesFrom = Date.now() + 30000
+  let notesAsked = false
+  const askNotes = () => {
+    if (notesAsked || !booted || document.hidden || ui.focus.mode === 'focus' || Date.now() < notesFrom) return
+    const s = store.state.settings
+    if (s.fujiNotify || !phoneLike || !agent.ready() || s.agentMode === 'off') return
+    if (['old-app', 'none'].includes(fujiNotes.reach())) return
+    notesAsked = true
+    try {
+      if (localStorage.getItem(NOTES_ASK_KEY) === store.today) return
+      localStorage.setItem(NOTES_ASK_KEY, store.today)
+    } catch {}
+    ui.afterBrief(() =>
+      ui.toast({
+        icon: '藤', stamp: true, tag: 'fuji-notes', ms: 30000,
+        title: 'App 關著的時候，要我通知你嗎？',
+        sub: '一天最多 3 則：早上今天的安排、截止日有風險時、睡前明天先做哪件。開會、專注、睡覺時不吵你',
+        actions: [
+          { label: '好', run: async () => (await fujiNotes.set(true)) && ui.toast({ icon: '藤', stamp: true, title: '好，之後從這台通知你', sub: '想換一台或不要了，到ふじ的頁面改' }) },
+          { label: '不用', soft: true, run: () => fujiNotes.set(false) },
+        ],
+      }),
+    )
+  }
   setInterval(() => {
     ui.tickClock()
     // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
@@ -1827,6 +1964,7 @@ async function boot() {
     // 等於沒看到，警語還會被當成念過了（手機那邊也不再發）。開場一好，下一秒就照常檢查
     if (booted) reminders.check()
     riskTick()
+    askNotes()
     syncMottos()
     tabNudge()
     // 到點自動延長時留著的慶祝（升級、成就、任務達成）：延長做完了（休息、結束、另一個分頁結束了），

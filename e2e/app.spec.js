@@ -4321,6 +4321,73 @@ test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的�
   await expect(row.locator('.ai-btns button')).toHaveText(['測試連線', '改通行碼', '停用'])
 })
 
+test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明天早上的那幾則先寫好交給手機；第一次問要不要，說不用就取消；ふじ頁面上可以改回這台接收', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T20:00:00+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    // 假的 Android 殼（新版，有 fujiNotes）：記下每一次交給手機的ふじ的那幾則
+    window.__fuji = []
+    window.HiyoriNative = {
+      version: () => 6, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify() {},
+      mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => true,
+      fujiNotes: (json) => window.__fuji.push(json),
+    }
+    if (localStorage.getItem('hiyori-daily-v1')) return
+    const tomorrow = new Date(Date.parse(`${ymd}T12:00:00+08:00`) + 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
+    // 明天要交的報告和簡報，各還要 10 小時：照現在的空檔來不及了
+    const tasks = [
+      { id: 'e2e-t1', title: '寫期末報告', priority: 3, date: tomorrow, at: '09:00', first: true, dur: 600, due: tomorrow },
+      { id: 'e2e-t2', title: '準備簡報', priority: 2, date: tomorrow, dur: 600, due: tomorrow },
+    ]
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, events: [], projects: [], player: {}, settings: { notify: true } }))
+    localStorage.setItem('hiyori-ai-pass', 'e2e-test-pass')
+    // App 關著時已經送過的風險那則（19:30，說明天截止的來不及了）
+    localStorage.setItem('hiyori-fuji-risk', JSON.stringify({ notes: [{ at: Date.parse(`${ymd}T19:30:17+08:00`), due: tomorrow, level: 'late' }], days: [] }))
+  }, { ymd })
+  // 假的 Claude：什麼都不動
+  await context.route(/\/v1\/ai$/, async (route) => {
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' }
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+    const out = { say: '', schedule: [], add: [], steps: [], edit: [], star: [], first: '', msteps: [], next: '', remember: [], forget: [], done: [], drop: [], events: [], dates: [], ask: [] }
+    await route.fulfill({ status: 200, headers: cors, contentType: 'application/json', body: JSON.stringify({ ok: true, model: 'mock', out }) })
+  })
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await bootReady(page)
+  const last = () => page.evaluate(() => {
+    const j = window.__fuji.at(-1)
+    return j === undefined ? null : j ? JSON.parse(j).items.map((x) => [new Date(x.at).toLocaleString('sv', { timeZone: 'Asia/Taipei' }).slice(11, 16), x.title, x.body]) : []
+  })
+  // 還沒選過哪一台：手機先送。今晚就寢（23:30）前 30 分鐘、明天起床（7:00）後 30 分鐘
+  await expect.poll(async () => (await last())?.slice(0, 2).map(([t, title]) => `${t} ${title}`)).toEqual(['23:00 ふじ · 差不多該睡了', '07:30 ふじ · 今天的安排'])
+  const [bed, morning] = await last()
+  // 關著時送過的風險那則：打開後記成說過了，開著時不再說一次（沒有「做不完」的提示卡），今天也不再排第二則
+  const tomorrow = await page.evaluate(() => window.hiyori.store.state.tasks[0].date)
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('hiyori-risk') || '{}').due)).toMatchObject({ [tomorrow]: 'late' })
+  expect(await page.evaluate(() => (window.__toasts || []).some((x) => x.includes('做不完')))).toBe(false)
+  expect((await last()).some(([, title]) => title.includes('截止日'))).toBe(false)
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('hiyori-fuji-risk')))).toEqual({ notes: [], days: [ymd] })
+  expect(bed[2]).toContain('明天先做「寫期末報告」（09:00）')
+  expect(morning[2]).toBe('今天 2 件事，先做「寫期末報告」（09:00）。「寫期末報告」 等 2 件今天截止。')
+  // 半分鐘後第一次問：說不用 → 不送了（手機上排著的取消）
+  await page.clock.setFixedTime(new Date(T + 31000))
+  const ask = page.locator('#toasts .toast', { hasText: 'App 關著的時候，要我通知你嗎？' })
+  await expect(ask).toBeVisible()
+  await ask.locator('.toast-act', { hasText: '不用' }).click()
+  await expect.poll(last).toEqual([])
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.fujiNotify)).toBe('off')
+  // ふじ頁面上改回這台接收
+  await page.evaluate(() => window.hiyori.ui.openAgent())
+  const toggle = page.locator('#coachRoot [data-av="notes"]')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('#coachRoot .ag-notes-sub')).toHaveText('早上、截止日有風險時、睡前，一天最多 3 則')
+  await expect.poll(async () => (await last())?.length).toBeGreaterThan(1)
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.fujiNotify)).toBe(await page.evaluate(() => localStorage.getItem('hiyori-device')))
+})
+
 test('隨叫隨到的ふじ：任何一頁按 J 叫出來，看得到正在看哪一頁；一句話改日程、設定、新增習慣，做完打開那一頁；整批撤銷', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
   const T = Date.parse(`${ymd}T10:00:00+08:00`)

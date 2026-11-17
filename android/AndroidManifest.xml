@@ -32,6 +32,7 @@
         </activity>
         <receiver android:name=".TimerAlarm" android:exported="false" />
         <receiver android:name=".MottoAlarm" android:exported="false" />
+        <receiver android:name=".FujiAlarm" android:exported="false" />
         <!-- 只收系統發的開機、App 更新（exported=false 時其他 App 叫不到，系統的廣播照樣收得到） -->
         <receiver android:name=".MottoBoot" android:exported="false">
             <intent-filter>

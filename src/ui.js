@@ -249,6 +249,8 @@ export class UI {
     if (this.agent) {
       const agentHooks = {
         toast: (o) => this.toast(o),
+        // App 關著時的通知從哪一台送（main.js 的 fujiNotes）
+        fujiNotes: hooks.fujiNotes,
         startFocus: (id) => {
           this.fuji?.close()
           this.focus.ask(id)

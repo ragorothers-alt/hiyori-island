@@ -146,6 +146,7 @@ public class MainActivity extends Activity {
         // 回到 App：「時間到了」和上一則警語已經看到了，收掉
         TimerNotice.clearDone(this);
         MottoNotice.clear(getApplicationContext());
+        FujiNotice.clear(getApplicationContext());
     }
 
     @Override
@@ -210,10 +211,17 @@ public class MainActivity extends Activity {
     class Bridge {
         // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）；
         // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）；
-        // 5：多了 actAt（按鈕是哪一則警語通知上的）、shown（App 不在前面時發過的警語）
+        // 5：多了 actAt（按鈕是哪一則警語通知上的）、shown（App 不在前面時發過的警語）；
+        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）
         @JavascriptInterface
         public int version() {
-            return 5;
+            return 6;
+        }
+
+        // ふじ在 App 關著時的通知：json 是接下來的每一則 { items: [{ at, title, body }] }，空字串是不送了
+        @JavascriptInterface
+        public void fujiNotes(String json) {
+            if (trusted) FujiNotice.plan(getApplicationContext(), json);
         }
 
         // 按了警語通知上的哪一顆按鈕："focus"（開始專注現在該做的那一件）、"pause"（先停 1 小時），沒有是空字串。拿走就清掉

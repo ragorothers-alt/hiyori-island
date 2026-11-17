@@ -70,5 +70,18 @@ export function createRiskWatch(store, { now = () => new Date() } = {}) {
     } catch {}
     return out
   }
-  return { current, check }
+  // 每個截止日上一次說過的等級（App 關著時的通知照它算：比它差了才送，見 fujiNotes.js）
+  const memo = () => ({ ...mem.due, ...load().due })
+  // App 關著時的通知說過了（排好的風險那則到點了）：記成說過這個等級（比記著的差才記），開著時、重算時不再為同一件事說一次
+  function mark(date, level) {
+    const saved = load()
+    mem = { due: { ...mem.due, ...saved.due }, proj: { ...mem.proj, ...saved.proj }, week: saved.week || mem.week }
+    if (!worse(level, mem.due[date])) return
+    mem.due[date] = level
+    cache = null
+    try {
+      localStorage.setItem(RISK_KEY, JSON.stringify({ due: mem.due, proj: mem.proj, week: mem.week }))
+    } catch {}
+  }
+  return { current, check, memo, mark }
 }

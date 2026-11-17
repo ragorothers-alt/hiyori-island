@@ -94,6 +94,8 @@ export const DEFAULT_SETTINGS = {
   pullActed: '', mottoActed: '',
   // 每天的專注目標（分鐘，theme.js 的 FOCUS_GOALS；0 是不設）
   focusGoal: 0,
+  // ふじ在 App 關著時的通知從哪一台送（那一台的代號，fujiNotes.js 的 deviceId）；'off' 是不送，'' 是還沒選（手機先送）
+  fujiNotify: '',
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 export const NOISES = ['off', 'rain', 'brown', 'pink']
