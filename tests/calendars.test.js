@@ -12,7 +12,8 @@ const ymd = (d) => d.replaceAll('-', '')
 const ics = (events, name = '學校課表') =>
   ['BEGIN:VCALENDAR', 'VERSION:2.0', `X-WR-CALNAME:${name}`, ...events.flatMap((e) => ['BEGIN:VEVENT', `UID:${e.uid}`, `SUMMARY:${e.title}`, ...e.lines, 'END:VEVENT']), 'END:VCALENDAR'].join('\r\n')
 const sample = ics([
-  { uid: 'math', title: '微積分', lines: [`DTSTART;TZID=Asia/Taipei:${ymd(TODAY)}T100000`, `DTEND;TZID=Asia/Taipei:${ymd(TODAY)}T120000`, 'RRULE:FREQ=WEEKLY;COUNT=4', 'LOCATION:理學院 201'] },
+  // 不帶時區＝照這台機器的時間（CI 在 UTC 跑；時區換算在 tests/ics.test.js 測）
+  { uid: 'math', title: '微積分', lines: [`DTSTART:${ymd(TODAY)}T100000`, `DTEND:${ymd(TODAY)}T120000`,'RRULE:FREQ=WEEKLY;COUNT=4', 'LOCATION:理學院 201'] },
   { uid: 'trip', title: '畢業旅行', lines: [`DTSTART;VALUE=DATE:${ymd(addDays(TODAY, 3))}`, `DTEND;VALUE=DATE:${ymd(addDays(TODAY, 5))}`] },
 ])
 const reply = (body, init = {}) => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status: 200, ...init })
