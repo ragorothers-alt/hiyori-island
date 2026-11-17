@@ -24,6 +24,7 @@ import { lookHour, nightAt, realHour, systemDark, daypart } from './daylight.js'
 import { RESIDENTS, buildingOf } from './data/town.js'
 import { pick, short, fill, line } from './voice.js'
 import { createAgent } from './agentRunner.js'
+import { createCalendars } from './calendars.js'
 import { AI_MODELS, aiModel, aiExtras, aiUnshared } from './ai.js'
 
 // 描寫天色的字眼：外觀設定讓天空和真實時間不同時（例如白天開夜間模式），問候避開這些句子
@@ -756,6 +757,11 @@ async function boot() {
     },
   })
   hooks.agent = agent
+  // ── 匯入的行事曆：抓回來的日程（唯讀）放進 store.external；設定變了就重新套用、去抓（src/calendars.js）──
+  const calendars = createCalendars(store)
+  hooks.calendars = calendars
+  calendars.sync()
+  store.on('change', () => calendars.sync())
   const ui = new UI(store, hooks)
   chatter = (who, text, ms) => ui.chatter(who, text, ms)
   // ふじ在對話裡改了設定（或撤銷了）：外觀、字的大小、音效、計時跟著換
@@ -1935,6 +1941,9 @@ async function boot() {
   // ふじ：開場好了、線上同步拉完之後看一次該不該整理今天；之後每分鐘、回到 App 時再看
   setTimeout(() => agent.tick(), 6000)
   document.addEventListener('visibilitychange', () => !document.hidden && setTimeout(() => agent.tick(), 1500))
+  // 匯入的行事曆：回到 App、每 10 分鐘看一次（超過 30 分鐘沒抓才真的去抓）
+  document.addEventListener('visibilitychange', () => !document.hidden && calendars.refresh())
+  setInterval(() => !document.hidden && calendars.refresh(), 10 * 60000)
   backReady = true
   if (bootAct) {
     const { act, at } = bootAct

@@ -35,6 +35,7 @@ export const EVENTS = {
   eventChanged: '日程改了（時間、日期、改成整天）',
   eventDone: '日程完成',
   rhythmChanged: '作息設定改了',
+  calendarsChanged: '匯入的行事曆加了、改了、刪了',
   planApplied: '套用最佳化時程',
   coachApplied: '套用ふじ排的計畫',
   coachUndone: '撤銷ふじ排的計畫',

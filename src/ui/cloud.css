@@ -20,3 +20,17 @@
 @media (max-width: 420px) {
   .cloud-qr { width: 88px; height: 88px; }
 }
+/* 設定裡的匯入行事曆 */
+.ics-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ics-list:empty { display: none; }
+.ics-list li { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: start; padding: 8px 10px; border-radius: 12px; background: var(--glass-strong); }
+.ics-list li > div:first-of-type { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ics-list li b { font-size: 13.5px; overflow-wrap: anywhere; }
+.ics-list li small { font-size: 11.5px; color: var(--ink-faint); line-height: 1.5; }
+.ics-list li.err small { color: var(--warn-ink); }
+.ics-list li.off { opacity: .65; }
+.ics-list li .sync-btns { grid-column: 2; }
+.ics-dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: var(--c); }
+.ics-add { display: flex; gap: 6px; }
+.ics-add .ics-input { flex: 1; min-width: 0; text-transform: none; letter-spacing: 0; font-family: inherit; font-size: 13px; }
+.ics-help { font-size: 11px; color: var(--ink-faint); line-height: 1.6; }

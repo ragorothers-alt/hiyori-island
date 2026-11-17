@@ -1,4 +1,4 @@
-import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PARK_MAX, parkText } from './migrate.js'
+import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PARK_MAX, parkText, calUrlOk, CALENDARS_MAX } from './migrate.js'
 import { uid, addDays, daysBetween, dateStr } from './util.js'
 import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
@@ -408,6 +408,39 @@ export const extrasMethods = {
   },
 
   // ── 重要日子 ──
+  // ── 匯入的行事曆（抓回來的日程在 this.external，見 src/calendars.js）──
+  // 回傳新的那一筆；網址不對、已經有同一個網址、到上限是 null
+  addCalendar({ url, name = '', color = 0 }) {
+    const u = String(url || '').trim()
+    if (!calUrlOk(u) || this.state.calendars.length >= CALENDARS_MAX) return null
+    if (this.state.calendars.some((c) => c.url === u)) return null
+    const c = { id: uid(), url: u, name: str(name, 30).trim(), color: Math.max(0, Math.min(99, Math.round(+color) || 0)), on: true, createdAt: Date.now() }
+    this.state.calendars.push(c)
+    this._finish([['calendarsChanged', c]])
+    return c
+  },
+  updateCalendar(id, patch = {}) {
+    const c = this._find('calendars', id)
+    if (!c) return
+    if ('name' in patch) c.name = str(patch.name, 30).trim()
+    if ('on' in patch) c.on = !!patch.on
+    if ('color' in patch) c.color = Math.max(0, Math.min(99, Math.round(+patch.color) || 0))
+    this._finish([['calendarsChanged', c]])
+  },
+  removeCalendar(id) {
+    const before = this.state.calendars.length
+    this.state.calendars = this.state.calendars.filter((c) => c.id !== id)
+    if (this.state.calendars.length === before) return
+    this.setExternal(this.external.filter((e) => e.ext !== id))
+    this._finish([['calendarsChanged', null]])
+  },
+  // 換掉抓回來的日程（不存進小島的資料、不同步：每台自己抓）。關掉、刪掉的行事曆不算
+  setExternal(list) {
+    const on = new Set(this.state.calendars.filter((c) => c.on).map((c) => c.id))
+    this.external = (Array.isArray(list) ? list : []).filter((e) => on.has(e.ext))
+    this.emit('change')
+  },
+
   addDate({ title, date, kind = 'exam' }) {
     title = str(title, 30).trim()
     if (!title || !DATE_RE.test(date) || this.state.dates.length >= DATES_MAX) return null

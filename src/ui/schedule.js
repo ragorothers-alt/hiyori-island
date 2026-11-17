@@ -5,6 +5,7 @@ import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey } from '../s
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
 import { taskMilestone } from '../projects.js'
 import { haptic } from './haptics.js'
+import { isExternal } from '../calendars.js'
 
 const clipTitle = (s, n = 14) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
@@ -255,12 +256,14 @@ export class ScheduleView {
         const c = ev ? EVENT_COLORS[item.color % EVENT_COLORS.length] : tagOf(item.tag).color
         const others = clash.get(b.id)
         const past = isToday ? b.end <= now : date < s.today
-        const meta = others ? `時間和 ${others.length} 件重疊` : ev ? (item.note ? esc(item.note) : '') : `${PRIORITIES[item.priority].label}優先${item.star ? '・本命' : ''}`
-        return `<div class="blk ${ev ? 'ev' : 'tk'} ${item.done ? 'done' : ''} ${others ? 'clash' : ''} ${past && !item.done ? 'past' : ''} ${short}"
+        // 匯入的行事曆：只看不改（不能勾、不能拖、不能改長度）
+        const ext = ev && isExternal(item)
+        const meta = others ? `時間和 ${others.length} 件重疊` : ext ? `匯入${item.note ? `・${esc(item.note)}` : ''}` : ev ? (item.note ? esc(item.note) : '') : `${PRIORITIES[item.priority].label}優先${item.star ? '・本命' : ''}`
+        return `<div class="blk ${ev ? 'ev' : 'tk'} ${ext ? 'ext' : ''} ${item.done ? 'done' : ''} ${others ? 'clash' : ''} ${past && !item.done ? 'past' : ''} ${short}"
           data-type="${ev ? 'event' : 'task'}" data-id="${esc(b.id)}" data-start="${b.start}" data-end="${b.end}" style="${pos};--c:${c}">
-          <button class="check" data-act="toggle" aria-label="完成「${esc(item.title)}」" aria-pressed="${!!item.done}" style="--c:${c}">${ICON.check}</button>
+          ${ext ? '' : `<button class="check" data-act="toggle" aria-label="完成「${esc(item.title)}」" aria-pressed="${!!item.done}" style="--c:${c}">${ICON.check}</button>`}
           <button type="button" class="blk-txt" data-edit><b>${ev ? '' : item.star ? '<em class="star">★</em>' : ''}${esc(item.title)}</b><small><span class="blk-time">${time}</span>${meta ? `・${meta}` : ''}</small></button>
-          <i class="blk-resize" data-resize title="拖曳調整長度"></i>
+          ${ext ? '' : '<i class="blk-resize" data-resize title="拖曳調整長度"></i>'}
         </div>`
       })
       .join('')
@@ -321,6 +324,12 @@ export class ScheduleView {
   // ── 編輯面板 ──
   openEdit(type, id) {
     const s = this.store
+    // 匯入的行事曆：只看不改，說一聲是從哪裡來的
+    const ext = type === 'event' ? s.external.find((e) => e.id === id) : null
+    if (ext) {
+      const cal = s.state.calendars.find((c) => c.id === ext.ext)
+      return this.hooks.toast({ icon: '暦', title: ext.title, sub: `從「${cal?.name || '匯入的行事曆'}」帶進來的${ext.note ? `・${ext.note}` : ''}，要改請到原本的行事曆` })
+    }
     const item = type === 'event' ? s.state.events.find((e) => e.id === id) : s.state.tasks.find((t) => t.id === id)
     if (!item) return
     this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay, ongoing: !!item.ongoing }
@@ -580,6 +589,8 @@ export class ScheduleView {
     line.addEventListener('pointerdown', (e) => {
       if (e.button > 0 || e.target.closest('[data-act]')) return
       const blk = e.target.closest('.blk:not(.ghost)')
+      // 匯入的日程不能拖：點一下說明
+      if (blk?.classList.contains('ext')) return
       if (blk) {
         this._startDrag(e, {
           kind: 'block', type: blk.dataset.type, id: blk.dataset.id, el: blk, resize: !!e.target.closest('[data-resize]'),
@@ -590,7 +601,7 @@ export class ScheduleView {
     line.addEventListener('click', (e) => {
       // 用鍵盤（Enter／空白鍵）按時段的標題：打開編輯。滑鼠和手指的點擊交給拖曳那邊分辨是點還是拖
       const ed = e.target.closest('[data-edit]')
-      if (ed && e.detail === 0) {
+      if (ed && (e.detail === 0 || ed.closest('.blk.ext'))) {
         const blk = ed.closest('.blk')
         return this.openEdit(blk.dataset.type, blk.dataset.id)
       }

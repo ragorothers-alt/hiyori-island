@@ -128,6 +128,7 @@ function seed(samples = true) {
     subscriptions: [],
     mottos: [],
     parked: [],
+    calendars: [],
     // 回神紀錄跟著哪一份資料（見 store.js 的 sameGen）
     tallyGen: uid(),
     templates: [],
@@ -419,6 +420,18 @@ function cleanDates(list) {
 }
 // 重要日子的上限：只防異常大的匯入；新增時到了就不再加，讀檔不會刪掉合法的紀錄
 export const DATES_MAX = 1000
+
+// ── 匯入的行事曆（Google 日曆的私密網址、學校課表的 .ics）：只存訂閱的設定，抓回來的日程放在這台裝置（src/calendars.js）──
+// url 只收 https／webcal（私人網址等於鑰匙：跟著加密的同步走，匯出的檔案裡也有）；on：要不要顯示、算進排程
+export const CALENDARS_MAX = 10
+export const calUrlOk = (v) => typeof v === 'string' && v.length <= 2000 && /^(https|webcals?):\/\/[^\s/?#]+\.[^\s/?#]+/i.test(v.trim())
+function cleanCalendars(list) {
+  return cleanList(list, (c) => {
+    const url = typeof c.url === 'string' ? c.url.trim() : ''
+    if (!calUrlOk(url)) return null
+    return { id: str(c.id), url, name: str(c.name, 30).trim(), color: num(c.color, 0, 99, 0), on: c.on !== false, createdAt: ts(c.createdAt) || Date.now() }
+  }).slice(0, CALENDARS_MAX)
+}
 
 // ── 訂閱服務（扣款日、月費怎麼算在 src/subs.js）──
 // 上限只防異常大的匯入；新增時到了就不再加
@@ -965,6 +978,7 @@ function migrate(s) {
     rhythm: cleanRhythm(s.rhythm), sleep, habits, life, town, coach: cleanCoach(s.coach), agent: cleanAgent(s.agent), dates: cleanDates(s.dates), createdAt, updatedAt: ts(s.updatedAt) || 0,
     subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
     parked: cleanParked(s.parked),
+    calendars: cleanCalendars(s.calendars),
     // 舊存檔沒有：空字串（每台都一樣，照常取比較大的）
     tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),

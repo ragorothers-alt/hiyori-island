@@ -45,3 +45,9 @@ new_sqlite_classes = ["PushHub"]
 name = "AI_LIMIT"
 namespace_id = "2003"
 simple = { limit = 10, period = 60 }
+
+# 匯入行事曆（/v1/ics，見 src/ics.js）：每個 IP 每分鐘 20 次
+[[ratelimits]]
+name = "ICS_LIMIT"
+namespace_id = "2005"
+simple = { limit = 20, period = 60 }

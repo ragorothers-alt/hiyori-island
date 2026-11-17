@@ -114,8 +114,8 @@ export const coachMethods = {
   coachContext(dates) {
     const set = new Set(dates)
     const n = new Date()
-    const events = this.state.events.filter((e) => set.has(e.date) && !e.allDay)
-    for (const date of dates) events.push(...this._routineEventsOn(date))
+    // 匯入的行事曆（eventsOn 裡有）也要避開
+    const events = dates.flatMap((date) => [...this.eventsOn(date), ...this._routineEventsOn(date)])
     return {
       today: this.today, nowMin: n.getHours() * 60 + n.getMinutes(), rhythm: this.state.rhythm,
       events, tasks: this.state.tasks.filter((t) => set.has(t.date) && t.at && !t.done && !t.ongoing),

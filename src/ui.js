@@ -34,6 +34,7 @@ import { DatesView } from './ui/dates.js'
 import { SubsView } from './ui/subs.js'
 import { MottosView, MottoBar } from './ui/mottos.js'
 import { CloudView } from './ui/cloud.js'
+import { CalendarRow } from './ui/calendars.js'
 import { AiView } from './ui/ai.js'
 import { AgentCard, AgentView, AgentDock } from './ui/agent.js'
 import { TodayView } from './ui/today.js'
@@ -329,6 +330,8 @@ export class UI {
         this.hooks.aiSet?.()
       },
     })
+    // 設定裡的「匯入行事曆」
+    if (hooks.calendars) this.icsView = new CalendarRow($('#icsRow'), store, hooks.calendars, { toast: (o) => this.toast(o) })
     // 另一個分頁（或同一個網站的另一個視窗）設了、換了通行碼或模型：這邊的設定列和ふじ的卡片跟著變
     addEventListener('storage', (e) => {
       if (e.key === null || e.key === 'hiyori-ai-pass' || e.key === 'hiyori-ai-model') this.aiShared()

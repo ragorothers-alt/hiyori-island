@@ -176,6 +176,8 @@ const sameGen = (a, b) => (a?.tallyGen || '') === (b?.tallyGen || '')
 export class Store {
   constructor() {
     this.handlers = {}
+    // 匯入的行事曆抓回來的日程（唯讀，不存進小島的資料；src/calendars.js 放進來）
+    this.external = []
     this.state = this._load()
     // 存檔裡現在是哪一版（這邊讀進來、寫出去或換成另一個分頁的那一版）；_seq：這邊最後讀到、寫出去的是哪一次存檔
     this._diskRev = this.state.rev || ''
@@ -454,12 +456,13 @@ export class Store {
     return [...list, ...late]
   }
   // 那天有時段的日程（時間軸、空檔、排程、時之環、提醒都只看這些）；整天的另外用 allDayOn
+  // 匯入的行事曆抓回來的日程（this.external，唯讀、id 開頭是 x-）也算在裡面
   eventsOn(date) {
-    return this.state.events.filter((e) => e.date === date && !e.allDay).sort((a, b) => toMin(a.start) - toMin(b.start))
+    return [...this.state.events, ...(this.external || [])].filter((e) => e.date === date && !e.allDay).sort((a, b) => toMin(a.start) - toMin(b.start))
   }
   // 那天落在裡面的整天日程（跨好幾天的每一天都算）：先開始的在前
   allDayOn(date) {
-    return this.state.events
+    return [...this.state.events, ...(this.external || [])]
       .filter((e) => e.allDay && e.date <= date && date <= (e.endDate || e.date))
       .sort((a, b) => a.date.localeCompare(b.date) || (b.endDate || b.date).localeCompare(a.endDate || a.date) || a.title.localeCompare(b.title))
   }

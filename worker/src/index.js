@@ -12,6 +12,7 @@
 import { HttpError } from './http.js'
 import { askAI, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
 import { pushKey, pushTimer, pushMottos } from './push.js'
+import { fetchICS } from './ics.js'
 
 export { PushHub } from './push.js'
 
@@ -59,8 +60,8 @@ export default {
           throw e
         }
       }
-      // 推播的請求只有一個網址和幾個數字（警語最多 200 個）
-      const small = pathname.startsWith('/v1/push/')
+      // 推播的請求只有一個網址和幾個數字（警語最多 200 個）；匯入行事曆只有一個網址
+      const small = pathname.startsWith('/v1/push/') || pathname === '/v1/ics'
       const text = await readBody(req, ai ? AI_MAX : small ? 8000 : MAX_DATA + 1000)
       let body
       try {
@@ -80,6 +81,7 @@ export default {
       if (pathname === '/v1/push/key') return json(await pushKey(env))
       if (pathname === '/v1/push/timer') return json(await pushTimer(env, body, now, new URL(req.url).origin))
       if (pathname === '/v1/push/mottos') return json(await pushMottos(env, body, now, new URL(req.url).origin))
+      if (pathname === '/v1/ics') return json(await fetchICS(body, env.ICS_FETCH || fetch))
       throw new HttpError(404, 'not found')
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message, ...e.extra }, e.status)
@@ -123,7 +125,11 @@ async function readBody(req, max) {
 // 每個 IP 每分鐘的請求上限（Cloudflare Rate Limiting binding；本機測試沒有就略過）
 async function limit(env, req, pathname) {
   const limiter =
-    pathname === '/v1/create' ? env.CREATE_LIMIT : pathname === '/v1/ai' ? env.AI_LIMIT : pathname.startsWith('/v1/push/') ? env.PUSH_LIMIT || env.SYNC_LIMIT : env.SYNC_LIMIT
+    pathname === '/v1/create' ? env.CREATE_LIMIT
+    : pathname === '/v1/ai' ? env.AI_LIMIT
+    : pathname === '/v1/ics' ? env.ICS_LIMIT || env.SYNC_LIMIT
+    : pathname.startsWith('/v1/push/') ? env.PUSH_LIMIT || env.SYNC_LIMIT
+    : env.SYNC_LIMIT
   if (!limiter) return
   const { success } = await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'unknown' })
   if (!success) throw new HttpError(429, 'too many requests')
