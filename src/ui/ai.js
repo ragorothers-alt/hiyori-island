@@ -103,7 +103,7 @@ export class AiView {
       info = '接上自己 Claude Console 的 API：金鑰放在自己的 Worker 裡，這裡只填通行碼。設好後ふじ會自己動：早上排好今天、替新任務估時間和排空檔、進度落後時重排、晚上準備明天，也能用一句話請她做事（每次都可以撤銷）'
       btns = [['edit', '設定通行碼', 1]]
     } else {
-      info = `${esc(this.result || `已設定・用 ${model.label}`)}・自己整理的方式（自動／先問我／關）在教練分頁的「ふじ」`
+      info = `${esc(this.result || (model.id === 'auto' ? '已設定・自動選模型（對話、新任務用 Sonnet，自己整理用 Opus）' : `已設定・用 ${model.label}`))}・自己整理的方式（自動／先問我／關）在教練分頁的「ふじ」`
       // 通行碼太短容易被猜中：提醒到 Worker 重設一組長一點的（這裡跟著改）
       const len = [...aiPass()].length
       if (len < PASS_MIN) info += `<br><span class="ai-warn">通行碼只有 ${len} 個字，容易被猜中。建議在 worker 資料夾執行 <code>npx wrangler@4 secret put AI_PASS</code> 換成 ${PASS_MIN} 個字以上，再按「改通行碼」</span>`

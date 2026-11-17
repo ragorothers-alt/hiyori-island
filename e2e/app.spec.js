@@ -4284,6 +4284,9 @@ test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的�
   await expect(row.locator('.ai-pass')).toHaveCount(0)
   await expect(row.locator('.ai-info')).toContainText('已設定')
   await expect(row.locator('.ai-btns button')).toHaveText(['測試連線', '改通行碼', '停用'])
+  // 沒選過模型：自動（對話用 Sonnet、自己整理用 Opus）
+  await expect(row.locator('[data-ai="model"][data-v="auto"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(row.locator('.ai-info')).toContainText('自動選模型')
   // 可以換模型
   await row.locator('[data-ai="model"][data-v="claude-sonnet-5-5"]').click()
   await expect(row.locator('.ai-info')).toContainText('用 Sonnet')

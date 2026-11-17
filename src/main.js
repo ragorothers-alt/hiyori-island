@@ -1714,7 +1714,7 @@ async function boot() {
       // 別台設的通行碼、選的模型到了：設定那一列跟著變、ふじ的卡片出現、之前連不上的再試
       ui.aiShared()
       if (pass) ui.toast({ icon: '藤', stamp: true, title: 'ふじ的 AI 通行碼同步過來了', sub: '別台設好的，這台不用再填一次', ms: 6000 })
-      else ui.toast({ icon: '藤', stamp: true, title: `ふじ改用 ${AI_MODELS.find((m) => m.id === aiModel())?.label || 'Claude'} 了`, sub: '別台選的模型，這台跟著換', ms: 5000 })
+      else ui.toast({ icon: '藤', stamp: true, title: aiModel() === 'auto' ? 'ふじ改成自動選模型了' : `ふじ改用 ${AI_MODELS.find((m) => m.id === aiModel())?.label || 'Claude'} 了`, sub: '別台選的模型，這台跟著換', ms: 5000 })
     }),
     onStatus: () => ui.renderSync(),
     onPulled: () => ui.toast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),

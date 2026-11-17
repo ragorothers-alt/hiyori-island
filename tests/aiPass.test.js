@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AI_MODELS, aiPass, aiPassAt, setAiPass, aiShare, aiAdopt, aiReady, aiModel, aiModelAt, setAiModel, aiAdoptModel } from '../src/ai.js'
+import { AI_MODELS, aiPass, aiPassAt, setAiPass, aiShare, aiAdopt, aiReady, aiModel, aiModelAt, setAiModel, aiAdoptModel, modelFor, askAI } from '../src/ai.js'
 
 // ふじ的 AI 通行碼和選的模型跟著線上同步帶到別台：各台用比較新設的那一個
 beforeEach(() => {
@@ -65,11 +65,11 @@ describe('AI 通行碼跟著同步走', () => {
 })
 
 describe('選的模型跟著同步走', () => {
-  const [OPUS, SONNET, HAIKU] = AI_MODELS.map((m) => m.id)
+  const [AUTO, OPUS, SONNET, HAIKU] = AI_MODELS.map((m) => m.id)
 
   it('沒選過模型（用預設的）不帶；選了就跟通行碼一起帶，沒設通行碼整包都不帶', () => {
     setAiPass('通行碼')
-    expect(aiModel()).toBe(OPUS)
+    expect(aiModel()).toBe(AUTO)
     expect(aiModelAt()).toBe(0)
     expect(aiShare()).toEqual({ aiPass: '通行碼', aiPassAt: Date.now() })
     setAiModel(SONNET)
@@ -103,10 +103,36 @@ describe('選的模型跟著同步走', () => {
   })
 
   it('別台選的剛好跟這台一樣：記下它的時間，但不算換了（不用說一聲）', () => {
-    expect(aiAdoptModel({ aiModel: OPUS, aiModelAt: 700 })).toBe(false)
+    expect(aiAdoptModel({ aiModel: AUTO, aiModelAt: 700 })).toBe(false)
     expect(aiModelAt()).toBe(700)
     expect(aiAdoptModel({ aiModel: SONNET, aiModelAt: 600 })).toBe(false)
-    expect(aiModel()).toBe(OPUS)
+    expect(aiModel()).toBe(AUTO)
+  })
+
+  it('自動：在等著看的（對話、剛加的任務、拆細項、摘要）用 Sonnet，自己整理和週報用 Opus；選了某一種就都用它', () => {
+    expect(aiModel()).toBe(AUTO)
+    for (const run of ['chat', 'capture']) expect(modelFor('agent', { run })).toBe(SONNET)
+    for (const run of ['morning', 'evening', 'replan', 'week']) expect(modelFor('agent', { run })).toBe(OPUS)
+    expect(modelFor('steps', {})).toBe(SONNET)
+    expect(modelFor('summary', {})).toBe(SONNET)
+    expect(modelFor('insight', {})).toBe(OPUS)
+    expect(modelFor('ping')).toBe(OPUS)
+    setAiModel(HAIKU)
+    expect(modelFor('agent', { run: 'morning' })).toBe(HAIKU)
+    expect(modelFor('agent', { run: 'chat' })).toBe(HAIKU)
+    // 以前就特地選了 Opus 的：照舊
+    localStorage.setItem('hiyori-ai-model', OPUS)
+    expect(modelFor('agent', { run: 'chat' })).toBe(OPUS)
+  })
+
+  it('送出去的是換好的真的模型，不是 auto', async () => {
+    setAiPass('通行碼一二三四')
+    const f = vi.fn(async () => new Response(JSON.stringify({ ok: true, out: { say: '' } })))
+    vi.stubGlobal('fetch', f)
+    await askAI('agent', { run: 'chat' })
+    await askAI('agent', { run: 'morning' })
+    expect(f.mock.calls.map((c) => JSON.parse(c[1].body).model)).toEqual([SONNET, OPUS])
+    vi.unstubAllGlobals()
   })
 
   it('以前選的模型沒記時間：算最舊，別台有記時間的會換過來；自己再選一次的時間一定比之前新（時鐘被調慢也一樣）', () => {

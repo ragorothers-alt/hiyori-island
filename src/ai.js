@@ -8,11 +8,23 @@ const MODEL_KEY = 'hiyori-ai-model'
 const PASS_AT_KEY = 'hiyori-ai-pass-at'
 const MODEL_AT_KEY = 'hiyori-ai-model-at'
 
+// 第一個是預設（沒選過的人用它）。auto 不是真的模型：送出時照這次的工作換成 Opus 或 Sonnet（modelFor）
 export const AI_MODELS = [
+  { id: 'auto', label: '自動', sub: '對話快、整理想得深' },
   { id: 'claude-opus-5-5', label: 'Opus', sub: '想得最周到' },
   { id: 'claude-sonnet-5-5', label: 'Sonnet', sub: '快又穩' },
   { id: 'claude-haiku-5-5', label: 'Haiku', sub: '最快最省' },
 ]
+const OPUS = 'claude-opus-5-5'
+const SONNET = 'claude-sonnet-5-5'
+// 自動：使用者在等著看的（對話、剛加的任務、按了「拆細項」「摘要」）用 Sonnet，快；
+// 背景自己整理的（早上、晚上、重排、週報）用 Opus，多等幾秒換排得周到。試跑時兩個都沒做錯，Opus 會多想一步
+const WAITING = (task, data) => (task === 'agent' ? data?.run === 'chat' || data?.run === 'capture' : task === 'steps' || task === 'summary')
+export const modelFor = (task, data) => {
+  const m = aiModel()
+  if (m !== 'auto') return m
+  return WAITING(task, data) ? SONNET : OPUS
+}
 
 const get = (k) => {
   try {
@@ -186,7 +198,7 @@ export async function askAI(task, data, { signal, onText } = {}) {
       method: 'POST',
       // 標頭只能放 ASCII：中文通行碼先編碼，Worker 那邊再解開
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${encodeURIComponent(pass)}` },
-      body: JSON.stringify({ task, model: aiModel(), data, ...(stream ? { stream: true } : {}) }),
+      body: JSON.stringify({ task, model: modelFor(task, data), data, ...(stream ? { stream: true } : {}) }),
       signal,
     })
   } catch (err) {
