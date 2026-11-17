@@ -5,7 +5,8 @@ export default defineConfig({
     environment: 'node',
     include: ['live/**/*.live.js'],
     setupFiles: ['tests/setup.js'],
-    testTimeout: 240000,
+    // 被流量上限擋下時會等一分鐘再試（最多兩次）
+    testTimeout: 420000,
     silent: false,
     fileParallelism: false,
     maxWorkers: 1,

@@ -252,6 +252,33 @@ describe('大任務分段', () => {
     expect(b.at === '09:00').toBe(false)
   })
 
+  it('試跑看到的：星期幾有對照；範例專案標出來，她自己整理時加的細項不會把範例變成自己的', () => {
+    localStorage.clear()
+    const fresh = new Store()
+    const ex = fresh.state.projects.find((p) => p.id.startsWith('ex-') && !(p.milestones.find((m) => !m.done)?.steps || []).length)
+    expect(ex).toBeTruthy()
+    const { ids, data } = agentContext(fresh, 'morning', {}, new Date())
+    expect(data.mondays).toHaveLength(10)
+    expect(data.mondays[0]).toBe(TODAY)
+    expect(data.mondays.every((d) => new Date(`${d}T12:00`).getDay() === 1)).toBe(true)
+    const p = data.projects.find((x) => x.name === ex.name)
+    expect(p.sample).toBe(true)
+    const m = ex.milestones.find((y) => !y.done)
+    const act = cleanOut(blank({ msteps: [{ ms: p.next.id, steps: ['打開今天頁', '開一輪專注'] }] }), ids, 'morning')
+    const entry = fresh.agentApply(act, { run: 'morning' })
+    expect(m.steps.map((s) => s.title)).toEqual(['打開今天頁', '開一輪專注'])
+    expect(!!ex.mine).toBe(false)
+    expect(fresh.samples().projects).toContain(ex)
+    fresh.agentUndo(entry.id)
+    expect(m.steps).toEqual([])
+    // 使用者開口要的：算他自己寫的（清範例時留著），也就不再標 sample
+    const c = agentContext(fresh, 'chat', { message: '幫這個專案拆細項' }, new Date())
+    const cp = c.data.projects.find((x) => x.name === ex.name)
+    fresh.agentApply(cleanOut(blank({ msteps: [{ ms: cp.next.id, steps: ['讀說明'] }], set: [], create: [], go: { do: '', id: '' } }), c.ids, 'chat'), { run: 'chat' })
+    expect(ex.mine).toBe(true)
+    expect(agentContext(fresh, 'morning', {}, new Date()).data.projects.find((x) => x.name === ex.name)).not.toHaveProperty('sample')
+  })
+
   it('對話裡改截止日、清掉截止日都會生效，撤銷回到原本的', () => {
     const t = store.addTask({ title: '期末報告', date: TODAY, due: '2026-11-20' })
     const run = (value) => {

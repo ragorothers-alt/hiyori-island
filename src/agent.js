@@ -125,6 +125,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
     .map((p) => {
       const st = projectStats(p, s.tasks)
       const o = { id: ids.of('p', p.id), name: clip(p.name, 30), ms: `${st.msDone}/${st.msTotal}` }
+      // App 附的範例專案（還沒寫進自己的東西）：自己整理時不替它加事情（試跑時她替「認識ひより小島」加了本命任務和細項）
+      if (p.id.startsWith('ex-') && !p.mine) o.sample = true
       if (p.goal) o.goal = clip(p.goal, 60)
       if (p.deadline) {
         o.deadline = p.deadline
@@ -150,6 +152,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
     now: `${today} ${pad(now.getHours())}:${pad(now.getMinutes())}`,
     today,
     weekday: WEEK[parseDate(today).getDay()],
+    // 這週起 10 週的星期一：說到 days 以外的日子時照這個推星期幾（試跑時她自己算，12/8 說成週一）
+    mondays: Array.from({ length: 10 }, (_, i) => addDays(today, i * 7 - ((parseDate(today).getDay() + 6) % 7))),
     mode: extra.mode === 'ask' ? 'ask' : 'auto',
     user: {
       wake: r.wake, sleep: r.sleep,

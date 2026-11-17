@@ -187,7 +187,8 @@ export const agentMethods = {
         added.push({ id: step.id, title: name })
       }
       if (!added.length) continue
-      this._authored(p)
+      // 使用者開口要的才算他自己寫的（範例專案從此留著）；她自己整理時加的不算，撤銷之後範例還是範例
+      if (chat) this._authored(p)
       this._edited(p)
       note(`「${short(p.name, 14)}」的「${short(m.title, 14)}」加了 ${added.length} 個細項`, { k: 'msteps', pid: p.id, mid: m.id, steps: added })
     }

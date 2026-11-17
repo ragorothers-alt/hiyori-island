@@ -11,7 +11,8 @@ const pass = process.env.HIYORI_AI_PASS || ''
 const model = process.env.HIYORI_AI_MODEL || 'claude-opus-5-5'
 const enabled = dry || !!pass
 const models = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
-const reportPath = join(tmpdir(), 'hiyori-fuji-live.md')
+// 不連網路的檢查另外存一份，不會蓋掉真的跑出來的報告
+const reportPath = join(tmpdir(), dry ? 'hiyori-fuji-live-dry.md' : 'hiyori-fuji-live.md')
 const results = []
 let baseline
 
@@ -115,7 +116,8 @@ function droppedActions(out, act, ids, run) {
 
 // 排除自動統計、獎勵與紀錄；其餘 state 欄位預設全部比較，包含 agent.memory。
 const ignoredRoot = new Set(['createdAt', 'updatedAt', 'rev', 'tallyGen', 'player', 'history', 'quests', 'weekly', 'weekCard', 'town', 'dex', 'pomoSids'])
-const ignoredFields = new Set(['createdAt', 'updatedAt', 'doneAt', 'rewarded', 'coach'])
+// editedAt：專案「最近動過」的排序時間，撤銷也算動過（不是沒還原）
+const ignoredFields = new Set(['createdAt', 'updatedAt', 'editedAt', 'doneAt', 'rewarded', 'coach'])
 const statusTimes = new Set(['completedAt', 'pausedAt', 'archivedAt'])
 function comparable(state) {
   function walk(value) {
@@ -149,14 +151,21 @@ async function request(data, result) {
   } else {
     let response
     try {
-      response = await fetch(`${SYNC_API}/v1/ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${encodeURIComponent(pass)}` },
-        body: JSON.stringify({ task: 'agent', model, data }),
-        signal: AbortSignal.timeout(210000),
-      })
+      // Worker 每分鐘有次數上限：連著送十幾句會被擋（too many requests），等一分鐘再送一次（最多兩次）
+      let text
+      for (let tries = 0; ; tries++) {
+        response = await fetch(`${SYNC_API}/v1/ai`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${encodeURIComponent(pass)}` },
+          body: JSON.stringify({ task: 'agent', model, data }),
+          signal: AbortSignal.timeout(210000),
+        })
+        text = await response.text()
+        if (response.status !== 429 || tries >= 2 || !/too many requests/.test(text)) break
+        print(`  （太頻繁，等 65 秒再試）`)
+        await new Promise((r) => setTimeout(r, 65000))
+      }
       result.http = response.status
-      const text = await response.text()
       try {
         result.response = JSON.parse(text)
       } catch {
