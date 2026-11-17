@@ -61,6 +61,19 @@ function pendingHTML(p, store) {
     <div class="ag-acts"><button type="button" class="btn-primary ag-go" data-ag="accept">套用</button><button type="button" class="btn-ghost" data-ag="dismiss">不用</button></div>`
 }
 
+// 自己整理沒做成（今天、而且比她最近說的那一句還新才顯示）：原因、能自己再叫一次的給「再試一次」
+const RETRY_RUNS = ['morning', 'evening', 'replan']
+function failOf(agent, today0, after = 0) {
+  const f = agent.failed
+  return f && f.at >= today0 && f.at > after ? f : null
+}
+function failHTML(f, store) {
+  const name = RUN_NAME[f.run]?.replace('了', '') || '整理'
+  return `<small class="ag-when">${name}沒做成・${when(f.at, store.today)}</small>
+    <p class="ag-say err">${esc(f.text || '這次沒連上')}</p>
+    ${RETRY_RUNS.includes(f.run) ? `<div class="ag-acts"><button type="button" class="btn-ghost" data-ag="now" data-v="${f.run}">再試一次</button></div>` : ''}`
+}
+
 // 兩個畫面共用的按鈕
 function act(view, b) {
   const { agent, store, hooks } = view
@@ -157,9 +170,11 @@ export class AgentCard extends Base {
     const last = agentFeed(agent, store).filter((m) => m.who === 'fuji' && m.at >= today0).pop()
     const mode = store.state.settings.agentMode
     this.el.querySelector('h3 small').textContent = mode === 'off' ? '我開口才動' : mode === 'ask' ? '整理前先問我' : '會自己整理'
+    const fail = failOf(agent, today0, last?.at || 0)
     let html
     if (agent.thinking) html = `<p class="ag-say think">${agent.thinking === 'chat' ? '我想一下' : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`}${DOTS}</p>`
     else if (agent.pending) html = pendingHTML(agent.pending, store)
+    else if (fail) html = failHTML(fail, store)
     else if (last) html = fujiHTML(last, store, { open: this.opened.has(last.e?.id), max: 3, last: true })
     else html = `<p class="ag-say hint">${mode === 'off' ? '想調整什麼就跟我說一聲。' : '我會自己把今天排好、盯著進度；有新的事也會替你安排。想改什麼直接跟我說。'}</p>${mode === 'off' ? '' : '<div class="ag-acts"><button type="button" class="btn-ghost" data-ag="now">現在整理今天</button></div>'}`
     this.el.querySelector('.ag-body').innerHTML = html
@@ -246,6 +261,8 @@ export class AgentView extends Base {
         : `<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${fujiHTML(m, store, { open: this.opened.has(m.e?.id), max: 6, last: m === lastFuji && !agent.thinking })}</div></div>`,
     )
     if (agent.pending) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${pendingHTML(agent.pending, store)}</div></div>`)
+    const fail = !agent.thinking && failOf(agent, new Date(`${store.today}T00:00:00`).getTime(), items.at(-1)?.at || 0)
+    if (fail) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble">${failHTML(fail, store)}</div></div>`)
     if (agent.thinking) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say think">${agent.thinking === 'chat' ? '我想一下' : `正在${RUN_NAME[agent.thinking]?.replace('了', '') || '整理'}`}${DOTS}${agent.thinking === 'chat' ? ' <button type="button" class="cm-link" data-ag="stop">停</button>' : ''}</p></div></div>`)
     if (!rows.length) rows.push(`<div class="cmsg fuji ag-msg"><span class="stamp-k coach-k">藤</span><div class="ag-bubble"><p class="ag-say">${mode === 'off' ? '想調整什麼就跟我說一聲。' : '我會自己把今天排好、盯著進度。想加什麼、改什麼，直接跟我說就好。'}</p>${mode === 'off' ? '' : '<div class="ag-acts"><button type="button" class="btn-ghost" data-ag="now">現在整理今天</button></div>'}</div></div>`)
     const feed = $('.ag-feed')

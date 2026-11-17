@@ -54,6 +54,49 @@ describe('自己整理', () => {
     expect(ai.ask).toHaveBeenCalledTimes(1)
   })
 
+  it('自己整理沒做成：記下原因（畫面上看得到），下一次做成了就清掉；對話出錯不算', async () => {
+    store.addTask({ title: '寫報告', date: TODAY })
+    ai.ask = vi.fn(async () => {
+      throw Object.assign(new AiError('claude rejected'), { message: 'Claude 沒有接受這次的請求：too large' })
+    })
+    await agent.tick()
+    expect(agent.failed).toMatchObject({ run: 'morning', text: 'Claude 沒有接受這次的請求：too large', code: 'claude rejected' })
+    await agent.say('嗨')
+    expect(agent.failed.run).toBe('morning')
+    ai.ask = vi.fn(async () => blank({ say: '排好了' }))
+    await agent.now('morning')
+    expect(agent.failed).toBeNull()
+  })
+
+  it('她排好之後自己又改掉的、撤銷了的，下一次都告訴她（看出偏好）', async () => {
+    const a = store.addTask({ title: '寫報告', date: TODAY })
+    const b = store.addTask({ title: '回信', date: TODAY })
+    const c = store.addTask({ title: '採買', date: TODAY })
+    ai.ask = vi.fn(async (task, data) => {
+      const id = (title) => data.days[0].tasks.find((t) => t.title === title).id
+      return blank({ schedule: [['寫報告', '10:00'], ['回信', '11:00'], ['採買', '14:00']].map(([title, at]) => ({ id: id(title), date: TODAY, at, dur: 30 })), add: [{ title: '整理桌面', date: TODAY, at: '', dur: 15, tag: 'life', project: '', steps: [], star: false }] })
+    })
+    await agent.now('morning')
+    expect([a.at, b.at, c.at]).toEqual(['10:00', '11:00', '14:00'])
+    store.updateTask(a.id, { at: '20:00' })
+    store.toggleTask(b.id)
+    store.deleteTask(store.state.tasks.find((t) => t.title === '整理桌面').id)
+    ai.ask = vi.fn(async () => blank())
+    await agent.now('replan')
+    const data = ai.ask.mock.calls[0][1]
+    expect(data.adjusted).toEqual([
+      { title: '寫報告', fuji: `${TODAY} 10:00`, now: `${TODAY} 20:00` },
+      { title: '整理桌面', fuji: `${TODAY} 沒排時段`, now: '刪掉了' },
+    ])
+    expect(data.recent.at(-1)).not.toHaveProperty('undone')
+    // 整批撤銷：帶著 undone，那一批排的不再算「被改掉的」
+    store.agentUndo(store.state.agent.log.at(-1).id)
+    await agent.now('replan')
+    const again = ai.ask.mock.calls[1][1]
+    expect(again.recent.some((e) => e.undone)).toBe(true)
+    expect(again).not.toHaveProperty('adjusted')
+  })
+
   it('早上沒有任何東西可以排：不問 Claude，記下今天看過了', () => {
     expect(agent.tick()).toBeNull()
     expect(ai.ask).not.toHaveBeenCalled()

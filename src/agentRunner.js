@@ -59,6 +59,8 @@ export function createAgent(store, hooks = {}) {
     pending: pendingOf(local.pending),
     // 上一次出錯的說法（對話裡顯示）
     error: '',
+    // 自己整理（不是對話）上一次沒做成：{ run, at, text, code }。今日總覽的卡片和ふじ那一頁會顯示，下一次做成了就清掉
+    failed: null,
     // 對話（這台裝置）：[{ who: 'me'|'fuji', text, at, entry: 那次記下的 id, ask: [可以直接點的回答] }]
     chat: Array.isArray(local.chat) ? local.chat.filter((m) => m && typeof m.text === 'string').slice(-CHAT_KEEP) : [],
   }
@@ -110,6 +112,7 @@ export function createAgent(store, hooks = {}) {
       if (!chat && !extra.manual && (!agent.auto() || gen !== from.gen || dateStr() !== from.day)) return null
       if (!chat && (kind === 'morning' || kind === 'evening') && store.state.agent.ran[kind] === store.today && from.ran !== store.today) return null
       const act = cleanOut(out, ids, kind)
+      if (!chat) agent.failed = null
       // 先給使用者看：有要動資料的才留著等；只有一句話就直接記下
       if (!chat && mode() === 'ask' && hasActions(act)) {
         agent.pending = { id: `p${Date.now().toString(36)}`, at: Date.now(), run: kind, say: act.say, act, lines: describe(act, store), weekStart }
@@ -128,6 +131,8 @@ export function createAgent(store, hooks = {}) {
       agent.error = err?.message || '出了點狀況'
       if (!chat) {
         console.warn('[hiyori] ふじ自己整理時沒連上', err)
+        // 以前只寫在 console：自己整理一直失敗時使用者完全不知道
+        agent.failed = { run: kind, at: Date.now(), text: agent.error, code: err?.code || '' }
         if (STOP_CODES.has(err?.code)) stopDay = store.today
         else stopUntil = Date.now() + RETRY_MS
       }

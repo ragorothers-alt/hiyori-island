@@ -167,8 +167,11 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
       week: { done: week.done, total: week.total, focusMin: week.focus },
       todayFocusMin: store.peekDay(today).focus || 0,
     },
-    recent: (s.agent?.log || []).filter((e) => !e.undone).slice(-3).map((e) => ({ at: stamp(e.at), run: e.run, did: e.changes.slice(0, 8).map((c) => c.t) })),
+    // 撤銷了的也帶（標 undone）：以前直接拿掉，她不知道使用者不要那樣的安排，下次又做一樣的事
+    recent: (s.agent?.log || []).slice(-4).map((e) => ({ at: stamp(e.at), run: e.run, did: e.changes.slice(0, 8).map((c) => c.t), ...(e.undone ? { undone: true } : {}) })),
   }
+  const adjusted = adjustedOf(s, now.getTime())
+  if (adjusted.length) data.adjusted = adjusted
   if (extra.weekStart) data.weekStart = true
   if (extra.why) data.why = clip(extra.why, 200)
   if (fresh.size) data.new = [...fresh].map((id) => ids.to.get(`t:${id}`)).filter(Boolean)
@@ -182,6 +185,41 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
     fitData(data)
   }
   return { data, ids }
+}
+
+// ふじ排好之後、使用者自己又改掉的：最近 7 天沒被撤銷的紀錄裡，每件任務看她最後一次排的日子和時段，跟現在不一樣（挪走了、刪掉了）就列出來。
+// 讓她看出固定的偏好（例如她排早上、使用者都挪到晚上），同樣的情況多了就記成「記得的事」
+const ADJUST_DAYS = 7
+export function adjustedOf(state, now = Date.now()) {
+  const since = now - ADJUST_DAYS * 86400000
+  const last = new Map()
+  for (const e of state.agent?.log || []) {
+    if (e.undone || !(e.at >= since)) continue
+    for (const c of e.changes || []) {
+      const u = c?.u
+      if (u?.k === 'task' && u.after && typeof u.after === 'object') last.set(u.id, { date: u.after.date, at: u.after.at ?? null })
+      else if (u?.k === 'add' && typeof u.sig === 'string') {
+        // 新增的樣子（store/agent.js 的 sigOf）：[標題, 日子, 時段, …]
+        try {
+          const sig = JSON.parse(u.sig)
+          if (Array.isArray(sig)) last.set(u.id, { title: String(sig[0] || ''), date: sig[1], at: sig[2] ?? null })
+        } catch {}
+      }
+    }
+  }
+  const byId = new Map(state.tasks.map((t) => [t.id, t]))
+  const slot = (x) => `${x.date} ${x.at || '沒排時段'}`
+  const out = []
+  for (const [id, p] of last) {
+    const t = byId.get(id)
+    // 做完了的：照她排的或自己找時間做完都好，不算
+    if (t?.done) continue
+    if (t && t.date === p.date && (t.at ?? null) === p.at) continue
+    const title = t?.title || p.title
+    if (!title) continue
+    out.push({ title: clip(title, 30), fuji: slot(p), now: t ? slot(t) : '刪掉了' })
+  }
+  return out.slice(-8)
 }
 
 // 送給 Worker 的資料有上限（worker/src/ai.js 的 AI_MAX，120 KB）：用了很久、專案很多時，先拿掉比較不要緊的，再縮短

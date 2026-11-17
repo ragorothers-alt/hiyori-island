@@ -126,7 +126,8 @@ const TASKS = {
 - 任務的欄位：id、title、at（排好的開始時間，沒有就是還沒排）、dur（預估分鐘，沒有就是沒填）、pri（3 高、2 中、1 低）、tag（work 工作、study 學習、life 生活、health 健康、idea 靈感）、star（本命：當天最重要的事，一天最多 3 件）、first（那天先做的那一件）、done（做完了）、moved（被往後挪過幾次）、project（歸在哪個專案）、steps（子任務「做完/全部」）、new（剛加的）、mine（你之前加的）。
 - overdue：逾期還沒做的任務（date 是原本的日子，late 是逾期幾天）。
 - projects：進行中的專案。daysLeft 是離期限幾天；next 是下一個還沒完成的里程碑（steps 是細項「做完/全部」）；idle 是幾天沒推進；open 是還沒做完的任務數。
-- dates：快到的重要日子。habits：今天要做的習慣。stats：最近的狀況。focusing：正在專注的任務（不要動它）。recent：你最近做過的調整，不要來回改同一件事。
+- dates：快到的重要日子。habits：今天要做的習慣。stats：最近的狀況。focusing：正在專注的任務（不要動它）。recent：你最近做過的調整，不要來回改同一件事；有 undone 的是使用者撤銷了的，表示他不要那樣的安排，不要再做一樣的事。
+- adjusted：你排好之後、使用者自己又改掉的（fuji 是你排的、now 是現在的樣子）。看得出固定的偏好（例如你排早上、他都挪到晚上；某類事他總是往後挪）就照著排；同樣的情況有 2 次以上、memory 裡又還沒有，用 remember 記成一句話。
 能做的事（寫在輸出的 JSON 裡；用不到的給空陣列或空字串）：
 - schedule：替任務排時間或改日子。at 是 "HH:MM"（5 分鐘為單位），"" 代表只改日子、不排時段；dur 是預估分鐘，0 代表不改。
 - add：新增任務。date 必填；at 可以是 ""；dur 是預估分鐘；project 是專案的 id 或 ""；steps 是一起建好的子任務（沒有給空陣列）；star 是要不要當本命。
@@ -235,7 +236,8 @@ const errText = (e) => String(e?.error?.error?.message || e?.message || '')
 function loose(params, schema) {
   return {
     ...params,
-    system: `${params.system}\n\n輸出格式：只輸出一個 JSON 物件，不要加任何說明文字，也不要用 \`\`\` 包起來。這個物件照下面的 JSON Schema，每個欄位都要有：\n${JSON.stringify(schema)}`,
+    // 接在快取的那一段後面（前面那段不變，快取照樣用得到）
+    system: [...params.system, { type: 'text', text: `輸出格式：只輸出一個 JSON 物件，不要加任何說明文字，也不要用 \`\`\` 包起來。這個物件照下面的 JSON Schema，每個欄位都要有：\n${JSON.stringify(schema)}` }],
     output_config: { effort: params.output_config.effort },
   }
 }
@@ -330,7 +332,8 @@ export async function askAI(env, body) {
     const params = {
       model,
       max_tokens: pickBy(task.maxTokens, data),
-      system: `${PERSONA}\n\n${task.system}`,
+      // 說明每次都一樣（ふじ的說明有五千多字）：放進提示快取，連續對話第二句起比較快、也比較省。資料放在 messages，每次不一樣
+      system: [{ type: 'text', text: `${PERSONA}\n\n${task.system}`, cache_control: { type: 'ephemeral' } }],
       output_config: { effort: pickBy(task.effort, data), format: { type: 'json_schema', schema } },
       messages: [{ role: 'user', content: `<data>\n${JSON.stringify(data)}\n</data>\n\n${pickBy(task.ask, data)}` }],
     }

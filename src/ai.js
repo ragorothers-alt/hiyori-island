@@ -117,6 +117,7 @@ const TEXT = {
   'too many requests': '問得太密了，休息一分鐘再試',
   'claude unreachable': 'Worker 連不上 Claude，等一下再試',
   'claude error': 'Claude 那邊出了點狀況，等一下再試',
+  'claude rejected': 'Claude 沒有接受這次的請求',
   refused: '這次的內容 Claude 沒辦法回答',
   'too long': '回答太長被截斷了，再試一次',
   'bad output': '回答的格式不對，再試一次',

@@ -18,6 +18,8 @@ function fakeClient(reply = {}) {
     create,
   }
 }
+// 送出去的說明（system 是一串文字區塊，第一段放進提示快取）
+const sys = (p) => p.system.map((b) => b.text).join('\n')
 const envOf = (client, extra = {}) => ({ ANTHROPIC_API_KEY: 'sk-test', AI_PASS: PASS, AI_CLIENT: client, ...extra })
 async function call(env, body, pass = PASS, ip = null) {
   const headers = { 'Content-Type': 'application/json' }
@@ -116,7 +118,7 @@ describe('送給 Claude 的參數', () => {
       if (s.type === 'array') walk(s.items)
     }
     walk(schema)
-    expect(p.system).toContain('ふじ')
+    expect(sys(p)).toContain('ふじ')
     expect(p.messages[0].content).toContain('<data>')
     expect(p.messages[0].content).toContain('訪談整理')
   })
@@ -169,7 +171,10 @@ describe('送給 Claude 的參數', () => {
     expect(chat.messages[0].content).toContain('明天三點看牙醫')
     expect(chat.messages[0].content).toContain('回覆使用者的 message')
     expect(morning.messages[0].content).toContain('判斷現在該調整什麼')
-    expect(morning.system).toContain('日程管家')
+    expect(sys(morning)).toContain('日程管家')
+    // 說明放進提示快取（每次都一樣）；資料放在 messages
+    expect(morning.system).toEqual([{ type: 'text', text: expect.stringContaining('日程管家'), cache_control: { type: 'ephemeral' } }])
+    expect(chat.system[0].text).toBe(morning.system[0].text)
   })
 
   it('對話時什麼都能改：schema 多了 set、create、go（欄位名稱只寫在提示詞，不放 enum），max_tokens 給多一點；自己整理時沒有', async () => {
@@ -189,7 +194,7 @@ describe('送給 Claude 的參數', () => {
     expect(schema.properties.create.items.properties.kind.enum).toEqual(CREATE_KINDS)
     expect(schema.properties.go.properties.do.enum).toEqual(['', 'focus', 'open'])
     // 前端認得的每一個欄位名稱，提示詞裡都有寫到
-    for (const f of FIELDS) expect(chat.system).toMatch(new RegExp(`(^|[^A-Za-z])${f}([^A-Za-z]|$)`))
+    for (const f of FIELDS) expect(sys(chat)).toMatch(new RegExp(`(^|[^A-Za-z])${f}([^A-Za-z]|$)`))
     // 整份格式裡的 enum 都很短（大的 enum 會讓編出來的格式變得很大）
     const enums = []
     const collect = (s) => {
@@ -211,7 +216,7 @@ describe('送給 Claude 的參數', () => {
     }
     walk(schema)
     // 提示詞說明了每一種代號、設定和作息怎麼改
-    for (const word of ['world.here', 'settings', 'rhythm', 'focusMin', 'create', 'go']) expect(chat.system).toContain(word)
+    for (const word of ['world.here', 'settings', 'rhythm', 'focusMin', 'create', 'go']) expect(sys(chat)).toContain(word)
   })
 })
 
@@ -328,7 +333,9 @@ describe('Claude 的回應', () => {
     const [strict, retry] = c.create.mock.calls.map((x) => x[0])
     expect(strict.output_config.format.type).toBe('json_schema')
     expect(retry.output_config).toEqual({ effort: 'low' })
-    expect(retry.system).toContain(JSON.stringify(strict.output_config.format.schema))
+    expect(sys(retry)).toContain(JSON.stringify(strict.output_config.format.schema))
+    // 快取的那一段不變，格式接在後面
+    expect(retry.system[0]).toEqual(strict.system[0])
     expect(retry.messages).toEqual(strict.messages)
     expect(retry.max_tokens).toBe(strict.max_tokens)
     await call(envOf(c), body)
