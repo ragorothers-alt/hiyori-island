@@ -88,8 +88,8 @@ describe('ICS 匯入', () => {
     expect(parse(body)[0]).toMatchObject({ start, end, endDate: '', allDay: false })
   })
 
-  it('23:59 起始沒有正長度可表示，跳過', () => {
-    expect(parse('DTSTART:20261117T235900')).toEqual([])
+  it('23:59 起始：當天沒有正長度可表示，只留隔天那段', () => {
+    expect(parse('DTSTART:20261117T235900').map((e) => [e.date, e.start, e.end])).toEqual([['2026-11-18', '00:00', '00:59']])
   })
 
   it('整天 DURATION 與預設一天', () => {
@@ -113,8 +113,31 @@ describe('ICS 匯入', () => {
     expect(dates('DTSTART:20261117T090000\nRRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=3')).toEqual(['2026-11-17', '2026-12-01', '2026-12-15'])
   })
 
-  it('每週 COUNT 在視窗前的多天仍計數，WKST 固定週一', () => {
+  it('每週 COUNT 在視窗前的多天仍計數', () => {
     expect(dates('DTSTART:20261117T090000\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=10;WKST=SU', { from: '2026-12-01' })).toEqual(['2026-12-02', '2026-12-04', '2026-12-07'])
+  })
+
+  it('每隔幾週照 WKST 切週（沒寫是星期一）；認不得的 WKST 只留第一次', () => {
+    expect(dates('DTSTART:20261115T090000\nRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=SU;COUNT=4')).toEqual(['2026-11-15', '2026-11-16', '2026-11-29', '2026-11-30'])
+    expect(dates('DTSTART:20261115T090000\nRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;COUNT=4')).toEqual(['2026-11-15', '2026-11-23', '2026-11-29', '2026-12-07'])
+    expect(dates('DTSTART:20261115T090000\nRRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=SU,MO;WKST=SU;COUNT=8', { from: '2026-12-10' })).toEqual(['2026-12-13', '2026-12-14', '2026-12-27', '2026-12-28'])
+    expect(parse('DTSTART:20261115T090000\nRRULE:FREQ=WEEKLY;WKST=XX')).toHaveLength(1)
+  })
+
+  it('跨過午夜的切成每天一段：隔天那段也看得到、各有自己的 uid', () => {
+    const span = (list) => list.map((e) => [e.date, e.start, e.end])
+    const night = parse('DTSTART:20261117T220000\nDTEND:20261118T020000\nSUMMARY:夜班')
+    expect(span(night)).toEqual([['2026-11-17', '22:00', '23:59'], ['2026-11-18', '00:00', '02:00']])
+    expect(new Set(night.map((e) => e.uid)).size).toBe(2)
+    expect(night[0].uid).toBe('test::' + night[0].uid.split('::')[1])
+    // 只查隔天：前一晚開始的那段也在
+    expect(span(parse('DTSTART:20261117T220000\nDTEND:20261118T020000', { from: '2026-11-18', to: '2026-11-18' }))).toEqual([['2026-11-18', '00:00', '02:00']])
+    // 每天重複的夜班：查詢範圍前一天開始的那次也算進來
+    expect(span(parse('DTSTART:20261110T220000\nDTEND:20261111T020000\nRRULE:FREQ=DAILY;COUNT=20', { from: '2026-11-18', to: '2026-11-18' }))).toEqual([['2026-11-18', '00:00', '02:00'], ['2026-11-18', '22:00', '23:59']])
+    // 剛好到午夜的不多一段；跨好幾天的中間是整天，最多切 14 天
+    expect(parse('DTSTART:20261117T220000\nDTEND:20261118T000000')).toHaveLength(1)
+    expect(span(parse('DTSTART:20261117T090000\nDTEND:20261119T100000'))).toEqual([['2026-11-17', '09:00', '23:59'], ['2026-11-18', '00:00', '23:59'], ['2026-11-19', '00:00', '10:00']])
+    expect(parse('DTSTART:20261101T090000\nDTEND:20261201T090000')).toHaveLength(14)
   })
 
   it.each([

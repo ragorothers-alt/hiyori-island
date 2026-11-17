@@ -71,7 +71,10 @@ export const agentMethods = {
     // ── 排時間、改日子、新增任務：先算好每天已經佔掉的時間，這一批要重排的任務先不算在裡面（排好一件算一件）──
     // 會被重排的那幾件（跟下面真的動手的條件一樣：做完的、長期的、正在專注的不動，它們的時段照樣佔著）
     const movable = (t) => !!t && !t.done && !floating(t) && (chat || t.id !== focusing)
-    const moving = new Set((act.schedule || []).map((x) => x?.id).filter((id) => movable(find(id))))
+    const dayOf = (x, t) => (okDate(x.date) ? x.date : t.date < today ? today : t.date)
+    // 自己整理時不把任務挪過它的截止日（使用者開口要的照做）：這種不動，原本的時段也照樣佔著
+    const pastDue = (x, t) => !chat && !!t.due && t.due >= today && dayOf(x, t) > t.due
+    const moving = new Set((act.schedule || []).filter((x) => movable(find(x?.id)) && !pastDue(x, find(x.id))).map((x) => x.id))
     const busy = {}
     // 使用者開口指定的時間照他說的排（只避開日程和別的任務）；自己整理時三餐、緩衝都要避開
     const plain = chat ? { ...rhythm, meals: [], buffer: 0 } : rhythm
@@ -93,10 +96,8 @@ export const agentMethods = {
     }
     for (const x of act.schedule || []) {
       const t = find(x?.id)
-      if (!movable(t)) continue
-      const date = okDate(x.date) ? x.date : t.date < today ? today : t.date
-      // 自己整理時不把任務挪過它的截止日（使用者開口要的照做）
-      if (!chat && t.due && t.due >= today && date > t.due) continue
+      if (!movable(t) || pastDue(x, t)) continue
+      const date = dayOf(x, t)
       const before = slotOf(t)
       let at = null
       let dur = x.dur ? x.dur : t.dur ?? null

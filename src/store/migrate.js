@@ -561,11 +561,12 @@ export const blankTask = (o = {}) => ({
   ...o,
 })
 
-// 一件任務剛建好時的樣子（ふじ加的、分段做出來的）：撤銷時還是這個樣子才刪（之後改過標題、時間、寫了說明、勾了子任務、專注過的就留著）
+// 一件任務剛建好時的樣子（ふじ加的、分段做出來的）：撤銷時還是這個樣子才刪（之後改過標題、時間、截止日、寫了說明、勾了子任務、專注過的就留著）。
+// 加了欄位，舊的撤銷紀錄就對不上、不會刪（寧可留著）
 export const taskSig = (t) =>
   JSON.stringify([
     t.title, t.date, t.at ?? null, t.dur ?? null, t.priority, t.tag, t.note || '', t.project || null, t.ms || null, !!t.ongoing, !!t.star, !!t.first, t.pomos || 0,
-    (t.subs || []).map((s) => [s.title, !!s.done]), t.tempo ? [t.tempo.unit, t.tempo.goal, t.tempo.log.length] : null,
+    (t.subs || []).map((s) => [s.title, !!s.done]), t.tempo ? [t.tempo.unit, t.tempo.goal, t.tempo.log.length] : null, t.due || null, t.spent || 0,
   ])
 
 // 任務範本：常用的一組設定（長期、分類、子任務、要不要記數字），新增任務時選了就照著建。例如「練習曲」

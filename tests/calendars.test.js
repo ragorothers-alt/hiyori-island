@@ -36,6 +36,23 @@ describe('Worker：代抓行事曆', () => {
     await expect(fetchICS({ url: 'https://example.com/a.ics' }, async () => { throw new TypeError('network') })).rejects.toMatchObject({ status: 502, message: 'ics unreachable' })
   })
 
+  it('轉址每一跳先檢查再抓：轉到 http、IP、本機的不去抓；跳太多次不收', async () => {
+    const hop = (to) => new Response(null, { status: 302, headers: { Location: to } })
+    for (const bad of ['http://example.com/a.ics', 'https://127.0.0.1/a.ics', 'https://[::1]/a.ics', 'https://localhost/a.ics', 'https://2130706433/a.ics']) {
+      const f = vi.fn(async (u) => (u === 'https://example.com/a.ics' ? hop(bad) : reply(sample)))
+      await expect(fetchICS({ url: 'https://example.com/a.ics' }, f), bad).rejects.toMatchObject({ status: 400 })
+      expect(f, bad).toHaveBeenCalledTimes(1)
+      expect(f.mock.calls[0][1].redirect).toBe('manual')
+    }
+    // 相對路徑、合規則的 https 照跟
+    const f = vi.fn(async (u) => (u === 'https://example.com/a.ics' ? hop('/b.ics') : u === 'https://example.com/b.ics' ? hop('https://cdn.example.org/c.ics') : reply(sample)))
+    expect(await fetchICS({ url: 'https://example.com/a.ics' }, f)).toEqual({ ok: true, text: sample })
+    expect(f.mock.calls.map((c) => c[0])).toEqual(['https://example.com/a.ics', 'https://example.com/b.ics', 'https://cdn.example.org/c.ics'])
+    const loop = vi.fn(async () => hop('https://example.com/a.ics'))
+    await expect(fetchICS({ url: 'https://example.com/a.ics' }, loop)).rejects.toMatchObject({ status: 502 })
+    expect(loop).toHaveBeenCalledTimes(6)
+  })
+
   it('/v1/ics 有自己的流量上限', async () => {
     const limit = vi.fn(async () => ({ success: false }))
     const res = await worker.fetch(new Request('https://hiyori.test/v1/ics', { method: 'POST', body: JSON.stringify({ url: 'https://example.com/a.ics' }) }), { ICS_LIMIT: { limit }, SYNC_LIMIT: { limit: async () => ({ success: true }) } })
@@ -124,6 +141,21 @@ describe('前端：抓回來變成唯讀的日程', () => {
     expect(store.eventsOn(TODAY)).toEqual([])
     await again.refresh({ force: true })
     expect(again.status(c.id)).toBeNull()
+  })
+
+  it('刪掉最後一個行事曆、換了網址：這台裝置存著的私密網址和日程馬上清掉', async () => {
+    const cals = createCalendars(store, { fetcher, now: () => Date.now() + t })
+    const c = store.addCalendar({ url: 'https://example.com/private-abc.ics' })
+    await cals.refresh()
+    expect(localStorage.getItem('hiyori-ics')).toContain('private-abc')
+    // 別台裝置換了網址、這裡同步過來（關著不抓）：舊網址那份也不留
+    store.state.calendars[0] = { ...c, url: 'https://example.com/private-new.ics', on: false }
+    await cals.refresh()
+    expect(localStorage.getItem('hiyori-ics') || '').not.toContain('private-abc')
+    store.removeCalendar(c.id)
+    await cals.refresh()
+    expect(localStorage.getItem('hiyori-ics') || '').not.toContain('private')
+    expect(localStorage.getItem('hiyori-ics') || '').not.toContain('微積分')
   })
 
   it('同一筆日程每次抓回來 id 都一樣（不同行事曆、不同那一次就不一樣）', () => {

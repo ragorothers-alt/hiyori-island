@@ -252,7 +252,9 @@ function bestStart(t, dur, free, rhythm, date) {
 // 最佳化時程：把還沒排時段（replan 時連同還沒開始的）任務放進空檔。
 // stretch：平常實際花的時間是預估的幾倍（estimateRatio）：會超時的人每件後面多留一點（任務的長度不改，多的是空白）。
 // fill：最多用掉空檔的幾成（本命、高優先的不受限），超過的留到別天。
+// replan 時原本就排了時段的不受 fill 限制（是使用者自己排進來的，重排不因為「太滿」把它踢掉）。
 // 回傳 plan：[{ id, at, dur }]、left：放不下的任務、full：其中因為不想排太滿而沒排的、big：其中比哪一段空檔都長、可以分段做的、
+// unslot：left 裡原本有時段的（replan 時被別件佔走了位置；套用時要清掉它的時段，不然會跟新排的疊在一起）、
 // load：當天已排的總分鐘、free：剩下的空檔分鐘、endAt：最後一件結束的時間
 export function optimizeDay({ tasks, events, rhythm, date, today, nowMin = null, replan = false, stretch = 1, fill = FILL }) {
   const [from, to] = windowOf({ rhythm, date, today, nowMin })
@@ -271,8 +273,8 @@ export function optimizeDay({ tasks, events, rhythm, date, today, nowMin = null,
   for (const t of pending) {
     const dur = taskDur(t)
     const need = stretchDur(dur, stretch)
-    // 一般的任務：再排下去就太滿了，留到別天（本命、高優先的一定排）
-    if (used + need > budget && !(t.star || t.priority === 3)) {
+    // 一般的任務：再排下去就太滿了，留到別天（本命、高優先、原本就排了時段的一定排）
+    if (used + need > budget && !(t.star || t.priority === 3 || t.at)) {
       left.push(t.id)
       full.push(t.id)
       continue
@@ -292,7 +294,9 @@ export function optimizeDay({ tasks, events, rhythm, date, today, nowMin = null,
   const load = [...placed.map(taskDur), ...plan.map((p) => p.dur)].reduce((a, b) => a + b, 0)
   const freeLeft = gaps(from, to, busy).reduce((a, [x, y]) => a + (y - x), 0)
   const ends = [...placed.map((t) => toM(t.at) + taskDur(t)), ...plan.map((p) => toM(p.at) + p.dur)]
-  return { plan, left, full, big, load, free: freeLeft, endAt: ends.length ? toHHMM(Math.max(...ends)) : null, from: toHHMM(from), to: toHHMM(to) }
+  const slotted = new Set(pending.filter((t) => t.at).map((t) => t.id))
+  const unslot = left.filter((id) => slotted.has(id))
+  return { plan, left, full, big, unslot, load, free: freeLeft, endAt: ends.length ? toHHMM(Math.max(...ends)) : null, from: toHHMM(from), to: toHHMM(to) }
 }
 
 // 單一任務：找最近的空檔（使用者自己要排的，不管排得滿不滿）

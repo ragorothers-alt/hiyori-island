@@ -167,7 +167,7 @@ export class ScheduleView {
     if (p) {
       html = `<div class="pb-preview">
         <div class="pb-msg">${ICON.spark}<div><b>${p.plan.length ? `預覽：排入 ${p.plan.length} 件` : '暫時沒有可排入的任務'}</b>${p.endAt ? `<small>預計 ${p.endAt} 任務結束・虛線是預覽</small>` : ''}
-          ${p.left.length ? `<small class="warn">還有 ${p.left.length} 件未排入${p.full?.length ? `（其中 ${p.full.length} 件是為了留白、不排太滿）` : ''}，改天安排也可以</small>` : ''}
+          ${p.left.length ? `<small class="warn">還有 ${p.left.length} 件未排入${p.full?.length ? `（其中 ${p.full.length} 件是為了留白、不排太滿）` : ''}${p.unslot?.length ? `，${p.unslot.length} 件原本的時段會空出來` : ''}，改天安排也可以</small>` : ''}
           ${p.big?.length ? `<small class="warn">${p.big.map((id) => `「${esc(clipTitle(s.state.tasks.find((t) => t.id === id)?.title || ''))}」`).join('')}比這天哪一段空檔都長 <button type="button" class="cm-link" data-plan="split">分成幾段、分到幾天做</button></small>` : ''}</div></div>
         <div class="pb-btns"><button class="btn-ghost" data-plan="cancel">取消</button>
           ${placed.length && !this.preview.replan ? '<button class="btn-ghost" data-plan="replan">重排未開始的任務</button>' : ''}
@@ -536,7 +536,7 @@ export class ScheduleView {
         if (!p) return
         // 預覽可能放了一陣子：照現在的時間、日程和任務再排一次，結果不一樣就換成新的預覽，請使用者再看一眼
         const fresh = p.date >= s.today ? s.planDay(p.date, { replan: p.replan }) : null
-        const sig = (r) => `${r.plan.map((x) => `${x.id}@${x.at}+${x.dur}`).join()}|${r.left.length}`
+        const sig = (r) => `${r.plan.map((x) => `${x.id}@${x.at}+${x.dur}`).join()}|${r.left.length}|${(r.unslot || []).join()}`
         if (!fresh || sig(fresh) !== sig(p.result)) {
           this.preview = fresh ? { ...p, result: fresh } : null
           this.render(false)
@@ -546,7 +546,7 @@ export class ScheduleView {
           return
         }
         this.preview = null
-        s.applyPlan(p.date, p.result.plan, p.result.left.length)
+        s.applyPlan(p.date, p.result.plan, p.result.left.length, p.result.unslot)
         if (p?.result.left.length) this.hooks.toast({ icon: '満', title: `還有 ${p.result.left.length} 件未排入`, sub: '這天的空檔有點滿，改天安排也沒關係' })
       } else if (act === 'split') {
         // 放不下的大任務分段，再照新的樣子預覽一次

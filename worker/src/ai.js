@@ -324,12 +324,24 @@ export function askAIStream(env, body, headers = {}) {
   const enc = new TextEncoder()
   const { readable, writable } = new TransformStream()
   const w = writable.getWriter()
-  // 使用者按了停、關掉頁面（讀的那一端斷了）：Claude 那邊也停掉，不再白寫
+  // 使用者按了停、關掉頁面（讀的那一端斷了）：Claude 那邊馬上停掉，不再白寫（不用等她寫出下一小段才發現）
   let gone = false
-  const line = (o) => w.write(enc.encode(`${JSON.stringify(o)}\n`)).catch(() => (gone = true))
+  const stops = new Set()
+  const leave = () => {
+    if (gone) return
+    gone = true
+    for (const f of stops) f()
+  }
+  w.closed.catch(leave)
+  const line = (o) => w.write(enc.encode(`${JSON.stringify(o)}\n`)).catch(leave)
+  const onGone = (f) => {
+    if (gone) f()
+    stops.add(f)
+    return () => stops.delete(f)
+  }
   ;(async () => {
     try {
-      const res = await askAI(env, body, { text: (s) => line({ t: 'd', s }), reset: () => line({ t: 'reset' }), gone: () => gone })
+      const res = await askAI(env, body, { text: (s) => line({ t: 'd', s }), reset: () => line({ t: 'reset' }), gone: () => gone, onGone })
       await line({ t: 'end', ...res })
     } catch (e) {
       if (e instanceof HttpError) await line({ t: 'error', error: e.message, ...e.extra })
@@ -375,13 +387,14 @@ export async function askAI(env, body, live = null) {
       const q = fb ? { ...p, betas: [FALLBACK_BETA], fallbacks: 'default' } : p
       if (!live) return fb ? client.beta.messages.create(q) : client.messages.create(q)
       const s = fb ? client.beta.messages.stream(q) : client.messages.stream(q)
+      const off = live.onGone?.(() => s.abort())
       s.on('streamEvent', (ev) => {
         if (live.gone?.()) return s.abort()
         // 被安全機制擋下、換成備援模型接著寫：前面那段（寫到一半的 JSON）不算
         if (ev.type === 'content_block_start' && ev.content_block?.type === 'fallback') live.reset()
         else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') live.text(ev.delta.text)
       })
-      return s.finalMessage()
+      return s.finalMessage().finally(() => off?.())
     }
     const key = `${model}:${JSON.stringify(schema)}`
     let res

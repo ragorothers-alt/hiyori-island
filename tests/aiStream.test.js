@@ -60,6 +60,43 @@ describe('Worker：邊寫邊送', () => {
     expect(client.messages.create).not.toHaveBeenCalled()
   })
 
+  it('讀的那一端斷了（按了停、關掉頁面）：馬上叫 Claude 停，不用等她寫出下一小段', async () => {
+    let s
+    const hang = () => {
+      const on = {}
+      let wake
+      s = {
+        aborted: false,
+        on(type, fn) {
+          ;(on[type] ||= []).push(fn)
+          return this
+        },
+        abort() {
+          this.aborted = true
+          wake?.()
+        },
+        async finalMessage() {
+          for (const fn of on.streamEvent || []) fn(delta('{"say":"嗨'))
+          // 之後很久都沒有新的一小段
+          await new Promise((r) => (wake = r))
+          throw new Anthropic.APIUserAbortError()
+        },
+      }
+      return s
+    }
+    const client = { messages: { stream: hang }, beta: { messages: { stream: hang } } }
+    const res = await worker.fetch(
+      new Request('https://hiyori.test/v1/ai', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${encodeURIComponent(PASS)}` }, body: JSON.stringify({ task: 'agent', stream: true, data: { run: 'chat', message: '嗨', days: [] } }) }),
+      env(client),
+    )
+    const reader = res.body.getReader()
+    const first = await reader.read()
+    expect(new TextDecoder().decode(first.value)).toContain('"t":"d"')
+    expect(s.aborted).toBe(false)
+    await reader.cancel()
+    await vi.waitFor(() => expect(s.aborted).toBe(true))
+  })
+
   it('出錯寫在最後一行（已經開始送了，HTTP 狀態是 200）；通行碼不對還是一般的 401', async () => {
     const bad = Anthropic.APIError.generate(400, { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low' } }, undefined, new Headers())
     const client = { messages: { stream: () => fakeStream([], null, { fail: bad }) }, beta: { messages: { stream: () => fakeStream([], null, { fail: bad }) } } }

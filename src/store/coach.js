@@ -31,8 +31,9 @@ export const coachMethods = {
   estimate() {
     return estimateRatio(this.state.tasks)
   },
-  // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數
-  applyPlan(date, plan, left = 0) {
+  // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數。
+  // unslot：重排時原本有時段、這次沒排進去的（位置被別件佔走了）：清掉時段，不然會跟新排的疊在一起
+  applyPlan(date, plan, left = 0, unslot = []) {
     this._refreshToday()
     // 過去的日子不排；今天已經過去的時段也不排（預覽放太久時，介面會先重新預覽）
     if (date < this.today) return
@@ -40,6 +41,10 @@ export const coachMethods = {
     const nowMin = date === this.today ? n0.getHours() * 60 + n0.getMinutes() : -1
     const fx = []
     let n = 0
+    for (const id of unslot) {
+      const t = this._find('tasks', id)
+      if (t && !t.done && t.date === date && t.at && toMin(t.at) >= nowMin) t.at = null
+    }
     for (const p of plan) {
       const t = this._find('tasks', p.id)
       if (!t || t.done || !TIME_RE.test(p.at) || toMin(p.at) < nowMin) continue

@@ -53,23 +53,39 @@ async function readCapped(res, max) {
   return new TextDecoder().decode(all)
 }
 
+export const ICS_HOPS = 5
+
 export async function fetchICS(body, fetcher = fetch) {
-  const url = icsUrl(body?.url)
+  let url = icsUrl(body?.url)
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), ICS_TIMEOUT)
   try {
+    // 轉址自己一跳一跳跟：每一跳先照同樣的規則檢查再去抓（交給 fetch 自己跟的話，轉到 http、IP 的會先被抓了才知道）
     let res
-    try {
-      res = await fetcher(url.href, {
-        headers: { Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.1', 'User-Agent': 'hiyori-calendar/1.0' },
-        redirect: 'follow',
-        signal: ctrl.signal,
-        cf: { cacheTtl: 0, cacheEverything: false },
-      })
-    } catch {
-      throw new HttpError(502, 'ics unreachable')
+    for (let hop = 0; ; hop++) {
+      try {
+        res = await fetcher(url.href, {
+          headers: { Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.1', 'User-Agent': 'hiyori-calendar/1.0' },
+          redirect: 'manual',
+          signal: ctrl.signal,
+          cf: { cacheTtl: 0, cacheEverything: false },
+        })
+      } catch {
+        throw new HttpError(502, 'ics unreachable')
+      }
+      if (res.status < 300 || res.status > 399) break
+      const to = res.headers.get('Location')
+      await res.body?.cancel().catch(() => {})
+      if (!to || hop >= ICS_HOPS) throw new HttpError(502, 'ics failed', { status: res.status })
+      let next
+      try {
+        next = new URL(to, url)
+      } catch {
+        throw new HttpError(400, 'bad url')
+      }
+      url = icsUrl(next.href)
     }
-    // 轉址到 http、IP 的不收
+    // 萬一 fetch 還是自己跟了轉址（舊的執行環境）：最後的網址也要合規則
     try {
       if (res.url) icsUrl(res.url)
     } catch {

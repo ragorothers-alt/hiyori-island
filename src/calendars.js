@@ -112,10 +112,14 @@ export function createCalendars(store, { fetcher = (...a) => fetch(...a), now = 
     }
     running = (async () => {
       const at = now()
-      // 刪掉的行事曆：快取也清掉
-      const ids = new Set(store.state.calendars.map((c) => c.id))
-      for (const id of Object.keys(cache)) if (!ids.has(id)) delete cache[id]
+      // 刪掉的行事曆、換了網址的：快取也清掉，而且馬上寫回（私密網址和日程不留在這台裝置上）
+      const urls = new Map(store.state.calendars.map((c) => [c.id, c.url]))
       let fetched = false
+      for (const id of Object.keys(cache)) {
+        if (urls.get(id) === cache[id]?.url) continue
+        delete cache[id]
+        fetched = true
+      }
       for (const c of store.state.calendars) {
         if (!c.on) continue
         const got = cache[c.id]

@@ -1,5 +1,7 @@
 // RDATE、VTIMEZONE 不展開；未知 RRULE 只保留首筆，避免把不懂的規則變成錯誤日程。
 const DAY = 86400000
+// 跨午夜的日程最多切成幾天（一個「日程」跨好幾週的多半是寫錯，不要把整個月塗滿）
+const SPLIT_DAYS = 14
 const weekdays = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 const pad = (n) => String(n).padStart(2, '0')
 const stamp = (p) => {
@@ -104,7 +106,8 @@ function ruleOf(value, start, read) {
   if (months?.some((n) => !Number.isInteger(n) || n < 1 || n > 12)) return null
   const until = r.UNTIL ? read({ value: r.UNTIL, params: { TZID: start.zone } }) : null
   if (r.UNTIL && !until) return null
-  return { freq: r.FREQ, interval: +(r.INTERVAL || 1), count: +(r.COUNT || Infinity), until, days, monthDays, months }
+  if (r.WKST && !weekdays.includes(r.WKST)) return null
+  return { freq: r.FREQ, interval: +(r.INTERVAL || 1), count: +(r.COUNT || Infinity), until, days, monthDays, months, wkst: weekdays.indexOf(r.WKST || 'MO') }
 }
 
 function * occurrences(start, rule, from, to, span) {
@@ -112,8 +115,10 @@ function * occurrences(start, rule, from, to, span) {
   if (!rule) return
   const base = stamp(start.p)
   const dow = new Date(base).getUTCDay()
-  const monday = base - ((dow + 6) % 7) * DAY
-  const weekDays = [...new Set((rule.days || [weekdays[dow]]).map((d) => (weekdays.indexOf(d) + 6) % 7))].sort((a, b) => a - b)
+  // 一週從 WKST 那天開始（沒寫是星期一）：每隔幾週的規則照它切週
+  const wk = rule.wkst ?? 1
+  const monday = base - ((dow - wk + 7) % 7) * DAY
+  const weekDays = [...new Set((rule.days || [weekdays[dow]]).map((d) => (weekdays.indexOf(d) - wk + 7) % 7))].sort((a, b) => a - b)
   let period = 0
   let count = 1
   // 日、週可以直接跳到查詢附近，COUNT 仍包含視窗前已經發生的次數。
@@ -239,10 +244,27 @@ export function parseICS(text, options = {}) {
         if ((from && endDate < from) || (to && date > to)) return
         if (endDate === date) endDate = ''
       } else {
+        const finish = c.local(ms + span)
+        // 跨過午夜的：照本地日期切成每天一段（00:00 開始、23:59 結束），每段自己看在不在查詢範圍裡；
+        // 第一段的 uid 跟沒切的一樣，之後的加 #1、#2…（最多 SPLIT_DAYS 天）
+        if (span > 0 && dateOf(finish) > date) {
+          const last = dateOf(finish)
+          let d = local.slice(0, 3)
+          for (let i = 0; i < SPLIT_DAYS; i++) {
+            const ds = dateOf(d)
+            if (ds > last) break
+            const s1 = i ? '00:00' : timeOf(local)
+            const e1 = ds === last ? timeOf(finish) : '23:59'
+            if (e1 > s1 && !((from && ds < from) || (to && ds > to))) {
+              events.push({ uid: `${uid}::${original}${i ? `#${i}` : ''}`, title: textOf(value(r, 'SUMMARY')) || '（沒有標題）', date: ds, start: s1, end: e1, allDay: false, endDate: '', location: textOf(value(r, 'LOCATION')) })
+            }
+            d = parts(stamp(d) + DAY)
+          }
+          return
+        }
         if ((from && date < from) || (to && date > to)) return
         start = timeOf(local)
-        const finish = c.local(ms + span)
-        end = dateOf(finish) > date ? '23:59' : timeOf(finish)
+        end = timeOf(finish)
         if (span <= 0 || end <= start) {
           const minute = Math.min(1439, local[3] * 60 + local[4] + 30)
           end = `${pad(Math.floor(minute / 60))}:${pad(minute % 60)}`
@@ -268,7 +290,8 @@ export function parseICS(text, options = {}) {
           }
           const rule = ruleOf(value(master, 'RRULE'), s, c.read)
           const e = c.read(first(master, 'DTEND'))
-          const span = s.allDay ? Math.max(DAY, e ? e.ms - s.ms : duration(value(master, 'DURATION')) || DAY) : DAY
+          // 往回多看一個事件的長度：開始在查詢範圍前、跨進範圍裡的那幾次也要展開
+          const span = Math.max(DAY, e ? e.ms - s.ms : duration(value(master, 'DURATION')) || DAY)
           for (const p of occurrences(s, rule, from, to, span)) {
             const occurrence = { ...s, p, ms: s.allDay ? stamp(p) : c.instant(p, s.zone) }
             if (rule?.until && (rule.until.allDay ? dateOf(p) > dateOf(rule.until.p) : occurrence.ms > rule.until.ms)) break

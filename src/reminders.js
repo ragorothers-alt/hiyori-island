@@ -304,7 +304,8 @@ export class Reminders {
         this.onRemind(t, t.due === today ? 0 : 1, 'due')
       }
     }
-    // 習慣快斷掉：連續 3 天以上、今天要做還沒打卡的養成習慣，就寢前兩個半小時起提醒一次（一天一次、一個習慣一則）
+    // 習慣快斷掉：連續 3 天以上、今天要做還沒打卡的養成習慣，就寢前兩個半小時起提醒一次（一天一次、一個習慣一則）。
+    // 習慣照日曆的日子算（過了午夜打卡就記在隔天）：就寢在午夜後的，改在午夜前兩個半小時提醒，不然提醒時這天已經過了
     const bed = toMin(r.sleep) > toMin(r.wake) ? toMin(r.sleep) : 1440
     if (mins >= bed - 150 && mins < bed) {
       for (const h of this.store.habitsDueToday?.() || []) {

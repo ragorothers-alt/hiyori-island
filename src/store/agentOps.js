@@ -417,6 +417,7 @@ export const agentOpsMethods = {
       if (f.done === true) out.done.push(id)
       else if (f.done === false) rest.done = false
       if ('note' in f) rest.note = f.note
+      if ('due' in f) rest.due = f.due
       for (const [field, value] of Object.entries(rest)) out.ops.set.push({ kind: 'task', id, field, value })
     }
     return out

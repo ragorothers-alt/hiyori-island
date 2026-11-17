@@ -123,6 +123,32 @@ describe('不排太滿', () => {
     expect(atOf('heavy') >= '09:00' && atOf('heavy') < '12:00').toBe(true)
   })
 
+  it('重排：原本就排了時段的不因為「太滿」被踢掉；真的被佔走位置的，套用時清掉時段（不會疊在一起）', () => {
+    const tomorrow = addDays(TODAY, 1)
+    const rhythm = { ...DEFAULT_RHYTHM, wake: '08:00', sleep: '12:00', meals: [], buffer: 0, work: null }
+    const overlaps = (list) => list.some((a, i) => list.some((b, j) => i !== j && a.s < b.e && b.s < a.e))
+    const span = (at, dur) => ({ s: +at.slice(0, 2) * 60 + +at.slice(3), e: +at.slice(0, 2) * 60 + +at.slice(3) + dur })
+    // 08:00、09:00 各一件，再加一件 120 分鐘的：七成上限不會把原本那兩件擠掉
+    const tasks = [
+      { id: 'a', title: 'A', priority: 2, dur: 60, date: tomorrow, at: '08:00' },
+      { id: 'b', title: 'B', priority: 2, dur: 60, date: tomorrow, at: '09:00' },
+      { id: 'c', title: 'C', priority: 2, dur: 120, date: tomorrow },
+    ]
+    const r = optimizeDay({ tasks, events: [], rhythm, date: tomorrow, today: TODAY, replan: true })
+    expect(r.plan.map((p) => p.id).sort()).toEqual(['a', 'b', 'c'])
+    expect(overlaps(r.plan.map((p) => span(p.at, p.dur)))).toBe(false)
+    expect(r.unslot).toEqual([])
+    // 高優先的一件佔滿整個早上：原本 08:00 那件放不下，套用後時段清掉
+    store.state.rhythm = rhythm
+    const low = store.addTask({ title: '低', date: tomorrow, dur: 60, at: '08:00', priority: 1 })
+    const high = store.addTask({ title: '高', date: tomorrow, dur: 240, priority: 3 })
+    const p = store.planDay(tomorrow, { replan: true })
+    expect(p.unslot).toEqual([low.id])
+    store.applyPlan(tomorrow, p.plan, p.left.length, p.unslot)
+    expect(high.at).toBe('08:00')
+    expect(low.at).toBeNull()
+  })
+
   it('比哪一段空檔都長的大任務：標成 big（可以分段）', () => {
     // 最大的一段空檔是午餐後到晚餐前（13:00–18:30，330 分）
     const tasks = [{ id: 'big', title: '寫論文', priority: 2, dur: 400, date: TODAY }]
@@ -172,6 +198,17 @@ describe('大任務分段', () => {
     expect(t.title).toBe('寫論文（1/3）')
   })
 
+  it('復原分段：之後改了截止日、專注過（就算沒滿一輪）的那一段留著', () => {
+    const t = store.addTask({ title: '寫論文', date: TODAY, dur: 150 })
+    const u = store.splitSessions(t.id, 4)
+    store.updateTask(u.made[0].id, { due: addDays(TODAY, 5) })
+    store.completePomodoro(20, u.made[1].id, null, null, { extra: true })
+    expect(store.state.tasks.find((x) => x.id === u.made[1].id)).toMatchObject({ pomos: 0, spent: 20 })
+    // 沒動過的第三段收掉；改過的兩段留著
+    expect(store.undoSplit(u)).toBe(true)
+    expect(store.state.tasks.map((x) => x.id).sort()).toEqual([t.id, u.made[0].id, u.made[1].id].sort())
+  })
+
   it('ふじ也能分段（自己整理時也可以），撤銷記錄經過讀檔還在、撤銷得回來', () => {
     const t = store.addTask({ title: '準備簡報', date: TODAY, dur: 150 })
     const { ids, data } = agentContext(store, 'morning', {}, new Date())
@@ -202,6 +239,33 @@ describe('大任務分段', () => {
     const c = agentContext(store, 'chat', { message: '報名移到週四' }, new Date())
     store.agentApply(cleanOut(blank({ schedule: [{ id: c.data.days[0].tasks[0].id, date: addDays(TODAY, 3), at: '', dur: 0 }], set: [], create: [], go: { do: '', id: '' } }), c.ids, 'chat'), { run: 'chat' })
     expect(t.date).toBe(addDays(TODAY, 3))
+  })
+
+  it('不挪過截止日的那件，原本的時段照樣佔著（同一批別件不能排進去）', () => {
+    const tomorrow = addDays(TODAY, 1)
+    const a = store.addTask({ title: 'A', date: tomorrow, at: '09:00', dur: 60, due: addDays(TODAY, 2) })
+    const b = store.addTask({ title: 'B', date: tomorrow, at: '10:30', dur: 60 })
+    const { ids, data } = agentContext(store, 'evening', {}, new Date())
+    const alias = (title) => data.days.flatMap((d) => d.tasks).find((x) => x.title === title).id
+    store.agentApply(cleanOut(blank({ schedule: [{ id: alias('A'), date: addDays(TODAY, 3), at: '09:00', dur: 0 }, { id: alias('B'), date: tomorrow, at: '09:00', dur: 0 }] }), ids, 'evening'), { run: 'evening' })
+    expect(a).toMatchObject({ date: tomorrow, at: '09:00' })
+    expect(b.at === '09:00').toBe(false)
+  })
+
+  it('對話裡改截止日、清掉截止日都會生效，撤銷回到原本的', () => {
+    const t = store.addTask({ title: '期末報告', date: TODAY, due: '2026-11-20' })
+    const run = (value) => {
+      const c = agentContext(store, 'chat', { message: '期末報告改成 22 號交' }, new Date())
+      const id = c.data.days[0].tasks.find((x) => x.title === '期末報告').id
+      const act = cleanOut(blank({ set: [{ kind: 'task', id, field: 'due', value }], create: [], go: { do: '', id: '' } }), c.ids, 'chat')
+      return store.agentApply(act, { run: 'chat' })
+    }
+    const e1 = run('2026-11-22')
+    expect(t.due).toBe('2026-11-22')
+    store.agentUndo(e1.id)
+    expect(t.due).toBe('2026-11-20')
+    run('')
+    expect(t.due).toBeNull()
   })
 
   it('自己整理時把「先記下來的事」變成任務、收掉那一筆（只能收這一種），撤銷時放回去', () => {
