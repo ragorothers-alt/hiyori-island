@@ -7,7 +7,7 @@ import { AGENT_MODES } from '../theme.js'
 //   AgentView：教練分頁的「ふじ」那一頁。完整的對話和她自己整理的紀錄、常用的幾句、自己整理的方式（自動／先問我／關）、她記得的事。
 // 兩個都是一直留著的節點（輸入框不跟著重畫，打到一半的字不會不見），只換裡面的內容。
 
-const RUN_NAME = { morning: '整理今天', replan: '重排了今天', capture: '安排新任務', evening: '準備明天', chat: '' }
+const RUN_NAME = { morning: '整理今天', replan: '重排了今天', capture: '安排新任務', evening: '準備明天', risk: '趕上截止日', week: '排下一週', chat: '' }
 const MODE_LABEL = { auto: ['自動', '直接安排，可以撤銷'], ask: ['先問我', '看過再套用'], off: ['關', '我開口才動'] }
 const HINTS = ['重排今天剩下的', '明天排鬆一點', '把最卡的那件拆小', '這週先顧哪幾件']
 const pad = (n) => String(n).padStart(2, '0')

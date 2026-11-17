@@ -240,8 +240,9 @@ function cleanCoach(c) {
   return { items, last, plans }
 }
 // 自主的ふじ（見 store/agent.js）：記得的事、早晚的整理上次哪天做的、最近做過的事（含撤銷用的紀錄）
-const emptyAgent = () => ({ memory: [], ran: { morning: '', evening: '', week: '' }, log: [] })
-const AGENT_RUN_IDS = ['morning', 'replan', 'capture', 'evening', 'chat']
+// ran：每一種上次做的日子。week 是整理過的那一週（星期一）；plan 是星期天晚上提出下一週安排的那天
+const emptyAgent = () => ({ memory: [], ran: { morning: '', evening: '', week: '', plan: '' }, log: [] })
+const AGENT_RUN_IDS = ['morning', 'replan', 'capture', 'evening', 'risk', 'week', 'chat']
 // 撤銷用的紀錄（store/agent.js 的 agentApply 寫的）：每一種只收認得的欄位、照型別清洗，缺了要緊的就當成不能撤銷（null；那一筆還是列得出來）。
 // 之後撤銷時每一筆還會對著現在的資料再檢查一次
 const AGENT_DROP_MAX = 60000
@@ -408,7 +409,7 @@ function cleanAgent(a) {
     },
     false,
   ).slice(-30)
-  return { memory: [...new Set(memory)].slice(0, 30), ran: { morning: ymd(ran.morning, ''), evening: ymd(ran.evening, ''), week: ymd(ran.week, '') }, log }
+  return { memory: [...new Set(memory)].slice(0, 30), ran: { morning: ymd(ran.morning, ''), evening: ymd(ran.evening, ''), week: ymd(ran.week, ''), plan: ymd(ran.plan, '') }, log }
 }
 // 重要日子：考試、截止日、紀念日
 function cleanDates(list) {

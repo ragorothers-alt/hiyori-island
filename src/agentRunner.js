@@ -6,7 +6,8 @@
 // 每一次是一個請求（askAI('agent')）：整理好的資料送給 Claude，回來的那批動作檢查過才做（store.agentApply），整批可以撤銷。
 // 設定的 agentMode：auto 直接做、ask 先放著等使用者按「套用」、off 只在開口時動。
 import { aiReady, askAI } from './ai.js'
-import { agentContext, cleanOut, dueRun, hasActions, describe, weekOf, saneAct, partialSay, AGENT_DAYS } from './agent.js'
+import { agentContext, cleanOut, dueRun, hasActions, describe, weekOf, saneAct, partialSay, AGENT_DAYS, morningAt } from './agent.js'
+import { bedAt } from './planner.js'
 import { addDays, dateStr } from './store/util.js'
 import { floating } from './store/migrate.js'
 
@@ -20,7 +21,7 @@ export const CAPTURE_RETRY = 30000
 const RETRY_MS = 10 * 60000
 // 這些錯誤再試也一樣：等使用者改了設定或隔天
 const STOP_CODES = new Set(['bad pass', 'ai off', 'bad key', 'no access', 'no model', 'daily limit', 'locked', 'no pass'])
-const RUN_LABEL = { morning: '整理今天', replan: '重排今天', capture: '安排新任務', evening: '準備明天', chat: '' }
+const RUN_LABEL = { morning: '整理今天', replan: '重排今天', capture: '安排新任務', evening: '準備明天', risk: '趕上截止日', week: '排下一週', chat: '' }
 
 // 頁面現在看不到（切到別的分頁、手機鎖著）；離線
 const hidden = () => typeof document !== 'undefined' && document.hidden
@@ -42,7 +43,7 @@ const sameDay = (at) => new Date(at).toDateString() === new Date().toDateString(
 // 存在這台裝置、等使用者決定的那一份（重新整理後接著問）：只收今天的、樣子對的
 function pendingOf(p) {
   if (!p || typeof p !== 'object' || !saneAct(p.act) || !Array.isArray(p.lines) || !sameDay(p.at)) return null
-  if (!['morning', 'replan', 'capture', 'evening'].includes(p.run)) return null
+  if (!['morning', 'replan', 'capture', 'evening', 'risk', 'week'].includes(p.run)) return null
   return { id: String(p.id || 'p'), at: +p.at, run: p.run, say: typeof p.say === 'string' ? p.say : '', act: p.act, lines: p.lines.filter((x) => typeof x === 'string').slice(0, 80), weekStart: !!p.weekStart }
 }
 
@@ -124,8 +125,8 @@ export function createAgent(store, hooks = {}) {
       if (!chat && (kind === 'morning' || kind === 'evening') && store.state.agent.ran[kind] === store.today && from.ran !== store.today) return null
       const act = cleanOut(out, ids, kind)
       if (!chat) agent.failed = null
-      // 先給使用者看：有要動資料的才留著等；只有一句話就直接記下
-      if (!chat && mode() === 'ask' && hasActions(act)) {
+      // 先給使用者看：有要動資料的才留著等；只有一句話就直接記下。排下一週一次動一整週，一定先給使用者看
+      if (!chat && (mode() === 'ask' || kind === 'week') && hasActions(act)) {
         agent.pending = { id: `p${Date.now().toString(36)}`, at: Date.now(), run: kind, say: act.say, act, lines: describe(act, store), weekStart }
         keep()
         store.agentRan(kind, weekStart)
@@ -173,9 +174,13 @@ export function createAgent(store, hooks = {}) {
     // 別的分頁剛為了同一個狀況重排過：照它記的
     seen = seenOf(readLocal().seen || seen)
     const today = store.today
-    return dueRun({
+    const nowMin = now.getHours() * 60 + now.getMinutes()
+    // 某個截止日變緊了（hooks.risk 給 { why, sig }）：早上、晚上的整理先做（那兩次也看得到風險），其他時候為它整理一次；
+    // 同一個狀況只做一次（sig 記在 seen.risk），晚上就寢前一小時後不做
+    const r = hooks.risk?.()
+    const base = dueRun({
       today,
-      nowMin: now.getHours() * 60 + now.getMinutes(),
+      nowMin,
       rhythm: store.state.rhythm,
       ran: store.state.agent.ran,
       tasks: store.tasksOn(today),
@@ -185,6 +190,9 @@ export function createAgent(store, hooks = {}) {
       seen,
       now: now.getTime(),
     })
+    if (base?.run === 'morning' || base?.run === 'evening' || !r || r.sig === seen.risk) return base
+    if (nowMin < morningAt(store.state.rhythm) || nowMin >= Math.min(bedAt(store.state.rhythm), 1440) - 60) return base
+    return { run: 'risk', why: r.why, sig: r.sig }
   }
   function go(due) {
     const today = store.today
@@ -197,8 +205,16 @@ export function createAgent(store, hooks = {}) {
       .then((res) => {
         // 這個狀況處理過了（做完才記：沒連上的話，等一下還會再試）
         if (res && due.run === 'replan') {
-          seen = { sig: due.sig, at: Date.now() }
+          seen = { ...seen, sig: due.sig, at: Date.now() }
           keep()
+        }
+        // 截止日的風險：這次（或早上、晚上那次，資料裡也有風險）看過了，同樣的狀況不再為它整理
+        if (res && (due.run === 'risk' || due.run === 'morning' || due.run === 'evening')) {
+          const sig = due.run === 'risk' ? due.sig : hooks.risk?.()?.sig
+          if (sig) {
+            seen = { ...seen, risk: sig }
+            keep()
+          }
         }
         return res
       })
@@ -329,6 +345,8 @@ export function createAgent(store, hooks = {}) {
     return entry
   }
   agent.dismiss = () => {
+    // 下一週的安排說不用了：這一週不再排（星期一早上也不再看一次）
+    if (agent.pending?.run === 'week') store.agentRan('weekSkip')
     agent.pending = null
     keep()
     changed()

@@ -271,6 +271,11 @@ export const agentMethods = {
       if (weekStart) a.ran.week = weekOf(today)
     }
     if (run === 'evening') a.ran.evening = today
+    // 下一週排好了（星期天晚上那次套用了）：星期一早上不用再看一次這一週
+    if (run === 'week') {
+      a.ran.plan = today
+      a.ran.week = weekOf(addDays(today, 1))
+    }
     const next = act.next && find(act.next) && !find(act.next).done ? act.next : null
     let entry = null
     if (changes.length || act.say) {
@@ -290,7 +295,13 @@ export const agentMethods = {
       a.ran.morning = this.today
       if (weekStart) a.ran.week = weekOf(this.today)
     } else if (run === 'evening') a.ran.evening = this.today
-    else return
+    // 星期天晚上提出了下一週的安排（等使用者決定）：今晚不再提一次。沒決定就過了午夜的話，星期一早上照常看這一週
+    else if (run === 'week') a.ran.plan = this.today
+    // 使用者說不用了：這一週不再排（星期一早上也不看）
+    else if (run === 'weekSkip') {
+      a.ran.plan = this.today
+      a.ran.week = weekOf(addDays(this.today, 1))
+    } else return
     this.save()
   },
 

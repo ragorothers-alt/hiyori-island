@@ -18,12 +18,14 @@ import { burst, floatText, petalRain, tapPoint, trackTaps, calmMotion } from './
 import { haptic } from './ui/haptics.js'
 import { RARITIES } from './data/flowers.js'
 import { lifeKindOf } from './data/life.js'
-import { taskDur } from './planner.js'
+import { taskDur, fmtDur, bedAt } from './planner.js'
 import { BOND_ACTS, outfitOf } from './data/bond.js'
 import { lookHour, nightAt, realHour, systemDark, daypart } from './daylight.js'
 import { RESIDENTS, buildingOf } from './data/town.js'
 import { pick, short, fill, line } from './voice.js'
 import { createAgent } from './agentRunner.js'
+import { dayWord } from './agent.js'
+import { createRiskWatch } from './riskWatch.js'
 import { createCalendars } from './calendars.js'
 import { AI_MODELS, aiModel, aiExtras, aiUnshared } from './ai.js'
 
@@ -721,9 +723,21 @@ async function boot() {
     focusSynced: () => scene?.focusStopped(),
   }
   // ── 自主的ふじ（接了 Claude 時）：自己排今天、安排新任務、進度落後時重排、晚上準備明天；什麼時候動見 agentRunner.js ──
-  const AGENT_DID = { morning: '整理了今天', replan: '重排了今天', capture: '安排了新任務', evening: '準備好明天了' }
-  const AGENT_WANT = { morning: '想整理今天', replan: '想重排今天', capture: '想安排新任務', evening: '想準備明天' }
+  const AGENT_DID = { morning: '整理了今天', replan: '重排了今天', capture: '安排了新任務', evening: '準備好明天了', risk: '替截止日提早排好了', week: '排好下一週了' }
+  const AGENT_WANT = { morning: '想整理今天', replan: '想重排今天', capture: '想安排新任務', evening: '想準備明天', risk: '想替截止日提早排', week: '想好下一週怎麼排了' }
+  // ── 往前看：截止日、專案會不會來不及（src/risk.js 算、riskWatch 記著上一次的等級）──
+  const risk = createRiskWatch(store)
+  hooks.risk = risk
+  // 很緊的截止日：交給ふじ整理一次（agentRunner 的 hooks.risk）。why 寫給她看：是哪幾件、還要多久、空檔多少
+  const riskDue = () => {
+    const tight = risk.current().due.filter((r) => r.level === 'tight')
+    if (!tight.length) return null
+    const name = (id) => short(store.state.tasks.find((t) => t.id === id)?.title || '', 16)
+    const why = tight.slice(0, 3).map((r) => `${r.ids.slice(0, 3).map((id) => `「${name(id)}」`).join('')}${dayWord(r.date, store.today)}截止，連同之前截止的還要大約 ${fmtDur(r.need)}，到那天能用的空檔（七成）大約 ${fmtDur(r.room)}`).join('；')
+    return { why: `${why}，很緊`, sig: tight.map((r) => `${r.date}:${[...r.ids].sort().join('+')}`).join(',') }
+  }
   const agent = createAgent(store, {
+    risk: riskDue,
     // 打到一半的字、開著的表單：先不動資料
     busy: () => ui.hasDraft(),
     // 開場還沒好、正在專注、正在擺裝飾：不打擾
@@ -1752,6 +1766,59 @@ async function boot() {
   let cheerT = 0
   addEventListener('pointerdown', touched, { capture: true, passive: true })
   addEventListener('keydown', touched, { capture: true })
+  // ── 截止日、專案的風險變差了：說一次（一分鐘最多看一次；開場好了、頁面在前面、沒在專注、早上 8 點到就寢前才看，
+  // 沒看的那幾次等下次再比，不會漏掉）。很緊的截止日接著 Claude 時交給ふじ排（riskDue），這裡只在沒接時提醒；
+  // 來不及、專案會晚的只提醒、給「跟ふじ商量」，不自己動別的事（要犧牲什麼是使用者的取捨）
+  let riskAt = 0
+  const riskTick = () => {
+    if (!booted || document.hidden || ui.focus.mode === 'focus' || Date.now() - riskAt < 60000) return
+    const n = new Date()
+    const mins = n.getHours() * 60 + n.getMinutes()
+    if (mins < 480 || mins >= Math.min(bedAt(store.state.rhythm), 1440)) return
+    riskAt = Date.now()
+    const got = risk.check()
+    const name = (id) => store.state.tasks.find((t) => t.id === id)?.title || ''
+    const day = (d) => dayWord(d, store.today)
+    const ask = (text) => (agent.ready() ? [{ label: '跟ふじ商量', run: () => ui.openFuji(text) }] : [])
+    const late = got.due.filter((r) => r.level === 'late')
+    const tight = agent.auto() ? [] : got.due.filter((r) => r.level === 'tight')
+    const r = late[0] || tight[0]
+    if (r) {
+      const titles = r.ids.slice(0, 2).map((id) => `「${short(name(id), 14)}」`).join('') + (r.ids.length > 2 ? ` 等 ${r.ids.length} 件` : '')
+      const more = late.length + tight.length > 1 ? `・還有 ${late.length + tight.length - 1} 個截止日也要注意` : ''
+      sfx.chime()
+      if (r.level === 'late') {
+        say('fuji', `${titles}${day(r.date)}截止，照現在的空檔排不下，我們一起想個辦法吧。`, 7000)
+        ui.toast({
+          icon: '旗', title: `${titles}${day(r.date)}截止，照現在的空檔做不完`, sub: `還要大約 ${fmtDur(r.need)}，到那天能用的大約 ${fmtDur(r.room)}${more}`, ms: 12000,
+          actions: [...ask(`${titles}${day(r.date)}要交，照現在的空檔做不完（還要大約 ${fmtDur(r.need)}，能用的大約 ${fmtDur(r.room)}），幫我想想辦法`), { label: '看看', soft: true, run: () => ui.setTab('tasks') }],
+        })
+      } else {
+        say('fuji', `${titles}${day(r.date)}截止，時間有點緊，先把它分段排進前幾天吧。`, 6000)
+        ui.toast({ icon: '旗', title: `${titles}${day(r.date)}截止，時間有點緊`, sub: `還要大約 ${fmtDur(r.need)}，到那天能用的大約 ${fmtDur(r.room)}${more}`, ms: 10000, actions: [{ label: '看看', soft: true, run: () => ui.setTab('tasks') }] })
+      }
+      return
+    }
+    const p = got.projects[0]
+    if (!p) return
+    const proj = store.state.projects.find((x) => x.id === p.id)
+    if (!proj) return
+    const pname = `「${short(proj.name, 16)}」`
+    sfx.chime()
+    if (p.level === 'late') {
+      say('fuji', `${pname}照最近的速度，會比期限晚 ${p.late} 天完成。`, 7000)
+      ui.toast({
+        icon: '町', title: `${pname}照最近的速度會晚 ${p.late} 天`, sub: `還有 ${p.left} 個里程碑，最近大約一週 ${p.pace} 個；期限 ${day(p.deadline)}`, ms: 12000,
+        actions: [...ask(`${pname}照最近的速度會比期限晚 ${p.late} 天完成（還有 ${p.left} 個里程碑），幫我想想辦法`), { label: '看看', soft: true, run: () => ui.openProject(proj.id) }],
+      })
+    } else {
+      say('fuji', `${pname}停了 ${p.idle} 天了，離期限還有一段，今天推一小步就好。`, 7000)
+      ui.toast({
+        icon: '町', title: `${pname}停了 ${p.idle} 天`, sub: `還有 ${p.left} 個里程碑；期限 ${day(p.deadline)}`, ms: 12000,
+        actions: [...ask(`${pname}停了一陣子，幫我排一個今天做得到的下一步`), { label: '看看', soft: true, run: () => ui.openProject(proj.id) }],
+      })
+    }
+  }
   setInterval(() => {
     ui.tickClock()
     // 先跨日再提醒：剛過午夜（或睡眠喚醒）時才不會拿昨天的日期算重要日子
@@ -1759,6 +1826,7 @@ async function boot() {
     // 開場還沒好（小島模式要等小島建好，載入畫面還蓋著）時先不提醒：提示卡會被蓋在載入畫面後面、到時間就收掉，
     // 等於沒看到，警語還會被當成念過了（手機那邊也不再發）。開場一好，下一秒就照常檢查
     if (booted) reminders.check()
+    riskTick()
     syncMottos()
     tabNudge()
     // 到點自動延長時留著的慶祝（升級、成就、任務達成）：延長做完了（休息、結束、另一個分頁結束了），

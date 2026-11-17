@@ -7,8 +7,10 @@ import { toM, toHHMM, gaps, busyOf, awake, bedAt, taskDur, PEAKS, SPLIT_MAX } fr
 import { addDays, parseDate, daysBetween } from './store/util.js'
 import { projectStats } from './projects.js'
 import { worldOf, cleanOps, saneOps, hasOps, resolve } from './agentOps.js'
+import { dueRisks, projectRisks } from './risk.js'
 
-export const AGENT_RUNS = ['morning', 'replan', 'capture', 'evening', 'chat']
+// risk：某個截止日變緊了（src/risk.js 算的），只把那幾件分段排進截止日前；week：星期天晚上排下一週（一定先給使用者看）
+export const AGENT_RUNS = ['morning', 'replan', 'capture', 'evening', 'risk', 'week', 'chat']
 // 自己整理（不是使用者開口）時不能做的事：勾完成、刪任務、加日程、加重要日子
 export const CHAT_ONLY = ['done', 'drop', 'events', 'dates']
 export const AGENT_DAYS = 7
@@ -96,7 +98,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
   }
   const r = s.rhythm
   const days = []
-  for (let i = 0; i < AGENT_DAYS; i++) {
+  // 星期天晚上排下一週：今天＋下週一到週日
+  for (let i = 0; i < (run === 'week' ? AGENT_DAYS + 1 : AGENT_DAYS); i++) {
     const date = addDays(today, i)
     const list = store.tasksOn(date)
     // 一天最多帶 40 件；剛加的排前面（一定要帶到）
@@ -119,6 +122,15 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 30)
     .map((t) => ({ ...task(t), date: t.date, late: daysBetween(t.date, today) }))
+  // 往前看（src/risk.js）：截止日很緊、來不及的；專案照最近的速度會晚、停住了的
+  const risk = dueRisks({ tasks: s.tasks, eventsOn: (d) => store._busyEvents(d), rhythm: r, today, nowMin, ratio: store.estimate?.()?.ratio || 1 })
+    .filter((x) => x.level !== 'ok')
+    .slice(0, 6)
+    .map((x) => ({
+      date: x.date, level: x.level, need: x.need, room: x.room,
+      tasks: x.ids.slice(0, 6).map((id) => ({ id: ids.of('t', id), title: clip(s.tasks.find((t) => t.id === id)?.title, 30) })),
+    }))
+  const paceOf = new Map(projectRisks({ projects: s.projects, tasks: s.tasks, today, now: now.getTime() }).filter((x) => x.level !== 'ok').map((x) => [x.id, x]))
   const projects = s.projects
     .filter((p) => !p.archived && !p.completedAt && !p.pausedAt)
     .slice(0, 12)
@@ -141,6 +153,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
       }
       o.idle = Math.max(0, Math.round((now.getTime() - (st.last || p.createdAt || now.getTime())) / 86400000))
       o.open = s.tasks.filter((t) => t.project === p.id && !t.done).length
+      const pace = paceOf.get(p.id)
+      if (pace) o.pace = pace.level === 'late' ? { level: 'late', eta: pace.eta, late: pace.late, perWeek: pace.pace } : { level: 'stalled', idle: pace.idle }
       return o
     })
   const y = addDays(today, -1)
@@ -174,6 +188,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
     stats: {
       streak: store.streak,
       yesterday: { done: yTasks.filter((t) => t.done).length, total: yTasks.length, focusMin: store.peekDay(y).focus || 0 },
+      // 今天的回顧（晚上準備明天時說一句）
+      today: { done: store.tasksOn(today).filter((t) => t.done).length, total: store.tasksOn(today).length, focusMin: store.peekDay(today).focus || 0 },
       week: { done: week.done, total: week.total, focusMin: week.focus },
       todayFocusMin: store.peekDay(today).focus || 0,
     },
@@ -182,6 +198,7 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
   }
   const adjusted = adjustedOf(s, now.getTime())
   if (adjusted.length) data.adjusted = adjusted
+  if (risk.length) data.risk = risk
   // 專注時先記下來的事（對話時在 world.parked 裡）：自己整理時把要做的變成任務
   if (run !== 'chat' && s.parked?.length) data.parked = s.parked.slice(-10).map((x) => ({ id: ids.of('k', x.id), text: clip(x.text, 80) }))
   if (extra.weekStart) data.weekStart = true
@@ -333,7 +350,8 @@ export function cleanOut(out, ids, run = 'chat') {
     seen.add(id)
     act.schedule.push({ id, date: DATE.test(x.date) ? x.date : '', at: time(x.at), dur: mins(x.dur) })
   }
-  for (const x of arr(o.add, chat ? 20 : 3)) {
+  // 自己整理一次最多加 3 件；排下一週是一整週的量（一天最多 2 件）
+  for (const x of arr(o.add, chat ? 20 : run === 'week' ? 10 : 3)) {
     const title = text(x?.title, 80)
     if (!title) continue
     const a = {
@@ -475,6 +493,10 @@ export const morningAt = (rhythm) => Math.max(0, toM(rhythm.wake) - 90)
 // ran：{ morning, evening }（那一種上次做的日期，跟著資料同步）；seen：這台裝置已經為了哪些狀況重排過（sig）、上次重排的時間
 export function dueRun({ today, nowMin, rhythm, ran = {}, tasks = [], events = [], tomorrow = [], overdue = 0, focusing = null, seen = {}, now = Date.now() }) {
   const eve = eveningAt(rhythm)
+  // 星期天晚上：先排下一週（還沒排過、下一週也還沒整理過）。星期天沒打開的話，星期一早上的整理會順便看這一週（weekStart）
+  if (parseDate(today).getDay() === 0 && nowMin >= eve && ran.plan !== today && ran.week !== weekOf(addDays(today, 1))) {
+    return { run: 'week', why: '' }
+  }
   if (nowMin >= morningAt(rhythm) && nowMin < eve && ran.morning !== today) {
     // 今天沒有任何要整理的東西（沒有任務、沒有逾期）也跑：專案的下一步、這一週的準備要看
     return { run: 'morning', why: '' }

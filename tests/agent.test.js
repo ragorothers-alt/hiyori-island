@@ -165,7 +165,7 @@ describe('套用', () => {
     expect(a.at).not.toBe(b.at)
     expect(entry).toMatchObject({ run: 'morning', say: '排好了', next: b.id, undone: false })
     expect(entry.changes).toHaveLength(2)
-    expect(store.state.agent.ran).toEqual({ morning: TODAY, evening: '', week: weekOf(TODAY) })
+    expect(store.state.agent.ran).toEqual({ morning: TODAY, evening: '', week: weekOf(TODAY), plan: '' })
     expect(store.state.agent.log).toHaveLength(1)
   })
 
@@ -469,7 +469,7 @@ describe('撤銷不會動到之後自己改過的', () => {
 describe('讀存檔', () => {
   it('舊存檔沒有 agent：補上空的；設定的 agentMode 留著，看不懂的回到自動', () => {
     const s = migrate({ tasks: [], settings: { agentMode: 'ask' } })
-    expect(s.agent).toEqual({ memory: [], ran: { morning: '', evening: '', week: '' }, log: [] })
+    expect(s.agent).toEqual({ memory: [], ran: { morning: '', evening: '', week: '', plan: '' }, log: [] })
     expect(s.settings.agentMode).toBe('ask')
     expect(migrate({ tasks: [], settings: { agentMode: 'off' } }).settings.agentMode).toBe('off')
     expect(migrate({ tasks: [], settings: { agentMode: 'wild' } }).settings.agentMode).toBe('auto')
@@ -490,7 +490,7 @@ describe('讀存檔', () => {
       },
     })
     expect(s.agent.memory).toEqual(['好', 'x'.repeat(80)])
-    expect(s.agent.ran).toEqual({ morning: '2026-11-16', evening: '', week: '' })
+    expect(s.agent.ran).toEqual({ morning: '2026-11-16', evening: '', week: '', plan: '' })
     expect(s.agent.log).toHaveLength(1)
     expect(s.agent.log[0].next).toBeNull()
     expect(s.agent.log[0].changes).toEqual([{ t: '甲', u: null }, { t: '乙', u: null }, { t: '丙', u: { k: 'add', id: 'ok-1', sig: '[]' } }])
