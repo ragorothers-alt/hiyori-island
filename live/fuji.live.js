@@ -232,7 +232,12 @@ describe.skipIf(!enabled)('ふじ真人試跑報告', () => {
         localStorage.clear()
         sessionStorage.clear()
         store = new Store()
-        if (!baseline) baseline = store.exportJSON()
+        if (!baseline) {
+          // 「作品集網站改版」當成使用者自己的專案（她該替它排下一步），「認識ひより小島」留著當範例（她不該碰）
+          const own = store.state.projects.find((p) => p.name === '作品集網站改版')
+          if (own) own.mine = true
+          baseline = store.exportJSON()
+        }
         store.importJSON(baseline)
         const prepared = scenario.prepare?.(store) || {}
         const extra = { mode: 'auto', ...(run === 'chat' ? { message: scenario.message, history: [], here: null } : {}), ...scenario.extra, ...prepared }

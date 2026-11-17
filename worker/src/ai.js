@@ -155,7 +155,7 @@ const TASKS = {
 - capture：只處理 new 的那幾件：沒有 dur 就估一個；今天、明天的排進空檔；分類明顯不對才改 tag；要好幾個步驟才做得完的（例如「準備報告」「辦簽證」）加 2～5 個子任務；明顯屬於某個專案就歸進去。其他任務不要動。
 - evening：替明天做準備：排好明天的任務、挑明天先做的那一件（first）。今天的任務不要動。
 - chat：照使用者說的做，所有動作都能用。說得不清楚時在 say 裡問一句，並在 ask 給可以直接點的回答。只是聊天或問問題時回答就好，不要動資料。
-- say：1～3 句、90 字以內，直接說做了什麼、為什麼、現在先做哪一件，例如「今天排好了：先做『寫報告』。下午三點有會議，所以把採買移到明天。」不要把每個動作逐條念一遍（介面會列出來）。對話時在回答問題的話可以到 5 句、200 字以內。
+- say：1～3 句、90 字以內，直接說做了什麼、為什麼、現在先做哪一件，例如「今天排好了：先做『寫報告』。下午三點有會議，所以把採買移到明天。」不要把每個動作逐條念一遍（介面會列出來）。對話時在回答問題的話可以到 5 句、200 字以內。說到數字、日子都照資料說；說「今天」「昨天」之前先對照 today（date 跟 today 一樣才是今天），對不上就直接說日期。
 
 對話（run 是 chat）時，App 裡什麼都能照使用者說的改，不只任務：
 - 多帶的資料在 world：events（前 3 天到之後 45 天的日程）、later（7 天以後的任務）、ongoing（專案裡的長期任務）、doneRecent（最近 7 天做完的任務）、subtasks（任務的子任務）、projects（每個專案的里程碑 milestones 和細項 steps、最近的進度 logs、筆記 notes；status：active 進行中、paused 暫停、done 已落成、archived 收起來了）、habits（today 今天打了幾次卡、streak 連續天數、clean 戒了幾天）、archivedHabits、routines（例行公事）、dates（重要日子）、mottos（警語）、subscriptions（訂閱，next 是下次扣款日）、parked（專注時先記下來的事）、life（昨天和今天的生活記錄）、energy、sleep（最近的睡眠）、settings（設定現在的值）、history（最近 14 天每天做完幾件、總共幾件、專注幾分鐘）。
@@ -176,7 +176,7 @@ const TASKS = {
 - create：新增任務、日程、重要日子以外的東西（那三種用 add、events、dates）。沒用到的欄位給 "" 或空陣列。kind：
   project：title 名稱、date 截止日、fields 可以有 goal
   milestone：parent 是專案、title、date 期限；step：parent 是里程碑、title
-  habit：title、fields：kind（build 養成、quit 戒除）、target、unit、days
+  habit：title、fields：kind（build 養成、quit 戒除）、target、unit、days。title 只寫做什麼（「喝水」「跑步」），次數、單位、星期幾放在 fields，不要寫進 title（畫面上會自己加「每天 8 杯」）
   routine（例行公事）：title；有 start、end 是例行日程，沒有是例行任務；date 從哪天開始；fields：days（"每天"、"平日"、"二四"）、tag、priority。改例行公事＝drop 舊的、create 新的
   motto：title 是警語的字；subscription：title、date 第一次扣款日、fields：price（一定要有）、cur、every、unit
   log（專案的進度）：parent 是專案、title 是做了什麼、date、fields：dur（分鐘）；note（專案的筆記）：parent 是專案、title、fields：text 內文
