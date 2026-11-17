@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "try:fuji": "vitest run --config vitest.live.config.js",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
