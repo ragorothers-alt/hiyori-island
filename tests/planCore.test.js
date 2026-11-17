@@ -204,6 +204,25 @@ describe('大任務分段', () => {
     expect(t.date).toBe(addDays(TODAY, 3))
   })
 
+  it('自己整理時把「先記下來的事」變成任務、收掉那一筆（只能收這一種），撤銷時放回去', () => {
+    const k = store.park('買投影機轉接頭')
+    const t = store.addTask({ title: '原本的任務', date: TODAY })
+    const { ids, data } = agentContext(store, 'evening', {}, new Date())
+    expect(data.parked).toEqual([{ id: expect.stringMatching(/^k/), text: '買投影機轉接頭' }])
+    expect(agentContext(store, 'chat', { message: '嗨' }, new Date()).data).not.toHaveProperty('parked')
+    const tid = data.days[0].tasks[0].id
+    const act = cleanOut(blank({ add: [{ title: '買投影機轉接頭', date: addDays(TODAY, 1), at: '', dur: 15, tag: 'life', project: '', steps: [], star: false, due: '' }], drop: [data.parked[0].id, tid] }), ids, 'evening')
+    expect(act.drop).toEqual([])
+    expect(act.ops.drop).toEqual([expect.objectContaining({ kind: 'park', id: k.id })])
+    const entry = store.agentApply(act, { run: 'evening' })
+    expect(store.state.parked).toEqual([])
+    expect(store.state.tasks.map((x) => x.title)).toEqual(['原本的任務', '買投影機轉接頭'])
+    expect(t.done).toBe(false)
+    store.agentUndo(entry.id)
+    expect(store.state.parked.map((x) => x.text)).toEqual(['買投影機轉接頭'])
+    expect(store.state.tasks.map((x) => x.title)).toEqual(['原本的任務'])
+  })
+
   it('一行輸入也能分：90 分鐘以上才有分段的按鈕', () => {
     expect(SPLIT_MIN).toBe(90)
   })

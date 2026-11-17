@@ -244,6 +244,9 @@ export const agentMethods = {
       }
       // 任務以外的：改欄位、勾完成、刪掉（專案、習慣、設定…，見 store/agentOps.js；日程、作息在最前面做過了）
       this._agentRest(act.ops, note, false)
+    } else if (act.ops?.drop?.length) {
+      // 自己整理時：變成任務的「先記下來的事」拿掉（cleanOut 只留這一種）
+      this._agentRest({ set: [], create: [], done: [], drop: act.ops.drop.filter((x) => x?.kind === 'park'), go: null }, note, false)
     }
 
     // ── 記住、忘掉 ──

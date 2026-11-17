@@ -188,8 +188,8 @@ export function createAgent(store, hooks = {}) {
   }
   function go(due) {
     const today = store.today
-    // 早上沒有任何東西可以排（今天沒有任務、沒有逾期、沒有進行中的專案）：不用問 Claude，記下今天看過了
-    if (due.run === 'morning' && !store.tasksOn(today).some((t) => !t.done) && !store.overdue().length && !store.state.projects.some((p) => !p.archived && !p.completedAt && !p.pausedAt)) {
+    // 早上沒有任何東西可以排（今天沒有任務、沒有逾期、沒有進行中的專案、沒有先記下來的事）：不用問 Claude，記下今天看過了
+    if (due.run === 'morning' && !store.tasksOn(today).some((t) => !t.done) && !store.overdue().length && !store.state.parked.length && !store.state.projects.some((p) => !p.archived && !p.completedAt && !p.pausedAt)) {
       store.agentRan('morning', store.state.agent.ran.week !== weekOf(today))
       return null
     }

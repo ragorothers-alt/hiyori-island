@@ -6,7 +6,7 @@
 import { toM, toHHMM, gaps, busyOf, awake, bedAt, taskDur, PEAKS, SPLIT_MAX } from './planner.js'
 import { addDays, parseDate, daysBetween } from './store/util.js'
 import { projectStats } from './projects.js'
-import { worldOf, cleanOps, saneOps, hasOps } from './agentOps.js'
+import { worldOf, cleanOps, saneOps, hasOps, resolve } from './agentOps.js'
 
 export const AGENT_RUNS = ['morning', 'replan', 'capture', 'evening', 'chat']
 // 自己整理（不是使用者開口）時不能做的事：勾完成、刪任務、加日程、加重要日子
@@ -178,6 +178,8 @@ export function agentContext(store, run, extra = {}, now = new Date()) {
   }
   const adjusted = adjustedOf(s, now.getTime())
   if (adjusted.length) data.adjusted = adjusted
+  // 專注時先記下來的事（對話時在 world.parked 裡）：自己整理時把要做的變成任務
+  if (run !== 'chat' && s.parked?.length) data.parked = s.parked.slice(-10).map((x) => ({ id: ids.of('k', x.id), text: clip(x.text, 80) }))
   if (extra.weekStart) data.weekStart = true
   if (extra.why) data.why = clip(extra.why, 200)
   if (fresh.size) data.new = [...fresh].map((id) => ids.to.get(`t:${id}`)).filter(Boolean)
@@ -316,8 +318,8 @@ export function cleanOut(out, ids, run = 'chat') {
     remember: texts(o.remember, 80, 5), forget: texts(o.forget, 80, 5),
     done: [], drop: [], events: [], dates: [],
     ask: chat ? texts(o.ask, 16, 3) : [],
-    // 任務以外的（日程、專案、習慣、設定…）：只有對話時有
-    ops: chat ? cleanOps(o, ids) : null,
+    // 任務以外的（日程、專案、習慣、設定…）：只有對話時有。自己整理時只能把「先記下來的事」變成任務之後拿掉那一筆
+    ops: chat ? cleanOps(o, ids) : parkOps(o, ids),
   }
   const made = new Set((act.ops?.create || []).filter((c) => c.kind === 'project' && c.ref).map((c) => c.ref))
   const seen = new Set()
@@ -389,6 +391,16 @@ export function cleanOut(out, ids, run = 'chat') {
   }
   return act
 }
+// 自己整理（早上、晚上…）時的 drop：只收「先記下來的事」（k 開頭；她把它變成任務了），任務、其他東西一律不刪
+function parkOps(o, ids) {
+  const drop = []
+  for (const a of arr(o.drop, 10)) {
+    const t = resolve(ids, a)
+    if (t?.kind === 'park' && !drop.some((y) => y.id === t.id)) drop.push(t)
+  }
+  return drop.length ? { set: [], create: [], done: [], drop, go: null } : null
+}
+
 // 這批動作的樣子對不對（每一種都是該有的陣列、欄位是該有的型別）。cleanOut 清出來的一定對；
 // 存在裝置上等使用者決定的那一份（重新整理後讀回來的）可能壞掉：不對就整份不要，不會做到一半
 const isO = (x) => !!x && typeof x === 'object' && !Array.isArray(x)
@@ -515,6 +527,8 @@ export function describe(act, store) {
   for (const id of act.drop) out.push(`刪掉「${title(id)}」`)
   for (const x of act.events) out.push(`日程「${clip(x.title, 22)}」（${dayWord(x.date, today)} ${x.start}）`)
   for (const x of act.dates) out.push(`重要日子「${clip(x.title, 22)}」（${dayWord(x.date, today)}）`)
+  // 自己整理時：變成任務的「先記下來的事」拿掉（對話時不會先給你看，這裡只有這一種）
+  for (const x of act.ops?.drop || []) if (x.kind === 'park') out.push(`收掉先記下來的「${clip(store.state.parked.find((k) => k.id === x.id)?.text || '', 22)}」`)
   for (const x of act.remember) out.push(`記住：${clip(x, 30)}`)
   for (const x of act.forget) out.push(`忘掉：${clip(x, 30)}`)
   return out

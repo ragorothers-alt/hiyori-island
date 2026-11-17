@@ -3,6 +3,10 @@
 import { addDays, dateStr, toMin } from './store.js'
 import { activeMottos, awake, mottoOf, pauseOf, planMottos, stepMotto } from './mottos.js'
 import { native, nativeAskNotify, nativeCanNotify } from './native.js'
+import { doneOn, streak } from './habits.js'
+
+// 連續幾天以上的習慣，今天還沒打卡時睡前提醒（快斷掉了）
+export const HABIT_RISK = 3
 
 const KEY = 'hiyori-reminded'
 // 訂閱：每個訂閱最近提醒過的那次扣款日 { 訂閱 id: 'YYYY-MM-DD' }
@@ -289,6 +293,26 @@ export class Reminders {
           if (e.date !== date || sent.includes(key)) continue
           if (this._claim(today, key)) this.onRemind(e, days, 'allday')
         }
+      }
+    }
+    // 任務的截止日：前一天和當天，早上 8 點後第一次打開時提醒一次（還沒做完的）
+    if (mins >= 480) {
+      for (const t of this.store.state.tasks) {
+        if (t.done || !t.due || (t.due !== today && t.due !== tomorrow)) continue
+        const key = `due-${t.id}@${t.due}`
+        if (sent.includes(key) || !this._claim(today, key)) continue
+        this.onRemind(t, t.due === today ? 0 : 1, 'due')
+      }
+    }
+    // 習慣快斷掉：連續 3 天以上、今天要做還沒打卡的養成習慣，就寢前兩個半小時起提醒一次（一天一次、一個習慣一則）
+    const bed = toMin(r.sleep) > toMin(r.wake) ? toMin(r.sleep) : 1440
+    if (mins >= bed - 150 && mins < bed) {
+      for (const h of this.store.habitsDueToday?.() || []) {
+        if (h.kind !== 'build' || doneOn(h, today)) continue
+        const run = streak(h, today)
+        const key = `habit-${h.id}@${today}`
+        if (run < HABIT_RISK || sent.includes(key) || !this._claim(today, key)) continue
+        this.onRemind({ id: h.id, title: h.name, habit: h, streak: run }, 0, 'habit')
       }
     }
     // 訂閱扣款：照每個訂閱設的提前天數（免費試用結束至少前 3 天），早上 8 點後第一次打開時提醒。

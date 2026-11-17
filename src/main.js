@@ -649,7 +649,9 @@ async function boot() {
       const sub = t ? `「${short(t.title, 10)}」長大了一點` : p ? `「${short(p.name, 10)}」+${minutes} 分鐘` : `+${minutes} 分鐘`
       // 專注的是專案裡的任務（例如一首練習曲）：趁還記得，直接接到那件的紀錄（練到哪、卡在哪、速度）
       const log = !!t?.project && store.state.projects.some((x) => x.id === t.project)
-      const actions = [...more(), ...(log ? [{ label: '寫紀錄', soft: true, run: () => ui.openTaskLog(t.id) }] : [])]
+      // 接上 Claude 時：跟ふじ說一句做到哪，她記成專案的進度、勾掉做完的小步驟（前半句先替你寫好）
+      const tell = t && !t.done && agent.ready() ? [{ label: '跟ふじ說做到哪', soft: true, run: () => ui.openFuji(`剛專注完「${short(t.title, 16)}」${minutes} 分鐘，做到：`) }] : []
+      const actions = [...more(), ...tell, ...(log && !tell.length ? [{ label: '寫紀錄', soft: true, run: () => ui.openTaskLog(t.id) }] : [])]
       ui.toast({ icon: '灯', title, sub: `${sub}・${rest}${awayNote}`, ...(actions.length ? { ms: 12000, actions } : {}), tag: 'focus' })
     },
     // 倒數到點、設了自動延長（還在心流裡就不打斷）：原定的那一段照常記進去（番茄、經驗值、任務長大），
@@ -1239,6 +1241,36 @@ async function boot() {
       const title = today ? `今天是「${e.title}」` : `明天就是「${e.title}」`
       ui.toast({ icon: DATE_KINDS[e.kind]?.kanji || '旗', title, sub: today ? '照自己的步調來就好' : '今天先留點時間準備吧', ms: 9000 })
       if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, '', e.id)
+      return
+    }
+    // 任務的截止日：前一天、當天早上ふじ提醒（還沒做完的），可以直接開始專注
+    if (kind === 'due') {
+      const t = store.state.tasks.find((x) => x.id === e.id)
+      if (!t || t.done) return
+      const today = min === 0
+      sfx.chime()
+      say('fuji', today ? `「${short(t.title)}」今天截止，先把它顧好。` : `「${short(t.title)}」明天截止，今天留點時間給它。`, 6000)
+      const title = `「${t.title}」${today ? '今天' : '明天'}截止`
+      const left = t.dur && t.spent ? `已經做了 ${t.spent} 分鐘` : t.subs?.length ? `小步驟做了 ${t.subs.filter((x) => x.done).length}/${t.subs.length}` : '還沒開始的話，先做 5 分鐘也好'
+      ui.toast({
+        icon: '旗', title, sub: left, ms: 10000,
+        actions: ui.focus.mode === 'idle' ? [{ label: '▶ 開始專注', run: () => ui.focus.startWith(t.id) }, { label: '只做 5 分鐘', soft: true, run: () => ui.focus.startSmall(t.id) }] : [],
+      })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, left, `due-${t.id}`)
+      return
+    }
+    // 習慣快斷掉：連續好幾天的習慣今天還沒打卡，睡前提醒一次（做了就直接打卡）
+    if (kind === 'habit') {
+      const h = store.state.habits.find((x) => x.id === e.id)
+      if (!h || h.archived) return
+      sfx.chime()
+      say('mochi', `「${short(h.name)}」已經連續 ${e.streak} 天了，今天還差一次。`, 5200)
+      const title = `「${h.name}」連續 ${e.streak} 天，今天還沒打卡`
+      ui.toast({
+        icon: '習', title, sub: '做一點點也算，別讓它斷掉', ms: 10000,
+        actions: [{ label: '做了，打卡', run: () => store.checkHabit(h.id) }, { label: '看看', soft: true, run: () => ui.setTab('habits') }],
+      })
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${title}`, '做一點點也算', `habit-${h.id}`)
       return
     }
     // 整天的日程：前一天、當天早上ふじ提醒

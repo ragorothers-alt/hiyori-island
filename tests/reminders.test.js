@@ -569,3 +569,35 @@ describe('訂閱扣款提醒', () => {
     expect(subCalls()).toHaveLength(1)
   })
 })
+
+describe('截止日、習慣快斷掉', () => {
+  it('任務的截止日：前一天和當天早上 8 點後提醒一次；做完的不提醒', () => {
+    const t = store.addTask({ title: '交報告', date: TODAY, due: '2026-10-26' })
+    const done = store.addTask({ title: '繳費', date: TODAY, due: TODAY })
+    store.toggleTask(done.id)
+    reminders.check(at(7, 59))
+    expect(callback.mock.calls.filter((c) => c[2] === 'due')).toEqual([])
+    reminders.check(at(8, 1))
+    reminders.check(at(9, 0))
+    expect(callback.mock.calls.filter((c) => c[2] === 'due').map((c) => [c[0].id, c[1]])).toEqual([[t.id, 1]])
+  })
+
+  it('連續 3 天以上、今天還沒打卡的養成習慣：就寢前兩個半小時起提醒一次', () => {
+    const h = store.addHabit({ name: '喝水' })
+    const q = store.addHabit({ name: '剛開始的' })
+    for (const d of ['2026-10-22', '2026-10-23', '2026-10-24']) store.checkHabit(h.id, d)
+    store.checkHabit(q.id, '2026-10-24')
+    // 就寢 23:30：21:00 起
+    reminders.check(at(20, 59))
+    expect(callback.mock.calls.filter((c) => c[2] === 'habit')).toEqual([])
+    reminders.check(at(21, 0))
+    reminders.check(at(22, 0))
+    const got = callback.mock.calls.filter((c) => c[2] === 'habit')
+    expect(got.map((c) => [c[0].id, c[0].streak])).toEqual([[h.id, 3]])
+    // 打卡了就不提醒（隔天另算）
+    store.checkHabit(h.id)
+    callback.mockClear()
+    reminders.check(at(22, 30))
+    expect(callback).not.toHaveBeenCalled()
+  })
+})
