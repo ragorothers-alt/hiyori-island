@@ -290,10 +290,10 @@ export class TodayView {
       ${this._firstHTML(today, tasks, nowMin)}
       <div class="td-grid">
         ${this._nowHTML(today, tasks, nowMin)}
+        ${this._topHTML(today, tasks)}
+        ${this._schedHTML(today, tasks, nowMin)}
         ${this._progHTML(tasks, nowMin)}
         ${this._quoteHTML(today)}
-        ${this._schedHTML(today, tasks, nowMin)}
-        ${this._topHTML(today, tasks)}
         ${this._questHTML()}
         ${this._habitHTML(today)}
         ${this._refHTML(today)}

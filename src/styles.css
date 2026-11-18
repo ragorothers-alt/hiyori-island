@@ -517,6 +517,8 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .dock-more svg circle { fill: currentColor; stroke: none; }
 .dock-pop { display: contents; }
 @media (max-width: 440px) {
+  /* 分隔線也拿掉：專注時多了「結束」和「看看小木屋裡」，360px 寬才放得下 */
+  body:not(.app-mode) .dock-sep { display: none; }
   body:not(.app-mode) .dock-more { display: grid; }
   body:not(.app-mode) .dock-more[aria-expanded="true"] { background: var(--glass-hover); color: var(--ink); }
   body:not(.app-mode) .dock-pop {
@@ -949,7 +951,8 @@ body.night .item-menu { background: rgba(40, 52, 94, .94); }
 body.night .item-menu button { color: #eef2fb; }
 @media (max-width: 860px) {
   .shop { bottom: calc(50dvh + 64px); }
-  .shop-card { max-height: 44dvh; }
+  /* 上面留 12px：矮一點的手機（800 高）不會超出螢幕頂端 */
+  .shop-card { max-height: min(44dvh, calc(50dvh - 76px)); }
   .place-bar { top: 64px; }
 }
 

@@ -589,7 +589,13 @@ export class UI {
       more.setAttribute('aria-expanded', String(on))
     }
     more.onclick = () => popOpen(!pop.classList.contains('open'))
-    pop.addEventListener('click', (e) => e.target.closest('button') && popOpen(false))
+    // 按了裡面的一顆：收起來，焦點交給「⋯」（那一顆收起來就看不到了，不然焦點會掉到頁首）
+    pop.addEventListener('click', (e) => {
+      if (!e.target.closest('button')) return
+      const had = pop.contains(document.activeElement)
+      popOpen(false)
+      if (had && more.getClientRects().length) more.focus({ preventScroll: true })
+    })
     document.addEventListener('pointerdown', (e) => pop.classList.contains('open') && !e.target.closest('#dockPop, #dockMore') && popOpen(false))
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || !pop.classList.contains('open')) return
@@ -3521,7 +3527,10 @@ export class UI {
       return
     }
     if (open) this.toggleFull(false)
+    // 關掉時焦點在商店裡：交回商店的按鈕（收在「⋯」裡看不到時交給「⋯」），不掉到頁首
+    const back = !open && $('#shop').contains(document.activeElement)
     $('#shop').hidden = !open
+    if (back) ($('#shopBtn').getClientRects().length ? $('#shopBtn') : $('#dockMore')).focus({ preventScroll: true })
     $('#shopBtn').classList.toggle('on', open)
     $('#shopBtn').setAttribute('aria-expanded', open)
     if (open) this.renderShop()

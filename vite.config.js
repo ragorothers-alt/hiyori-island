@@ -36,7 +36,8 @@ const swVersion = () => {
 }
 
 // 小島（three.js 和場景，src/islandScene.js）是動態載入的：App 模式開機時不下載，第一次切回小島才下載。
-// 小島模式開機一定會用到，所以在 index.html 先看這台裝置選的模式，小島模式就跟入口一起開始下載，不用等入口跑起來
+// 小島模式開機一定會用到，所以在 index.html 先看這台裝置選的模式，小島模式就跟入口一起開始下載，不用等入口跑起來。
+// 還沒選過的照 ui.js 的 savedAppMode：手機（Android 殼、觸控螢幕）先用 App 模式，不預載；電腦先看小島
 const islandPreload = () => ({
   name: 'hiyori-island-preload',
   transformIndexHtml: {
@@ -51,7 +52,9 @@ const islandPreload = () => ({
         '</head>',
         `  <script>
     try {
-      if (JSON.parse(localStorage.getItem('hiyori-layout')) !== 'app')
+      const v = JSON.parse(localStorage.getItem('hiyori-layout'))
+      const app = v ? v === 'app' : !!window.HiyoriNative || !matchMedia('(hover: hover) and (pointer: fine)').matches
+      if (!app)
         for (const f of ${JSON.stringify(files)}) document.head.append(Object.assign(document.createElement('link'), { rel: 'modulepreload', crossOrigin: '', href: './' + f }))
     } catch {}
   </script>
