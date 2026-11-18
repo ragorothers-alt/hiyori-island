@@ -156,7 +156,12 @@ export class CaptureView {
   _undo(i) {
     const it = this.items[i]
     if (!it || it.gone) return
-    it.undo?.()
+    // 撤銷不了（記下之後又改過了，那邊已經說了）：不寫「已復原」，按鈕拿掉
+    if (it.undo?.() === false) {
+      it.undo = null
+      this._renderDone()
+      return this.el.input.focus()
+    }
     it.gone = true
     this._renderDone()
     this.el.input.focus()

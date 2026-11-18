@@ -1532,6 +1532,14 @@ describe('通知與提醒的總開關', () => {
     // 已經開著：不動
     store.setMottoOn(true)
     expect(store.state.settings.mottoEvery).toBe(30)
+    // 總開關關著時只打開了面板上方那一條，再按總開關關掉：本來就關著的間隔、貓咪留著之前記的
+    Object.assign(store.state.settings, { mottoEvery: 30, catMotto: 10, mottoBar: true })
+    store.setMottoOn(false)
+    store.state.settings.mottoBar = true
+    store.setMottoOn(false)
+    expect(store.state.settings).toMatchObject({ mottoEvery: 0, catMotto: 0, mottoBar: false })
+    store.setMottoOn(true)
+    expect(store.state.settings).toMatchObject({ mottoEvery: 30, catMotto: 10, mottoBar: true })
     // 一樣一樣自己關掉的（沒經過總開關）：打開總開關用預設
     Object.assign(store.state.settings, { mottoEvery: 0, catMotto: 0, mottoBar: false, mottoWasEvery: 0, mottoWasCat: -1, mottoWasBar: false })
     store.setMottoOn(true)

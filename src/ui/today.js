@@ -187,9 +187,7 @@ export class TodayView {
       case 'review-later': return this.hooks.reviewLater?.()
       // 上週的回顧卡：看看（看完就算看過了）、收起來
       case 'week-open': return this.hooks.openWeekCard?.()
-      case 'week-seen':
-        s.seenWeekCard()
-        return this.render()
+      case 'week-seen': return this.hooks.weekSeen?.()
       // 明天先做的那一件：挑一件（再挑別件就換過去）、把今天沒做完的挪過去當成那一件、換一件、不挑了
       case 'first':
         this.firstEdit = false
@@ -241,6 +239,8 @@ export class TodayView {
     // 存完會重畫：框裡的字就是剛記下的，不用當成打到一半的接回去
     this._clean = true
     s.saveReview(day, mood, ta.value)
+    // 寫好今天的：接著問明天先做哪一件（跟回顧的視窗一樣）
+    if (day === s.today) this.hooks.askFirst?.()
   }
   // 選了但還沒記下的天氣（只算選的那一天）
   _refMood(day = this.store.today) {

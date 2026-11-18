@@ -208,6 +208,9 @@ describe('寫了時間的那一行原本想要多長（span）', () => {
     expect(at('23:30 寫日記')).toMatchObject({ start: '23:30', end: '23:59', span: 60 })
     expect(at('23:30 寫日記 90分鐘')).toMatchObject({ end: '23:59', span: 90 })
     expect(at('15:00-16:30 開會')).toMatchObject({ end: '16:30', span: 90 })
+    // 「到 1:00」的結束沿用了晚上會讀成 13:00：跨過半夜的當成凌晨
+    expect(at('23:00 到 1:00 趕報告')).toMatchObject({ start: '23:00', span: 120 })
+    expect(at('晚上10點到2點 跨年')).toMatchObject({ start: '22:00', span: 240 })
     expect(at('買牛奶').span).toBeUndefined()
     expect(parseQuick('23:00-01:00 趕報告', { today: TODAY }).span).toBeUndefined()
   })

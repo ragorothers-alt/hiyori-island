@@ -266,6 +266,8 @@ export class UI {
     this.mottos = new MottosView($('#mottoRoot'), store, {
       ...viewHooks,
       mottoBar: () => this.mottoBar.render(),
+      // 警語的間隔、貓咪、面板上方那一條改了：設定頁的總開關和摘要跟著
+      changed: () => this.renderSettings(),
       mottoReach: () => this.mottoReach(),
       // 上一則警語的推播幾點送到這台（網頁交給伺服器推的時候）
       mottoLast: () => this.hooks.mottoPush?.last() ?? null,
@@ -336,6 +338,9 @@ export class UI {
       // 晚上還沒回顧：今日反思移到最上面；「之後再說」放回原位
       reviewEve: () => this.reviewEve(),
       reviewLater: () => this.reviewLater(),
+      weekSeen: () => this.weekSeen(),
+      // 在總覽寫好今天的回顧：跟回顧的視窗一樣，接著問明天先做哪一件
+      askFirst: () => this.askFirst(),
       // 新的一週：上週的回顧卡（看過、收起來就不放）
       weekDue: () => this.store.weekCardDue(),
       openSettings: () => this.openSettings(),
@@ -1372,7 +1377,7 @@ export class UI {
       return {
         icon: '環', title: p.title, toasts,
         sub: allDay ? `整天的日程・${day}${until}` : `${routine ? '例行日程' : '日程'}・${day} ${p.start}–${p.end}`,
-        undo: made ? () => (routine ? this._undoRoutine(made.id) : s.deleteEvent(made.id)) : null,
+        undo: made ? (routine ? () => this._undoRoutine(made.id) : this._undoAdd(made, 'event')) : null,
       }
     }
     const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur, due: p.due || null, ...(p.at ? { at: p.at } : {}) }
@@ -1397,15 +1402,20 @@ export class UI {
   }
   // 復原剛加的例行公事：連它已經產生、還沒做的那幾件一起拿掉。
   // （deleteRoutine 會把今天以前的留著當紀錄：加完跨了午夜才按復原，昨天那件會變成逾期）
-  // 撤銷剛記下的任務：之後改過（改名、做完、排了時間、加了子任務）就留著，說一聲
-  _undoAdd(made) {
+  // 撤銷剛記下的任務、日程：之後改過（改名、做完、排了時間、加了子任務）就留著，說一聲
+  _undoAdd(made, kind = 'task') {
     const snap = JSON.stringify(made)
     const id = made.id
     return () => {
-      const cur = this.store.state.tasks.find((t) => t.id === id)
-      if (!cur) return
-      if (JSON.stringify(cur) !== snap) return this.toast({ icon: '種', title: '記下之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
-      this.store.deleteTask(id)
+      const cur = this.store.state[kind === 'event' ? 'events' : 'tasks'].find((t) => t.id === id)
+      if (!cur) return true
+      if (JSON.stringify(cur) !== snap) {
+        this.toast({ icon: '種', title: '記下之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
+        return false
+      }
+      if (kind === 'event') this.store.deleteEvent(id)
+      else this.store.deleteTask(id)
+      return true
     }
   }
   _undoRoutine(id) {
@@ -2125,12 +2135,13 @@ export class UI {
         <button class="btn-ghost" data-act="drop" data-id="${esc(t.id)}">先放下</button>
         <button class="cm-link" data-act="mute" data-id="${esc(t.id)}">不再提醒這件</button>
       </div></div></div>`
-    if (readLocal(STUCK_SAID_KEY, '') !== s.today) {
-      writeLocal(STUCK_SAID_KEY, s.today)
-      this.hooks.stuck?.('nudge', t, st.moved || st.late)
-    }
+    if (readLocal(STUCK_SAID_KEY, '') !== s.today && this._tasksShown() && this.hooks.stuck?.('nudge', t, st.moved || st.late)) writeLocal(STUCK_SAID_KEY, s.today)
   }
 
+  // 任務頁現在看得到嗎（面板沒收起來、分頁是任務）：卡關的那一句旁白只在看得到那張小卡時說
+  _tasksShown() {
+    return this.tab === 'tasks' && !$('#panel').classList.contains('collapsed') && !document.hidden
+  }
   // 好久沒碰的長期任務：長期任務不會逾期、也不在每天的任務裡，放久了沒人提醒。沒有卡關的任務時，同一個位置提一件（最久的那件），
   // ふじ每天開口一次。跟卡關提醒共用設定裡的開關
   idleTasks() {
@@ -2162,10 +2173,7 @@ export class UI {
         <button class="btn-ghost" data-act="idle-focus" data-id="${k}">專注一輪</button>
         <button class="cm-link" data-act="idle-snooze" data-id="${k}">過一週再提醒</button>
       </div></div></div>`
-    if (readLocal(IDLE_SAID_KEY, '') !== this.store.today) {
-      writeLocal(IDLE_SAID_KEY, this.store.today)
-      this.hooks.idle?.(t, it.idle)
-    }
+    if (readLocal(IDLE_SAID_KEY, '') !== this.store.today && this._tasksShown() && this.hooks.idle?.(t, it.idle)) writeLocal(IDLE_SAID_KEY, this.store.today)
   }
 
   // ── 字體大小、這一版的新功能 ──
@@ -3260,6 +3268,12 @@ export class UI {
     $('#reviewModal').hidden = true
   }
 
+  // 總覽上的「收起來」：這週不再放，提示卡一起收
+  weekSeen() {
+    this.store.seenWeekCard()
+    this.dropToasts('week')
+    if (this.tab === 'today') this.today.render()
+  }
   // 晚上 9 點後、今天還沒寫、也沒按「之後再說」：總覽把今日反思移到最上面（不再自己跳成對話框），main.js 再說一則提示
   reviewEve() {
     const s = this.store
@@ -3282,9 +3296,10 @@ export class UI {
     this._eve = eve
     if (this.tab === 'today') this.today.render()
   }
-  reviewLater() {
+  // day：問的是哪一天（提示卡留到過了午夜才按的，記在那一天，不會跳過新的一天）
+  reviewLater(day = this.store.today) {
     try {
-      localStorage.setItem('hiyori-review-later', this.store.today)
+      localStorage.setItem('hiyori-review-later', day)
     } catch {}
     this.dropToasts('review')
     if (this.tab === 'today') this.today.render()
@@ -3841,6 +3856,14 @@ export class UI {
   hasToast(tag) {
     return $$('#toasts .toast:not(.out)').some((el) => el.dataset.tag === tag)
   }
+  // 把焦點放到某一類提示卡的第一顆按鈕（from：收掉時要交回的地方）
+  focusToast(tag, from = null) {
+    const el = $$('#toasts .toast:not(.out)').find((x) => x.dataset.tag === tag)
+    const b = el?.querySelector('button')
+    if (!b) return
+    if (from) el._from = from
+    b.focus({ preventScroll: true })
+  }
   dropToasts(tag) {
     for (const el of $$('#toasts .toast')) if (el.dataset.tag === tag) this._dropToast(el, true)
   }
@@ -3849,7 +3872,13 @@ export class UI {
     if (!el?.isConnected || el.classList.contains('out')) return
     clearTimeout(el._life)
     // 焦點在這一張的按鈕上：先交回進來之前的地方（不然收掉時掉到 body，下一次 Tab 又從頭來）
-    if (el.contains(document.activeElement)) this._toastHome(el)?.focus({ preventScroll: true })
+    if (el.contains(document.activeElement)) {
+      const home = this._toastHome(el)
+      if (home) home.focus({ preventScroll: true })
+      else document.activeElement.blur()
+    }
+    // 淡出的這一下按不到了（按 Enter 不會再算一次）
+    el.inert = true
     el.classList.add('out')
     const done = () => el.remove()
     if (calmMotion()) return done()

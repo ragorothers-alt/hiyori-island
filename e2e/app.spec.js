@@ -2432,8 +2432,23 @@ test('建議類的提示：打字中先不說、停下來再說；兩則至少�
   await motto.click()
   expect(await mottoSet()).toEqual([30, 10, true])
 
-  // 晚上 9 點後還沒回顧：不跳出回顧的視窗，總覽的今日反思排到「現在」下面，提示卡問一聲
+  // 晚上 9 點後還沒回顧：不跳出回顧的視窗，總覽的今日反思排到「現在」下面，提示卡問一聲。
+  // 頁面在背景時過了 9 點：不說、不算問過（看得到了再說）
   await page.evaluate(() => window.hiyori.ui.setTab('today'))
+  await page.clock.setFixedTime(T('20:55:00'))
+  await page.waitForTimeout(1500)
+  await page.evaluate(() => {
+    window.__hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.setFixedTime(T('21:05:00'))
+  await page.waitForTimeout(2500)
+  expect(await seen('今天過得怎麼樣')).toBe(0)
+  expect(await page.evaluate(() => localStorage.getItem('hiyori-review-asked'))).not.toBe(ymd)
+  await page.evaluate(() => {
+    window.__hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
   await page.clock.setFixedTime(T('21:30:00'))
   const ask = shown('今天過得怎麼樣')
   await expect(ask).toBeVisible()
@@ -2463,6 +2478,15 @@ test('建議類的提示：打字中先不說、停下來再說；兩則至少�
   await expect(page.locator('#weekModal')).toBeHidden()
   const card = page.locator('#todayRoot .td-weekc')
   await expect(card).toContainText('3 朵花綻放')
+  // 總覽上的「收起來」：卡和提示卡一起收（不留一張按了會再打開的提示卡）
+  await card.locator('[data-act="week-seen"]').click()
+  await expect(card).toHaveCount(0)
+  await expect(week).toHaveCount(0)
+  // 再放回來：「看看」打開回顧卡的視窗，關掉也收起來
+  await page.evaluate(() => {
+    window.hiyori.store.state.weekCard = ''
+    window.hiyori.ui.today.render()
+  })
   await card.locator('[data-act="week-open"]').click()
   await expect(page.locator('#weekModal')).toBeVisible()
   await page.locator('#weekClose').click()
@@ -2851,6 +2875,20 @@ test.describe('手機上的任務', () => {
     await swap.click()
     await input.press('Enter')
     await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '趕報告'))).toMatchObject({ date: tmr, at: '23:00', dur: 120 })
+    // 記下的日程之後改了名：「復原」留著現在的樣子、說一聲，清單上不寫「已復原」
+    await input.fill('後天 10:00 看牙醫')
+    await input.press('Enter')
+    await expect.poll(() => page.evaluate(() => window.hiyori.store.state.events.some((x) => x.title === '看牙醫'))).toBe(true)
+    await page.evaluate(() => {
+      const s = window.hiyori.store
+      const e = s.state.events.find((x) => x.title === '看牙醫')
+      s.updateEvent(e.id, { title: '看牙醫（二樓）' })
+    })
+    const undoEv = page.locator('.cap-undo[aria-label="復原：看牙醫"]')
+    await undoEv.click()
+    await expect(page.locator('#toasts .toast', { hasText: '記下之後又改過了' })).toBeVisible()
+    await expect(undoEv).toHaveCount(0)
+    expect(await page.evaluate(() => window.hiyori.store.state.events.some((x) => x.title === '看牙醫（二樓）'))).toBe(true)
     await input.fill('')
     await page.keyboard.press('Escape')
     // 任務頁的輸入框記下一件：提示卡說記下了，可以撤銷
@@ -2860,6 +2898,27 @@ test.describe('手機上的任務', () => {
     await expect(added).toBeVisible()
     await added.locator('.toast-act', { hasText: '撤銷' }).click()
     await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.some((t) => t.title === '買牛奶'))).toBe(false)
+  })
+  test('編輯日程只存改過的欄位：打開之後別處改了名稱、備註，這裡只切成整天，名稱和備註留著別處改的', async ({ page, context, site }) => {
+    await useAppMode(context)
+    await page.goto(site.url)
+    await bootReady(page)
+    const id = await page.evaluate(() => {
+      const s = window.hiyori.store
+      window.hiyori.ui.setTab('schedule')
+      const e = s.addEvent({ title: '牙醫', date: s.today, start: '15:00', end: '16:00', color: 0 })
+      window.hiyori.ui.schedule.openEdit('event', e.id)
+      return e.id
+    })
+    const sheet = page.locator('#editSheet')
+    await expect(sheet).toBeVisible()
+    // 另一台改的（同步進來）
+    await page.evaluate((id) => window.hiyori.store.updateEvent(id, { title: '牙醫（改到二樓）', note: '帶健保卡' }), id)
+    await sheet.locator('[data-allday]').click()
+    await sheet.locator('button[type="submit"]').click()
+    await expect(sheet).toBeHidden()
+    const got = await page.evaluate((id) => window.hiyori.store.state.events.find((e) => e.id === id), id)
+    expect(got).toMatchObject({ title: '牙醫（改到二樓）', note: '帶健保卡', allDay: true })
   })
 })
 test.describe('手機的觸控', () => {

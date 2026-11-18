@@ -221,7 +221,14 @@ export function parseQuick(input, { today = dateStr(), projects = [], span = fal
         start -= 1440
         if (end >= 1440) end -= 1440
       }
-      want = end > start ? end - start : end < start ? end + 1440 - start : 60
+      // 跨過半夜：結束被猜成下午、或沿用了開始的「晚上」（23:00 到 1:00 的 1:00 讀成 13:00）的，當成凌晨。
+      // 自己寫了時段、am/pm、13 點以後的不動
+      let late = end
+      if (end < start && !rm[8]) {
+        const am = readTime(rm, 8, false, '凌晨').minutes
+        if (am != null && am >= 60 && am < end) late = am
+      }
+      want = late > start ? late - start : late < start ? late + 1440 - start : 60
       // 結束在半夜：那天的最後一分鐘
       if (end >= 1440) end = 1439
       if (end <= start) end = Math.min(start + 60, 1439)

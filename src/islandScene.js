@@ -743,7 +743,8 @@ export async function createIsland(ctx) {
   let lastVisit = performance.now()
   setInterval(() => {
     const keys = Object.keys(town.residents).filter((k) => !town.residents[k].busy)
-    if (!keys.length || !townQuiet() || townBusy || town.visiting || duo.inside || mochi.busy || fuji.busy) return
+    // 設定裡關了「小島上的閒聊和招呼」：居民不自己來串門子
+    if (store.state.settings.chatOn === false || !keys.length || !townQuiet() || townBusy || town.visiting || duo.inside || mochi.busy || fuji.busy) return
     if (performance.now() - lastVisit < 150000 || Math.random() < 0.55) return
     lastVisit = performance.now()
     startVisit(pick(keys))

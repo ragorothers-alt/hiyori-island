@@ -1167,7 +1167,14 @@ export class Store {
     const st = this.state.settings
     if (on === this.mottoOn()) return
     if (!on) {
-      Object.assign(st, { mottoWasEvery: st.mottoEvery, mottoWasCat: st.catMotto, mottoWasBar: !!st.mottoBar, mottoEvery: 0, catMotto: 0, mottoBar: false })
+      // 開著的記下現在的；本來就關著的（例如總開關關著時只打開了面板上方那一條）留著之前記的，不會被蓋成關
+      const keep = st.mottoWasEvery > 0 || st.mottoWasCat > 0 || st.mottoWasBar
+      Object.assign(st, {
+        mottoWasEvery: st.mottoEvery > 0 || !keep ? st.mottoEvery : st.mottoWasEvery,
+        mottoWasCat: st.catMotto > 0 || !keep ? st.catMotto : st.mottoWasCat,
+        mottoWasBar: st.mottoBar || !keep ? !!st.mottoBar : st.mottoWasBar,
+        mottoEvery: 0, catMotto: 0, mottoBar: false,
+      })
     } else {
       const none = !(st.mottoWasEvery > 0) && !(st.mottoWasCat > 0) && !st.mottoWasBar
       const pick = (list, v, d) => (!none && list.includes(v) ? v : d)

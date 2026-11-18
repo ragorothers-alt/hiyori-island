@@ -96,11 +96,13 @@ export class MottosView {
         return armConfirm(b, '再按一次刪掉', () => s.deleteMotto(id))
       case 'every':
         s.setSetting('mottoEvery', +b.dataset.v)
+        this.hooks.changed?.()
         return this.render()
       // 專注中貓咪多久念一句（計時設定裡也有同一組）
       case 'cat':
         if (!CAT_MOTTOS.includes(+b.dataset.v)) return
         s.setSetting('catMotto', +b.dataset.v)
+        this.hooks.changed?.()
         return keepFocus(this.el.set, () => this.render())
       // 先停一下／現在就恢復：按完焦點放在換上來的那一顆（鍵盤操作的人不會掉到頁面最上面）
       case 'pause': {
@@ -123,6 +125,7 @@ export class MottosView {
       case 'bar':
         s.setSetting('mottoBar', !s.state.settings.mottoBar)
         this.hooks.mottoBar?.()
+        this.hooks.changed?.()
         return this.render()
       case 'events':
         s.setSetting('mottoEvents', s.state.settings.mottoEvents === false)

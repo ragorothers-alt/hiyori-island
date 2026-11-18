@@ -448,10 +448,10 @@ export class ScheduleView {
   _taskTools(t) {
     const subs = t.subs || []
     const tools = [
-      !t.done && !t.ongoing ? `<button type="button" class="btn-ghost" data-ec="slot">${t.at ? '移到最近空檔' : '排進最近空檔'}</button>` : '',
+      !t.done ? `<button type="button" class="btn-ghost" data-ec="slot">${t.at ? '移到最近空檔' : '排進最近空檔'}</button>` : '',
       t.at ? '<button type="button" class="btn-ghost" data-ec="unplan">移回未排時段</button>' : '',
       `<button type="button" class="btn-ghost" data-ec="subs">${subs.length ? `子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : '拆成子任務'}</button>`,
-      !t.done && !t.routineId && !floating(t) ? '<button type="button" class="btn-ghost" data-ec="split" title="分成幾段，分到幾天做">分成幾段</button>' : '',
+      !t.done && !t.routineId ? '<button type="button" class="btn-ghost" data-ec="split" title="分成幾段，分到幾天做">分成幾段</button>' : '',
     ].filter(Boolean)
     return `<div class="ec-tools">${tools.join('')}</div>`
   }
@@ -508,10 +508,8 @@ export class ScheduleView {
         s.addEvent(allDay ? v : rest)
         this.lastColor = ed.color
       } else {
+        // 只送改過的（改成整天、改回有時段時，開始、結束、到哪天跟著不一樣，自然會一起送；名稱、備註沒改就不送）
         const patch = changed(v)
-        // 時段一起改（開始改了、結束跟著調過的那種）；改成整天、改回有時段時整組送
-        if ('start' in patch || 'end' in patch) Object.assign(patch, { start: v.start, end: v.end })
-        if ('allDay' in patch) Object.assign(patch, v)
         if (Object.keys(patch).length) s.updateEvent(ed.id, patch)
       }
     } else {

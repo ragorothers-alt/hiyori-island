@@ -107,6 +107,8 @@ async function boot() {
   store.on('dateChanged', applySeason)
   // App 開著跨到新的一週：等一下再給回顧卡
   // 開著過了一天：貓咪說新的一天的摘要，一週回顧等摘要關掉再出來
+  // 換日了：昨天晚上的回顧、上週的回顧卡那兩張提示卡收起來（按下去會記到新的一天）
+  store.on('dateChanged', () => ['review', 'week'].forEach((tag) => ui.dropToasts(tag)))
   store.on('dateChanged', () =>
     setTimeout(() => {
       ui.maybeShowBrief()
@@ -172,17 +174,30 @@ async function boot() {
     } catch {}
     return suggestMem
   }
-  // 最後一次在輸入框裡按鍵的時間
+  // 最後一次在輸入框裡按鍵的時間；正在組字（注音、日文）；打過字的那幾格（本來就填好的、點進去沒改的不算在打字）
   let lastKey = 0
+  let composing = false
+  const typed = new WeakSet()
   addEventListener('keydown', (e) => e.target?.closest?.('input, textarea, [contenteditable]') && (lastKey = Date.now()), { capture: true })
-  addEventListener('input', () => (lastKey = Date.now()), { capture: true })
-  // 正在打字：焦點在輸入框裡，而且框裡有字、或幾秒內才按過鍵（點進空的框就走開了不算）
+  addEventListener('input', (e) => {
+    lastKey = Date.now()
+    if (e.target) typed.add(e.target)
+  }, { capture: true })
+  addEventListener('compositionstart', () => (composing = true), { capture: true })
+  addEventListener('compositionend', () => {
+    composing = false
+    lastKey = Date.now()
+  }, { capture: true })
+  // 正在打字：焦點在輸入框裡，而且正在組字、幾秒內才按過鍵，或這一格打過字、還留著字（點進空的框就走開了、本來就填好的不算）
   const typing = () => {
     const a = document.activeElement
     if (!a?.closest?.('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]), textarea, [contenteditable]')) return false
-    return !!String(a.value ?? a.textContent ?? '').trim() || Date.now() - lastKey < 8000
+    return composing || Date.now() - lastKey < 8000 || (typed.has(a) && !!String(a.value ?? a.textContent ?? '').trim())
   }
   const suggestBusy = () => typing() || ui.focus.mode === 'focus'
+  // 開場好了、看得到頁面（Android 的 App 在前面）才說：在背景、載入畫面還蓋著時說了也沒人看到，還會用掉今天的則數
+  let suggestReady = false
+  const suggestSeen = () => suggestReady && !document.hidden && !(native && nativeAway())
   // 現在能說一則嗎（不管打字、專注；只看開關、間隔、今天的則數）
   const suggestRoom = (now = Date.now()) => {
     if (!store.nudge()) return false
@@ -194,7 +209,7 @@ async function boot() {
   let suggestHeld = null
   // show() 回傳 false 是說不出來了（那一件做完了、條件不成立）：不算一則。回傳有沒有說
   const suggest = (kind, show, wait = 0) => {
-    if (!store.nudge()) return false
+    if (!store.nudge() || !suggestSeen()) return false
     const now = Date.now()
     if (suggestBusy()) {
       if (wait) suggestHeld = { kind, show, until: now + wait }
@@ -220,7 +235,7 @@ async function boot() {
     suggest(h.kind, h.show)
   }
   // 卡關、好久沒碰的那一句只是那張小卡的旁白：能說的時候才說，不佔間隔、不算則數
-  const aside = (fn) => store.nudge() && !suggestBusy() && suggestRoom() && fn()
+  const aside = (fn) => (store.nudge() && suggestSeen() && !suggestBusy() && suggestRoom() ? fn() : false)
   // 晚上回顧、上週的回顧卡：不再自己跳成對話框。總覽上放一張卡（晚上把今日反思移到最上面、新的一週放上週的回顧卡），
   // 再說一則提示（建議類的一則；回顧一天一次、回顧卡一週一次，說不出來的話之後每分鐘再看）
   const REVIEW_ASKED_KEY = 'hiyori-review-asked'
@@ -238,13 +253,14 @@ async function boot() {
     } catch {}
   }
   const askReview = () => {
-    if (askedOn(REVIEW_ASKED_KEY, store.today) || !ui.reviewDue()) return false
+    const day = store.today
+    if (askedOn(REVIEW_ASKED_KEY, day) || !ui.reviewDue()) return false
     return suggest('review', () => {
       if (ui._topLayer() || !ui.reviewDue()) return false
       markAsked(REVIEW_ASKED_KEY, store.today)
       ui.toast({
         icon: '筆', title: '今天過得怎麼樣？', sub: ui.appMode ? '在總覽的今日反思選個天氣、寫兩句就好' : '選個天氣、寫兩句就好', ms: 12000, tag: 'review',
-        actions: [{ label: '寫回顧', run: () => ui.goReview() }, { label: '之後再說', soft: true, run: () => ui.reviewLater() }],
+        actions: [{ label: '寫回顧', run: () => ui.goReview() }, { label: '之後再說', soft: true, run: () => ui.reviewLater(day) }],
       })
     })
   }
@@ -257,11 +273,15 @@ async function boot() {
       ui.toast({ icon: '週', title: '上週的回顧卡好了', sub: '做了多少、哪天最充實，總覽上也看得到', ms: 12000, tag: 'week', actions: [{ label: '看看', run: () => ui.openWeekCard() }] })
     })
   }
-  // 寫著「現在該做」的提示卡（回來了、下一件、警語）同時只留一張：新的出來時收掉其他兩種
+  // 寫著「現在該做」的提示卡（回來了、下一件、警語）同時只留一張：新的出來時收掉其他兩種。
+  // 焦點在被收掉的那一張上：交給新的那一張的第一顆按鈕（不會掉到頁首）
   const NOW_TAGS = ['back', 'next', 'motto']
   const nowToast = (opts) => {
+    const held = document.activeElement?.closest?.('.toast')
+    const move = !!held && NOW_TAGS.includes(held.dataset.tag) && held.dataset.tag !== opts.tag
     for (const tag of NOW_TAGS) if (tag !== opts.tag) ui.dropToasts(tag)
     ui.toast(opts)
+    if (move) ui.focusToast(opts.tag, held._from)
   }
 
   // ── 回來了，現在該做：離開 App 一陣子（BACK_MIN）才回來、沒在計時（專注、休息、暫停都不算）、醒著、不在日程中、警語沒先停：
@@ -280,11 +300,7 @@ async function boot() {
     const st = store.state.settings
     // 頁面又看不到了（剛回來又馬上切走、Android 的 App 已經在背景）：不說，也不算說過
     if (!backReady || document.hidden || (native && nativeAway())) return false
-    if (!store.nudge('backNudge') || ui.awayMs() < BACK_MIN || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer()) return false
-    const p = pauseOf(st)
-    if (!awakeAt(store.state.rhythm, now) || (p.until > now && p.from <= now) || inQuiet(eventsQuiet(now), now)) return false
-    // 警語的提示卡還在（上面就寫著現在該做）：不疊上去
-    if (ui.hasToast('motto')) return false
+    if (ui.awayMs() < BACK_MIN || !backOk(st, now)) return false
     let last = backAt
     try {
       last = Math.max(last, Number(JSON.parse(localStorage.getItem(BACK_KEY) || '0')) || 0)
@@ -292,10 +308,18 @@ async function boot() {
     if (Math.abs(now - last) < BACK_GAP || !nowTask()) return false
     // 正在打字：打完再說（兩分鐘內）；說的時候再看一次（開始計時了、打開了別的視窗、切走了、這件做完了就不說）
     return suggest('back', () => {
-      if (document.hidden || (native && nativeAway()) || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer() || ui.hasToast('motto')) return false
+      if (!backOk(store.state.settings, Date.now())) return false
       const t = nowTask()
       return t ? sayBack(t) : false
     }, 2 * 60000)
+  }
+  // 現在說得了「回來了」嗎（等著的那一則說的時候也再看一次：關掉了、開始計時了、進了會議、先停了警語、打開了別的視窗）
+  const backOk = (st, now) => {
+    if (!store.nudge('backNudge') || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer()) return false
+    const p = pauseOf(st)
+    if (!awakeAt(store.state.rhythm, now) || (p.until > now && p.from <= now) || inQuiet(eventsQuiet(now), now)) return false
+    // 警語的提示卡還在（上面就寫著現在該做）：不疊上去
+    return !ui.hasToast('motto')
   }
   const sayBack = (t) => {
     const now = Date.now()
@@ -632,7 +656,7 @@ async function boot() {
     // 卡關提醒：nudge 是第一次看到卡關小卡（n：挪了幾次或逾期幾天），其他是按了哪個選項
     stuck: (kind, t, n) => {
       const task = short(t.title)
-      if (kind === 'nudge') aside(() => talk('stuck', { task, n }, 6000, `「${task}」好像卡住了，拆小一點好嗎？`, 'fuji'))
+      if (kind === 'nudge') return aside(() => talk('stuck', { task, n }, 6000, `「${task}」好像卡住了，拆小一點好嗎？`, 'fuji'))
       else if (kind === 'split') {
         talk('stuckSplit', { task }, 5000, '拆好了，先做第一步就好。', 'fuji')
         setTimeout(() => talk('stuckSplit', { task }, 4200, '', 'mochi'), 2200)
@@ -1011,6 +1035,7 @@ async function boot() {
     ui.toast({ icon: '糖', title: `收起了${item?.name || '裝飾'}`, sub: `退還 ${refund} 顆金平糖` })
   })
   store.on('reviewSaved', ({ first }) => {
+    ui.dropToasts('review')
     sfx.chime()
     const who = talk('reviewDone', {}, 4200, '謝謝你告訴我今天的事。')
     if (first) scene?.headBurst(who, { colors: ['#ffffff', '#fff1b8', '#d9ccff'], count: 30, speed: 1.4 })
@@ -2017,6 +2042,8 @@ async function boot() {
     }
     // 網頁已經自己說了的那一則不再交出去
     const claimed = beds.claimed.filter((at) => now - at < 2 * 86400000)
+    // 設定裡關了「建議和鼓勵」：不送截止日的風險；關了「時間到的提醒」：不送睡前那則
+    planned = planned.filter((n) => (n.kind !== 'risk' || store.nudge()) && (n.kind !== 'bed' || store.state.settings.remindOn !== false))
     fujiList = planned.filter((n) => !claimed.includes(n.at))
     // 睡前那則：到點的留著（12 小時內），還沒到的照這次排的換掉
     const keepBeds = [...beds.beds.filter((b) => b.at <= now && now - b.at < 12 * 3600000).slice(-2), ...planned.filter((n) => n.kind === 'bed').map(({ at, title, body }) => ({ at, title, body }))]
@@ -2411,6 +2438,7 @@ async function boot() {
   document.addEventListener('visibilitychange', () => !document.hidden && calendars.refresh())
   setInterval(() => !document.hidden && calendars.refresh(), 10 * 60000)
   backReady = true
+  suggestReady = true
   if (bootAct) {
     const { act, at } = bootAct
     bootAct = null

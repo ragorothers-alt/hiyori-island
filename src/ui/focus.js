@@ -968,6 +968,8 @@ export class FocusTimer {
   }
   _setOption(key, v) {
     this.ui.store.setSetting(key, v)
+    // 貓咪念警語的間隔：設定頁上警語的總開關、摘要跟著
+    if (key === 'catMotto') this.ui.renderSettings?.()
     this._renderSet()
     this.render()
   }
