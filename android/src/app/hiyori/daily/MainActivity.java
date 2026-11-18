@@ -212,7 +212,7 @@ public class MainActivity extends Activity {
         // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）；
         // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）；
         // 5：多了 actAt（按鈕是哪一則警語通知上的）、shown（App 不在前面時發過的警語）；
-        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）
+        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）、fujiClaim（網頁自己說了其中一則）
         @JavascriptInterface
         public int version() {
             return 6;
@@ -222,6 +222,17 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void fujiNotes(String json) {
             if (trusted) FujiNotice.plan(getApplicationContext(), json);
+        }
+
+        // 網頁要自己說排在 at（毫秒）的那一則：還沒發的話手機不發了，回 true；已經發過了回 false
+        @JavascriptInterface
+        public boolean fujiClaim(String at) {
+            if (!trusted) return false;
+            try {
+                return FujiNotice.claim(getApplicationContext(), Long.parseLong(at));
+            } catch (NumberFormatException e) {
+                return false;
+            }
         }
 
         // 按了警語通知上的哪一顆按鈕："focus"（開始專注現在該做的那一件）、"pause"（先停 1 小時），沒有是空字串。拿走就清掉

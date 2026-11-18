@@ -305,6 +305,8 @@ body.night input[type=time], body.night input[type=date] { color-scheme: dark; }
 .item-title { font-size: 14px; line-height: 1.4; word-break: break-word; }
 .item-meta { font-size: 11px; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 0 8px; margin-top: 1px; align-items: center; }
 .item-meta > * { white-space: nowrap; }
+/* 第一次打開時放的範例：任務、日程、專案上的小標籤 */
+.ex-tag { display: inline-flex; align-items: center; padding: 0 6px; border-radius: 6px; font-size: 12px; font-style: normal; font-weight: 600; line-height: 1.5; letter-spacing: .06em; color: var(--ink-soft); background: rgba(127, 127, 127, .15); margin-right: 5px; vertical-align: 1px; }
 .pri { font-family: var(--font-num); letter-spacing: .1em; }
 .pri-3 { color: #b84468; }
 body.night .pri-3 { color: #e08aa2; }

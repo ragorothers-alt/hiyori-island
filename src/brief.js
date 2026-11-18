@@ -8,7 +8,7 @@
 //   dates: 快到的重要日子、里程碑、專案截止 [{ title, days, kind, pid, project, projectName }],
 //   subs: 快扣款的訂閱 [{ name, days, price, trial }],
 //   stuck: 卡住的任務 { title, moved, late } 或 null, idle: 好久沒碰的長期任務 { id, title, idle, pid, projectName } 或 null,
-//   streak: 連續天數,
+//   streak: 連續天數, samples: 島上還有幾筆第一次打開時放的範例（上面的任務、日程都不含範例）,
 //   away: 上次看 App 之後的事（沒有上次、或一直開著在看就不給）{
 //     since: 上次看 App 的時間（毫秒）,
 //     events: 最近幾天有時段的日程 [{ title, date, start, end }], charges: 最近幾天扣款的訂閱 [{ name, date, price }],
@@ -126,6 +126,8 @@ export function buildBrief(d) {
     today.push({ icon: t.first ? '先' : t.star ? '命' : '花', text: t.title, sub: sub.filter(Boolean).join('・'), go: ['tab', 'tasks'] })
   }
   if (todo.length > 3) today.push({ icon: '…', text: `還有 ${todo.length - 3} 件任務`, sub: '', go: ['tab', 'tasks'] })
+  // 島上還有第一次打開時放的範例：說一聲那些是範例（不算進上面的件數），記下自己的第一件就收起來
+  if (d.samples > 0) today.unshift({ icon: '例', text: '島上現在的任務和日程是範例', sub: '記下你自己的第一件，範例就收起來', go: ['tab', 'tasks'] })
   const habits = d.habits || { total: 0, done: 0 }
   if (habits.total > habits.done) today.push({ icon: '習', text: `${habits.total - habits.done} 個習慣還沒打卡`, sub: habits.done ? `做了 ${habits.done}／${habits.total}` : '', go: ['tab', 'habits'] })
 

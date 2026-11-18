@@ -515,6 +515,59 @@ test.describe('打開時的今日摘要', () => {
     expect(await page.evaluate(() => window.hiyori.ui.brief.open)).toBe(false)
   })
 
+  test('範例：標著「範例」、摘要不算範例；記下第一件自己的任務就收起來（可以撤銷，撤銷了就不再收）；隔天打開也收起來', async ({ page, context, site }) => {
+    test.setTimeout(120000)
+    await useAppMode(context)
+    await morning(page)
+    await page.goto(site.url)
+    await bootReady(page)
+    const samples = () => page.evaluate(() => window.hiyori.store.sampleCount())
+    expect(await samples()).toBe(12)
+    // 摘要：件數不含範例，最上面說一聲島上的是範例
+    const card = page.locator('#brief .bf-card')
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
+    await expect(card.locator('.bf-lead .sr-only')).toContainText('今天還沒排任何事')
+    await expect(card.locator('.bf-list button').first()).toContainText('島上現在的任務和日程是範例')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#brief')).toBeHidden()
+    // 任務頁上標著「範例」
+    await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+    await expect(page.locator('#taskList .item').first().locator('.ex-tag')).toHaveText('範例')
+    // 記下自己的第一件：範例收起來，可以撤銷
+    await page.locator('#taskTitle').fill('買牛奶')
+    await page.locator('#taskTitle').press('Enter')
+    const tucked = page.locator('#toasts .toast', { hasText: '範例收起來了' })
+    await expect(tucked).toBeVisible()
+    await expect.poll(samples).toBe(0)
+    await expect(page.locator('#taskList .item')).toHaveCount(1)
+    await tucked.locator('.toast-act', { hasText: '撤銷' }).click()
+    await expect.poll(samples).toBe(12)
+    await expect(page.locator('#toasts .toast', { hasText: '範例放回去了' })).toBeVisible()
+    expect(await page.evaluate(() => window.hiyori.store.state.settings.keepSamples)).toBe(true)
+    // 撤銷過了：再記一件也不收
+    await page.locator('#taskTitle').fill('回信')
+    await page.locator('#taskTitle').press('Enter')
+    await page.waitForTimeout(500)
+    expect(await samples()).toBe(12)
+    // 換一份還沒撤銷過的、隔天才打開：開場時就收起來（不會變成逾期、「那時沒提醒到」）
+    await page.evaluate(() => {
+      const s = window.hiyori.store
+      s.state.settings.keepSamples = false
+      s.state.tasks = s.state.tasks.filter((t) => s.isSample(t))
+      s.saveNow()
+    })
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+    await page.clock.setFixedTime(new Date(Date.parse(`${ymd}T10:00:00+08:00`) + 86400000))
+    await page.reload()
+    await bootReady(page)
+    await expect.poll(samples).toBe(0)
+    await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
+    await expect(card).not.toContainText('逾期')
+    await expect(card).not.toContainText('沒提醒到')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#toasts .toast', { hasText: '範例收起來了' })).toBeVisible({ timeout: 15000 })
+  })
+
   test('你不在的時候：上次看 App 之後錯過的日程列在最前面，點了跳到那一天', async ({ page, context, site }) => {
     await useAppMode(context)
     await morning(page)
@@ -582,7 +635,13 @@ test('快速記錄：在總覽按＋，一行字記下待辦、日程和生活�
   await bootReady(page)
   const cap = page.locator('#capture')
   const input = page.locator('#capInput')
-  const count = () => page.evaluate(() => ({ tasks: window.hiyori.store.state.tasks.length, events: window.hiyori.store.state.events.length, life: (window.hiyori.store.state.life[window.hiyori.store.today]?.items || []).length }))
+  // 自己記的（記下第一件時範例就收起來了，不算範例）
+  const count = () =>
+    page.evaluate(() => {
+      const s = window.hiyori.store
+      const mine = (list) => list.filter((x) => !s.isSample(x)).length
+      return { tasks: mine(s.state.tasks), events: mine(s.state.events), life: (s.state.life[s.today]?.items || []).length }
+    })
   const before = await count()
 
   // 留在總覽，不用換到任務頁
@@ -1092,6 +1151,8 @@ test('下一步：專注一件拆成小步驟的任務時，專注頁寫著下�
     const t = s.addTask({ title: '寫期末報告', date: s.today })
     s.addSub(t.id, '找三篇參考資料')
     s.addSub(t.id, '寫大綱')
+    // 做完這件之後建議的那一件（範例不算）
+    s.addTask({ title: '讀 20 頁書', date: s.today })
     window.hiyori.ui.focus.startWith(t.id)
     return t.id
   })
@@ -1751,6 +1812,8 @@ test('接下來：帶著秒數開始也算得準（10:00:30 開始的 25 分鐘�
     s.setSetting('focusRounds', 1)
     s.setSetting('focusUp', false)
     s.setSetting('focusMin', 25)
+    // 專注在一件自己的任務上（範例不算進「現在該做」）
+    s.addTask({ title: '寫報告', date: s.today, priority: 3 })
     return s.addEvent({ title: '設計週會', date: s.today, start: '10:25', end: '11:00' }).id
   })
   await page.evaluate(() => window.hiyori.ui.focus.toggle())
@@ -4328,11 +4391,14 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
     // 假的 Android 殼（新版，有 fujiNotes）：記下每一次交給手機的ふじ的那幾則
     window.__fuji = []
     window.__notified = []
+    window.__claims = []
     window.__away = false
     window.HiyoriNative = {
-      version: () => 6, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify: (title, body, tag) => window.__notified.push(tag),
+      version: () => 6, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify: (title, body, tag) => window.__notified.push([tag, title]),
       mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => !window.__away,
       fujiNotes: (json) => window.__fuji.push(json),
+      // 手機還沒發那一則：拿掉、由網頁說
+      fujiClaim: (at) => window.__claims.push(Number(at)) > 0,
     }
     if (localStorage.getItem('hiyori-daily-v1')) return
     const tomorrow = new Date(Date.parse(`${ymd}T12:00:00+08:00`) + 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
@@ -4388,14 +4454,21 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
   await expect(page.locator('#coachRoot .ag-notes-sub')).toHaveText('早上、截止日有風險時、睡前，一天最多 3 則')
   await expect.poll(async () => (await last())?.length).toBeGreaterThan(1)
   expect(await page.evaluate(() => window.hiyori.store.state.settings.fujiNotify)).toBe(await page.evaluate(() => localStorage.getItem('hiyori-device')))
-  // 23:00 App 不在前面：手機的鬧鐘發ふじ睡前那則，就寢提醒不再另外跳系統通知（畫面上的提示卡照常，回來看得到）
+  // 23:00 App 在背景、網頁還在跑：就寢提醒跟ふじ睡前那則只跳一則。手機還沒發，網頁跟手機說了「這則我來」，用ふじ的字說
+  // （畫面上的提示卡照常，回來看得到）
+  const bedAt = Date.parse(`${ymd}T23:00:17+08:00`)
   await page.evaluate(() => {
     window.__away = true
     document.hasFocus = () => false
   })
-  await page.clock.setFixedTime(new Date(Date.parse(`${ymd}T23:00:30+08:00`)))
+  await page.clock.setFixedTime(new Date(Date.parse(`${ymd}T23:00:05+08:00`)))
   await expect(page.locator('#toasts .toast', { hasText: '就寢時間快到了' })).toBeVisible()
-  expect(await page.evaluate(() => window.__notified)).not.toContain('bedtime')
+  await expect.poll(() => page.evaluate(() => window.__notified)).toEqual([['fuji', 'ふじ · 差不多該睡了']])
+  expect(await page.evaluate(() => window.__claims)).toEqual([bedAt])
+  // 說過的那一則不再交給手機（明天晚上的睡前那則照排）
+  const sent = () => page.evaluate(() => (window.__fuji.at(-1) ? JSON.parse(window.__fuji.at(-1)).items.map((x) => x.at) : []))
+  await expect.poll(async () => (await sent()).includes(bedAt)).toBe(false)
+  expect((await sent()).includes(bedAt + 86400000)).toBe(true)
 })
 
 test('隨叫隨到的ふじ：任何一頁按 J 叫出來，看得到正在看哪一頁；一句話改日程、設定、新增習慣，做完打開那一頁；整批撤銷', async ({ page, context, site }) => {

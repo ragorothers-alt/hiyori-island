@@ -21,6 +21,8 @@ final class FujiNotice {
     private static final String PREFS = "hiyori";
     private static final String KEY = "fujiNotes";
     private static final String KEY_POSTED = "fujiPosted";
+    // 最後發出去的那一則排在幾點（網頁要自己說同一則時用它認出已經發過了，見 claim）
+    private static final String KEY_POSTED_AT = "fujiPostedAt";
     private static final String TAG = "fuji";
     private static final int ID = 40;
     // 晚了這麼久還沒發的就不發了（早上那則晚半小時就沒意思了）
@@ -112,9 +114,23 @@ final class FujiNotice {
         }
         if (due != null && !MainActivity.foreground && now - due.optLong("at") < LATE) {
             show(c, due);
-            prefs(c).edit().putLong(KEY_POSTED, now).apply();
+            prefs(c).edit().putLong(KEY_POSTED, now).putLong(KEY_POSTED_AT, due.optLong("at")).apply();
         }
         keep(c, rest, now);
+    }
+
+    // 網頁要自己說排在 at 的那一則（App 在背景、網頁還在跑時到點的就寢提醒，跟ふじ睡前那則是同一刻）：
+    // 還沒發的拿掉、不發了，回 true（由網頁發）；已經發過了回 false（網頁就不再發）。沒排這一則的也回 true
+    static synchronized boolean claim(Context c, long at) {
+        if (at <= 0 || prefs(c).getLong(KEY_POSTED_AT, 0) == at) return false;
+        JSONArray items = load(c);
+        JSONArray rest = new JSONArray();
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject o = items.optJSONObject(i);
+            if (o != null && o.optLong("at", 0) != at) rest.put(o);
+        }
+        if (rest.length() != items.length()) keep(c, rest, System.currentTimeMillis());
+        return true;
     }
 
     // 開機、App 更新後：鬧鐘被清掉了，照存著的重排（剛好錯過、還不算太晚的那一則馬上補發）

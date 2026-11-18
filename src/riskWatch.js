@@ -31,13 +31,16 @@ export function createRiskWatch(store, { now = () => new Date() } = {}) {
     if (!force && cache && +n - at < FRESH && cache.today === store.today) return cache
     at = +n
     const today = store.today
+    // 範例不算（範例專案的截止日、範例日程佔掉的空檔）
+    const own = (x) => !store.isSample?.(x)
+    const tasks = store.state.tasks.filter(own)
     cache = {
       today,
       due: dueRisks({
-        tasks: store.state.tasks, eventsOn: (d) => store._busyEvents(d), rhythm: store.state.rhythm, today,
+        tasks, eventsOn: (d) => store._busyEvents(d).filter(own), rhythm: store.state.rhythm, today,
         nowMin: n.getHours() * 60 + n.getMinutes(), ratio: store.estimate()?.ratio || 1,
       }),
-      projects: projectRisks({ projects: store.state.projects, tasks: store.state.tasks, today, now: +n }),
+      projects: projectRisks({ projects: store.state.projects.filter(own), tasks, today, now: +n }),
     }
     return cache
   }

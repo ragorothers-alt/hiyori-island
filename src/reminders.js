@@ -73,11 +73,12 @@ export class Reminders {
     } catch {}
   }
 
-  // 那天有時間的日程和任務：[項目, 開始時間, 種類, 日期, 分鐘數要加多少（明天的 +1440）]
+  // 那天有時間的日程和任務：[項目, 開始時間, 種類, 日期, 分鐘數要加多少（明天的 +1440）]。範例不提醒
   _items(date, offset) {
+    const own = (x) => !this.store.isSample?.(x)
     return [
-      ...this.store.eventsOn(date).map((e) => [e, e.start, 'event', date, offset]),
-      ...this.store.tasksOn(date).filter((t) => t.at).map((t) => [t, t.at, 'task', date, offset]),
+      ...this.store.eventsOn(date).filter(own).map((e) => [e, e.start, 'event', date, offset]),
+      ...this.store.tasksOn(date).filter((t) => t.at && own(t)).map((t) => [t, t.at, 'task', date, offset]),
     ]
   }
 

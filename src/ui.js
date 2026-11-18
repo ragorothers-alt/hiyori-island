@@ -106,6 +106,8 @@ const layerZ = (el) => {
   while (el.parentElement && el.parentElement !== document.body) el = el.parentElement
   return parseInt(getComputedStyle(el).zIndex, 10) || 0
 }
+// 第一次打開時放的範例：任務、日程、專案上標一個「範例」（不算進提醒，記下自己的第一件就收起來）
+const SAMPLE_TAG = '<span class="ex-tag" title="第一次打開時放的範例：不會提醒你，記下自己的第一件就收起來">範例</span>'
 // 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
 const LAYOUT_KEY = 'hiyori-layout'
 // 這台裝置上次選的是 App 模式（開機時決定要不要先載入小島）
@@ -715,15 +717,18 @@ export class UI {
     const on = s.state.settings.stuckNudge
     const stuck = on ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
     const idle = this.idleTasks()[0]
+    // 範例不算進摘要（只在最上面說一聲島上的是範例）
+    const own = (x) => !s.isSample(x)
     return {
       now: new Date(),
       today,
-      tasks: s.tasksOn(today),
-      overdue: s.overdue().length,
-      events: s.eventsOn(today),
+      tasks: s.tasksOn(today).filter(own),
+      overdue: s.overdue().filter(own).length,
+      events: s.eventsOn(today).filter(own),
       allDay: s.allDayOn(today),
       habits: todayProgress(s.state.habits, today),
-      dates: s.upcomingDates(6, 3),
+      dates: s.upcomingDates(6, 3).filter((x) => !s.sampleProject(x.pid || (x.project ? x.id : ''))),
+      samples: s.sampleCount(),
       subs: s.subReminders().map((r) => ({ name: r.sub.name, days: r.days, trial: r.trial, price: fmtMoney(r.sub.price, r.sub.cur) })),
       stuck: stuck ? { title: stuck.task.title, moved: stuck.moved, late: stuck.late } : null,
       idle: idle ? { id: idle.task.id, title: idle.task.title, idle: idle.idle, pid: idle.project.id, projectName: idle.project.name } : null,
@@ -731,7 +736,7 @@ export class UI {
       away: since
         ? {
             since,
-            events: days.flatMap((date) => s.eventsOn(date).map((e) => ({ title: e.title, date, start: e.start, end: e.end }))),
+            events: days.flatMap((date) => s.eventsOn(date).filter(own).map((e) => ({ title: e.title, date, start: e.start, end: e.end }))),
             charges: s.state.subscriptions.flatMap((sub) => chargesBetween(sub, days[0], yesterday).map((date) => ({ name: sub.name, date, price: fmtMoney(sub.price, sub.cur) }))),
             habits: todayProgress(s.state.habits, yesterday),
           }
@@ -1828,6 +1833,7 @@ export class UI {
     if (subs.length) {
       meta.push(`<button class="subs-tag${sd === subs.length ? ' ok' : ''}" data-act="subs" aria-expanded="${open}" title="${open ? '收起' : '展開'}子任務">${ICON.subs}${sd}/${subs.length}</button>`)
     }
+    if (this.store.isSample(t)) meta.unshift(SAMPLE_TAG)
     return `<li class="item ${t.done ? 'done' : ''} ${t.star ? 'starred' : ''} ${open ? 'subs-open' : ''} ${this.hlKey === 'task:' + t.id ? 'hl' : ''}" data-id="${esc(t.id)}" style="--c:${tag.color}">
       <button class="check" data-act="toggle" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
       <div class="item-main">
@@ -2453,7 +2459,7 @@ export class UI {
     const bar = p.milestones.map((m) => `<i style="--f:${msProgress(m, by.get(m.id)).toFixed(3)}"></i>`).join('') || '<i style="--f:0"></i>'
     const hit = find?.hit ? `<div class="proj-hit"><b>${esc(find.hit.kind)}</b>${markHTML(find.hit.text, find.terms)}</div>` : ''
     return `<div class="proj ${paused ? 'is-paused' : ''} ${this.hlKey === 'project:' + p.id ? 'hl' : ''}" data-id="${esc(p.id)}" style="--c:${c}">
-      <div class="proj-head"><div class="proj-name">${mk(p.name)}</div><div class="proj-pct">${pct}%</div></div>
+      <div class="proj-head"><div class="proj-name">${s.isSample(p) ? SAMPLE_TAG : ''}${mk(p.name)}</div><div class="proj-pct">${pct}%</div></div>
       <div class="proj-meta">${tags}${paused ? '' : this._deadlineText(p)}<span>${doneN} / ${p.milestones.length} 個里程碑</span></div>
       ${hit}
       <div class="proj-bar">${bar}</div>

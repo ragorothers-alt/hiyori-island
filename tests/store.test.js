@@ -1511,6 +1511,60 @@ describe('範例資料', () => {
     expect(s.state.tasks.map((t) => t.id)).toEqual(['mine1'])
   })
 
+  it('認得出範例：任務、日程看 id；範例專案寫了自己的進度就不算', () => {
+    const s = fresh()
+    const [task] = s.state.tasks
+    const folio = s.state.projects.find((p) => p.name === '作品集網站改版')
+    expect(s.isSample(task)).toBe(true)
+    expect(s.isSample(s.state.events[0])).toBe(true)
+    expect(s.sampleProject(folio.id)).toBe(true)
+    expect(s.isSample(s.addTask({ title: '自己的' }))).toBe(false)
+    s.addProjectLog(folio.id, { text: '自己寫的進度' })
+    expect(s.isSample(folio)).toBe(false)
+    expect(s.sampleProject('nope')).toBe(false)
+  })
+
+  it('範例收起來可以整個放回去：自己的任務歸在範例專案裡的，放回去時接回去；撤銷過就不再收', () => {
+    const s = fresh()
+    const tasks = s.state.tasks.map((t) => t.id)
+    const events = s.state.events.map((e) => e.id)
+    const guide = s.state.projects.find((p) => p.name === '認識ひより小島')
+    const mine = s.addTask({ title: '自己的', project: guide.id, ms: guide.milestones[0].id })
+    const snap = s.tuckSamples()
+    expect(snap.tasks.map((t) => t.id)).toEqual(tasks)
+    expect(s.sampleCount()).toBe(0)
+    expect(s.state.tasks.map((t) => t.id)).toEqual([mine.id])
+    expect(mine.project).toBe(null)
+    expect(s.tuckSamples()).toBe(null)
+    expect(s.restoreSamples(snap)).toBe(12)
+    expect(s.state.tasks.map((t) => t.id).sort()).toEqual([...tasks, mine.id].sort())
+    expect(s.state.events.map((e) => e.id)).toEqual(events)
+    expect(mine).toMatchObject({ project: guide.id, ms: guide.milestones[0].id })
+    expect(s.state.settings.keepSamples).toBe(true)
+    // 放回去了就不再自動收；設定裡的「清除範例資料」照常能清
+    expect(s.tuckSamples()).toBe(null)
+    expect(s.restoreSamples(snap)).toBe(0)
+    expect(s.clearSamples()).toBe(12)
+  })
+
+  it('範例過了開島那天就算過期（隔天要收起來）', () => {
+    const s = fresh()
+    expect(s.samplesStale()).toBe(false)
+    setDate(addDays(TODAY, 1))
+    s.tick()
+    expect(s.samplesStale()).toBe(true)
+    s.clearSamples()
+    expect(s.samplesStale()).toBe(false)
+  })
+
+  it('範例專案不算快到期', () => {
+    const s = fresh()
+    setDate(addDays(TODAY, 2))
+    s.tick()
+    expect(s.state.projects.some((p) => p.deadline === addDays(TODAY, 3))).toBe(true)
+    expect(s.deadlineSoon()).toEqual([])
+  })
+
   it('重置小島會變成空島，不再放範例', () => {
     const s = fresh()
     s.addTask({ title: '自己的' })

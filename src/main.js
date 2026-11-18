@@ -6,7 +6,7 @@ import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, closeNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct, pushSupported } from './push.js'
-import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes } from './native.js'
+import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes, nativeFujiClaim } from './native.js'
 import { planKey, pauseOf, pauseText, pauseUntil, pausedUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt, activeMottos, windowEnd } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
@@ -139,7 +139,8 @@ async function boot() {
   // 警語交給別人排了嗎（頁面在背景時不用自己發）：新版的 Android 殼、開了系統通知；網頁開了通知、訂閱了推播
   const mottoExternal = () => (mottoPush ? mottoPush.ready() : nativeMottos() && notifyOn())
   // 現在該做的那一件：今天還沒做完的任務裡，本命、重要的、排了時間早的在前（跟今日摘要一樣）
-  const nowTask = () => doFirst(store.tasksOn(store.today))[0] || null
+  // 現在該做哪一件（範例不算：回來了、做完一件、警語上的「現在該做」都照這個）
+  const nowTask = () => doFirst(store.tasksOn(store.today).filter((t) => !store.isSample(t)))[0] || null
   // 拆成了小步驟的話，下一步也寫上去（通知上一眼就知道從哪裡開始）
   const mottoBody = (text, task) => {
     const step = task && nextStep(task)
@@ -774,6 +775,21 @@ async function boot() {
     },
   })
   hooks.agent = agent
+  // ── 範例（第一次打開時放的）：加了第一件自己的任務、日程、專案，或過了開島那天，就收起來，附撤銷（撤銷過就不再自動收） ──
+  const tuckSamples = (why) => {
+    const snap = store.tuckSamples()
+    if (!snap) return
+    const toast = () =>
+      ui.toast({
+        icon: '例', title: '範例收起來了', sub: why === 'day' ? '第一次打開時放的範例，過了那天就收起來' : '島上現在只有你自己的東西', ms: 9000, tag: 'samples',
+        actions: [{ label: '撤銷', soft: true, run: () => store.restoreSamples(snap) && ui.toast({ icon: '例', title: '範例放回去了', sub: '之後不再自動收；「紀錄 → 設定」裡可以清除', ms: 4200 }) }],
+      })
+    // 開場時（過了那天）等摘要說完再說
+    setTimeout(() => ui.afterBrief(toast), booted ? 0 : 6500)
+  }
+  // 等這一次新增的事件都跑完再收（同一個事件的其他反應看到的還是收之前的樣子）
+  for (const kind of ['taskAdded', 'eventAdded', 'projectAdded']) store.on(kind, (x) => !store.isSample(x) && store.sampleCount() && queueMicrotask(() => tuckSamples('own')))
+  store.on('dateChanged', () => store.samplesStale() && tuckSamples('day'))
   // ── 匯入的行事曆：抓回來的日程（唯讀）放進 store.external；設定變了就重新套用、去抓（src/calendars.js）──
   const calendars = createCalendars(store)
   hooks.calendars = calendars
@@ -1404,8 +1420,11 @@ async function boot() {
         icon: '眠', title: '就寢時間快到了', sub: first ? `預定 ${e.start} 就寢・${word}先做「${short(first.title, 10)}」` : `預定 ${e.start} 就寢・今天辛苦了`, ms: day && !first ? 12000 : 9000,
         ...(day && !first ? { actions: [{ label: `挑${word}的第一件`, soft: true, run: () => ui.openFirst() }] } : {}),
       })
-      // ふじ睡前那則同一刻會送到（這台收、App 不在前面）：系統通知交給它說，不跳兩則
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !fujiBedSent(Date.now())) systemNotify('ひより · 就寢提醒', `預定 ${e.start} 就寢`, 'bedtime')
+      // ふじ睡前那則是同一刻：只跳一則（bedNotice 決定誰說）
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) {
+        const out = bedNotice(Date.now(), { title: 'ひより · 就寢提醒', body: `預定 ${e.start} 就寢`, tag: 'bedtime' })
+        if (out) systemNotify(out.title, out.body, out.tag)
+      }
       return
     }
     // 排定的任務到了開始的時間：提示卡上直接開始專注（提不起勁就只做 5 分鐘、還沒準備好就晚 15 分鐘再提醒）。
@@ -1752,11 +1771,43 @@ async function boot() {
   let fujiAt = 0
   let fujiDirty = true
   let fujiHidden = null
-  // 排過的睡前那則是幾點（到點後就不在 fujiList 裡了，另外記著）：就寢提醒跟它是同一刻
-  let fujiBeds = []
-  // 睡前那則會送到嗎：這台收、App 不在前面（網頁是頁面看不到時才交給伺服器推，Android 是 App 不在前面時手機的鬧鐘才發），
-  // 而且排了一則在這前後 15 分鐘內（就寢提醒在就寢前 30 分鐘起的 10 分鐘內說）；被開會、專注挪走或挪進睡覺時間沒送的，就寢提醒照常跳
-  const fujiBedSent = (now) => fujiOn() && (native ? nativeAway() : document.hidden) && fujiBeds.some((at) => Math.abs(at - now) < 15 * 60000)
+  // 睡前那則（這台的，FUJI_BED_KEY）：就寢提醒（就寢前 30 分鐘起的 10 分鐘內）跟它是同一刻。{ beds: [{ at, title, body }], claimed: [at] }
+  //   beds：排過的（到點的留著，重新整理後還認得出來；還沒到的照每次重算換掉：改了就寢時間、被挪走了）
+  //   claimed：就寢提醒跳出來時那一則還沒送、由網頁說了的：之後不再交給伺服器和手機
+  const FUJI_BED_KEY = 'hiyori-fuji-bed'
+  const readBeds = () => {
+    try {
+      const v = JSON.parse(localStorage.getItem(FUJI_BED_KEY) || 'null')
+      return { beds: Array.isArray(v?.beds) ? v.beds.filter((b) => Number.isFinite(b?.at) && typeof b.title === 'string') : [], claimed: Array.isArray(v?.claimed) ? v.claimed.filter(Number.isFinite) : [] }
+    } catch {
+      return { beds: [], claimed: [] }
+    }
+  }
+  const writeBeds = (v) => {
+    try {
+      localStorage.setItem(FUJI_BED_KEY, JSON.stringify(v))
+    } catch {}
+  }
+  // 就寢提醒要跳系統通知時，跟ふじ睡前那則只跳一則：回傳要跳的 { title, body, tag }，不用跳是 null
+  //   沒排那一則（這台不收ふじ的通知、被開會或專注挪走、挪進睡覺時間）：照一般的就寢提醒
+  //   Android：問手機，還沒發的話手機不發了、由網頁用ふじ的字說；已經發過了就不跳
+  //   網頁：頁面在背景、伺服器排著這一則就交給推播；不然頁面自己說，記成念過了（推播晚到時 Service Worker 不再顯示）
+  const bedNotice = (now, generic) => {
+    const r = readBeds()
+    const n = fujiOn() ? r.beds.find((b) => Math.abs(b.at - now) < 15 * 60000) : null
+    if (!n) return generic
+    if (r.claimed.includes(n.at)) return null
+    const say = { title: n.title, body: n.body, tag: 'fuji' }
+    const claimed = () => {
+      writeBeds({ ...r, claimed: [...r.claimed, n.at].slice(-4) })
+      fujiDirty = true
+      return say
+    }
+    if (native) return nativeFujiClaim(n.at) ? claimed() : null
+    if (!mottoPush) return claimed()
+    if (document.hidden && mottoPush.covers(n.at, now)) return null
+    return mottoPush.claim(n.at) ? claimed() : null
+  }
   // 最後一次正看著 App 的時間：那之前已經打開過 App，今天早上那則就不送
   let lookedAt = Date.now()
   store.on('dirty', () => (fujiDirty = true))
@@ -1790,6 +1841,7 @@ async function boot() {
     const s = store.state.settings
     return agent.ready() && s.agentMode !== 'off' && fujiNotes.here() && fujiNotes.reach() === 'ok'
   }
+  const own = (x) => !store.isSample(x)
   const planFuji = (now, hidden) => {
     if (!hidden && !(native && nativeAway())) lookedAt = now
     if (!fujiDirty && hidden === fujiHidden && now - fujiAt < 60000) return fujiList
@@ -1798,24 +1850,33 @@ async function boot() {
     fujiHidden = hidden
     fujiAt = now
     const saveRisk = () => writeRiskNotes({ notes: fujiList.filter((n) => n.kind === 'risk').map(({ at, due, level }) => ({ at, due, level })), days: riskDays })
+    const beds = readBeds()
     if (!fujiOn()) {
       fujiList = fujiList.length ? [] : fujiList
       saveRisk()
+      if (beds.beds.length) writeBeds({ ...beds, beds: [] })
       return fujiList
     }
+    let planned = fujiList
     try {
-      fujiList = planNotes({
+      planned = planNotes({
         riskDays,
         // 別的分頁看過的也算（ui.lastSeen：看得到的分頁每分鐘記一次）：在背景很久的分頁不會把今天早上那則又排回去
-        today: store.today, now, seen: Math.max(lookedAt, ui.lastSeen()), rhythm: store.state.rhythm, tasks: store.state.tasks,
-        tasksOn: (d) => store.tasksOn(d), eventsOn: (d) => store.timedEventsOn(d), ratio: store.estimate()?.ratio || 1,
+        // 範例不算
+        today: store.today, now, seen: Math.max(lookedAt, ui.lastSeen()), rhythm: store.state.rhythm, tasks: store.state.tasks.filter(own),
+        tasksOn: (d) => store.tasksOn(d).filter(own), eventsOn: (d) => store.timedEventsOn(d).filter(own), ratio: store.estimate()?.ratio || 1,
         memo: risk.memo(), quietUntil: ui.focus.mode === 'focus' ? ui.focus.boundary?.at || 0 : 0, auto: agent.auto(),
       })
     } catch (e) {
       console.warn('[hiyori] ふじ的通知沒排好', e)
     }
-    // 已經到點的留著（重算時它已經不在 fujiList 裡），還沒到的照這次排的換掉（改了就寢時間、被挪走了）
-    fujiBeds = [...fujiBeds.filter((at) => at <= now).slice(-2), ...fujiList.filter((n) => n.kind === 'bed').map((n) => n.at)]
+    // 網頁已經自己說了的那一則不再交出去
+    const claimed = beds.claimed.filter((at) => now - at < 2 * 86400000)
+    fujiList = planned.filter((n) => !claimed.includes(n.at))
+    // 睡前那則：到點的留著（12 小時內），還沒到的照這次排的換掉
+    const keepBeds = [...beds.beds.filter((b) => b.at <= now && now - b.at < 12 * 3600000).slice(-2), ...planned.filter((n) => n.kind === 'bed').map(({ at, title, body }) => ({ at, title, body }))]
+    const nextBeds = { beds: keepBeds, claimed }
+    if (JSON.stringify(nextBeds) !== JSON.stringify(beds)) writeBeds(nextBeds)
     saveRisk()
     return fujiList
   }
@@ -2183,6 +2244,8 @@ async function boot() {
   // 開始專注的話今日摘要就不出來（專注中不打擾；摘要等一下才出來，快取一下就讀到了）。
   // 讀快取不擋開場：機器忙的時候不要讓載入畫面多停
   takeNativeAct()
+  // 範例過了開島那天還在（隔天才打開）：摘要出來前先收起來
+  if (store.samplesStale()) tuckSamples('day')
   booted = true
   // ふじ：開場好了、線上同步拉完之後看一次該不該整理今天；之後每分鐘、回到 App 時再看
   setTimeout(() => agent.tick(), 6000)
@@ -2220,13 +2283,15 @@ async function boot() {
       setTimeout(() => ui.afterBrief(() => {
         if (ui.maybeShowWeekCard()) return
         if (ui.maybeAskReview()) return
-        const overdue = store.overdue().length
-        const todo = store.tasksOn(store.today).filter((t) => !t.done).length
+        // 範例不算
+        const overdue = store.overdue().filter(own).length
+        const mineToday = store.tasksOn(store.today).filter(own)
+        const todo = mineToday.filter((t) => !t.done).length
         const soon = store.deadlineSoon()[0]
         if (overdue) talk('wilt', { count: overdue }, 3800, line('overdue', { count: overdue }, 'fuji'))
         else if (soon) talk('deadlineNear', { project: short(soon.project.name), days: soon.days }, 4200, `「${short(soon.project.name)}」快到期囉。`)
         else if (new Date().getHours() < 12 && todo >= MAX_STARS && !store.starsOn(store.today).length) talk('planAsk', {}, 4200, '今天最重要的三件事是什麼？點 ☆ 選起來吧。')
-        else if (!store.tasksOn(store.today).length) talk('emptyDay', {}, 3800)
+        else if (!mineToday.length) talk('emptyDay', {}, 3800)
         else talk(`season.${season}`, {}, 3800)
       }), 5600)
     }),

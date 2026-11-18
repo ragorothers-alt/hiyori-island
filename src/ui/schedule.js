@@ -262,7 +262,7 @@ export class ScheduleView {
         return `<div class="blk ${ev ? 'ev' : 'tk'} ${ext ? 'ext' : ''} ${item.done ? 'done' : ''} ${others ? 'clash' : ''} ${past && !item.done ? 'past' : ''} ${short}"
           data-type="${ev ? 'event' : 'task'}" data-id="${esc(b.id)}" data-start="${b.start}" data-end="${b.end}" style="${pos};--c:${c}">
           ${ext ? '' : `<button class="check" data-act="toggle" aria-label="完成「${esc(item.title)}」" aria-pressed="${!!item.done}" style="--c:${c}">${ICON.check}</button>`}
-          <button type="button" class="blk-txt" data-edit><b>${ev ? '' : item.star ? '<em class="star">★</em>' : ''}${esc(item.title)}</b><small><span class="blk-time">${time}</span>${meta ? `・${meta}` : ''}</small></button>
+          <button type="button" class="blk-txt" data-edit><b>${s.isSample?.(item) ? '<em class="ex-tag">範例</em>' : ''}${ev ? '' : item.star ? '<em class="star">★</em>' : ''}${esc(item.title)}</b><small><span class="blk-time">${time}</span>${meta ? `・${meta}` : ''}</small></button>
           ${ext ? '' : '<i class="blk-resize" data-resize title="拖曳調整長度"></i>'}
         </div>`
       })

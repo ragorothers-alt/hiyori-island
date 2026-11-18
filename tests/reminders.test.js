@@ -49,6 +49,17 @@ describe('日程提醒', () => {
     expect(callback).toHaveBeenCalledTimes(1)
   })
 
+  it('範例的日程、任務不提醒', () => {
+    localStorage.clear()
+    const fresh = new Store()
+    const sample = fresh.state.events.find((e) => e.start === '09:00')
+    expect(fresh.isSample(sample)).toBe(true)
+    const mine = fresh.addEvent({ title: '自己的會', date: TODAY, start: '09:00', end: '09:20' })
+    const cb = vi.fn()
+    new Reminders(fresh, cb).check(at(8, 50))
+    expect(cb).toHaveBeenCalledExactlyOnceWith(mine, 10, 'event')
+  })
+
   it('提前時間窗內首次開啟時將剩餘秒數向上取整為分鐘', () => {
     reminders.check(at(8, 54, 30))
     expect(callback).toHaveBeenCalledExactlyOnceWith(event, 6, 'event')

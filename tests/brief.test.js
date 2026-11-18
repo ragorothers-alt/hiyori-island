@@ -24,6 +24,14 @@ describe('今日摘要', () => {
     expect(b.bye).toBe('今天也慢慢來。')
   })
 
+  it('島上還有範例：最上面說一聲那些是範例（件數裡不含範例）', () => {
+    const b = buildBrief(base({ samples: 12 }))
+    expect(b.lead).toBe('今天還沒排任何事。想到什麼，先記一件就好。')
+    expect(b.today[0]).toEqual({ icon: '例', text: '島上現在的任務和日程是範例', sub: '記下你自己的第一件，範例就收起來', go: ['tab', 'tasks'] })
+    expect(b.first).toBeNull()
+    expect(buildBrief(base({ samples: 0 })).today).toEqual([])
+  })
+
   it('第一句：幾件任務、幾個日程；做了一些、日程過了一些時照實說', () => {
     const tasks = [task('寫報告'), task('買菜'), task('回信')]
     const events = [ev('設計週會', '10:00', '11:00'), ev('牙醫', '15:30', '16:00')]

@@ -4,7 +4,7 @@
 // store/tasks.js、projects.js、habits.js、extras.js、coach.js：各領域的方法。
 // 這裡保留 Store 核心與其餘區段，並轉出原本的公開名稱。
 
-import { uid, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS } from './store/util.js'
+import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS } from './store/util.js'
 import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM } from './theme.js'
 import { isEvent, CHEERS } from './events.js'
 import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE } from './store/migrate.js'
@@ -473,10 +473,10 @@ export class Store {
   activeProjects() {
     return this.state.projects.filter((p) => !p.archived)
   }
-  // 期限在兩天內（含今天）還沒落成的專案，最急的在前
+  // 期限在兩天內（含今天）還沒落成的專案，最急的在前（範例專案不算）
   deadlineSoon() {
     return this.activeProjects()
-      .filter((p) => p.deadline && !p.completedAt && !p.pausedAt && p.milestones.length)
+      .filter((p) => p.deadline && !p.completedAt && !p.pausedAt && p.milestones.length && !this.isSample(p))
       .map((p) => ({ project: p, days: daysBetween(this.today, p.deadline) }))
       .filter((x) => x.days >= 0 && x.days <= 2)
       .sort((a, b) => a.days - b.days)
@@ -1233,16 +1233,67 @@ export class Store {
     return saved
   }
   // ── 範例資料（id 開頭是 ex-） ──
+  // 是不是範例：任務、日程看 id；範例專案裡寫了自己的東西（_authored 記下的，或匯入的檔案裡有自己的進度、筆記）就是使用者的了。
+  // 範例只是讓島一開始有東西看：不算進任何會提醒你的地方（摘要、提醒、風險、ふじ的通知、「現在該做」）
+  isSample(x) {
+    if (!isSampleId(x?.id)) return false
+    if (!Array.isArray(x.milestones)) return true
+    return !(x.mine || x.logs.some((y) => !isSampleId(y.id)) || x.notes.some((y) => !isSampleId(y.id)))
+  }
+  // 那個專案是範例嗎（給 id；找不到的不算）
+  sampleProject(id) {
+    const p = id && this.state.projects.find((x) => x.id === id)
+    return !!p && this.isSample(p)
+  }
   samples() {
-    const mark = (x) => x.id.startsWith('ex-')
-    // 範例專案裡寫了自己的東西（_authored 記下的，或匯入的檔案裡有自己的進度、筆記）：已經是使用者的了，不算範例
-    const mine = (p) => p.mine || p.logs.some((x) => !mark(x)) || p.notes.some((x) => !mark(x))
     const s = this.state
-    return { tasks: s.tasks.filter(mark), events: s.events.filter(mark), projects: s.projects.filter((p) => mark(p) && !mine(p)) }
+    const keep = (x) => this.isSample(x)
+    return { tasks: s.tasks.filter(keep), events: s.events.filter(keep), projects: s.projects.filter(keep) }
   }
   sampleCount() {
     const x = this.samples()
     return x.tasks.length + x.events.length + x.projects.length
+  }
+  // 範例過了開島那天還留著（隔天就收起來，不然變成逾期、「那時沒提醒到」、快到期的專案）
+  samplesStale() {
+    const x = this.samples()
+    return [...x.tasks, ...x.events].some((y) => y.date < this.today)
+  }
+  // 收起範例（加了第一件自己的東西，或過了開島那天）：跟 clearSamples 一樣，另外留一份放得回去的（撤銷用）。
+  // 說過要留著（撤銷過一次）就不收。回傳那一份，沒有可收的是 null
+  tuckSamples() {
+    if (this.state.settings.keepSamples) return null
+    const x = this.samples()
+    if (!x.tasks.length && !x.events.length && !x.projects.length) return null
+    const gone = new Set(x.projects.map((p) => p.id))
+    const copy = (list) => list.map((y) => structuredClone(y))
+    // 自己的任務歸在範例專案裡：收起來時拿掉歸屬，放回去時接回去
+    const left = this.state.tasks
+      .filter((t) => gone.has(t.project) && !x.tasks.includes(t))
+      .map((t) => ({ id: t.id, project: t.project, ms: t.ms, ongoing: t.ongoing, date: t.date }))
+    const snap = { tasks: copy(x.tasks), events: copy(x.events), projects: copy(x.projects), left }
+    this.clearSamples()
+    return snap
+  }
+  // 撤銷收起範例：放回去（已經有同一個 id 的不重複放），之後也不再自動收
+  restoreSamples(snap) {
+    if (!snap) return 0
+    const s = this.state
+    let n = 0
+    for (const key of ['tasks', 'events', 'projects']) {
+      for (const y of snap[key] || []) {
+        if (s[key].some((z) => z.id === y.id)) continue
+        s[key].push(structuredClone(y))
+        n++
+      }
+    }
+    for (const l of snap.left || []) {
+      const t = s.tasks.find((y) => y.id === l.id)
+      if (t && !t.project && s.projects.some((p) => p.id === l.project)) Object.assign(t, l)
+    }
+    s.settings.keepSamples = true
+    this._finish()
+    return n
   }
   // 清掉範例，自己加的資料、經驗值和統計都不動
   clearSamples() {

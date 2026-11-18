@@ -1,6 +1,6 @@
 // Android 殼的即時倒數通知：計時的狀態 → 通知上的樣子（src/native.js）
 import { describe, expect, it } from 'vitest'
-import { liveTimer, native, nativeFujiNotes, sendFujiNotes } from '../src/native.js'
+import { liveTimer, native, nativeFujiClaim, nativeFujiNotes, sendFujiNotes } from '../src/native.js'
 
 const AT = new Date(2026, 10, 10, 17, 25).getTime()
 const done = { at: AT, title: 'ひより · 專注結束', body: '25 分鐘完成，休息一下吧' }
@@ -64,5 +64,14 @@ describe('ふじ在 App 關著時的通知交給手機', () => {
     expect(got).toEqual([JSON.stringify({ items: [{ at: AT, title: 'ふじ · 今天的安排', body: '今天 1 件事' }] })])
     sendFujiNotes([], bridge)
     expect(got.at(-1)).toBe('')
+  })
+
+  it('網頁要自己說其中一則：問手機發過了沒（傳字串）；舊版的殼沒排ふじ的通知、出錯時都由網頁說', () => {
+    const asked = []
+    expect(nativeFujiClaim(AT, { fujiClaim: (at) => asked.push(at) && true })).toBe(true)
+    expect(asked).toEqual([String(AT)])
+    expect(nativeFujiClaim(AT, { fujiClaim: () => false })).toBe(false)
+    expect(nativeFujiClaim(AT, {})).toBe(true)
+    expect(nativeFujiClaim(AT, { fujiClaim: () => { throw new Error('x') } })).toBe(true)
   })
 })

@@ -50,6 +50,8 @@ export const toMin = (hhmm) => {
   const [h, m] = String(hhmm || '0:0').split(':').map(Number)
   return (h || 0) * 60 + (m || 0)
 }
+// 第一次打開時放的範例（任務、日程、專案和它的進度、筆記）id 開頭是 ex-
+export const isSampleId = (id) => typeof id === 'string' && id.startsWith('ex-')
 export const uid = () => Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 7)
 const REV_RE = /^[\w-]{1,40}$/
 
@@ -96,6 +98,8 @@ export const DEFAULT_SETTINGS = {
   focusGoal: 0,
   // ふじ在 App 關著時的通知從哪一台送（那一台的代號，fujiNotes.js 的 deviceId）；'off' 是不送，'' 是還沒選（手機先送）
   fujiNotify: '',
+  // 範例收起來時按過撤銷：之後不再自動收（設定裡的「清除範例資料」照常能清）
+  keepSamples: false,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 export const NOISES = ['off', 'rain', 'brown', 'pink']

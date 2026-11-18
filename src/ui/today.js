@@ -601,7 +601,7 @@ export class TodayView {
       const sub = subs.length ? `・子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : ''
       const on = t.id === focusId
       const first = t.first && !t.done ? '<em class="td-first-chip">先做這件</em>' : ''
-      const meta = `<span>${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${on ? '<em class="td-focusing">專注中</em>' : first || (sug ? '<em>還不是本命</em>' : '')}</small>`
+      const meta = `<span>${this.store.isSample?.(t) ? '<em class="ex-tag">範例</em>' : ''}${esc(t.title)}</span><small><i style="--c:${tag.color}"></i>${tag.label}・${KANA_TAG[tag.id] || ''}${sub}${on ? '<em class="td-focusing">專注中</em>' : first || (sug ? '<em>還不是本命</em>' : '')}</small>`
       return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}${on ? ' on' : ''}">
         <b class="td-n">${i + 1}</b>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
@@ -648,7 +648,7 @@ export class TodayView {
     const row = (t) => {
       const k = esc(t.id)
       const on = t.id === focusId
-      const inner = `<i style="--c:${tagOf(t.tag).color}"></i><span>${esc(t.title)}</span>${on ? '<em class="td-focusing">專注中</em>' : t.first ? '<em class="td-first-chip">先做這件</em>' : ''}${t.at ? `<small>${t.at}</small>` : ''}<small>${dur(taskDur(t))}</small>`
+      const inner = `<i style="--c:${tagOf(t.tag).color}"></i><span>${this.store.isSample?.(t) ? '<em class="ex-tag">範例</em>' : ''}${esc(t.title)}</span>${on ? '<em class="td-focusing">專注中</em>' : t.first ? '<em class="td-first-chip">先做這件</em>' : ''}${t.at ? `<small>${t.at}</small>` : ''}<small>${dur(taskDur(t))}</small>`
       return `<li>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="false">${ICON.check}</button>
         ${this._focusName(t, inner, 'td-mo', `mo-${k}`)}

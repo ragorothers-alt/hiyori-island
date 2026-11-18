@@ -174,6 +174,17 @@ export function sendFujiNotes(items, bridge = native) {
   }
 }
 
+// 網頁要自己說排在 at 的那一則（App 在背景、網頁還在跑時到點的就寢提醒，跟ふじ睡前那則同一刻）：
+// 手機還沒發的話不發了，回 true（由網頁說）；已經發過了回 false。沒有這個的殼（舊版）沒排ふじ的通知，回 true
+export function nativeFujiClaim(at, bridge = native) {
+  if (typeof bridge?.fujiClaim !== 'function') return true
+  try {
+    return !!bridge.fujiClaim(String(at))
+  } catch {
+    return true
+  }
+}
+
 // 通知權限：殼裡沒有瀏覽器的 Notification，問原生
 export const nativeCanNotify = () => {
   try {
