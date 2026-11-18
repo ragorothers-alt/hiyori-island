@@ -2,10 +2,15 @@
 import { test as base, expect } from '@playwright/test'
 import { startServer } from './server.js'
 
+// Google Fonts：每個測試都是全新的 context（沒有快取），整套跑下來要向 Google 要上千次字型；被限流時頁面的 load 事件
+// 會卡上一分多鐘（測試在 goto 就逾時）。測試不看字型：給一份空的樣式表，用系統字
+export const noFonts = (context) => context.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
+
 export const test = base.extend({
   // 每天第一次打開時貓咪會出來說今日摘要，蓋住畫面：測別的東西時先當成今天看過了（要測它的把 brief 設成 true）
   brief: [false, { option: true }],
   context: async ({ context, brief }, use) => {
+    await noFonts(context)
     if (!brief) {
       await context.addInitScript(() => {
         const d = new Date()

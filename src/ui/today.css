@@ -39,8 +39,9 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
   .td-grid.eve { grid-template-areas: "now now sched" "ref ref sched" "prog quote sched" "top top sched" "quest habit habit"; }
   .td-sched { max-height: 760px; }
 }
-/* 右上的齒輪：App 模式在總覽上藏起了日期列，設定從這裡進 */
+/* 右上的齒輪：App 模式在總覽上藏起了日期列，設定從這裡進。字不要跑到齒輪底下 */
 .td-hero { position: relative; }
+.td-hero:has(> .td-gear) { padding-right: 48px; }
 .td-gear { position: absolute; top: 0; right: 0; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 14px; border: 0; background: var(--field); color: var(--ink-soft); cursor: pointer; }
 .td-gear svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .td-gear:hover { color: var(--ink); }

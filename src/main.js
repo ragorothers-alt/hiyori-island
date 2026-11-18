@@ -1,5 +1,5 @@
 import './styles.css'
-import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev } from './store.js'
 import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
@@ -560,8 +560,15 @@ async function boot() {
     }, 2600)
   }
 
+  // 跨裝置的計時（下面同步那一段接上）：送給別台、到點時要不要先等別台
+  let shareTimer = null
+  let timerShared = null
   // ── UI 掛鉤 ──
   const hooks = {
+    // 這台按了計時的按鈕、到點時接手了：送給別台（開了同步才送，見同步那一段）
+    focusShare: (t) => shareTimer?.(t),
+    // 到點時要不要先等別台：沒開同步是 null；mine：這一輪是不是這台的（最後按按鈕、接手的是這台）；sync()：同步一次
+    shared: () => timerShared?.() ?? null,
     // 計時的狀態變了：b 是下一次到點的時間和狀況（沒在計時、暫停中是 null），到點的推播跟著重排
     focusPlan: (b) => {
       timerPush.plan(b && timerNotice(b))
@@ -927,16 +934,22 @@ async function boot() {
   })
   hooks.agent = agent
   // ── 範例（第一次打開時放的）：加了第一件自己的任務、日程、專案，或過了開島那天，就收起來，附撤銷（撤銷過就不再自動收） ──
+  // 開場前排著的提示卡（範例收起來了，附撤銷）：等摘要關掉（點了摘要裡的哪一件也照樣說，撤銷不能不見）、
+  // 看得到頁面了再說（開場後馬上切走的話，回來才說，不會在背景出來又收掉）
+  const bootSay = (fn) => {
+    if (ui.brief.open || document.hidden || (native && nativeAway())) return void setTimeout(() => bootSay(fn), 800)
+    fn()
+  }
   const tuckSamples = (why) => {
     const snap = store.tuckSamples()
     if (!snap) return
     const toast = () =>
       ui.toast({
         icon: '例', title: '範例收起來了', sub: why === 'day' ? '第一次打開時放的範例，過了那天就收起來' : '島上現在只有你自己的東西', ms: 9000, tag: 'samples',
-        actions: [{ label: '撤銷', soft: true, run: () => store.restoreSamples(snap) && ui.toast({ icon: '例', title: '範例放回去了', sub: '之後不再自動收；「紀錄 → 設定」裡可以清除', ms: 4200 }) }],
+        actions: [{ label: '撤銷', soft: true, run: () => store.restoreSamples(snap) && ui.toast({ icon: '例', title: '範例放回去了', sub: '之後不再自動收；「設定 → 資料與同步」裡可以清除', ms: 4200 }) }],
       })
     // 開場時（過了那天）等摘要說完再說
-    if (greeted) ui.afterBrief(toast)
+    if (greeted) bootSay(toast)
     else bootQueue.push(toast)
   }
   // 等這一次新增的事件都跑完再收（同一個事件的其他反應看到的還是收之前的樣子）
@@ -2067,7 +2080,10 @@ async function boot() {
   addEventListener('pagehide', () => syncMottos(true))
 
   // ── 同步：線上同步（同步碼，手機也能用）＋資料夾同步（資料寫進 OneDrive／Dropbox 裡的檔案）。兩種可以同時開 ──
-  const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「紀錄 → 設定」選要保留哪一邊', ms: 7000 })
+  const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「設定 → 資料與同步」選要保留哪一邊', ms: 7000 })
+  // 剛說了別台的計時（那一張就夠了，「已同步別台裝置的變更」不再說）
+  let timerSaid = 0
+  const pulledToast = (o) => Date.now() - timerSaid > 3000 && ui.toast(o)
   // ふじ的 AI 通行碼和選的模型跟著同步碼走：放在加密的那一包裡帶到別台（伺服器看不到），別台輸入同步碼就能用，不用再填、再選一次。
   // 通行碼、模型各自用比較新設的那一個（src/ai.js 的 aiExtras）
   const cloudSync = new CloudSync(store, {
@@ -2078,12 +2094,12 @@ async function boot() {
       else ui.toast({ icon: '藤', stamp: true, title: aiModel() === 'auto' ? 'ふじ改成自動選模型了' : `ふじ改用 ${AI_MODELS.find((m) => m.id === aiModel())?.label || 'Claude'} 了`, sub: '別台選的模型，這台跟著換', ms: 5000 })
     }),
     onStatus: () => ui.renderSync(),
-    onPulled: () => ui.toast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),
+    onPulled: () => pulledToast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),
     onConflict,
   })
   const fileSync = new FileSync(store, {
     onStatus: () => ui.renderSync(),
-    onPulled: () => ui.toast({ icon: '雲', title: '已載入雲端的新資料', sub: '別台裝置的變更同步過來了' }),
+    onPulled: () => pulledToast({ icon: '雲', title: '已載入雲端的新資料', sub: '別台裝置的變更同步過來了' }),
     onConflict,
   })
   ui.attachCloud(cloudSync)
@@ -2093,8 +2109,46 @@ async function boot() {
     if (cloudSync.state !== 'off' && cloudSync.state !== 'unsupported' && aiUnshared()) store.save()
   }
   hooks.aiSet = shareAi
-  cloudSync.init().then(shareAi, () => {})
-  fileSync.init()
+  // 開機時的第一次同步：做完之前，到點晚了的那一輪先等它（別台可能已經接手記好了）
+  let syncBooted = false
+  const syncBoot = Promise.allSettled([cloudSync.init().then(shareAi, () => {}), fileSync.init()]).then(() => (syncBooted = true))
+  const syncLinked = () => cloudSync._canSync() || fileSync._canSync()
+  const syncAll = () => Promise.allSettled([cloudSync.sync(), fileSync.sync()])
+
+  // ── 跨裝置的計時：計時的樣子放在小島資料裡跟著同步走（store.state.timer，記著是哪一台、哪一次）。
+  // 這台按了開始、暫停、延長、結束，或到點時接手了：馬上送（不等平常的 1.5 秒）；別台打開、切回來、定期同步時換成同一份，
+  // 到點的通知、Android 的即時倒數跟著排，那一台也會響。到點時由這一輪的主人記（見 focus.js 的 _hold），每一輪只記一次 ──
+  timerShared = () => {
+    if (syncBooted && !syncLinked()) return null
+    const t = store.state.timer
+    return { mine: !t || t.by === deviceId(), sync: () => syncBoot.then(() => (syncLinked() ? syncAll() : null)) }
+  }
+  shareTimer = (t) => {
+    if (!syncLinked()) return
+    store.setTimer({ ...t, by: deviceId(), v: newRev().slice(0, 24) })
+    syncAll()
+  }
+  // 別台的計時換過來了：說一聲（開始、暫停、繼續、那一輪記下了、結束；只換了目標就不說）
+  const timerToast = (r) => {
+    const what = r.target ? `「${short(r.target, 12)}」` : ''
+    let o = null
+    if (r.mode === 'focus' && r.was.mode !== 'focus') o = { title: '另一台開始專注了', sub: `${what}這台也跟著計時` }
+    else if (r.mode === 'focus' && r.paused && !r.was.paused) o = { title: '另一台暫停了計時', sub: what || '按繼續就接著算' }
+    else if (r.mode === 'focus' && !r.paused && r.was.paused) o = { title: '另一台繼續計時了', sub: what || '接著算' }
+    else if (r.mode === 'break' && r.was.mode === 'focus') o = { title: '這一輪在另一台記下了', sub: r.rounds > 1 && r.round < r.rounds ? `休息一下，接著第 ${r.round + 1} 輪` : '這台也跟著休息' }
+    else if (r.mode === 'idle' && r.was.mode !== 'idle') o = { title: '另一台結束了計時', sub: '這台也停下來了' }
+    if (!o) return false
+    ui.toast({ icon: '時', ms: 5000, tag: 'focus', ...o })
+    return true
+  }
+  // 同步拉回來的那一份（soft）：不是這台送的就換過來。同一台的另一個分頁有自己的通道（focus.js 的 storage 事件）；
+  // 匯入、還原備份不算（那份裡的計時是舊的）
+  store.on('reload', ({ soft } = {}) => {
+    const t = store.state.timer
+    if (!soft || !t || t.by === deviceId()) return
+    const r = ui.focus.fromSync(t)
+    if (r && timerToast(r)) timerSaid = Date.now()
+  })
   // 分享連結（#sync=同步碼）：先從網址拿掉，再到設定裡等使用者按「連線」
   const linkCode = codeFromHash()
   if (linkCode) {
@@ -2408,7 +2462,7 @@ async function boot() {
   // 原本的存檔讀不進來，換成了範例島：原文另外留著（hiyori-rescue），有開同步的話會從雲端拉回來
   if (store.loadFailed) {
     const sub = store.loadFailed.rescued
-      ? '原本的檔案另外留了一份，沒有刪掉（紀錄頁的設定裡可以下載）。有開同步的話，會自動從雲端拉回來'
+      ? '原本的檔案另外留了一份，沒有刪掉（設定的「資料與同步」裡可以下載）。有開同步的話，會自動從雲端拉回來'
       : '有開同步的話，會自動從雲端拉回來；沒有的話先別在這台新增資料'
     ui.toast({ icon: '！', title: '原本的存檔讀不進來', sub, ms: 15000 })
   }
@@ -2464,7 +2518,7 @@ async function boot() {
         // 開場前排著的提示卡：摘要開著就等它關掉；沒有摘要的話等打招呼說完
         greeted = true
         setTimeout(() => {
-          for (const fn of bootQueue.splice(0)) ui.afterBrief(fn)
+          for (const fn of bootQueue.splice(0)) bootSay(fn)
         }, brief ? 0 : 5600)
         // 設定裡關了「小島上的閒聊和招呼」：不打招呼（回來了的提示照常）
         const chat = store.state.settings.chatOn !== false

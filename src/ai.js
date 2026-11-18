@@ -118,7 +118,7 @@ export const aiReady = () => !!aiPass()
 
 // Worker 回的錯誤代碼 → 給人看的話
 const TEXT = {
-  'no pass': '還沒設定通行碼（紀錄 → 設定 → ふじ的 AI）',
+  'no pass': '還沒設定通行碼（設定 → ふじ）',
   offline: '連不上網路，等一下再試',
   'ai off': 'Worker 還沒設定 Claude 的金鑰或通行碼',
   'bad pass': '通行碼不對，到設定裡改一下',

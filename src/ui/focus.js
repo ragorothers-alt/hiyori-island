@@ -34,6 +34,16 @@ const NOISE_NAMES = { rain: '雨聲', brown: '褐噪音', pink: '粉紅噪音' }
 // 自動延長：之後就有日程（開會、上課）的話，延長到它開始前幾分鐘為止；剩不到幾分鐘就不延長（到點照常休息，留時間準備）
 const FLOW_GAP = 5
 const FLOW_MIN = 5
+// ── 跨裝置的計時：計時的樣子跟著同步走（main.js 的 focusShare、fromSync）。最後按計時按鈕、或到點時接手的那一台是「這一輪的主人」：
+// 到點時由它記專注、換到休息，別台等一下、同步看看它做了沒，沒消息才接手（見 _hold）。
+// OWNER_LATE：主人自己晚了這麼久才到點（睡著、關著才打開）就先同步一次再做；PEEK_AT：別台到點後多久先看一次（主人通常已經送上去了）；
+// TAKE_OVER：別台等這麼久還沒消息就接手；HOLD_MAX：同步一直沒回來（離線）最多等多久就自己做
+const OWNER_LATE = 5000
+const PEEK_AT = 4000
+const TAKE_OVER = 15000
+const HOLD_MAX = 20000
+// 別台的哪一份已經換過了（同一份只換一次；這台記著，重新整理也不會再換回舊的）
+const SEEN_KEY = 'hiyori-focus-seen'
 // 專注中貓咪念的警語輪到第幾句（這台裝置記著：重新整理、下一輪也接著輪，不會一直是第一句）
 const CAT_MOTTO_KEY = 'hiyori-cat-motto'
 // 到點自動延長的那一刻，專注頁上的貓咪說的話（不出聲）
@@ -153,7 +163,8 @@ export class FocusTimer {
     this.mode = 'idle'
     this.paused = null
     this._loadLengths()
-    this._save()
+    // 別台開始的那一輪：每一台都會自己發現放太久了，由那一台送就好
+    this._save({ share: this.hooks.shared?.()?.mine !== false })
     this.render()
     this.hooks.focusExpired?.(wasFocus)
   }
@@ -185,18 +196,26 @@ export class FocusTimer {
     this.projectId = !this.taskId && typeof saved?.projectId === 'string' ? saved.projectId : null
   }
 
-  _save() {
+  // share：也送給別台裝置（開了同步的話；main.js 的 focusShare）。這台自己推導的變化（目標失效了、別台的那一輪放太久）不送：
+  // 每一台都會自己算出一樣的結果，各自送的話兩邊都改過，同步時就要選邊
+  _save({ share = true } = {}) {
     this._persist()
+    if (share) this.hooks.focusShare?.(this._shared())
     // 計時的狀態變了（開始、暫停、換目標、結束）：到點的通知跟著重排，Android 殼裡的即時倒數跟著換
     this.hooks.focusPlan?.(this.boundary)
     this.hooks.focusLive?.(this.live, this.boundary)
   }
   // 只寫進 localStorage（重新整理、另一個分頁接得回來），不重排通知
   _persist() {
-    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, detour, detourRang, flow, cap } = this
+    const { detour, detourRang, away } = this
     try {
-      localStorage.setItem(FOCUS_KEY, JSON.stringify({ mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, away, flow, cap, ...(detour ? { detour, detourRang } : {}) }))
+      localStorage.setItem(FOCUS_KEY, JSON.stringify({ ...this._shared(), away, ...(detour ? { detour, detourRang } : {}) }))
     } catch {}
+  }
+  // 別台裝置也照著走的部分：中途離開了幾次、限時去是這台的事，不送
+  _shared() {
+    const { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, flow, cap } = this
+    return { mode, endAt, paused, taskId, projectId, up, ext, doneAt, focusMin, breakMin, round, rounds, sid, small, flow, cap }
   }
   // 這一輪專注中切去用別的 App 一陣子（main.js 量的）：記一次，到點的提示卡上寫中途離開了幾次。
   // sid：哪一輪——到點時還在外面的那一次，記在剛結束、正在休息的那一輪（延長是同一輪，接著算；重新整理也接得回來）
@@ -265,7 +284,12 @@ export class FocusTimer {
     try {
       saved = JSON.parse(text || 'null')
     } catch {}
+    this._adopt(saved)
+  }
+  // 換成另一份計時（另一個分頁、另一台裝置的）
+  _adopt(saved) {
     const was = this.mode
+    this._wait = null
     if (saved?.mode === 'focus' || saved?.mode === 'break') this._restore(saved)
     else {
       this.mode = 'idle'
@@ -280,6 +304,61 @@ export class FocusTimer {
     this.render()
     if (this.mode === 'focus' && was !== 'focus') this.hooks.focusStarted(true, this.task?.id || null, this.info)
     else if (this.mode !== 'focus' && was === 'focus') this.hooks.focusSynced?.()
+  }
+
+  // 另一台裝置開始、暫停、結束了計時，或這一輪到點時它記好了（同步拉回來的；main.js 先確認不是這台自己送的）：換成那一份，
+  // 這台也排到點的通知、Android 的即時倒數（手機照樣會響）。同一份只換一次；放太久的（那一台關掉了沒結束）當成沒在計時。
+  // 回傳換之前、之後的樣子（main.js 的提示卡用），沒換是 null
+  fromSync(t) {
+    if (!t?.v || !['idle', 'focus', 'break'].includes(t.mode)) return null
+    let seen = this._seenMem
+    try {
+      seen = localStorage.getItem(SEEN_KEY) ?? seen
+    } catch {}
+    if (seen === t.v) return null
+    this._seenMem = t.v
+    try {
+      localStorage.setItem(SEEN_KEY, t.v)
+    } catch {}
+    let saved = t
+    if (t.mode !== 'idle' && clock.isStale(clock.restoreState(t, this), Date.now())) saved = { mode: 'idle', taskId: t.taskId, projectId: t.projectId }
+    const before = { mode: this.mode, paused: this.paused != null, sid: this.sid, endAt: this.endAt, rounds: this.rounds, key: this._targetKey() }
+    const same = saved.mode === this.mode && (saved.mode === 'idle' || (saved.sid === this.sid && saved.endAt === this.endAt && (saved.paused ?? null) === this.paused && saved.rounds === this.rounds))
+    this._adopt(saved)
+    if (same && this._targetKey() === before.key) return null
+    this._persist()
+    this.hooks.focusPlan?.(this.boundary)
+    this.hooks.focusLive?.(this.live, this.boundary)
+    return { was: before, mode: this.mode, paused: this.paused != null, round: this.round, rounds: this.rounds, left: this.left, target: this.task?.title || this.project?.name || '' }
+  }
+
+  // 這一段到點了，這台要不要先等一下（step 先不做，回傳 true）：開了同步時，到點由這一輪的主人做（記專注、換到休息），
+  // 別台先等著：到點 PEEK_AT 後同步看一次，TAKE_OVER 後還沒消息（主人關著、睡著、斷線）才接手；看不到這一頁的不接手（回來時再說）。
+  // 主人準時到點就照做；晚了（剛睡醒、剛打開）先同步一次，別台已經接手了就換成那一份。同步一直沒回來最多等 HOLD_MAX
+  _hold(at) {
+    const sh = at == null ? null : this.hooks.shared?.()
+    if (!sh) return false
+    const now = Date.now()
+    if (sh.mine && now - at < OWNER_LATE) return false
+    const w = this._wait?.at === at ? this._wait : (this._wait = { at })
+    if (!sh.mine) {
+      if (this.hooks.pageAway?.()) return true
+      if (now - at < TAKE_OVER) {
+        if (now - at >= PEEK_AT && !w.peek) {
+          w.peek = true
+          Promise.resolve(sh.sync()).catch(() => {})
+        }
+        return true
+      }
+    }
+    if (w.done) return false
+    if (!w.since) {
+      w.since = now
+      Promise.resolve(sh.sync())
+        .catch(() => {})
+        .finally(() => (w.done = true))
+    }
+    return now - w.since < HOLD_MAX
   }
 
   // 綁定的任務若已完成或刪除就自動解除
@@ -1340,10 +1419,13 @@ export class FocusTimer {
       }
       return
     }
-    const step = clock.due(this, Date.now())
+    let step = clock.due(this, Date.now())
+    // 開了同步、這一輪是別台開始的（或這台晚了）：先等一下，看那一台做了沒（見 _hold）。放太久的照常回到待機
+    const held = !!step && step.do !== 'expire' && this._hold(clock.nextEnd(this))
+    if (held) step = null
     // 限時去的時間到了：叫你回來（一次）。這一輪剛好也到點、放太久失效了的話，交給下面到點的那邊（不先叫一聲才結束）。
     // 另一個分頁已經叫過、已經回來了：照存著的，不再叫。叫的那邊說先不叫（Android 的 App 在背景：手機的那一則會叫）就等等再看
-    if (!step && this.detour && !this.detourRang && this.mode === 'focus' && Date.now() >= this.detour) {
+    if (!step && !held && this.detour && !this.detourRang && this.mode === 'focus' && Date.now() >= this.detour) {
       const s = this._detourStored()
       if (s && (s.detour !== this.detour || s.detourRang)) Object.assign(this, s)
       else if (this.hooks.detourDue?.() !== false) {
@@ -1386,7 +1468,7 @@ export class FocusTimer {
     if ((this.taskId && !this.task) || (this.projectId && !this.project)) {
       if (!this.task) this.taskId = null
       if (!this.project) this.projectId = null
-      this._save()
+      this._save({ share: false })
     }
     // 今日總覽的「進行中」算正在專注的那一件：開始、結束或換了一件就重畫
     const fk = this.mode === 'focus' ? this.taskId : null

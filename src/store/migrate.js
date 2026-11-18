@@ -135,6 +135,8 @@ function seed(samples = true) {
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
     pomoSids: [],
+    // 跨裝置的計時（最後按計時按鈕、到點時接手的那一台送的樣子）：沒開過同步是 null
+    timer: null,
     lotsPlan: 1,
     journal: {},
     dex: {},
@@ -147,6 +149,20 @@ function seed(samples = true) {
     updatedAt: 0,
     rev: '',
   }
+}
+
+// 跨裝置的計時：別台送的，每個欄位都檢查過（計時器換過去時還會再整理一次，見 focusClock.js 的 restoreState）。
+// by：哪一台（fujiNotes.js 的 deviceId）；v：這一次的代號（同一份只換一次）
+const TIMER_NUMS = { endAt: [0, 8.64e15], paused: [0, 8.64e15], doneAt: [0, 8.64e15], focusMin: [0.05, 180], breakMin: [0.05, 60], round: [1, 12], rounds: [1, 12], flow: [0, 60], cap: [0, 60] }
+function cleanTimer(t) {
+  if (!isObj(t) || !['idle', 'focus', 'break'].includes(t.mode)) return null
+  const code = (v) => typeof v === 'string' && /^[a-z0-9]{1,24}$/.test(v)
+  if (!code(t.by) || !code(t.v)) return null
+  const out = { mode: t.mode, by: t.by, v: t.v }
+  for (const [k, [lo, hi]] of Object.entries(TIMER_NUMS)) if (typeof t[k] === 'number' && Number.isFinite(t[k])) out[k] = Math.min(hi, Math.max(lo, t[k]))
+  for (const k of ['up', 'ext', 'small']) out[k] = t[k] === true
+  for (const k of ['taskId', 'projectId', 'sid']) out[k] = ID_RE.test(t[k]) ? t[k] : null
+  return out
 }
 
 // ── 讀檔／匯入時把每個欄位都清洗成合法值（資料一律視為不可信） ──
@@ -988,6 +1004,7 @@ function migrate(s) {
     tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
+    timer: cleanTimer(s.timer),
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
   }

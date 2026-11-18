@@ -169,7 +169,7 @@ export class CloudView {
         <div class="cloud-qr"></div>
         <div class="cloud-code-text">
           <code>${esc(code)}</code>
-          <small>在另一台裝置打開ひより，到「紀錄 → 設定 → 線上同步」按「輸入同步碼」；手機也可以直接用相機掃左邊的 QR code。同步碼就是鑰匙，不要給別人。</small>
+          <small>在另一台裝置打開ひより，到「設定 → 資料與同步」的線上同步按「輸入同步碼」；手機也可以直接用相機掃左邊的 QR code。同步碼就是鑰匙，不要給別人。</small>
           <div class="sync-btns"><button class="chip-toggle" data-cloud="copy-code">複製同步碼</button><button class="chip-toggle" data-cloud="copy-link">複製連結</button><button class="chip-toggle danger" data-cloud="delete">刪除雲端資料</button></div>
         </div>
       </div>`

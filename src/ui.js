@@ -291,7 +291,7 @@ export class UI {
         // 還沒接上 Claude：到設定裡填通行碼
         openSetup: () => {
           this.fuji?.close()
-          this.setTab('records')
+          this.setTab('settings')
           requestAnimationFrame(() => {
             $('#aiRow').scrollIntoView({ block: 'center' })
             this.aiView._edit(true)
@@ -481,9 +481,16 @@ export class UI {
   }
 
   // 設定頁（外觀、通知與提醒、專注、警語、ふじ、資料與同步）：小島模式收著面板的話先打開
+  // 回到上次捲到的地方（跟其他分頁一樣）。按的那一顆跟著上一頁藏起來了（紀錄頁、總覽上的、Dock「⋯」裡的）：
+  // 焦點放到設定頁上，鍵盤接著從這裡往下走（不會掉回頁首）
   openSettings() {
     this.setTab('settings')
-    $('.panel-body').scrollTop = 0
+    const a = document.activeElement
+    if (!a || a === document.body || !a.getClientRects().length) {
+      const page = $('#page-settings')
+      page.tabIndex = -1
+      page.focus({ preventScroll: true })
+    }
   }
 
   // 教練分頁的「ふじ」那一頁（對話和她自己整理的紀錄）
@@ -622,6 +629,7 @@ export class UI {
       this.store.setSetting('sound', on)
       this.hooks.setSound(on)
       this.renderChrome()
+      if (this.tab === 'settings') this.renderSettings()
       // 專注時的背景聲跟著音效一起開、關
       this.focus?._noiseSync()
     }
@@ -929,11 +937,13 @@ export class UI {
   }
 
   // 選中的分頁：active 樣式、aria-selected，Tab 鍵只停在選中的那一個（其他用方向鍵）
-  _markTabs(tab) {
+  // page：真的開著的那一頁（設定頁算在紀錄底下：亮著的「紀錄」指到設定頁）
+  _markTabs(tab, page = tab) {
     for (const b of $$('.tab')) {
       const on = b.dataset.tab === tab
       b.classList.toggle('active', on)
       b.setAttribute('aria-selected', String(on))
+      b.setAttribute('aria-controls', `page-${on ? page : b.dataset.tab}`)
       b.tabIndex = on ? 0 : -1
     }
     this._moveTabInk()
@@ -1008,7 +1018,7 @@ export class UI {
     this.tab = tab
     // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
     document.body.dataset.tab = tab
-    this._markTabs(PAGE_OF[tab] || tab)
+    this._markTabs(PAGE_OF[tab] || tab, tab)
     $$('.tab-page').forEach((p) => p.classList.toggle('active', p.dataset.page === tab))
     const tb = $(`.tab[data-tab="${tab}"]`)
     $('#ahTitle').textContent = tb ? tb.querySelector('span').textContent : PAGE_NAME[tab][0]
@@ -1336,7 +1346,7 @@ export class UI {
     const night = !this._nightFor(this.store.state.settings.theme)
     const theme = this._nightFor('auto') === night ? 'auto' : night ? 'night' : 'day'
     this.setTheme(theme)
-    const where = '想換回來，到「紀錄 → 設定 → 夜間模式」'
+    const where = '想換回來，到「設定 → 外觀 → 夜間模式」'
     if (theme === 'auto') this.toast({ icon: '時', title: '天色回到跟著時間走', sub: '傍晚會自然變成夜晚' })
     else this.toast({ icon: night ? '夜' : '晝', title: night ? '換成夜晚了' : '換成白天了', sub: where })
   }
@@ -2902,7 +2912,7 @@ export class UI {
   }
   // 分享連結打開時：到設定裡填好同步碼
   offerCloud(code) {
-    this.setTab('records')
+    this.setTab('settings')
     this.cloudView?.offer(code)
   }
 

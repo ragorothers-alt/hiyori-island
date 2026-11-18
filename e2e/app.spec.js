@@ -1,5 +1,5 @@
 // App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
-import { bootReady, chatSaid, expect, swReady, test, toastSeen, useAppMode } from './fixtures.js'
+import { bootReady, chatSaid, expect, noFonts, swReady, test, toastSeen, useAppMode } from './fixtures.js'
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -764,13 +764,24 @@ test('檢視進度：總覽有這週每天做完幾件，點「看週報」到�
   // 分頁列亮著紀錄（設定算在紀錄底下）；App 模式的頁名寫著設定
   await expect(page.locator('#tab-records')).toHaveClass(/active/)
   await expect(page.locator('#ahTitle')).toHaveText('設定')
-  // 日期列的齒輪、今日總覽右上的齒輪也打得開
+  // 按的那一顆跟著紀錄頁藏起來了：焦點放到設定頁上（鍵盤接著往下走，不掉回頁首）；亮著的「紀錄」指到設定頁
+  await expect(page.locator('#page-settings')).toBeFocused()
+  await expect(page.locator('#tab-records')).toHaveAttribute('aria-controls', 'page-settings')
+  // 日期列的齒輪、今日總覽右上的齒輪也打得開；回到上次捲到的地方
+  const y = await page.evaluate(() => {
+    const b = document.querySelector('.panel-body')
+    b.scrollTop = 400
+    return b.scrollTop
+  })
+  expect(y).toBeGreaterThan(0)
   await page.locator('#tab-today').click()
   await page.locator('#todayRoot .td-gear').click()
   expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('settings')
+  expect(await page.evaluate(() => document.querySelector('.panel-body').scrollTop)).toBe(y)
   await page.locator('#tab-tasks').click()
   await page.locator('#gearBtn').click()
   expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('settings')
+  await expect(page.locator('#tab-records')).toHaveAttribute('aria-controls', 'page-settings')
   // 設定頁上的捷徑：日程提醒跟日程頁上方那一個是同一個設定，音效跟 Dock 的喇叭是同一個開關
   await page.locator('#remindLeadSet').selectOption('30')
   expect(await page.evaluate(() => window.hiyori.store.state.settings.remindLead)).toBe(30)
@@ -780,6 +791,9 @@ test('檢視進度：總覽有這週每天做完幾件，點「看週報」到�
   await snd.click()
   await expect(snd).toHaveText('關')
   expect(await page.evaluate(() => window.hiyori.store.state.settings.sound)).toBe(false)
+  // Dock 的喇叭按了：設定頁上那一顆跟著變
+  await page.evaluate(() => document.querySelector('#soundBtn').click())
+  await expect(snd).toHaveText('開')
   // 警語的句子和間隔：到紀錄頁的警語那一區
   await expect(page.locator('#mottoSetInfo')).toContainText('提醒一句')
   await page.locator('#mottoSetBtn').click()
@@ -4889,4 +4903,141 @@ test('隨叫隨到的ふじ：任何一頁按 J 叫出來，看得到正在看�
   // Esc 收起來
   await page.keyboard.press('Escape')
   await expect(sheet).toBeHidden()
+})
+
+test.describe('跨裝置的計時', () => {
+  // 不註冊 Service Worker：同步的請求一律從頁面發，下面的假伺服器都攔得到（不會連到真的同步伺服器）
+  test.use({ serviceWorkers: 'block' })
+  test('一台開始專注，另一台跟著計時；暫停也跟著；到點由開始的那一台記、另一台跟著休息（只記一次）；那一台關掉了，另一台到點等一下就接手記，那一台再打開時換成接手的那一份、不再記一次', async ({ page, context, browser, site }) => {
+    test.setTimeout(180000)
+    // 假的同步伺服器（只在測試的記憶體裡）：跟真的一樣只認「對得上才寫」，內容是兩台自己加密的
+    const vault = { rev: null, savedAt: 0, data: null }
+    const api = async (route) => {
+      const req = route.request()
+      const path = new URL(req.url()).pathname
+      let body = {}
+      try {
+        body = JSON.parse(req.postData() || '{}')
+      } catch {}
+      const headers = { 'Access-Control-Allow-Origin': '*' }
+      if (path === '/v1/pull') {
+        if (!vault.rev) return route.fulfill({ json: { rev: null }, headers })
+        if (body.peek || body.have === vault.rev) return route.fulfill({ json: { rev: vault.rev, savedAt: vault.savedAt, same: true }, headers })
+        return route.fulfill({ json: { rev: vault.rev, savedAt: vault.savedAt, data: vault.data }, headers })
+      }
+      if (path === '/v1/push') {
+        if ((body.base ?? null) !== vault.rev) return route.fulfill({ status: 409, json: { error: 'conflict', rev: vault.rev }, headers })
+        Object.assign(vault, { rev: body.rev, savedAt: body.savedAt, data: body.data })
+        return route.fulfill({ json: { rev: body.rev }, headers })
+      }
+      return route.fulfill({ json: { ok: true }, headers })
+    }
+    const CODE = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345'
+    const device = async (ctx) => {
+      await noFonts(ctx)
+      await ctx.route(/\/v1\//, api)
+      await ctx.addInitScript((code) => {
+        if (!localStorage.getItem('hiyori-cloud-code')) localStorage.setItem('hiyori-cloud-code', code)
+        if (!localStorage.getItem('hiyori-layout')) localStorage.setItem('hiyori-layout', '"app"')
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        if (!localStorage.getItem('hiyori-brief-day')) localStorage.setItem('hiyori-brief-day', JSON.stringify(today))
+      }, CODE)
+    }
+    const sync = (p) => p.evaluate(() => window.hiyori.cloudSync.sync())
+    // 送出去了（這台沒有還沒同步的變更）
+    const sent = (p) => expect.poll(() => p.evaluate(() => window.hiyori.cloudSync.state === 'linked' && !window.hiyori.cloudSync.dirty), { timeout: 15000 }).toBe(true)
+    const timer = (p) => p.evaluate(() => (({ mode, sid, endAt, paused }) => ({ mode, sid, endAt, paused }))(window.hiyori.ui.focus))
+    const focusMin = (p) => p.evaluate(() => window.hiyori.store.peekDay(window.hiyori.store.today).focus || 0)
+    const toast = (p, text) => p.locator('#toasts .toast', { hasText: text })
+
+    // 電腦（A）先開、放上雲端；手機（B）用同一組同步碼，拿 A 的資料
+    await device(context)
+    await page.goto(site.url)
+    await bootReady(page)
+    await sent(page)
+    const ctxB = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 390, height: 844 } })
+    await device(ctxB)
+    const b = await ctxB.newPage()
+    await b.goto(site.url)
+    await bootReady(b)
+    await expect.poll(() => b.evaluate(() => window.hiyori.cloudSync.state), { timeout: 15000 }).toMatch(/linked|conflict/)
+    if ((await b.evaluate(() => window.hiyori.cloudSync.state)) === 'conflict') await b.evaluate(() => window.hiyori.cloudSync.resolve('remote'))
+    await expect.poll(() => b.evaluate(() => window.hiyori.store.state.rev)).toBe(vault.rev)
+    const base = await focusMin(page)
+
+    // A 開始專注：B 同步之後跟著計時（同一輪），說一聲
+    await page.evaluate(() => {
+      const s = window.hiyori.store
+      s.setSetting('focusRounds', 1)
+      s.setSetting('focusUp', false)
+      s.setSetting('flowMax', 0)
+      window.hiyori.ui.focus.toggle()
+    })
+    await sent(page)
+    await sync(b)
+    const a1 = await timer(page)
+    expect(a1.mode).toBe('focus')
+    await expect.poll(() => timer(b)).toMatchObject({ mode: 'focus', sid: a1.sid, endAt: a1.endAt })
+    await expect(toast(b, '另一台開始專注了')).toBeVisible()
+
+    // B 暫停：A 跟著暫停
+    await b.evaluate(() => window.hiyori.ui.focus.toggle())
+    await sent(b)
+    await sync(page)
+    await expect.poll(async () => (await timer(page)).paused).not.toBe(null)
+    await expect(toast(page, '另一台暫停了計時')).toBeVisible()
+
+    // A 繼續、這一輪 3 秒後到點：A 記下來，B 不記、跟著休息
+    await page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      f.toggle()
+      f.endAt = Date.now() + 3000
+      f._save()
+    })
+    await sent(page)
+    await sync(b)
+    await expect.poll(async () => (await timer(b)).paused).toBe(null)
+    await expect.poll(async () => (await timer(page)).mode, { timeout: 15000 }).toBe('break')
+    await expect.poll(async () => (await timer(b)).mode, { timeout: 20000 }).toBe('break')
+    await expect(toast(b, '這一輪在另一台記下了')).toBeVisible()
+    const min = await page.evaluate(() => window.hiyori.ui.focus.focusMin)
+    expect(await focusMin(page)).toBe(base + Math.round(min))
+    expect(await focusMin(b)).toBe(base + Math.round(min))
+    expect(await b.evaluate((sid) => window.hiyori.store.state.pomoSids.filter((x) => x === sid).length, a1.sid)).toBe(1)
+
+    // A 再開始一輪、3 秒後到點，然後 A 關掉了（筆電闔上）：B 到點等一下、同步看過沒消息，接手記下
+    await page.evaluate(() => {
+      const f = window.hiyori.ui.focus
+      f.stop()
+      f.toggle()
+      f.endAt = Date.now() + 3000
+      f._save()
+    })
+    await sent(page)
+    await sync(b)
+    const a2 = await timer(page)
+    await expect.poll(() => timer(b)).toMatchObject({ mode: 'focus', sid: a2.sid })
+    await page.close()
+    // 到點後還沒過 15 秒：B 還在等
+    await b.waitForTimeout(6000)
+    expect((await timer(b)).mode).toBe('focus')
+    await expect.poll(async () => (await timer(b)).mode, { timeout: 30000 }).toBe('break')
+    expect(await focusMin(b)).toBe(base + 2 * Math.round(min))
+    await sent(b)
+    const bId = await b.evaluate(() => localStorage.getItem('hiyori-device'))
+    expect(await b.evaluate(() => window.hiyori.store.state.timer.by)).toBe(bId)
+
+    // A 再打開：這一輪早就到點了，先同步、換成 B 接手的那一份（休息中），不再記一次、也不會變成要選邊
+    const a = await context.newPage()
+    await a.goto(site.url)
+    await bootReady(a)
+    await expect.poll(async () => (await timer(a)).mode, { timeout: 20000 }).toBe('break')
+    await a.waitForTimeout(1500)
+    expect(await focusMin(a)).toBe(base + 2 * Math.round(min))
+    expect(await a.evaluate((sid) => window.hiyori.store.state.pomoSids.filter((x) => x === sid).length, a2.sid)).toBe(1)
+    expect(await a.evaluate(() => window.hiyori.cloudSync.state)).toBe('linked')
+    expect(await b.evaluate(() => window.hiyori.cloudSync.state)).toBe('linked')
+    await ctxB.close()
+  })
 })

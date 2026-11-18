@@ -1151,6 +1151,11 @@ export class Store {
     this.state.settings[key] = value
     this.save()
   }
+  // 跨裝置的計時：這台按了計時的按鈕、到點時接手了（main.js 的 shareTimer）。別台同步拉回時照它換
+  setTimer(t) {
+    this.state.timer = t
+    this.save()
+  }
   // 建議和鼓勵：總開關關著時底下的每一項都不說；key 是底下那一項自己的開關（backNudge、nextNudge、stuckNudge、brief）
   nudge(key) {
     const st = this.state.settings

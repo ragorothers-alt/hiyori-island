@@ -212,6 +212,8 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 :root { scrollbar-color: rgba(120, 150, 190, .35) transparent; }
 @media (max-width: 600px) { :root { --fmin: 12px; } }
 .panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 22px; scrollbar-width: thin; scrollbar-color: rgba(120, 150, 190, .3) transparent; }
+/* 小島模式、視窗不夠寬（下方的 Dock 跟右邊的面板疊在一起）：面板最下面多留一段，最後幾列捲得到 Dock 上面 */
+@media (min-width: 861px) and (max-width: 1360px) { body:not(.app-mode) .panel:not(.full) .panel-body { padding-bottom: 96px; scroll-padding-bottom: 96px; } }
 .tab-page { display: none; animation: fadeUp .45s var(--ease); }
 .tab-page.active { display: block; }
 @keyframes fadeUp { from { opacity: 0; transform: translate(var(--enter-x, 0px), var(--enter-y, 8px)); } }
@@ -455,7 +457,7 @@ body[data-tab="records"] .panel-body { scroll-padding-top: var(--rec-pad, 0px); 
 .rec-nav button.on { color: #a8395d; background: var(--lg-sel, rgba(140, 170, 200, .3)); }
 body.night .rec-nav button.on { color: #ffb3c8; }
 .rec-nav button svg { width: 13px; height: 13px; margin: -2px 4px 0 -2px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.sec-title { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 18px 2px 8px; letter-spacing: .12em; display: flex; align-items: baseline; gap: 8px; }
+.sec-title { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 18px 2px 8px; letter-spacing: .12em; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
 .sec-title small { font-size: max(var(--fmin), 10.5px); color: var(--ink-deco); letter-spacing: .16em; }
 .sec-title .count { margin-left: auto; font-family: var(--font-num); font-size: 12px; color: var(--ink-soft); }
 .week-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 120px; padding: 10px 8px 4px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
@@ -774,6 +776,8 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .set-row small { font-size: max(var(--fmin), 11px); color: var(--ink-faint); line-height: 1.5; display: block; }
 /* 設定頁：一段一段（外觀、通知與提醒、專注、警語、ふじ、資料與同步），最下面是新功能和回饋 */
 .tab-page[data-page="settings"] .settings + .sec-title { margin-top: 22px; }
+/* 打開設定頁時焦點放在整頁上（鍵盤從這裡往下走）：整頁不畫外框 */
+.tab-page:focus { outline: none; }
 .set-head { display: flex; align-items: baseline; gap: 10px; margin: 2px 2px 4px; }
 .set-head h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 22px; letter-spacing: .14em; }
 .set-head small { font-family: var(--font-display); font-size: 12px; letter-spacing: .24em; color: var(--sakura); }
@@ -1217,6 +1221,8 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
   body.app-mode .datebar .chip-btn { top: 50%; right: calc(100% + 8px); translate: 0 -50%; }
   body.app-mode .ab-hi { min-width: 0; max-width: calc(100vw - 250px); }
   body.app-mode:has(#todayBtn:not([hidden])) .ab-hi { max-width: calc(100vw - 332px); }
+  /* 很窄的手機看別天：問候只剩一兩個字，先收起來（日期和「回到今天」比較要緊） */
+  @media (max-width: 400px) { body.app-mode:has(#todayBtn:not([hidden])) .ab-hi { display: none; } }
   body.app-mode .ab-hi :is(b, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body.app-mode .datebar { top: 8px; }
   body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: transparent; backdrop-filter: none; }
