@@ -1547,6 +1547,38 @@ describe('範例資料', () => {
     expect(s.clearSamples()).toBe(12)
   })
 
+  it('撤銷時範例專案原本的地被用了：重新分一塊空地；換了一份資料（匯入）之後按撤銷不放回去', () => {
+    const s = fresh()
+    const snap = s.tuckSamples()
+    const mine = s.addProject({ name: '自己的專案', milestones: ['一'] })
+    expect(mine.slot).toBe(0)
+    s.restoreSamples(snap)
+    const slots = s.towerProjects().map((p) => p.slot)
+    expect(new Set(slots).size).toBe(slots.length)
+    expect(slots.every((x) => x >= 0)).toBe(true)
+    // 匯入一份別的資料之後：舊的撤銷不放回去
+    const other = fresh()
+    const snap2 = other.tuckSamples()
+    other.importJSON(JSON.stringify({ tasks: [], events: [], projects: [], player: {}, settings: {} }))
+    expect(other.restoreSamples(snap2)).toBe(0)
+    expect(other.sampleCount()).toBe(0)
+  })
+
+  it('範例分出來的那幾段還是範例；每日任務抽的時候不算範例（不會抽到要完成兩個日程）', () => {
+    const s = fresh()
+    const t = s.state.tasks[0]
+    s.splitTask(t.id)
+    expect(s.state.tasks.filter((x) => x.title.startsWith(t.title)).every((x) => s.isSample(x))).toBe(true)
+    expect(s.sampleCount()).toBeGreaterThan(12)
+    // 新島只有範例的日程和專案：抽的時候當成沒有（不會抽到「完成兩個日程」「完成 1 個日程或里程碑」）
+    for (let i = 0; i < 20; i++) {
+      setDate(addDays(TODAY, i))
+      const ids = fresh().quests().map((q) => q.id)
+      expect(ids).not.toContain('event2')
+      expect(ids).not.toContain('step1')
+    }
+  })
+
   it('範例過了開島那天就算過期（隔天要收起來）', () => {
     const s = fresh()
     expect(s.samplesStale()).toBe(false)

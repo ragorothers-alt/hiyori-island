@@ -212,7 +212,7 @@ public class MainActivity extends Activity {
         // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）；
         // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）；
         // 5：多了 actAt（按鈕是哪一則警語通知上的）、shown（App 不在前面時發過的警語）；
-        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）、fujiClaim（網頁自己說了其中一則）
+        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）、fujiNow（網頁到點要說其中一則：由手機現在發）
         @JavascriptInterface
         public int version() {
             return 6;
@@ -224,12 +224,12 @@ public class MainActivity extends Activity {
             if (trusted) FujiNotice.plan(getApplicationContext(), json);
         }
 
-        // 網頁要自己說排在 at（毫秒）的那一則：還沒發的話手機不發了，回 true；已經發過了回 false
+        // 網頁到點要說排在 at（毫秒）的那一則：手機排著的話現在用ふじ的通知類別發（發過了就不再發），回 true；手機沒排這一則回 false
         @JavascriptInterface
-        public boolean fujiClaim(String at) {
+        public boolean fujiNow(String at) {
             if (!trusted) return false;
             try {
-                return FujiNotice.claim(getApplicationContext(), Long.parseLong(at));
+                return FujiNotice.now(getApplicationContext(), Long.parseLong(at));
             } catch (NumberFormatException e) {
                 return false;
             }

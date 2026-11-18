@@ -1,6 +1,6 @@
 import { blankTask, TIME_RE, newTempo, isObj, floating, cleanPatch, TASK_PATCH, DATE_RE, str, TEMPLATES_MAX, blank, taskSig } from './migrate.js'
 import { PROJECT_LIMITS as PL, taskMilestone, unitOf, bpmOf } from '../projects.js'
-import { uid, seasonKey, daysBetween, dateStr, addDays } from './util.js'
+import { uid, seasonKey, daysBetween, dateStr, addDays, isSampleId } from './util.js'
 import { taskDur, sessionLen, SPLIT_MAX } from '../planner.js'
 import { MAX_STARS, TAGS, PRIORITIES, SOFT_CAP, XP } from '../theme.js'
 import { BOND_POINTS } from '../data/bond.js'
@@ -332,7 +332,8 @@ export const tasksMethods = {
     this._editedTask(t)
     const made = []
     for (let i = 1; i < n; i++) {
-      const x = blankTask({ title: str(`${base}（${i + 1}/${n}）`), date: dayOf(i), priority: t.priority, tag: t.tag, dur: each, project: t.project, ms: t.ms, due: t.due })
+      // 範例分出來的那幾段還是範例（不會被當成自己記的第一件）
+      const x = blankTask({ ...(isSampleId(t.id) ? { id: `ex-${uid()}` } : {}), title: str(`${base}（${i + 1}/${n}）`), date: dayOf(i), priority: t.priority, tag: t.tag, dur: each, project: t.project, ms: t.ms, due: t.due })
       this.state.tasks.push(x)
       this._editedTask(x)
       made.push({ id: x.id, sig: taskSig(x) })
@@ -444,6 +445,7 @@ export const tasksMethods = {
     const parts = steps.map(([name, share], i) => {
       // 第一步接手原本那件身上的東西（本命、專注過的輪數、說明、子任務、數字進度）
       const p = blankTask({
+        ...(isSampleId(t.id) ? { id: `ex-${uid()}` } : {}),
         title: `${t.title}・${name}`.slice(0, 80), date, priority: t.priority, tag: t.tag, rewarded: !!t.rewarded, createdAt: Date.now() + i,
         dur: Math.max(10, Math.round((total * share) / 5) * 5), coach: t.coach || null, project: t.project || null, ms: t.ms || null,
         ...(i === 0 ? { star: !!t.star, first: !!t.first, pomos: t.pomos || 0, note: t.note || '', subs: t.subs || [], tempo: t.tempo || null } : {}),

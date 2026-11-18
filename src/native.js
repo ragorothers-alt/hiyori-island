@@ -156,8 +156,9 @@ export function nativeAwayLocked(bridge = native) {
   }
 }
 
-// ふじ在 App 關著時的通知（fujiNotes.js 排的）交給手機的鬧鐘：舊版的殼（6 以前）沒有這個，那時只在 App 開著時說
-export const nativeFujiNotes = (bridge = native) => typeof bridge?.fujiNotes === 'function'
+// ふじ在 App 關著時的通知（fujiNotes.js 排的）交給手機的鬧鐘：舊版的殼（6 以前）沒有這個，那時只在 App 開著時說。
+// 要有 fujiNow（就寢提醒跟睡前那則同一刻時由手機發）才算：沒有的殼排了的話，網頁在背景還在跑時會兩邊都發
+export const nativeFujiNotes = (bridge = native) => typeof bridge?.fujiNotes === 'function' && typeof bridge?.fujiNow === 'function'
 // items：[{ at, title, body }]（照時間排好），空的是不送了。內容沒變就不重送。回傳送到了沒
 let lastFuji = null
 export function sendFujiNotes(items, bridge = native) {
@@ -174,14 +175,14 @@ export function sendFujiNotes(items, bridge = native) {
   }
 }
 
-// 網頁要自己說排在 at 的那一則（App 在背景、網頁還在跑時到點的就寢提醒，跟ふじ睡前那則同一刻）：
-// 手機還沒發的話不發了，回 true（由網頁說）；已經發過了回 false。沒有這個的殼（舊版）沒排ふじ的通知，回 true
-export function nativeFujiClaim(at, bridge = native) {
-  if (typeof bridge?.fujiClaim !== 'function') return true
+// 網頁到點要說排在 at 的那一則（App 在背景、網頁還在跑時的就寢提醒，跟ふじ睡前那則同一刻）：
+// 手機排著的話由手機現在用ふじ的通知類別發（發過了就不再發），回 true；手機沒排這一則、殼沒有這個、出錯，回 false（網頁自己說）
+export function nativeFujiNow(at, bridge = native) {
+  if (typeof bridge?.fujiNow !== 'function') return false
   try {
-    return !!bridge.fujiClaim(String(at))
+    return !!bridge.fujiNow(String(at))
   } catch {
-    return true
+    return false
   }
 }
 

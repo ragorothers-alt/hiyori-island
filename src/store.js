@@ -525,11 +525,12 @@ export class Store {
   _ensureQuests() {
     const date = this.today
     if (this.state.quests[date]) return false
+    // 範例不算（記下自己的第一件時就收起來了，抽到「完成兩個日程」會做不到）
     const ctx = {
       hour: new Date().getHours(),
-      events: this.eventsOn(date).length,
+      events: this.eventsOn(date).filter((e) => !this.isSample(e)).length,
       routineTasks: this.tasksOn(date).filter((t) => t.routineId).length,
-      projects: this.activeProjects().filter((p) => !p.completedAt && !p.pausedAt).length,
+      projects: this.activeProjects().filter((p) => !p.completedAt && !p.pausedAt && !this.isSample(p)).length,
       habits: todayProgress(this.state.habits, date).total,
     }
     const yesterday = this.state.quests[addDays(date, -1)]?.ids || []
@@ -1254,10 +1255,11 @@ export class Store {
     const x = this.samples()
     return x.tasks.length + x.events.length + x.projects.length
   }
-  // 範例過了開島那天還留著（隔天就收起來，不然變成逾期、「那時沒提醒到」、快到期的專案）
+  // 範例過了開島那天還留著（隔天就收起來，不然變成逾期、「那時沒提醒到」、快到期的專案）。
+  // 範例任務、日程都刪掉了、只剩範例專案的：照專案建立的那天
   samplesStale() {
     const x = this.samples()
-    return [...x.tasks, ...x.events].some((y) => y.date < this.today)
+    return [...x.tasks, ...x.events].some((y) => y.date < this.today) || x.projects.some((p) => p.createdAt && dateStr(new Date(p.createdAt)) < this.today)
   }
   // 收起範例（加了第一件自己的東西，或過了開島那天）：跟 clearSamples 一樣，另外留一份放得回去的（撤銷用）。
   // 說過要留著（撤銷過一次）就不收。回傳那一份，沒有可收的是 null
@@ -1268,28 +1270,30 @@ export class Store {
     const gone = new Set(x.projects.map((p) => p.id))
     const copy = (list) => list.map((y) => structuredClone(y))
     // 自己的任務歸在範例專案裡：收起來時拿掉歸屬，放回去時接回去
-    const left = this.state.tasks
-      .filter((t) => gone.has(t.project) && !x.tasks.includes(t))
-      .map((t) => ({ id: t.id, project: t.project, ms: t.ms, ongoing: t.ongoing, date: t.date }))
-    const snap = { tasks: copy(x.tasks), events: copy(x.events), projects: copy(x.projects), left }
+    const left = this.state.tasks.filter((t) => gone.has(t.project) && !x.tasks.includes(t)).map((t) => ({ id: t.id, project: t.project, ms: t.ms }))
+    // gen：這一份資料（匯入、還原備份會換）。換了一份之後按撤銷不放回去（範例不會混進別份資料）
+    const snap = { gen: this.state.tallyGen || '', tasks: copy(x.tasks), events: copy(x.events), projects: copy(x.projects), left }
     this.clearSamples()
     return snap
   }
-  // 撤銷收起範例：放回去（已經有同一個 id 的不重複放），之後也不再自動收
+  // 撤銷收起範例：放回去（已經有同一個 id 的不重複放），之後也不再自動收。
+  // 範例專案原本的地被新專案用了：照空地重新分（不會兩間房子疊在一起）；自己的任務只接回專案和里程碑（之後改過的日期照改過的）
   restoreSamples(snap) {
-    if (!snap) return 0
+    if (!snap || (snap.gen || '') !== (this.state.tallyGen || '')) return 0
     const s = this.state
     let n = 0
     for (const key of ['tasks', 'events', 'projects']) {
       for (const y of snap[key] || []) {
         if (s[key].some((z) => z.id === y.id)) continue
-        s[key].push(structuredClone(y))
+        const item = structuredClone(y)
+        if (key === 'projects' && item.slot >= 0 && s.projects.some((p) => p.slot === item.slot)) item.slot = -1
+        s[key].push(item)
         n++
       }
     }
     for (const l of snap.left || []) {
       const t = s.tasks.find((y) => y.id === l.id)
-      if (t && !t.project && s.projects.some((p) => p.id === l.project)) Object.assign(t, l)
+      if (t && !t.project && s.projects.some((p) => p.id === l.project)) Object.assign(t, { project: l.project, ms: l.ms })
     }
     s.settings.keepSamples = true
     this._finish()

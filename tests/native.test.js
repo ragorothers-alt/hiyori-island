@@ -1,6 +1,6 @@
 // Android 殼的即時倒數通知：計時的狀態 → 通知上的樣子（src/native.js）
 import { describe, expect, it } from 'vitest'
-import { liveTimer, native, nativeFujiClaim, nativeFujiNotes, sendFujiNotes } from '../src/native.js'
+import { liveTimer, native, nativeFujiNotes, nativeFujiNow, sendFujiNotes } from '../src/native.js'
 
 const AT = new Date(2026, 10, 10, 17, 25).getTime()
 const done = { at: AT, title: 'ひより · 專注結束', body: '25 分鐘完成，休息一下吧' }
@@ -57,7 +57,7 @@ describe('ふじ在 App 關著時的通知交給手機', () => {
     expect(nativeFujiNotes({})).toBe(false)
     expect(sendFujiNotes([{ at: 1, title: 'a', body: 'b' }], {})).toBe(false)
     const got = []
-    const bridge = { fujiNotes: (j) => got.push(j) }
+    const bridge = { fujiNotes: (j) => got.push(j), fujiNow: () => true }
     const items = [{ at: AT, title: 'ふじ · 今天的安排', body: '今天 1 件事', kind: 'morning', fuji: true }]
     expect(sendFujiNotes(items, bridge)).toBe(true)
     expect(sendFujiNotes([...items], bridge)).toBe(true)
@@ -66,12 +66,17 @@ describe('ふじ在 App 關著時的通知交給手機', () => {
     expect(got.at(-1)).toBe('')
   })
 
-  it('網頁要自己說其中一則：問手機發過了沒（傳字串）；舊版的殼沒排ふじ的通知、出錯時都由網頁說', () => {
+  it('就寢提醒跟睡前那則同一刻：手機排著的話由手機發（傳字串，回 true 網頁就不發）；手機沒排、舊版的殼、出錯時網頁自己說', () => {
     const asked = []
-    expect(nativeFujiClaim(AT, { fujiClaim: (at) => asked.push(at) && true })).toBe(true)
+    expect(nativeFujiNow(AT, { fujiNow: (at) => asked.push(at) && true })).toBe(true)
     expect(asked).toEqual([String(AT)])
-    expect(nativeFujiClaim(AT, { fujiClaim: () => false })).toBe(false)
-    expect(nativeFujiClaim(AT, {})).toBe(true)
-    expect(nativeFujiClaim(AT, { fujiClaim: () => { throw new Error('x') } })).toBe(true)
+    expect(nativeFujiNow(AT, { fujiNow: () => false })).toBe(false)
+    expect(nativeFujiNow(AT, {})).toBe(false)
+    expect(nativeFujiNow(AT, { fujiNow: () => { throw new Error('x') } })).toBe(false)
+  })
+
+  it('有 fujiNotes 但沒有 fujiNow 的殼不算（不排，免得兩邊都發）', () => {
+    expect(nativeFujiNotes({ fujiNotes() {} })).toBe(false)
+    expect(nativeFujiNotes({ fujiNotes() {}, fujiNow() {} })).toBe(true)
   })
 })

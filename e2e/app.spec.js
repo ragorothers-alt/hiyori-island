@@ -4391,14 +4391,15 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
     // 假的 Android 殼（新版，有 fujiNotes）：記下每一次交給手機的ふじ的那幾則
     window.__fuji = []
     window.__notified = []
-    window.__claims = []
+    window.__asked = []
+    window.__nativeHas = true
     window.__away = false
     window.HiyoriNative = {
       version: () => 6, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify: (title, body, tag) => window.__notified.push([tag, title]),
       mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => !window.__away,
       fujiNotes: (json) => window.__fuji.push(json),
-      // 手機還沒發那一則：拿掉、由網頁說
-      fujiClaim: (at) => window.__claims.push(Number(at)) > 0,
+      // 網頁到點要說那一則：手機排著的話由手機發（__nativeHas），沒排的話網頁自己說
+      fujiNow: (at) => window.__asked.push(Number(at)) > 0 && window.__nativeHas,
     }
     if (localStorage.getItem('hiyori-daily-v1')) return
     const tomorrow = new Date(Date.parse(`${ymd}T12:00:00+08:00`) + 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
@@ -4454,7 +4455,7 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
   await expect(page.locator('#coachRoot .ag-notes-sub')).toHaveText('早上、截止日有風險時、睡前，一天最多 3 則')
   await expect.poll(async () => (await last())?.length).toBeGreaterThan(1)
   expect(await page.evaluate(() => window.hiyori.store.state.settings.fujiNotify)).toBe(await page.evaluate(() => localStorage.getItem('hiyori-device')))
-  // 23:00 App 在背景、網頁還在跑：就寢提醒跟ふじ睡前那則只跳一則。手機還沒發，網頁跟手機說了「這則我來」，用ふじ的字說
+  // 23:00 App 在背景、網頁還在跑：就寢提醒跟ふじ睡前那則只跳一則。手機排著那一則：請手機現在發，網頁不另外跳
   // （畫面上的提示卡照常，回來看得到）
   const bedAt = Date.parse(`${ymd}T23:00:17+08:00`)
   await page.evaluate(() => {
@@ -4463,12 +4464,24 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
   })
   await page.clock.setFixedTime(new Date(Date.parse(`${ymd}T23:00:05+08:00`)))
   await expect(page.locator('#toasts .toast', { hasText: '就寢時間快到了' })).toBeVisible()
-  await expect.poll(() => page.evaluate(() => window.__notified)).toEqual([['fuji', 'ふじ · 差不多該睡了']])
-  expect(await page.evaluate(() => window.__claims)).toEqual([bedAt])
-  // 說過的那一則不再交給手機（明天晚上的睡前那則照排）
+  await expect.poll(() => page.evaluate(() => window.__asked)).toEqual([bedAt])
+  expect(await page.evaluate(() => window.__notified)).toEqual([])
+  // 手機發了的那一則不再交給手機（明天晚上的睡前那則照排）
   const sent = () => page.evaluate(() => (window.__fuji.at(-1) ? JSON.parse(window.__fuji.at(-1)).items.map((x) => x.at) : []))
   await expect.poll(async () => (await sent()).includes(bedAt)).toBe(false)
   expect((await sent()).includes(bedAt + 86400000)).toBe(true)
+  // 手機沒排那一則（例如還沒收到）：網頁用ふじ的字說一則（就寢提醒再響一次來看）
+  await page.evaluate(() => {
+    const r = JSON.parse(localStorage.getItem('hiyori-fuji-bed'))
+    r.claimed = []
+    localStorage.setItem('hiyori-fuji-bed', JSON.stringify(r))
+    localStorage.removeItem('hiyori-reminded')
+    window.hiyori.reminders.sent = {}
+    window.__nativeHas = false
+    window.hiyori.reminders.check(new Date())
+  })
+  // （清掉了提醒過的紀錄，截止日那兩則也會再響：只看就寢這一則）
+  await expect.poll(() => page.evaluate(() => window.__notified.filter(([tag]) => tag === 'fuji' || tag === 'bedtime'))).toEqual([['fuji', 'ふじ · 差不多該睡了']])
 })
 
 test('隨叫隨到的ふじ：任何一頁按 J 叫出來，看得到正在看哪一頁；一句話改日程、設定、新增習慣，做完打開那一頁；整批撤銷', async ({ page, context, site }) => {

@@ -112,6 +112,8 @@ final class FujiNotice {
             }
             if (due == null || at > due.optLong("at")) due = o;
         }
+        // 網頁剛請手機發過的那一則（now）又被排回來了：不再發一次
+        if (due != null && due.optLong("at") == prefs(c).getLong(KEY_POSTED_AT, 0)) due = null;
         if (due != null && !MainActivity.foreground && now - due.optLong("at") < LATE) {
             show(c, due);
             prefs(c).edit().putLong(KEY_POSTED, now).putLong(KEY_POSTED_AT, due.optLong("at")).apply();
@@ -119,17 +121,26 @@ final class FujiNotice {
         keep(c, rest, now);
     }
 
-    // 網頁要自己說排在 at 的那一則（App 在背景、網頁還在跑時到點的就寢提醒，跟ふじ睡前那則是同一刻）：
-    // 還沒發的拿掉、不發了，回 true（由網頁發）；已經發過了回 false（網頁就不再發）。沒排這一則的也回 true
-    static synchronized boolean claim(Context c, long at) {
-        if (at <= 0 || prefs(c).getLong(KEY_POSTED_AT, 0) == at) return false;
+    // 網頁到點了要說排在 at 的那一則（App 在背景、網頁還在跑時的就寢提醒，跟ふじ睡前那則是同一刻）：
+    // 手機還沒發的話現在就用ふじ的通知類別發、不再排，已經發過了就不再發，兩種都回 true（網頁就不發）。
+    // 手機沒排這一則（還沒收到、被換掉了）回 false：網頁自己說
+    static synchronized boolean now(Context c, long at) {
+        if (at <= 0) return false;
+        if (prefs(c).getLong(KEY_POSTED_AT, 0) == at) return true;
         JSONArray items = load(c);
         JSONArray rest = new JSONArray();
+        JSONObject hit = null;
         for (int i = 0; i < items.length(); i++) {
             JSONObject o = items.optJSONObject(i);
-            if (o != null && o.optLong("at", 0) != at) rest.put(o);
+            if (o == null) continue;
+            if (hit == null && o.optLong("at", 0) == at) hit = o;
+            else rest.put(o);
         }
-        if (rest.length() != items.length()) keep(c, rest, System.currentTimeMillis());
+        if (hit == null) return false;
+        long now = System.currentTimeMillis();
+        show(c, hit);
+        prefs(c).edit().putLong(KEY_POSTED, now).putLong(KEY_POSTED_AT, at).apply();
+        keep(c, rest, now);
         return true;
     }
 

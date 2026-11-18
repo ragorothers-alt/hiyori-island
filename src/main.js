@@ -6,7 +6,7 @@ import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, closeNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct, pushSupported } from './push.js'
-import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes, nativeFujiClaim } from './native.js'
+import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes, nativeFujiNow } from './native.js'
 import { planKey, pauseOf, pauseText, pauseUntil, pausedUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt, activeMottos, windowEnd } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
@@ -153,7 +153,7 @@ async function boot() {
     const to = dateStr(new Date(planUntil(store.state.rhythm, now)))
     const out = []
     // 明天以後還沒生成的例行日程（每天的晨會）也算：timedEventsOn
-    for (let d = dateStr(new Date(now)), k = 0; d <= to && k < 4; d = addDays(d, 1), k++) out.push(...eventQuiet(store.timedEventsOn(d), d))
+    for (let d = dateStr(new Date(now)), k = 0; d <= to && k < 4; d = addDays(d, 1), k++) out.push(...eventQuiet(store.timedEventsOn(d).filter((e) => !store.isSample(e)), d))
     return out
   }
   // ── 回來了，現在該做：離開 App 一陣子（BACK_MIN）才回來、沒在計時（專注、休息、暫停都不算）、醒著、不在日程中、警語沒先停：
@@ -224,7 +224,9 @@ async function boot() {
     if (!nextOk() || t.ongoing) return
     if (Date.now() - nextAt < NEXT_GAP) return
     const day = store.today
-    const list = store.tasksOn(day)
+    // 範例不算（勾掉範例不說下一件、下一件也不會是範例）
+    const mine = () => store.tasksOn(day).filter((x) => !store.isSample(x))
+    const list = mine()
     if (!list.some((x) => x.id === t.id)) return
     // 勾掉之前它是不是排在最前面的那一件（在原本的位置當成還沒做完再排一次：一樣重要的照原本的先後）
     if (doFirst(list.map((x) => (x.id === t.id ? { ...x, done: false } : x)))[0]?.id !== t.id) return
@@ -236,7 +238,7 @@ async function boot() {
     setTimeout(() => {
       if (!store.state.tasks.some((x) => x.id === t.id && x.done)) return (nextAt = 0)
       if (!nextOk() || dateStr() !== day) return
-      const cur = doFirst(store.tasksOn(day))[0]
+      const cur = doFirst(mine())[0]
       if (!cur) return
       const step = nextStep(cur)
       talk('nextTask', { task: short(cur.title) }, 5200, `接下來做「${short(cur.title)}」吧，趁手感還在。`, 'fuji')
@@ -1790,23 +1792,38 @@ async function boot() {
   }
   // 就寢提醒要跳系統通知時，跟ふじ睡前那則只跳一則：回傳要跳的 { title, body, tag }，不用跳是 null
   //   沒排那一則（這台不收ふじ的通知、被開會或專注挪走、挪進睡覺時間）：照一般的就寢提醒
-  //   Android：問手機，還沒發的話手機不發了、由網頁用ふじ的字說；已經發過了就不跳
-  //   網頁：頁面在背景、伺服器排著這一則就交給推播；不然頁面自己說，記成念過了（推播晚到時 Service Worker 不再顯示）
+  //   Android：手機排著的話請手機現在用ふじ的通知類別發（發過了就不再發）；手機沒排這一則才由網頁用ふじ的字說
+  //   網頁：頁面在背景、伺服器排著這一則就交給推播，到點一分鐘後 Service Worker 還沒顯示（推播掉了）頁面再補；
+  //   不然頁面自己說。頁面說了的記下來，之後不再交出去；推播還是來了的話同一個 tag 換掉，只留一則
   const bedNotice = (now, generic) => {
     const r = readBeds()
-    const n = fujiOn() ? r.beds.find((b) => Math.abs(b.at - now) < 15 * 60000) : null
+    const dist = (b) => Math.abs(b.at - now)
+    const n = fujiOn() ? r.beds.filter((b) => dist(b) < 15 * 60000).sort((a, b) => dist(a) - dist(b))[0] : null
     if (!n) return generic
     if (r.claimed.includes(n.at)) return null
     const say = { title: n.title, body: n.body, tag: 'fuji' }
     const claimed = () => {
-      writeBeds({ ...r, claimed: [...r.claimed, n.at].slice(-4) })
+      const cur = readBeds()
+      if (!cur.claimed.includes(n.at)) writeBeds({ ...cur, claimed: [...cur.claimed, n.at].slice(-4) })
       fujiDirty = true
       return say
     }
-    if (native) return nativeFujiClaim(n.at) ? claimed() : null
-    if (!mottoPush) return claimed()
-    if (document.hidden && mottoPush.covers(n.at, now)) return null
-    return mottoPush.claim(n.at) ? claimed() : null
+    // 手機發了或網頁要說：都記下來，之後不再交給手機（不然重排時又排回去）
+    if (native) {
+      const sent = nativeFujiNow(n.at)
+      claimed()
+      return sent ? null : say
+    }
+    if (document.hidden && mottoPush?.covers(n.at, now)) {
+      setTimeout(async () => {
+        await mottoPush.refresh().catch(() => {})
+        if (mottoPush.done >= n.at || readBeds().claimed.includes(n.at)) return
+        claimed()
+        systemNotify(say.title, say.body, say.tag)
+      }, Math.max(0, n.at - Date.now()) + 60000)
+      return null
+    }
+    return claimed()
   }
   // 最後一次正看著 App 的時間：那之前已經打開過 App，今天早上那則就不送
   let lookedAt = Date.now()
@@ -2127,7 +2144,7 @@ async function boot() {
       }))
 
   // 方便除錯：在 console 用 hiyori.store；小島建好後還有 hiyori.sky.hourOverride = 20、hiyori.world…
-  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise, agent }
+  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise, agent, reminders }
 
   // ── PWA：正式版註冊 Service Worker（開發時不註冊，避免快取干擾） ──
   if ('serviceWorker' in navigator && import.meta.env.PROD) {
