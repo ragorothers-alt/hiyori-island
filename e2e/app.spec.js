@@ -2193,7 +2193,8 @@ test('回來了，現在該做：離開 20 分鐘以上再回到 App、沒在計
   await page.clock.setFixedTime(T('18:30:00'))
   await page.goto(site.url)
   await bootReady(page)
-  await expect.poll(welcomes).toBe(1)
+  // CI 的機器（2 核心、軟體算圖）重新打開後第一次畫出畫面要等快 10 秒，提示卡跟著晚出來：多等一下
+  await expect.poll(welcomes, { timeout: 30000 }).toBe(1)
   await expect(page.locator('#toasts .toast', { hasText: '歡迎回來' })).toContainText('現在該做：寫期末報告')
   // 睡覺時間（預設 23:00 就寢）：不說
   await away('18:31:00', '23:40:00')
