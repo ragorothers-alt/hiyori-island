@@ -476,6 +476,10 @@ async function boot() {
   }
   // 開機還沒好之前按的先記著，開場時做
   let booted = false
+  // 開場決定好要不要出今日摘要了沒（決定之前要說的提示卡排在 bootQueue，決定之後才出來：摘要還開著就等它關掉）。
+  // 開得慢的時候，固定等幾秒再說的話，提示卡可能先出來、被接著打開的摘要蓋住，等摘要關掉已經收掉了
+  let greeted = false
+  const bootQueue = []
   let bootAct = null
   const runAct = (act, at = 0) => {
     if (booted) doAct(act, at)
@@ -908,7 +912,8 @@ async function boot() {
         actions: [{ label: '撤銷', soft: true, run: () => store.restoreSamples(snap) && ui.toast({ icon: '例', title: '範例放回去了', sub: '之後不再自動收；「紀錄 → 設定」裡可以清除', ms: 4200 }) }],
       })
     // 開場時（過了那天）等摘要說完再說
-    setTimeout(() => ui.afterBrief(toast), booted ? 0 : 6500)
+    if (greeted) ui.afterBrief(toast)
+    else bootQueue.push(toast)
   }
   // 等這一次新增的事件都跑完再收（同一個事件的其他反應看到的還是收之前的樣子）
   for (const kind of ['taskAdded', 'eventAdded', 'projectAdded']) store.on(kind, (x) => !store.isSample(x) && store.sampleCount() && queueMicrotask(() => tuckSamples('own')))
@@ -2428,6 +2433,11 @@ async function boot() {
         // 今天第一次打開：貓咪走進來說今日摘要（牠在說的時候兩人先不搶話）。
         // 今天看過摘要、離開一陣子才又打開（App 被收掉了、關掉分頁）：提示卡寫現在該做的那一件，ふじ那一句代替打招呼
         const brief = ui.maybeShowBrief() || ui.brief.open
+        // 開場前排著的提示卡：摘要開著就等它關掉；沒有摘要的話等打招呼說完
+        greeted = true
+        setTimeout(() => {
+          for (const fn of bootQueue.splice(0)) ui.afterBrief(fn)
+        }, brief ? 0 : 5600)
         // 設定裡關了「小島上的閒聊和招呼」：不打招呼（回來了的提示照常）
         const chat = store.state.settings.chatOn !== false
         if (!brief && !welcomeBack() && chat && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)

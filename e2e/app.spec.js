@@ -494,7 +494,7 @@ test.describe('打開時的今日摘要', () => {
     expect(await page.evaluate(() => window.hiyori.ui.brief.open)).toBe(false)
 
     // 設定裡（通知與提醒 → 建議和鼓勵的「更多」）「現在看」再看一次，Esc 關掉；關掉開關後，隔天也不出來
-    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.evaluate(() => window.hiyori.ui.setTab('settings'))
     await page.locator('#nudgeMore > summary').click()
     await page.locator('#briefNow').click()
     await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
@@ -506,7 +506,7 @@ test.describe('打開時的今日摘要', () => {
     await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await card.locator('.bf-list button').first().click()
     expect(await page.evaluate(() => window.hiyori.store.selectedDate === window.hiyori.store.today)).toBe(true)
-    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.evaluate(() => window.hiyori.ui.setTab('settings'))
     await page.locator('#briefBtn').click()
     await expect(page.locator('#briefBtn')).toHaveText('關')
     await page.evaluate(() => localStorage.removeItem('hiyori-brief-day'))
@@ -558,8 +558,10 @@ test.describe('打開時的今日摘要', () => {
       s.saveNow()
     })
     const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+    // 先離開這一頁再撥到隔天（不然舊的那一頁在重新整理前就先過了午夜，自己收起來了）
+    await page.goto('about:blank')
     await page.clock.setFixedTime(new Date(Date.parse(`${ymd}T10:00:00+08:00`) + 86400000))
-    await page.reload()
+    await page.goto(site.url)
     await bootReady(page)
     await expect.poll(samples).toBe(0)
     await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
@@ -610,7 +612,7 @@ test.describe('打開時的今日摘要', () => {
     await missed.click()
     expect(await page.evaluate(() => [window.hiyori.ui.tab, window.hiyori.store.selectedDate])).toEqual(['schedule', yesterday])
     // 同一天再看一次（設定的建議和鼓勵 → 更多）：這一段還在
-    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.evaluate(() => window.hiyori.ui.setTab('settings'))
     await page.locator('#nudgeMore > summary').click()
     await page.locator('#briefNow').click()
     await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
@@ -719,7 +721,7 @@ test('快速記錄：在總覽按＋，一行字記下待辦、日程和生活�
   expect(new URL(page.url()).search).toBe('')
 })
 
-test('檢視進度：總覽有這週每天做完幾件，點「看週報」到教練的週報；紀錄頁最上面一排直接跳到設定；分頁各自記住捲到哪', async ({ page, context, site }) => {
+test('檢視進度：總覽有這週每天做完幾件，點「看週報」到教練的週報；紀錄頁最上面一排的「設定」、齒輪打開設定頁；分頁各自記住捲到哪', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.setViewportSize({ width: 393, height: 800 })
   await page.goto(site.url)
@@ -750,15 +752,38 @@ test('檢視進度：總覽有這週每天做完幾件，點「看週報」到�
   expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('coach')
   await expect(page.locator('#coachRoot [data-v="report"]')).toHaveClass(/on/)
 
-  // 紀錄頁：設定在好幾個畫面底下，最上面那一排點了就到
+  // 紀錄頁：最上面那一排的「設定」打開設定頁（外觀、通知與提醒、專注、警語、ふじ、資料與同步）
   await page.locator('#tab-records').click()
   const nav = page.locator('#recNav')
   await expect(nav.locator('button').first()).toHaveText('設定')
   await expect(nav.locator('button', { hasText: '最近七天' })).toBeVisible()
-  const title = page.locator('[data-page="records"] h3.sec-title', { hasText: '設定' })
-  await expect(title).not.toBeInViewport()
   await nav.locator('button.set').click()
-  await expect(title).toBeInViewport()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('settings')
+  const heads = page.locator('[data-page="settings"] h3.sec-title')
+  await expect(heads).toHaveText([/外觀/, /通知與提醒/, /專注/, /警語/, /ふじ/, /資料與同步/])
+  // 分頁列亮著紀錄（設定算在紀錄底下）；App 模式的頁名寫著設定
+  await expect(page.locator('#tab-records')).toHaveClass(/active/)
+  await expect(page.locator('#ahTitle')).toHaveText('設定')
+  // 日期列的齒輪、今日總覽右上的齒輪也打得開
+  await page.locator('#tab-today').click()
+  await page.locator('#todayRoot .td-gear').click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('settings')
+  await page.locator('#tab-tasks').click()
+  await page.locator('#gearBtn').click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('settings')
+  // 設定頁上的捷徑：日程提醒跟日程頁上方那一個是同一個設定，音效跟 Dock 的喇叭是同一個開關
+  await page.locator('#remindLeadSet').selectOption('30')
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.remindLead)).toBe(30)
+  await expect(page.locator('#remindLead')).toHaveValue('30')
+  const snd = page.locator('#soundSetBtn')
+  await expect(snd).toHaveText('開')
+  await snd.click()
+  await expect(snd).toHaveText('關')
+  expect(await page.evaluate(() => window.hiyori.store.state.settings.sound)).toBe(false)
+  // 警語的句子和間隔：到紀錄頁的警語那一區
+  await expect(page.locator('#mottoSetInfo')).toContainText('提醒一句')
+  await page.locator('#mottoSetBtn').click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('records')
 })
 
 test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正計時，多做的分鐘記進去）；輪數做完了可以再加一輪、休息完再來一輪', async ({ page, context, site }) => {
@@ -2235,7 +2260,7 @@ test('做完一件，接著下一件：沒在計時的時候勾掉現在該做�
     const s = window.hiyori.store
     s.addTask({ title: '倒垃圾', date: s.today })
     s.addTask({ title: '澆花', date: s.today })
-    window.hiyori.ui.setTab('records')
+    window.hiyori.ui.setTab('settings')
   })
   // （勾了好幾件，可能剛好升級、「升級了」的視窗蓋在上面：直接送點擊）
   await page.locator('#nextBtn').dispatchEvent('click')
@@ -2371,7 +2396,7 @@ test('建議類的提示：打字中先不說、停下來再說；兩則至少�
   await log({ day: ymd, n: 0, at: 0 })
 
   // 設定的「通知與提醒」：時間到的提醒關掉，日程到點不說；打開照常
-  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await page.evaluate(() => window.hiyori.ui.setTab('settings'))
   await expect(page.locator('#alertT')).toBeVisible()
   const remind = page.locator('#remindOnBtn')
   await expect(remind).toHaveText('開')
@@ -2392,7 +2417,7 @@ test('建議類的提示：打字中先不說、停下來再說；兩則至少�
   await away('14:05:00', '14:35:00')
   await page.waitForTimeout(2000)
   expect(await seen('歡迎回來')).toBe(1)
-  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await page.evaluate(() => window.hiyori.ui.setTab('settings'))
   await nudge.click()
   await expect(nudge).toHaveText('開')
   // 警語關掉：三樣都關；打開時放回原本的樣子
@@ -2968,7 +2993,7 @@ test.describe('手機的觸控', () => {
     await expect.poll(buzz).toEqual([8, 8, 8, [24, 50, 24]])
 
     // 設定裡關掉：打勾不再震；這台裝置記住了，重新整理也一樣
-    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.evaluate(() => window.hiyori.ui.setTab('settings'))
     const btn = page.locator('#hapticBtn')
     await expect(page.locator('#hapticRow')).toBeVisible()
     await expect(btn).toHaveText('開')
@@ -2984,7 +3009,7 @@ test.describe('手機的觸控', () => {
     await page.waitForTimeout(300)
     expect(await buzz()).toEqual([])
     // 再打開：馬上震一下
-    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.evaluate(() => window.hiyori.ui.setTab('settings'))
     await btn.tap()
     await expect(btn).toHaveText('開')
     await expect.poll(buzz).toEqual([14])
@@ -3037,7 +3062,7 @@ test.describe('手機的觸控', () => {
     await useAppMode(context)
     await page.goto(site.url)
     await bootReady(page)
-    await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.evaluate(() => window.hiyori.ui.setTab('settings'))
     const btn = page.locator('#fontPick button[data-v="1"]')
     await btn.scrollIntoViewIfNeeded()
     await expect.poll(() => btn.evaluate((b) => {
@@ -3982,7 +4007,7 @@ test('專注中離開 App：切走時交給手機一則「回來吧」；回來�
   // 設定裡關掉：切走時不排那一則（回來時照樣說一聲）。先縮小專注頁（休息中還開著）
   await page.evaluate(() => {
     window.hiyori.ui.focus.toggleBig(false)
-    window.hiyori.ui.setTab('records')
+    window.hiyori.ui.setTab('settings')
   })
   await expect(page.locator('#awayRow')).toBeVisible()
   await page.locator('#awayBtn').click()
@@ -4118,7 +4143,7 @@ test('桌機的網頁：「專注中切到別的分頁太久叫我回來」（�
   const leave = () => page.evaluate(() => (window.__hidden = true) && document.dispatchEvent(new Event('visibilitychange')))
   const back = () => page.evaluate(() => (window.__hidden = false) || document.dispatchEvent(new Event('visibilitychange')))
   // 桌機才有這一列，預設關著；打開
-  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await page.evaluate(() => window.hiyori.ui.setTab('settings'))
   await expect(page.locator('#tabRow')).toBeVisible()
   await expect(page.locator('#tabBtn')).toHaveText('關')
   await page.locator('#tabBtn').click()
@@ -4579,7 +4604,7 @@ test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的�
   await bootReady(page)
   await page.evaluate(() => {
     window.hiyori.store.setSetting('agentMode', 'off')
-    window.hiyori.ui.setTab('records')
+    window.hiyori.ui.setTab('settings')
   })
   const row = page.locator('#aiRow')
   await row.scrollIntoViewIfNeeded()
@@ -4624,7 +4649,7 @@ test('AI 通行碼從別處到了（別台同步過來、另一個分頁設的�
   await page.evaluate(() => {
     window.hiyori.ui.setTab('today')
     localStorage.setItem('hiyori-ai-pass', 'e2e-other-tab')
-    window.hiyori.ui.setTab('records')
+    window.hiyori.ui.setTab('settings')
   })
   await expect(row.locator('.ai-btns button')).toHaveText(['測試連線', '改通行碼', '停用'])
 })

@@ -772,9 +772,23 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .set-row > div { flex: 1; min-width: 0; }
 .set-row b { font-weight: 500; font-size: 13px; display: block; }
 .set-row small { font-size: max(var(--fmin), 11px); color: var(--ink-faint); line-height: 1.5; display: block; }
+/* 設定頁：一段一段（外觀、通知與提醒、專注、警語、ふじ、資料與同步），最下面是新功能和回饋 */
+.tab-page[data-page="settings"] .settings + .sec-title { margin-top: 22px; }
+.set-head { display: flex; align-items: baseline; gap: 10px; margin: 2px 2px 4px; }
+.set-head h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 22px; letter-spacing: .14em; }
+.set-head small { font-family: var(--font-display); font-size: 12px; letter-spacing: .24em; color: var(--sakura); }
+@media (min-width: 861px) and (min-height: 560px) { body.app-mode .set-head { display: none; } }
+.tab-page[data-page="settings"] .data-tools { margin-top: 8px; }
+.set-foot { margin-top: 18px; }
+#remindLeadSet { height: 34px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--field); color: var(--ink); font: inherit; font-size: 12.5px; }
+/* 按鈕比較多的那一列：窄的時候按鈕排到字的下面 */
+.set-row.stack { flex-wrap: wrap; }
+.set-row.stack > div:first-child { flex: 1 1 220px; }
+.set-row.stack > .bf-set { flex: 1 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.set-row.stack .chip-toggle { white-space: nowrap; }
+/* 齒輪：App 模式在日期列最後（小島模式在 Dock 的「⋯」裡） */
+body:not(.app-mode) .gear-btn { display: none; }
 /* 通知與提醒：四個總開關一組，「更多」裡是建議和鼓勵底下一項一項的開關（總開關關著時淡一點，照樣改得了） */
-.set-group-t { margin: 10px 2px 2px; font-size: 13px; font-weight: 600; color: var(--ink-soft); letter-spacing: .04em; }
-.set-group-t small { display: block; margin-top: 2px; font-size: max(var(--fmin), 11px); font-weight: 400; color: var(--ink-faint); letter-spacing: 0; }
 .set-more { display: grid; gap: 6px; margin: -2px 0 0 14px; padding-left: 10px; border-left: 2px solid var(--glass-border); }
 .set-more > summary { cursor: pointer; padding: 6px 4px; font-size: 12.5px; color: var(--ink-soft); list-style-position: inside; border-radius: 10px; }
 .set-more > summary small { margin-left: 6px; font-size: max(var(--fmin), 11px); color: var(--ink-faint); }
@@ -1201,8 +1215,8 @@ body.app-mode.night { --lg-rgb: 46, 43, 72; --lg-sel: rgba(150, 150, 175, .22); 
   body.app-mode .ab-hi small { display: block; font-size: max(var(--fmin), 10.5px); }
   /* 看別天時的「回到今天」：放在日期列左邊的同一列（掉到下面會被內容區蓋住、按不到）；問候那兩行讓出位置，太長就省略 */
   body.app-mode .datebar .chip-btn { top: 50%; right: calc(100% + 8px); translate: 0 -50%; }
-  body.app-mode .ab-hi { min-width: 0; max-width: calc(100vw - 210px); }
-  body.app-mode:has(#todayBtn:not([hidden])) .ab-hi { max-width: calc(100vw - 292px); }
+  body.app-mode .ab-hi { min-width: 0; max-width: calc(100vw - 250px); }
+  body.app-mode:has(#todayBtn:not([hidden])) .ab-hi { max-width: calc(100vw - 332px); }
   body.app-mode .ab-hi :is(b, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body.app-mode .datebar { top: 8px; }
   body.app-mode .panel.full { top: 60px; bottom: 0; left: 0; right: 0; border-radius: 0; border: 0; box-shadow: none; background: transparent; backdrop-filter: none; }

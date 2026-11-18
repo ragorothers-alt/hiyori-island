@@ -30,6 +30,7 @@ const WEEK_KANA = ['にちようび', 'げつようび', 'かようび', 'すい
 // 線條小圖示（stroke 跟著文字顏色）
 const svg = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
 const IC = {
+  gear: svg('<circle cx="12" cy="12" r="2.8"/><path d="M10.3 3.6h3.4l.5 2.3 1.6.9 2.2-.8 1.7 2.9-1.8 1.6v1.9l1.8 1.6-1.7 2.9-2.2-.8-1.6.9-.5 2.3h-3.4l-.5-2.3-1.6-.9-2.2.8-1.7-2.9 1.8-1.6v-1.9L4.3 8.9 6 6l2.2.8 1.6-.9z"/>'),
   cal: svg('<rect x="4" y="5.5" width="16" height="14" rx="3"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/>'),
   target: svg('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2"/>'),
   spark: svg('<path d="M12 3.5l1.8 5.2 5.2 1.8-5.2 1.8L12 17.5l-1.8-5.2L5 10.5l5.2-1.8z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>'),
@@ -151,6 +152,7 @@ export class TodayView {
     const id = b.dataset.id
     switch (b.dataset.act) {
       case 'tab': return this.hooks.setTab(b.dataset.v)
+      case 'settings': return this.hooks.openSettings?.()
       case 'add': return this.hooks.addTask()
       case 'report': return this.hooks.openReport?.()
       case 'cal': return this.hooks.openCalendar(s.today)
@@ -424,6 +426,7 @@ export class TodayView {
     const kind = !tasks.length ? 'empty' : done === tasks.length ? 'done' : now.getHours() >= 21 ? 'night' : done ? 'going' : 'start'
     const lead = pickOf(TODAY_LEADS[kind], today + kind)
     return `<header class="td-hero">
+      <button type="button" class="td-gear" data-act="settings" data-fk="settings" title="設定" aria-label="設定">${IC.gear}</button>
       <div class="td-date">${d.getMonth() + 1}月${d.getDate()}日 週${WEEK_ZH[d.getDay()]}<em>${MONTH_KANA[d.getMonth()]}・${WEEK_KANA[d.getDay()]}</em></div>
       <h2 class="td-title">今天的總覽<i class="td-sakura">${IC.sakura}</i></h2>
       <p class="td-lead">${esc(lead.zh)}<small>${esc(lead.ja)}</small></p>

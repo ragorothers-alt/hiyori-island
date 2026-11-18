@@ -42,6 +42,9 @@ import { readBackup, readBackups, restoreBackup } from './sync.js'
 import { doneOn, todayProgress } from './habits.js'
 
 const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
+// 設定頁：不在分頁列上，算在「紀錄」底下（分頁列亮著紀錄、左右鍵從紀錄算）
+const PAGE_OF = { settings: 'records' }
+const PAGE_NAME = { settings: ['設定', 'せってい'] }
 // 不常用的畫面（月曆、教練、專案詳情）：開場不載，第一次用到才下載。開完閒下來時也會先在背景載好（preloadViews），
 // 之後離線也打得開。view 是載好的那個（還沒載好是 null）。
 // root：頁面裡先放了「正在準備」閃著的底的那一格（教練）；沒下載到時換成可以再試一次（_use）
@@ -335,6 +338,7 @@ export class UI {
       reviewLater: () => this.reviewLater(),
       // 新的一週：上週的回顧卡（看過、收起來就不放）
       weekDue: () => this.store.weekCardDue(),
+      openSettings: () => this.openSettings(),
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
     this._project = lazy(() =>
@@ -373,7 +377,7 @@ export class UI {
     this.setAppMode(savedAppMode(), { save: false })
     // 開發與截圖用：?tab=habits、?calendar
     const q = new URLSearchParams(location.search)
-    if (TAB_ORDER.includes(q.get('tab'))) this.setTab(q.get('tab'))
+    if (TAB_ORDER.includes(q.get('tab')) || PAGE_OF[q.get('tab')]) this.setTab(q.get('tab'))
     if (q.has('calendar')) this._use(this._calendar, (c) => c.open())
   }
 
@@ -426,10 +430,7 @@ export class UI {
       return
     }
     if (g.page === 'calendar') return this._use(this._calendar, (c) => c.open())
-    if (g.page === 'settings') {
-      this.setTab('records')
-      return requestAnimationFrame(() => $('#settingsBox')?.scrollIntoView({ block: 'start' }))
-    }
+    if (g.page === 'settings') return this.openSettings()
     if (g.page) return this.setTab(g.page)
     const s = this.store.state
     if (g.kind === 'project' || g.kind === 'milestone') return this.openProject(g.kind === 'project' ? g.id : g.pid)
@@ -472,6 +473,12 @@ export class UI {
     this.aiView.result = ''
     this.aiView.refresh()
     this._aiChanged()
+  }
+
+  // 設定頁（外觀、通知與提醒、專注、警語、ふじ、資料與同步）：小島模式收著面板的話先打開
+  openSettings() {
+    this.setTab('settings')
+    $('.panel-body').scrollTop = 0
   }
 
   // 教練分頁的「ふじ」那一頁（對話和她自己整理的紀錄）
@@ -574,6 +581,12 @@ export class UI {
     }
     for (const p of $$('.tab-page')) {
       p.id = `page-${p.dataset.page}`
+      // 設定頁不在分頁列上：自己有名字的一區
+      if (PAGE_NAME[p.dataset.page]) {
+        p.setAttribute('role', 'region')
+        p.setAttribute('aria-label', PAGE_NAME[p.dataset.page][0])
+        continue
+      }
       p.setAttribute('role', 'tabpanel')
       p.setAttribute('aria-labelledby', `tab-${p.dataset.page}`)
     }
@@ -582,7 +595,7 @@ export class UI {
     $('.tabs').addEventListener('keydown', (e) => {
       if (!e.target.closest('.tab')) return
       const n = TAB_ORDER.length
-      const i = TAB_ORDER.indexOf(this.tab)
+      const i = TAB_ORDER.indexOf(PAGE_OF[this.tab] || this.tab)
       const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
       const to = step ? TAB_ORDER[(i + step + n) % n] : e.key === 'Home' ? TAB_ORDER[0] : e.key === 'End' ? TAB_ORDER[n - 1] : null
       if (!to) return
@@ -594,6 +607,7 @@ export class UI {
     $('#prevDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, -1))
     $('#nextDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, 1))
     $('#todayBtn').onclick = () => this.store.selectDate(this.store.today)
+    for (const id of ['#gearBtn', '#setBtn', '#openSetBtn']) $(id).onclick = () => this.openSettings()
     $('#viewBtn').onclick = () => {
       this.toggleFull(false)
       this.hooks.resetView()
@@ -989,16 +1003,20 @@ export class UI {
     this.tab = tab
     // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
     document.body.dataset.tab = tab
-    this._markTabs(tab)
+    this._markTabs(PAGE_OF[tab] || tab)
     $$('.tab-page').forEach((p) => p.classList.toggle('active', p.dataset.page === tab))
     const tb = $(`.tab[data-tab="${tab}"]`)
-    $('#ahTitle').textContent = tb.querySelector('span').textContent
-    $('#ahKana').textContent = tb.querySelector('small').textContent
+    $('#ahTitle').textContent = tb ? tb.querySelector('span').textContent : PAGE_NAME[tab][0]
+    $('#ahKana').textContent = tb ? tb.querySelector('small').textContent : PAGE_NAME[tab][1]
     if ($('#panel').classList.contains('collapsed')) this.togglePanel(false)
     // 日程的時間軸要在看得到時量高度：切過去時一定重畫
     if (tab === 'schedule') this._stale?.add('schedule')
     this._renderPage(tab)
     if (tab === 'records') this.renderRecords()
+    if (tab === 'settings') {
+      this.renderSettings()
+      this.renderRemind()
+    }
     if (tab === 'habits') this.habits.render()
     if (tab === 'coach') this._use(this._coach, (c) => c.render())
     if (tab === 'today') this.today.render()
@@ -2333,6 +2351,16 @@ export class UI {
     // 警語卡上「App 關著時收不收得到」那一行也跟著通知的開關、權限（回到 App 時可能在系統設定裡改過）
     this.mottos?.render()
     $('#remindLead').value = String(st.remindLead)
+    $('#remindLeadSet').value = String(st.remindLead)
+    // 設定頁的系統通知按鈕：照日程頁那一顆的樣子（下面改完再抄一次）
+    queueMicrotask(() => {
+      const a = $('#notifyBtn')
+      const b = $('#notifySetBtn')
+      b.hidden = a.hidden
+      b.disabled = a.disabled
+      b.textContent = a.textContent
+      setOn(b, a.classList.contains('on'))
+    })
     const btn = $('#notifyBtn')
     const test = $('#notifyTest')
     const hint = $('#notifyHint')
@@ -2806,6 +2834,11 @@ export class UI {
     master('#nudgeOnBtn', st.nudgeOn !== false)
     master('#chatOnBtn', st.chatOn !== false)
     master('#mottoOnBtn', this.store.mottoOn())
+    master('#soundSetBtn', st.sound !== false)
+    const every = st.mottoEvery
+    $('#mottoSetInfo').textContent = !this.store.mottoOn()
+      ? '總開關關著（在上面的通知與提醒）'
+      : [every > 0 ? `醒著時每 ${every >= 60 ? `${every / 60} 小時` : `${every} 分鐘`}提醒一句` : '不定時提醒', st.mottoBar ? '面板上方輪流放' : '', st.catMotto > 0 ? `專注時貓咪每 ${st.catMotto} 分鐘念一句` : ''].filter(Boolean).join('・')
     $('#nudgeMore').classList.toggle('muted', st.nudgeOn === false)
     const stuck = this.store.state.settings.stuckNudge
     setOn($('#stuckBtn'), stuck)
@@ -3343,8 +3376,6 @@ export class UI {
       this.mottoBar?.render()
       this.renderSettings()
     }
-    // 警語怎麼提醒（間隔、念哪幾句）：捲到同一頁上警語的那一區
-    $('#mottoSetBtn').onclick = () => $('#mottoRoot').scrollIntoView({ block: 'start', behavior: scrollMode() })
     $('#stuckBtn').onclick = () => {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()
@@ -3385,6 +3416,24 @@ export class UI {
     $('#newsModal').addEventListener('click', (e) => {
       if (e.target.id === 'newsModal') this.closeNews()
     })
+    // 設定頁上的音效：跟 Dock 上的喇叭同一個開關
+    $('#soundSetBtn').onclick = () => {
+      $('#soundBtn').click()
+      this.renderSettings()
+    }
+    // 日程提醒、系統通知：跟日程頁上方那一列同一個設定
+    $('#remindLeadSet').addEventListener('change', (e) => {
+      $('#remindLead').value = e.target.value
+      $('#remindLead').dispatchEvent(new Event('change'))
+    })
+    $('#notifySetBtn').onclick = () => $('#notifyBtn').click()
+    $('#focusSetBtn').onclick = () => this.focus.toggleSet(true)
+    // 警語的句子和間隔：在紀錄頁的警語那一區
+    $('#mottoSetBtn').onclick = () => {
+      this.setTab('records')
+      requestAnimationFrame(() => $('#mottoRoot').scrollIntoView({ block: 'start', behavior: scrollMode() }))
+    }
+    $('#agentSetBtn').onclick = () => this.openAgent()
     $('#feedbackBtn').onclick = () => {
       const body = `## 想說的話\n\n\n\n---\n版本：${CHANGELOG[0].id}\n畫面：${innerWidth}×${innerHeight}・${matchMedia('(pointer: coarse)').matches ? '觸控' : '滑鼠'}`
       window.open(`${FEEDBACK_URL}?title=${encodeURIComponent('意見回饋：')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener')
@@ -3460,6 +3509,8 @@ export class UI {
       nav.dataset.bound = '1'
       nav.addEventListener('click', (e) => {
         const b = e.target.closest('button[data-i]')
+        // 設定那格：打開設定頁
+        if (b?.classList.contains('set')) return this.openSettings()
         const el = b && this._recTargets?.[+b.dataset.i]
         if (!el) return
         // 捲動區上面留了這一排的高度（--rec-pad）：標題停在它下面，不會被它蓋住
@@ -3489,7 +3540,7 @@ export class UI {
     const set = items.findIndex(([t]) => t === '設定')
     if (set > 0) items.unshift(...items.splice(set, 1))
     this._recTargets = items.map(([, el]) => el)
-    // 設定那格前面放一個小圖示：它是跳到最下面的捷徑，不是「現在在這裡」
+    // 設定那格前面放一個小圖示：它是打開設定頁的捷徑，不是「現在在這裡」
     const gear = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>'
     // 段落有增減才重建（比對段落的名字，不比 HTML：亮起的那格會改 class）；沒變就留著原本的按鈕，焦點和左右捲的位置都不動
     const key = items.map(([t]) => t).join('|')
