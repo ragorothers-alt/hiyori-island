@@ -10,8 +10,8 @@ const KEEP = 5
 
 export class CaptureView {
   // hooks：
-  //   preview(text) → 預覽的小標籤 [字串]（第一個是「日程」時會上色）
-  //   add(text) → { icon, title, sub, undo } 或 null（沒有標題）
+  //   preview(text, asTask) → 預覽的小標籤 [字串]（第一個是「日程」時會上色）；canSwap(text) → 寫了時間的那一行能不能改成有時段的任務
+  //   add(text, asTask) → { icon, title, sub, undo } 或 null（沒有標題）
   //   log(kind, text) → 同上（生活記錄）；logPreview(kind, text) → [字串]
   //   tags() → [{ id, label, color }]、tag() 現在選的分類、setTag(id)
   constructor(root, hooks) {
@@ -47,6 +47,13 @@ export class CaptureView {
       if (!b) return
       hooks.setTag(b.dataset.tag)
       this._paint()
+      el.input.focus()
+    })
+    // 預覽上的「改成任務／改回日程」
+    el.preview.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-swap]')) return
+      this.asTask = !this.asTask
+      this._preview()
       el.input.focus()
     })
     el.done.addEventListener('click', (e) => {
@@ -117,15 +124,18 @@ export class CaptureView {
 
   _preview() {
     const v = this.el.input.value
-    const chips = v.trim() ? (this.mode === 'log' ? this.hooks.logPreview(this.kind, v) : this.hooks.preview(v)) : []
+    const swap = this.mode !== 'log' && !!v.trim() && !!this.hooks.canSwap?.(v)
+    if (!swap) this.asTask = false
+    const chips = v.trim() ? (this.mode === 'log' ? this.hooks.logPreview(this.kind, v) : this.hooks.preview(v, this.asTask)) : []
     this.el.preview.hidden = !chips.length
     this.el.preview.innerHTML = chips.map((c, i) => `<span class="${i === 0 && c.endsWith('日程') ? 'kind' : ''}">${esc(c)}</span>`).join('')
+      + (swap ? `<button type="button" class="qp-swap" data-swap aria-pressed="${this.asTask}">${this.asTask ? '改回日程' : '改成任務'}</button>` : '')
   }
 
   _submit() {
     const el = this.el
     const text = el.input.value
-    const r = text.trim() ? (this.mode === 'log' ? this.hooks.log(this.kind, text) : this.hooks.add(text)) : null
+    const r = text.trim() ? (this.mode === 'log' ? this.hooks.log(this.kind, text) : this.hooks.add(text, !!this.asTask)) : null
     if (!r) {
       // 沒有可以記的（空的、只有日期沒有標題）：晃一下輸入框
       el.form.classList.remove('nudge')
@@ -135,6 +145,7 @@ export class CaptureView {
       return
     }
     el.input.value = ''
+    this.asTask = false
     this.items.unshift({ ...r, gone: false })
     this.items = this.items.slice(0, KEEP)
     this._preview()

@@ -22,7 +22,7 @@ import { BUILDINGS, RESIDENTS, MAX_STAGE, MOVE_IN } from './data/town.js'
 import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from './data/projectTown.js'
 import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm, inlineEdit, editing, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
-import { firstPickIn, taskDur, SPLIT_MIN } from './planner.js'
+import { firstPickIn, taskDur, SPLIT_MIN, fmtDur } from './planner.js'
 import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
 import { ScheduleView } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
@@ -106,6 +106,19 @@ const layerZ = (el) => {
   while (el.parentElement && el.parentElement !== document.body) el = el.parentElement
   return parseInt(getComputedStyle(el).zIndex, 10) || 0
 }
+// 寫了時間的一行字（「明天 15:00 牙醫」）預設是日程；預覽上點一下可以改成「有時段的任務」（整天的、會重複的不行）
+const canSwap = (p, repeat = null) => p?.kind === 'event' && !p.allDay && !p.repeat && !repeat
+const asTimedTask = (p) => ({ ...p, kind: 'task', at: p.start, dur: Math.max(5, Math.min(600, toMin(p.end) - toMin(p.start))), start: null, end: null })
+// 預覽的小標籤：有時段的任務寫成「任務・15:00」；可以換的時候後面多一顆換的按鈕
+const quickChips = (p, today, asTask) => {
+  const q = asTask ? asTimedTask(p) : p
+  const chips = describeQuick(q, today)
+  if (asTask) chips.unshift(`任務・${q.at}`)
+  return chips
+}
+const swapBtn = (asTask) => `<button type="button" class="qp-swap" data-swap aria-pressed="${asTask}" title="${asTask ? '改回日程（有開始和結束的行程）' : '改成有時段的任務（會開花、可以專注、做完打勾）'}">${asTask ? '改回日程' : '改成任務'}</button>`
+// 觸控為主的螢幕（手機、平板）：任務列只留完成和專注兩顆大按鈕，點任務打開編輯面板（styles.css 的 (pointer: coarse)）
+const touchUI = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 // 第一次打開時放的範例：任務、日程、專案上標一個「範例」（不算進提醒，記下自己的第一件就收起來）
 const SAMPLE_TAG = '<span class="ex-tag" title="第一次打開時放的範例：不會提醒你，記下自己的第一件就收起來">範例</span>'
 // 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
@@ -186,18 +199,21 @@ export class UI {
     })
     // 快速記錄：加在今天（字裡寫了日期就照寫的），不跟著上面選的日期走
     this.capture = new CaptureView($('#capture'), {
-      preview: (text) => {
+      preview: (text, asTask = false) => {
         const p = parseQuick(text, { today: store.today, projects: store.activeProjects() })
         if (!p.title) return []
-        const chips = describeQuick(p, store.today)
-        if (!p.date) chips.splice(p.kind === 'event' ? 1 : 0, 0, '今天')
-        if (p.kind === 'task') chips.push(tagOf(p.tag || this.tag).label)
+        const task = asTask && canSwap(p)
+        const chips = quickChips(p, store.today, task)
+        if (!p.date) chips.splice(p.kind === 'event' || task ? 1 : 0, 0, '今天')
+        if (p.kind === 'task' || task) chips.push(tagOf(p.tag || this.tag).label)
         return chips
       },
+      // 這一行字可以在日程和有時段的任務之間換嗎
+      canSwap: (text) => canSwap(parseQuick(text, { today: store.today, projects: store.activeProjects() })),
       // 剛過午夜、每秒的 tick 還沒跑到：先換日再記，不然會記到昨天
-      add: (text) => {
+      add: (text, asTask = false) => {
         store.tick()
-        return this.quickAdd(text, { base: store.today })
+        return this.quickAdd(text, { base: store.today, asTask })
       },
       logPreview: (kind, text) => {
         const { amount } = this._logParts(kind, text)
@@ -221,6 +237,10 @@ export class UI {
       selectDate: (date) => this.store.selectDate(date),
       setTab: (tab) => this.setTab(tab),
       openEdit: (type, id) => this.schedule.openEdit(type, id),
+      // 任務的編輯面板：到任務頁打開那一件的子任務、分成幾段；排進時段之後說排在哪裡
+      openSubs: (id) => this.openSubs(id),
+      split: (id) => this._split(id),
+      scheduled: (id, prev) => this.scheduled(id, prev),
       openReview: (date) => this.openReview(date),
       openCalendar: (date) => this._use(this._calendar, (c) => c.open(date)),
       closeCalendar: () => this._calendar.view?.close(),
@@ -1303,10 +1323,12 @@ export class UI {
   // base：沒寫日期時加在哪一天；repeat、project：表單下拉選的重複和專案（字裡寫了「每天」「@專案」的優先）。
   // 回傳 { icon, title, sub, undo, toasts }；沒有標題（空的、只寫了日期）是 null。
   //   sub：加到哪裡的一句話（快速記錄列出來用）；undo()：拿掉剛加的；toasts：任務頁要跳的提示
-  quickAdd(raw, { base = this.store.selectedDate, repeat: picked = null, project: pickedProj = null } = {}) {
+  quickAdd(raw, { base = this.store.selectedDate, repeat: picked = null, project: pickedProj = null, asTask = false } = {}) {
     const s = this.store
-    const p = parseQuick(raw, { today: s.today, projects: s.activeProjects() })
+    let p = parseQuick(raw, { today: s.today, projects: s.activeProjects() })
     if (!p.title) return null
+    // 預覽上點了「改成任務」：寫了時間的那一行記成有時段的任務
+    if (asTask && canSwap(p, picked)) p = asTimedTask(p)
     const date = p.date || base
     const repeat = p.repeat || picked
     const md = date.slice(5).replace('-', '/')
@@ -1329,7 +1351,7 @@ export class UI {
         undo: made ? () => (routine ? this._undoRoutine(made.id) : s.deleteEvent(made.id)) : null,
       }
     }
-    const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur, due: p.due || null }
+    const t = { title: p.title, priority: p.priority || this.priority, tag: p.tag || this.tag, date, dur: p.dur, due: p.due || null, ...(p.at ? { at: p.at } : {}) }
     // 「@專案」優先，沒打就用下拉選的專案（例行任務不歸專案）
     const proj = p.project ? { id: p.project, name: p.projectName } : pickedProj
     let made
@@ -1342,8 +1364,10 @@ export class UI {
     }
     if (date !== s.selectedDate) toasts.push({ icon: '種', title: `已種在 ${md}`, sub: proj && !repeat ? `${p.title}・${proj.name}` : p.title })
     return {
+      // task：剛加的任務（不是例行公事）的 id，任務頁的輸入框加完說一聲時用
+      task: !repeat && made ? made.id : null,
       icon: repeat ? '↻' : '種', title: p.title, toasts,
-      sub: [repeat ? '例行任務' : '任務', day, tagOf(t.tag).label, proj && !repeat ? proj.name : ''].filter(Boolean).join('・'),
+      sub: [repeat ? '例行任務' : '任務', p.at ? `${day} ${p.at}` : day, tagOf(t.tag).label, proj && !repeat ? proj.name : ''].filter(Boolean).join('・'),
       undo: made ? () => (repeat ? this._undoRoutine(made.id) : s.deleteTask(made.id)) : null,
     }
   }
@@ -1423,13 +1447,17 @@ export class UI {
     const box = $('#quickPreview')
     const v = $('#taskTitle').value
     const p = v.trim() ? parseQuick(v, { today: this.store.today, projects: this.store.activeProjects() }) : null
-    const chips = p ? describeQuick(p, this.store.today) : []
-    if (p?.tag && p.kind === 'task') chips.push(tagOf(p.tag).label)
+    // 寫了時間的那一行：可以點一下改成有時段的任務（換成別的字、不能換了就回到預設）
+    const swap = canSwap(p, this._repeatValue('#taskRepeat'))
+    if (!swap) this.quickAsTask = false
+    const task = swap && this.quickAsTask
+    const chips = p ? quickChips(p, this.store.today, task) : []
+    if (p?.tag && (p.kind === 'task' || task)) chips.push(tagOf(p.tag).label)
     // 沒打「@專案」時，歸到下拉選的專案（例行任務不歸專案）
-    const proj = p?.kind === 'task' && !p.projectName && !p.repeat && $('#taskRepeat').value === 'none' && this._taskProject()
+    const proj = (p?.kind === 'task' || task) && !p.projectName && !p.repeat && $('#taskRepeat').value === 'none' && this._taskProject()
     if (proj) chips.push(`專案・${proj.name}`)
     box.hidden = !chips.length
-    box.innerHTML = chips.map((c, i) => `<span class="${i === 0 && p.kind === 'event' ? 'kind' : ''}">${esc(c)}</span>`).join('')
+    box.innerHTML = chips.map((c, i) => `<span class="${i === 0 && p.kind === 'event' && !task ? 'kind' : ''}">${esc(c)}</span>`).join('') + (swap ? swapBtn(task) : '')
   }
 
   _repeatValue(sel) {
@@ -1520,7 +1548,7 @@ export class UI {
       e.preventDefault()
       const input = $('#taskTitle')
       const before = new Set(this.store.state.tasks.map((t) => t.id))
-      const r = this.quickAdd(input.value, { repeat: this._repeatValue('#taskRepeat'), project: this._taskProject() })
+      const r = this.quickAdd(input.value, { repeat: this._repeatValue('#taskRepeat'), project: this._taskProject(), asTask: !!this.quickAsTask })
       if (!r) {
         input.focus()
         return
@@ -1528,11 +1556,30 @@ export class UI {
       // 重畫完（下一個 task）再找剛加的那件
       setTimeout(() => this._showAdded(before), 0)
       r.toasts.forEach((t) => this.toast(t))
+      // 記下了：說一聲記在哪天，可以直接排進空檔、撤銷（種到別天的上面已經說了）
+      if (r.task && !r.toasts.length) {
+        const id = r.task
+        this.toast({
+          icon: '種', title: `記下了「${r.title.length > 14 ? `${r.title.slice(0, 13)}…` : r.title}」`, sub: r.sub, ms: 4200, tag: 'added',
+          actions: [
+            { label: '排進空檔', soft: true, run: () => this.schedule._slot(id) },
+            ...(r.undo ? [{ label: '撤銷', soft: true, run: r.undo }] : []),
+          ],
+        })
+      }
       $('#taskRepeat').value = 'none'
       $('#taskRepeat').classList.remove('on')
       input.value = ''
+      this.quickAsTask = false
       this._renderQuickPreview()
       input.focus()
+    })
+    // 預覽上的「改成任務／改回日程」
+    $('#quickPreview').addEventListener('click', (e) => {
+      if (!e.target.closest('[data-swap]')) return
+      this.quickAsTask = !this.quickAsTask
+      this._renderQuickPreview()
+      $('#taskTitle').focus()
     })
 
     const onList = (e) => {
@@ -1558,10 +1605,9 @@ export class UI {
       // 那天挑好先做的那一件：再按一下就不挑了
       else if (act === 'first') s.setFirst(id, false)
       else if (act === 'delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteTask(id))
-      else if (act === 'edit') {
-        const t = s.state.tasks.find((x) => x.id === id)
-        inlineEdit($('.item-title', li), t.title, (v) => (v ? s.updateTask(id, { title: v }) : this.renderTasks()))
-      } else if (act === 'pri') {
+      // 編輯：打開編輯面板（名稱、日期、時間、長度、截止日、本命、子任務、分段…都在裡面）
+      else if (act === 'edit') this.schedule.openEdit('task', id)
+      else if (act === 'pri') {
         const t = s.state.tasks.find((x) => x.id === id)
         s.updateTask(id, { priority: (t.priority % 3) + 1 })
       } else if (act === 'tag') {
@@ -1589,7 +1635,11 @@ export class UI {
           const x = s.state.tasks.find((t) => t.id === id)?.subs?.find((y) => y.id === sid)
           if (x) inlineEdit(e.target.closest('.sub-t'), x.title, (v) => (v ? s.renameSub(id, sid, v) : this.renderTasks()), PL.subTitle)
         }
-      } else if (!act && !e.target.closest('input, .subs')) this.hooks.focusTask(id)
+      } else if (!act && !e.target.closest('input, .subs')) {
+        // 手機（觸控）：任務列上只留完成和專注，點任務本身打開編輯面板；電腦照舊（島上那朵花亮一下）
+        if (touchUI()) this.schedule.openEdit('task', id)
+        else this.hooks.focusTask(id)
+      }
     }
     // 子任務：Enter 加一個，輸入框留著接著打下一個
     const onSubAdd = (e) => {
@@ -1805,6 +1855,54 @@ export class UI {
     }
   }
   // 大任務分成幾段、分到幾天做（一天一段，有截止日的分在截止日前）；可以復原
+  // 到任務頁打開那一件的子任務（還沒有子任務就直接打字）
+  openSubs(id) {
+    const s = this.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    if (!t) return
+    if (t.date !== s.selectedDate && !floating(t)) s.selectDate(t.date < s.today ? s.today : t.date)
+    this.setTab('tasks')
+    this.subsView.set(id, true)
+    this.renderTasks()
+    requestAnimationFrame(() => {
+      const li = $(`#taskList .item[data-id="${CSS.escape(id)}"], #overdueBox .item[data-id="${CSS.escape(id)}"]`)
+      li?.scrollIntoView({ block: 'center', behavior: scrollMode() })
+      li?.querySelector('.sub-add input')?.focus({ preventScroll: true })
+    })
+  }
+  // 排進時段之後：說排在哪裡，可以看位置、撤銷（回到原本的日子和時段）
+  scheduled(id, prev) {
+    const s = this.store
+    const t = s.state.tasks.find((x) => x.id === id)
+    if (!t?.at) return
+    const day = t.date === s.today ? '今天' : t.date === addDays(s.today, 1) ? '明天' : `${+t.date.slice(5, 7)}/${+t.date.slice(8)}`
+    this.toast({
+      icon: '時', title: `排在${day} ${t.at}`, sub: `${t.title}・${fmtDur(taskDur(t))}`, ms: 6000, tag: 'scheduled',
+      actions: [
+        { label: '看位置', soft: true, run: () => this.showOnTimeline(id) },
+        {
+          label: '撤銷', soft: true,
+          run: () => {
+            if (prev.date && prev.date !== t.date) s.updateTask(id, { date: prev.date })
+            s.scheduleTask(id, prev.at, prev.dur)
+          },
+        },
+      ],
+    })
+  }
+  // 到日程頁那一天，捲到那一件、亮一下
+  showOnTimeline(id) {
+    const t = this.store.state.tasks.find((x) => x.id === id)
+    if (!t) return
+    this.store.selectDate(t.date)
+    this.setTab('schedule')
+    requestAnimationFrame(() => {
+      const b = $(`.blk[data-id="${CSS.escape(id)}"]`)
+      if (!b) return
+      b.scrollIntoView({ block: 'center', behavior: scrollMode() })
+      setTimeout(() => this._glow(b), calmMotion() ? 0 : 380)
+    })
+  }
   _split(id) {
     const s = this.store
     const t = s.state.tasks.find((x) => x.id === id)

@@ -371,6 +371,18 @@ body.night .proj-pct { filter: none; }
 .ms:hover .mini, .ms:focus-within .mini { opacity: 1; }
 /* 觸控裝置沒有「滑過」：任務和里程碑的小按鈕直接淡淡地顯示，不然找不到 */
 @media (hover: none) { .item-actions, .ms .mini { opacity: .7; } }
+/* 觸控（手機、平板）：任務列只留完成和專注（逾期的是移到今天）兩顆，點得到的範圍至少 40px；
+   其他的（編輯、刪除、子任務、截止日、分段、本命、優先度、分類）在點任務打開的編輯面板裡（ui.js 的 touchUI）。左右滑照舊 */
+@media (pointer: coarse) {
+  .item-actions { opacity: 1; }
+  .item-actions .mini:not([data-act="focus"], [data-act="today"]) { display: none; }
+  .item-actions .mini { width: 40px; height: 40px; border-radius: 12px; color: var(--ink-soft); }
+  .item-actions .mini svg { width: 17px; height: 17px; }
+  .item .check { position: relative; width: 26px; height: 26px; }
+  .item .check::before { content: ''; position: absolute; inset: -8px; }
+  /* 小標籤只是寫著，點了跟點任務一樣打開編輯面板（子任務的那一個照舊展開子任務） */
+  .item-meta button:not(.subs-tag) { pointer-events: none; }
+}
 /* 子任務：展開時任務列表的勾勾和按鈕靠上，子任務排在標題下面 */
 .item.subs-open { align-items: flex-start; }
 .item.subs-open > .check { margin-top: 1px; }
@@ -961,6 +973,11 @@ body.night .item-menu button { color: #eef2fb; }
 .quick-preview span { font-size: max(var(--fmin), 11px); padding: 2px 8px; border-radius: 8px; background: rgba(143, 197, 232, .2); color: var(--sky-deep); }
 .quick-preview span.kind { background: linear-gradient(135deg, #8cc6ea, #b9a7e6); color: #fff; }
 body.night .quick-preview span { color: #bfe0f7; }
+/* 寫了時間的那一行：「改成任務／改回日程」 */
+.qp-swap { font-size: max(var(--fmin), 11px); padding: 2px 9px; border-radius: 8px; color: var(--ink-soft); border: 1px dashed rgba(120, 150, 190, .5); cursor: pointer; }
+.qp-swap:hover { background: var(--glass-hover); color: var(--ink); }
+.qp-swap[aria-pressed="true"] { border-style: solid; color: var(--ink); }
+@media (pointer: coarse) { .qp-swap { padding: 6px 12px; } }
 
 /* ── 例行公事 ── */
 .repeat-pick { border: 0; outline: 0; border-radius: 10px; padding: 4px 6px; font-size: 12px; background: rgba(140, 170, 200, .14); color: var(--ink-soft); cursor: pointer; max-width: 92px; }

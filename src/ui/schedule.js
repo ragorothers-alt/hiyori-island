@@ -1,8 +1,8 @@
 import './schedule.css'
 import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn, keepFocus } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
-import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey } from '../store.js'
-import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes } from '../planner.js'
+import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey, floating } from '../store.js'
+import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes, SPLIT_MIN } from '../planner.js'
 import { taskMilestone } from '../projects.js'
 import { haptic } from './haptics.js'
 import { isExternal } from '../calendars.js'
@@ -332,7 +332,7 @@ export class ScheduleView {
     }
     const item = type === 'event' ? s.state.events.find((e) => e.id === id) : s.state.tasks.find((t) => t.id === id)
     if (!item) return
-    this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay, ongoing: !!item.ongoing }
+    this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay, ongoing: !!item.ongoing, star: !!item.star }
     this._sheet(item)
   }
   openCreate(minute) {
@@ -376,7 +376,9 @@ export class ScheduleView {
           <label>開始<input type="time" name="at" value="${item.at || ''}"></label>
           <label>預估時間<select name="dur">${[...new Set([...DURS, taskDur(item)])].sort((a, b) => a - b).map((d) => `<option value="${d}" ${d === taskDur(item) ? 'selected' : ''}>${fmtDur(d)}</option>`).join('')}</select></label>
         </div>
-        <div class="form-row"><div class="seg" data-pri>${[1, 2, 3].map((p) => `<button type="button" data-v="${p}" class="${p === ed.priority ? 'on' : ''}" aria-pressed="${p === ed.priority}">${PRIORITIES[p].label}</button>`).join('')}</div></div>
+        <div class="ec-grid ec-due"><label>截止日<input type="date" name="due" value="${item.due || ''}" aria-label="截止日：一定要做完的那天（可以不填）"></label></div>
+        <div class="form-row"><div class="seg" data-pri>${[1, 2, 3].map((p) => `<button type="button" data-v="${p}" class="${p === ed.priority ? 'on' : ''}" aria-pressed="${p === ed.priority}">${PRIORITIES[p].label}</button>`).join('')}</div>
+          ${!item.done && item.date >= this.store.today && !item.ongoing ? `<button type="button" class="chip-toggle${ed.star ? ' on' : ''}" data-star aria-pressed="${ed.star}" title="今天最重要的三件之一：完成給雙倍 XP">★ 本命</button>` : ''}</div>
         <div class="tag-pick">${TAGS.map((t) => `<button type="button" data-tag="${t.id}" style="--c:${t.color}" class="${t.id === ed.tag ? 'on' : ''}" aria-pressed="${t.id === ed.tag}"><i></i>${t.label}</button>`).join('')}</div>
         ${this._projectPick(item)}`
     $('#editSheet').innerHTML = `<form class="modal-card edit-card glass" autocomplete="off">
@@ -384,11 +386,10 @@ export class ScheduleView {
       <input name="title" class="ec-title" maxlength="${ev ? 60 : 80}" placeholder="${ev ? '日程名稱，例如：牙醫' : '任務名稱'}" aria-label="${ev ? '日程名稱' : '任務名稱'}" value="${esc(item.title)}" required>
       ${body}
       ${routine ? `<p class="hint ec-hint">這是例行${ev ? '日程' : '任務'}，這裡只改這一天</p>` : ''}
+      ${ev || ed.create ? '' : this._taskTools(item)}
       <div class="ec-actions">
         ${ed.create ? '' : `<button type="button" class="btn-ghost danger" data-ec="delete">刪除</button>
           ${ev && ad ? '' : `<button type="button" class="btn-ghost" data-ec="done">${item.done ? '改回未完成' : '完成'}</button>`}`}
-        ${!ev && !item.done && !item.ongoing ? `<button type="button" class="btn-ghost" data-ec="slot">${item.at ? '移到最近空檔' : '排進最近空檔'}</button>` : ''}
-        ${!ev && item.at ? '<button type="button" class="btn-ghost" data-ec="unplan">移回未排時段</button>' : ''}
         <span class="sp"></span>
         <button type="button" class="btn-ghost" data-ec="cancel">取消</button>
         <button class="btn-primary" type="submit">${ed.create ? '加入' : '儲存'}</button>
@@ -397,6 +398,18 @@ export class ScheduleView {
     $('#editSheet').hidden = false
     const title = $('#editSheet [name="title"]')
     if (ed.create) title.focus()
+  }
+
+  // 任務的編輯面板上直接做的事：排進最近空檔、移回未排時段、子任務、分成幾段（任務列上原本的小按鈕，手機上收進這裡）
+  _taskTools(t) {
+    const subs = t.subs || []
+    const tools = [
+      !t.done && !t.ongoing ? `<button type="button" class="btn-ghost" data-ec="slot">${t.at ? '移到最近空檔' : '排進最近空檔'}</button>` : '',
+      t.at ? '<button type="button" class="btn-ghost" data-ec="unplan">移回未排時段</button>' : '',
+      `<button type="button" class="btn-ghost" data-ec="subs">${subs.length ? `子任務 ${subs.filter((x) => x.done).length}/${subs.length}` : '拆成子任務'}</button>`,
+      !t.done && !t.routineId && !floating(t) && taskDur(t) >= SPLIT_MIN ? '<button type="button" class="btn-ghost" data-ec="split" title="分成幾段，分到幾天做">分成幾段</button>' : '',
+    ].filter(Boolean)
+    return `<div class="ec-tools">${tools.join('')}</div>`
   }
 
   // 編輯面板的「長期」：藏起日期、開始時間和預估時間；改回排在某一天時日期至少是今天（不會一改回來就逾期）
@@ -462,7 +475,11 @@ export class ScheduleView {
       const ms = proj ? { project: proj.value || null, ms: form.elements.ms?.value || null } : {}
       // 長期只有歸在專案裡的任務可以設（store 也會再檢查一次）
       const ongoing = !!ed.ongoing && !!(proj ? proj.value : s.state.tasks.find((t) => t.id === ed.id)?.project)
-      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...ms, ongoing })
+      const due = form.elements.due ? { due: form.elements.due.value || null } : {}
+      s.updateTask(ed.id, { title, date, priority: ed.priority, tag: ed.tag, at, dur: +form.dur.value, ...ms, ongoing, ...due })
+      // 本命：照每天的上限（滿了的話 store 不收，提示卡會說）
+      const t = s.state.tasks.find((x) => x.id === ed.id)
+      if (t && form.querySelector('[data-star]') && !!t.star !== ed.star) s.toggleStar(ed.id)
     }
     this.closeEdit()
   }
@@ -478,8 +495,10 @@ export class ScheduleView {
       nowMin: date === s.today ? nowMin() : null,
     })
     if (!hit) return this.hooks.toast({ icon: '満', title: '可用空檔有點不足', sub: '換個日子安排也可以' })
+    const prev = { date: t.date, at: t.at, dur: t.dur }
     if (t.date !== date) s.updateTask(id, { date })
     s.scheduleTask(id, hit.at, t.dur || hit.dur)
+    this.hooks.scheduled?.(id, prev)
   }
 
   // ── 事件 ──
@@ -699,6 +718,11 @@ export class ScheduleView {
       }
       // 長期／排在某一天：只換看得到的欄位
       if (e.target.closest('[data-long]')) return this._setLong(!ed.ongoing)
+      const star = e.target.closest('[data-star]')
+      if (star) {
+        ed.star = !ed.star
+        return setOn(star, ed.star)
+      }
       // 整天／有時段：只換看得到的欄位，打到一半的名稱和備註都留著
       const adBtn = e.target.closest('[data-allday]')
       if (adBtn) {
@@ -732,6 +756,11 @@ export class ScheduleView {
       } else if (act === 'unplan') {
         this.closeEdit()
         s.scheduleTask(ed.id, null)
+      } else if (act === 'subs' || act === 'split') {
+        // 先把面板上改到一半的存起來，再到任務頁打開子任務、或分段
+        this._saveSheet(sheet.querySelector('form'))
+        if (act === 'subs') this.hooks.openSubs?.(ed.id)
+        else this.hooks.split?.(ed.id)
       }
     })
     sheet.addEventListener('keydown', (e) => {

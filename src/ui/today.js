@@ -170,7 +170,13 @@ export class TodayView {
         if (s.weekly().ready && !s.weekly().claimed) s.claimWeekly()
         return
       case 'habit': return s.checkHabit(id)
-      case 'slot': return s.updateTask(id, { at: b.dataset.v })
+      // 排進眼前這段空檔：提示卡說排在哪裡，可以看位置、撤銷
+      case 'slot': {
+        const t = s.state.tasks.find((x) => x.id === id)
+        const prev = t && { date: t.date, at: t.at, dur: t.dur }
+        s.updateTask(id, { at: b.dataset.v })
+        return prev && this.hooks.scheduled?.(id, prev)
+      }
       case 'mood':
         this.refMood = b.dataset.v
         this.refDate = s.today

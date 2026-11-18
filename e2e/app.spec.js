@@ -2595,6 +2595,73 @@ test('手機往下捲時，右下角的番茄鐘膠囊讓開；往上捲一點�
   await page.waitForTimeout(500)
   await expect(body).not.toHaveClass(/dock-tuck/)
 })
+test.describe('手機上的任務', () => {
+  test.use({ isMobile: true, hasTouch: true, viewport: { width: 390, height: 844 } })
+  test('任務列只留完成和專注，點任務打開編輯面板：截止日、本命、排進最近空檔（說排在哪、可以撤銷）；寫了時間的那一行可以改成有時段的任務；記下一件說一聲', async ({ page, context, site }) => {
+    test.setTimeout(90000)
+    await useAppMode(context)
+    const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+    const tmr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date(Date.parse(`${ymd}T12:00:00+08:00`) + 86400000))
+    await page.clock.setFixedTime(new Date(`${ymd}T10:00:00+08:00`))
+    await page.goto(site.url)
+    await bootReady(page)
+    const id = await page.evaluate(() => {
+      const s = window.hiyori.store
+      s.clearSamples()
+      for (const t of s.tasksOn(s.today)) s.deleteTask(t.id)
+      const t = s.addTask({ title: '寫報告', date: s.today, dur: 60 })
+      window.hiyori.ui.setTab('tasks')
+      return t.id
+    })
+    const task = () => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id), id)
+    const row = page.locator(`#taskList .item[data-id="${id}"]`)
+    // 只留完成圈和 ▶，點得到的範圍至少 40px
+    await expect(row.locator('.item-actions .mini:visible')).toHaveCount(1)
+    expect((await row.locator('[data-act="focus"]').boundingBox()).width).toBeGreaterThanOrEqual(40)
+    // 點任務本身：打開編輯面板
+    await row.locator('.item-title').click()
+    const sheet = page.locator('#editSheet')
+    await expect(sheet).toBeVisible()
+    await sheet.locator('[name="due"]').fill(tmr)
+    await sheet.locator('[data-star]').click()
+    await sheet.locator('button[type="submit"]').click()
+    await expect(sheet).toBeHidden()
+    expect(await task()).toMatchObject({ due: tmr, star: true })
+    // 排進最近空檔：提示卡說排在今天幾點，撤銷回到沒排的樣子
+    await row.locator('.item-title').click()
+    await sheet.locator('[data-ec="slot"]').click()
+    const toast = page.locator('#toasts .toast', { hasText: '排在今天' })
+    await expect(toast).toBeVisible()
+    expect((await task()).at).toMatch(/^\d\d:\d\d$/)
+    await toast.locator('.toast-act', { hasText: '撤銷' }).click()
+    await expect.poll(async () => (await task()).at).toBe(null)
+    // 快速記錄：「明天 15:00 牙醫」預設是日程，點「改成任務」記成明天 15:00 的任務（一小時）
+    await page.locator('#captureBtn').click()
+    const input = page.locator('#capInput')
+    await input.fill('明天 15:00 牙醫')
+    const swap = page.locator('#capPreview [data-swap]')
+    await expect(swap).toHaveText('改成任務')
+    await swap.click()
+    await expect(page.locator('#capPreview')).toContainText('任務・15:00')
+    await expect(input).toBeFocused()
+    const events = await page.evaluate(() => window.hiyori.store.state.events.length)
+    await input.press('Enter')
+    await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '牙醫'))).toMatchObject({ date: tmr, at: '15:00', dur: 60 })
+    expect(await page.evaluate(() => window.hiyori.store.state.events.length)).toBe(events)
+    // 下一行回到預設（日程）
+    await input.fill('後天 9:00 開會')
+    await expect(swap).toHaveText('改成任務')
+    await input.fill('')
+    await page.keyboard.press('Escape')
+    // 任務頁的輸入框記下一件：提示卡說記下了，可以撤銷
+    await page.locator('#taskTitle').fill('買牛奶')
+    await page.locator('#taskTitle').press('Enter')
+    const added = page.locator('#toasts .toast', { hasText: '記下了「買牛奶」' })
+    await expect(added).toBeVisible()
+    await added.locator('.toast-act', { hasText: '撤銷' }).click()
+    await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.some((t) => t.title === '買牛奶'))).toBe(false)
+  })
+})
 test.describe('手機的觸控', () => {
   test.use({ hasTouch: true, viewport: { width: 393, height: 852 } })
   test('任務列左右滑：往右滑完成、往左滑明天再做（可以復原）、逾期的往左滑移到今天；滑一點點會彈回去', async ({ page, context, site }) => {
@@ -2719,7 +2786,10 @@ test.describe('手機的觸控', () => {
       window.__buzz.length = 0
       for (const t of s.tasksOn(s.today).filter((x) => !x.done).slice(0, 3)) s.toggleStar(t.id)
     })
-    await row('五').locator('[data-act="star"]').tap()
+    // 手機上本命在編輯面板裡：點任務打開、點「★ 本命」、存下來
+    await row('五').locator('.item-title').tap()
+    await page.locator('#editSheet [data-star]').tap()
+    await page.locator('#editSheet button[type="submit"]').tap()
     await expect.poll(buzz).toEqual([8, 8, 8, [24, 50, 24]])
 
     // 設定裡關掉：打勾不再震；這台裝置記住了，重新整理也一樣
