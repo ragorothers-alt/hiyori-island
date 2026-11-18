@@ -1404,7 +1404,8 @@ async function boot() {
         icon: '眠', title: '就寢時間快到了', sub: first ? `預定 ${e.start} 就寢・${word}先做「${short(first.title, 10)}」` : `預定 ${e.start} 就寢・今天辛苦了`, ms: day && !first ? 12000 : 9000,
         ...(day && !first ? { actions: [{ label: `挑${word}的第一件`, soft: true, run: () => ui.openFirst() }] } : {}),
       })
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify('ひより · 就寢提醒', `預定 ${e.start} 就寢`, 'bedtime')
+      // ふじ睡前那則同一刻會送到（這台收、App 不在前面）：系統通知交給它說，不跳兩則
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !fujiBedSent(Date.now())) systemNotify('ひより · 就寢提醒', `預定 ${e.start} 就寢`, 'bedtime')
       return
     }
     // 排定的任務到了開始的時間：提示卡上直接開始專注（提不起勁就只做 5 分鐘、還沒準備好就晚 15 分鐘再提醒）。
@@ -1751,6 +1752,11 @@ async function boot() {
   let fujiAt = 0
   let fujiDirty = true
   let fujiHidden = null
+  // 排過的睡前那則是幾點（到點後就不在 fujiList 裡了，另外記著）：就寢提醒跟它是同一刻
+  let fujiBeds = []
+  // 睡前那則會送到嗎：這台收、App 不在前面（網頁是頁面看不到時才交給伺服器推，Android 是 App 不在前面時手機的鬧鐘才發），
+  // 而且排了一則在這前後 15 分鐘內（就寢提醒在就寢前 30 分鐘起的 10 分鐘內說）；被開會、專注挪走或挪進睡覺時間沒送的，就寢提醒照常跳
+  const fujiBedSent = (now) => fujiOn() && (native ? nativeAway() : document.hidden) && fujiBeds.some((at) => Math.abs(at - now) < 15 * 60000)
   // 最後一次正看著 App 的時間：那之前已經打開過 App，今天早上那則就不送
   let lookedAt = Date.now()
   store.on('dirty', () => (fujiDirty = true))
@@ -1808,6 +1814,8 @@ async function boot() {
     } catch (e) {
       console.warn('[hiyori] ふじ的通知沒排好', e)
     }
+    // 已經到點的留著（重算時它已經不在 fujiList 裡），還沒到的照這次排的換掉（改了就寢時間、被挪走了）
+    fujiBeds = [...fujiBeds.filter((at) => at <= now).slice(-2), ...fujiList.filter((n) => n.kind === 'bed').map((n) => n.at)]
     saveRisk()
     return fujiList
   }

@@ -4327,9 +4327,11 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
   await context.addInitScript(({ ymd }) => {
     // 假的 Android 殼（新版，有 fujiNotes）：記下每一次交給手機的ふじ的那幾則
     window.__fuji = []
+    window.__notified = []
+    window.__away = false
     window.HiyoriNative = {
-      version: () => 6, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify() {},
-      mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => true,
+      version: () => 6, canNotify: () => true, canLive: () => false, askNotify() {}, timer() {}, notify: (title, body, tag) => window.__notified.push(tag),
+      mottos() {}, mottoHandled: () => 0, mottoClaim: () => true, foreground: () => !window.__away,
       fujiNotes: (json) => window.__fuji.push(json),
     }
     if (localStorage.getItem('hiyori-daily-v1')) return
@@ -4386,6 +4388,14 @@ test('App 關著時ふじ也說一聲（Android 的 App）：今晚睡前、明�
   await expect(page.locator('#coachRoot .ag-notes-sub')).toHaveText('早上、截止日有風險時、睡前，一天最多 3 則')
   await expect.poll(async () => (await last())?.length).toBeGreaterThan(1)
   expect(await page.evaluate(() => window.hiyori.store.state.settings.fujiNotify)).toBe(await page.evaluate(() => localStorage.getItem('hiyori-device')))
+  // 23:00 App 不在前面：手機的鬧鐘發ふじ睡前那則，就寢提醒不再另外跳系統通知（畫面上的提示卡照常，回來看得到）
+  await page.evaluate(() => {
+    window.__away = true
+    document.hasFocus = () => false
+  })
+  await page.clock.setFixedTime(new Date(Date.parse(`${ymd}T23:00:30+08:00`)))
+  await expect(page.locator('#toasts .toast', { hasText: '就寢時間快到了' })).toBeVisible()
+  expect(await page.evaluate(() => window.__notified)).not.toContain('bedtime')
 })
 
 test('隨叫隨到的ふじ：任何一頁按 J 叫出來，看得到正在看哪一頁；一句話改日程、設定、新增習慣，做完打開那一頁；整批撤銷', async ({ page, context, site }) => {
