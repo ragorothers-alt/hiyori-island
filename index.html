@@ -331,10 +331,14 @@
     </div>
     <div class="dock-sep"></div>
     <button class="icon-btn" id="calBtn" title="日曆（C）"><svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="3"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/></svg></button>
-    <button class="icon-btn" id="shopBtn" title="金平糖商店 (S)" aria-label="金平糖商店" aria-haspopup="dialog" aria-expanded="false" aria-controls="shop"><svg viewBox="0 0 24 24"><path d="M4 9.5L5.5 4h13L20 9.5"/><path d="M4 9.5c0 1.4 1.1 2.5 2.5 2.5S9 10.9 9 9.5c0 1.4 1.1 2.5 2.5 2.5h1c1.4 0 2.5-1.1 2.5-2.5 0 1.4 1.1 2.5 2.5 2.5S20 10.9 20 9.5"/><path d="M5.5 12v8h13v-8"/><path d="M10 20v-4h4v4"/></svg></button>
-    <button class="icon-btn" id="viewBtn" title="回到全景 (V)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
-    <button class="icon-btn" id="themeBtn" title="切換成夜晚 (D)"><svg viewBox="0 0 24 24" class="i-moon"><path d="M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z"/></svg><svg viewBox="0 0 24 24" class="i-sun"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"/></svg></button>
-    <button class="icon-btn" id="soundBtn" title="音效"><svg viewBox="0 0 24 24" id="soundIcon"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    <!-- 手機（窄的螢幕）：商店、視角、日夜、音效收進「⋯」，Dock 才放得下；寬的時候照常排在 Dock 上 -->
+    <button class="icon-btn dock-more" id="dockMore" title="更多" aria-label="更多" aria-haspopup="true" aria-expanded="false" aria-controls="dockPop"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/></svg></button>
+    <div class="dock-pop" id="dockPop">
+      <button class="icon-btn" id="shopBtn" title="金平糖商店 (S)" aria-label="金平糖商店" aria-haspopup="dialog" aria-expanded="false" aria-controls="shop"><svg viewBox="0 0 24 24"><path d="M4 9.5L5.5 4h13L20 9.5"/><path d="M4 9.5c0 1.4 1.1 2.5 2.5 2.5S9 10.9 9 9.5c0 1.4 1.1 2.5 2.5 2.5h1c1.4 0 2.5-1.1 2.5-2.5 0 1.4 1.1 2.5 2.5 2.5S20 10.9 20 9.5"/><path d="M5.5 12v8h13v-8"/><path d="M10 20v-4h4v4"/></svg></button>
+      <button class="icon-btn" id="viewBtn" title="回到全景 (V)"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
+      <button class="icon-btn" id="themeBtn" title="切換成夜晚 (D)"><svg viewBox="0 0 24 24" class="i-moon"><path d="M19.5 14.6A7.6 7.6 0 0 1 9.4 4.5a7.6 7.6 0 1 0 10.1 10.1z"/></svg><svg viewBox="0 0 24 24" class="i-sun"><circle cx="12" cy="12" r="3.8"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"/></svg></button>
+      <button class="icon-btn" id="soundBtn" title="音效"><svg viewBox="0 0 24 24" id="soundIcon"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+    </div>
     <button class="icon-btn" id="appBtn" title="App 模式：像一般 App 一樣用（小島先休息）"><svg viewBox="0 0 24 24"><rect x="6.5" y="3" width="11" height="18" rx="2.5"/><path d="M10.5 17.5h3"/></svg></button>
     <button class="icon-btn" id="panelBtn" title="收合面板"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M14 4v16"/></svg></button>
   </div>

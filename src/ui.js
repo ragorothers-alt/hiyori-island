@@ -110,8 +110,9 @@ const layerZ = (el) => {
 const SAMPLE_TAG = '<span class="ex-tag" title="第一次打開時放的範例：不會提醒你，記下自己的第一件就收起來">範例</span>'
 // 介面：小島（預設）或 App 模式，每台裝置自己記（手機想當一般 App 用、電腦想看小島）
 const LAYOUT_KEY = 'hiyori-layout'
-// 這台裝置上次選的是 App 模式（開機時決定要不要先載入小島）
-export const savedAppMode = () => readLocal(LAYOUT_KEY, 'island') === 'app'
+// 這台裝置上次選的是 App 模式（開機時決定要不要先載入小島）。還沒選過的：手機（Android 的 App、手機和平板的瀏覽器）
+// 先用 App 模式（打開就能記事情，不用先下載整座島），電腦先看小島；小島在分頁列的「島」隨時切得過去
+export const savedAppMode = () => readLocal(LAYOUT_KEY, native || !deskWeb() ? 'app' : 'island') === 'app'
 // App 模式寬螢幕的側欄收成圖示窄欄（也是每台裝置自己記）
 const SIDE_KEY = 'hiyori-side-mini'
 // 商店和花の図鑑的縮圖是用 three.js 拍的，載入前先放透明的圖（版面不會跳）
@@ -580,6 +581,21 @@ export class UI {
       this.focus?._noiseSync()
     }
     $('#panelBtn').onclick = () => this.togglePanel()
+    // 窄螢幕 Dock 上的「⋯」：商店、視角、日夜、音效收在裡面。按了其中一顆、點旁邊、按 Esc 就收起來
+    const pop = $('#dockPop')
+    const more = $('#dockMore')
+    const popOpen = (on) => {
+      pop.classList.toggle('open', on)
+      more.setAttribute('aria-expanded', String(on))
+    }
+    more.onclick = () => popOpen(!pop.classList.contains('open'))
+    pop.addEventListener('click', (e) => e.target.closest('button') && popOpen(false))
+    document.addEventListener('pointerdown', (e) => pop.classList.contains('open') && !e.target.closest('#dockPop, #dockMore') && popOpen(false))
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !pop.classList.contains('open')) return
+      popOpen(false)
+      more.focus()
+    })
     // 轉向、拉寬視窗時版面會換（手機的底部面板 ↔ 桌面的側邊面板）：收起的面板要不要 inert 跟著重算
     addEventListener('resize', () => this._syncPanelInert())
     $('#fullBtn').onclick = () => (this.appMode ? this.setAppMode(false) : this.toggleFull())

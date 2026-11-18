@@ -450,7 +450,7 @@ export class TodayView {
       const k = esc(t.id)
       const d = taskDur(t)
       const at = Math.ceil(g.next.start / 5) * 5 + d <= g.next.end ? slotAt : toHHMM(g.next.start)
-      return `<li><i style="--c:${tagOf(t.tag).color}"></i>${this._focusName(t, `${t.star ? '★ ' : ''}${esc(t.title)}`, 'tn-name', `nf-${k}`)}<small>${dur(d)}</small>
+      return `<li><i style="--c:${tagOf(t.tag).color}"></i>${this._focusName(t, `${this.store.isSample?.(t) ? '<em class="ex-tag">範例</em>' : ''}${t.star ? '★ ' : ''}${esc(t.title)}`, 'tn-name', `nf-${k}`)}<small>${dur(d)}</small>
         <button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="專注在這件事上">${IC.play}</button>
         <button type="button" class="tn-slot" data-act="slot" data-id="${k}" data-v="${at}" data-fk="ns-${k}" title="排進這段空檔">排進 ${at}</button></li>`
     }

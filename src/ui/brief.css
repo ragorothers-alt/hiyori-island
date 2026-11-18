@@ -23,7 +23,7 @@ body.night .bf-card { background: var(--card-bg, #27243c); box-shadow: 0 14px 40
 @keyframes bfCaret { 50% { opacity: 0; } }
 
 .bf-body { scrollbar-width: thin; flex: 1; min-height: 0; overflow-y: auto; margin: 4px -6px 0; padding: 0 6px; overscroll-behavior: contain; }
-.bf-body h4 { margin: 10px 2px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .14em; color: var(--ink-faint); animation: bfIn .3s both; }
+.bf-body h4 { margin: 10px 2px 4px; font-size: max(var(--fmin), 11.5px); font-weight: 600; letter-spacing: .14em; color: var(--ink-faint); animation: bfIn .3s both; }
 .bf-body h4 small { margin-left: 8px; font-weight: 400; letter-spacing: .04em; opacity: .85; }
 .bf-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 /* 一項一項出現 */
@@ -35,7 +35,7 @@ body.night .bf-card { background: var(--card-bg, #27243c); box-shadow: 0 14px 40
 .bf-ic { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; font: 600 13px var(--font-display); font-style: normal; color: var(--ink-soft); background: rgba(140, 170, 200, .16); }
 .bf-list span { min-width: 0; display: grid; }
 .bf-list b { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bf-list small { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bf-list small { font-size: max(var(--fmin), 11.5px); color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bf-none { margin: 2px 2px 0; font-size: 13.5px; color: var(--ink-soft); animation: bfIn .3s both; }
 .bf-bye { margin: 10px 2px 2px; font-size: 13px; color: var(--ink-soft); }
 

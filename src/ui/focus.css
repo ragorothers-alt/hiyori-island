@@ -36,7 +36,7 @@ body.night .focus-full.paused { --ff-ink: var(--ink-faint); }
 .ff-noisebtn.on::after { content: ''; position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--ff-ink); }
 .ff-noise { position: absolute; top: calc(56px + env(safe-area-inset-top)); right: 12px; z-index: 3; width: min(300px, calc(100% - 24px)); padding: 12px 14px; text-align: left; background: var(--lg-bg-strong); animation: riseIn .25s var(--ease); }
 .ff-noise h4 { margin: 0 2px 10px; font-family: var(--font-display); font-weight: 400; font-size: 14px; letter-spacing: .08em; display: flex; gap: 8px; align-items: baseline; }
-.ff-noise h4 small { font-size: 10.5px; color: var(--ink-deco); }
+.ff-noise h4 small { font-size: max(var(--fmin), 10.5px); color: var(--ink-deco); }
 .ff-noise .seg button { flex: 1; white-space: nowrap; padding: 6px; }
 .ff-noise .noise-vol { margin-top: 12px; }
 /* 最上面中間：今天已經專注了多久（左右讓開縮小、背景聲和貓咪的按鈕） */
@@ -49,7 +49,7 @@ body.night .focus-full.paused { --ff-ink: var(--ink-faint); }
 .ff-today.goal-done { color: var(--ff-ink); }
 /* 寫著目標的時候字比較多：字距收一點，手機上才放得下「今天 1 小時 29 分／目標 1.5 小時」 */
 .ff-today.has-goal { letter-spacing: .01em; }
-@media (max-width: 380px) { .ff-goal-w { display: none; } .ff-today.has-goal { font-size: 11.5px; } }
+@media (max-width: 380px) { .ff-goal-w { display: none; } .ff-today.has-goal { font-size: max(var(--fmin), 11.5px); } }
 
 /* 圓環的中心大約在畫面 46% 的高度：下面一排排的東西（接下來、目標、按鈕、先記下來、想分心了？）放完，筆電的畫面（860 高）底下還留得出地板給貓咪 */
 .ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(46dvh - 104px - var(--ff-ring) / 2)); }
@@ -126,7 +126,7 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-more { display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 8px; }
 .ff-more[hidden] { display: none; }
 .ff-more button { padding: 8px 15px; border-radius: 14px; font-size: 13px; line-height: 1.35; color: var(--ink); }
-.ff-more button small { display: block; font-size: 11px; color: var(--ink-faint); }
+.ff-more button small { display: block; font-size: max(var(--fmin), 11px); color: var(--ink-faint); }
 /* 先記下來：專注時腦中冒出別的事，一行字記下（專注頁和計時設定的小視窗） */
 .ff-park, .fs-park { display: flex; gap: 6px; width: min(320px, 100%); }
 .ff-park[hidden], .fs-park[hidden] { display: none; }
@@ -140,9 +140,9 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-step { display: flex; align-items: center; gap: 10px; width: min(360px, 100%); min-height: 46px; padding: 5px 6px 5px 14px; border-radius: 18px; background: var(--field); border: 1px solid var(--line); text-align: left; }
 .ff-step[hidden] { display: none; }
 .ff-step-t { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.ff-step-t small { font-size: 11px; letter-spacing: .12em; color: var(--ink-faint); }
+.ff-step-t small { font-size: max(var(--fmin), 11px); letter-spacing: .12em; color: var(--ink-faint); }
 .ff-step-t b { font-weight: 500; font-size: 14.5px; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
-.ff-step-n { flex: none; font-size: 11.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ff-step-n { flex: none; font-size: max(var(--fmin), 11.5px); color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .ff-step-check { flex: none; display: grid; place-items: center; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--ff-a) 65%, var(--line)); background: none; color: var(--ff-a); cursor: pointer; transition: background .2s; }
 .ff-step-check svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .ff-step-check:hover { background: color-mix(in srgb, var(--ff-a) 14%, transparent); }
@@ -166,7 +166,7 @@ body.night .ff-knob i { background: #1c1a2e; }
 /* 接下來：今天下一個有時段的日程；這一輪結束前就要開始的用提醒的顏色 */
 .ff-next { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 8px; margin: -4px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-soft); text-align: center; }
 .ff-next[hidden] { display: none; }
-.ff-next small { font-size: 11.5px; letter-spacing: .06em; color: var(--ink-faint); }
+.ff-next small { font-size: max(var(--fmin), 11.5px); letter-spacing: .06em; color: var(--ink-faint); }
 .ff-next b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .ff-next.clash small, .ff-next.clash b { color: var(--warn-ink); }
 /* 想分心了：先等一分鐘、跟著圓圈呼吸（打開時專注頁下面其他的按鈕先收起來，時間照樣走） */
@@ -192,7 +192,7 @@ body.night .ff-knob i { background: #1c1a2e; }
 .ff-urge-left:empty { display: none; }
 /* 想去做什麼：一排小標籤，點了選起來 */
 .ff-urge-pulls { display: grid; justify-items: center; gap: 6px; margin-top: 2px; }
-.ff-urge-pulls > span { font-size: 11.5px; letter-spacing: .06em; color: var(--ink-faint); }
+.ff-urge-pulls > span { font-size: max(var(--fmin), 11.5px); letter-spacing: .06em; color: var(--ink-faint); }
 .ff-urge-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 .ff-urge-chips .chip-toggle { padding: 5px 11px; font-size: 12px; }
 /* 點了想去做什麼之後：現在就做得到的一件小事 */
