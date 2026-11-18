@@ -5,6 +5,7 @@
 //   FileSync（這個檔案）：資料寫進使用者選的檔案，放在 OneDrive／Dropbox 的同步資料夾裡（不需後端，只有電腦版 Chrome／Edge）
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
 import { dropBackup, keepBackup, newRev, readBackup, readBackups, newerData, NEWER_MSG, NEWER_TAB_MSG, NO_SAVE_MSG } from './store.js'
+import { migrate } from './store/migrate.js'
 
 // 被取代的資料（留最近幾份）由 store.js 管：兩個分頁同時改了資料時也會用到
 export { readBackup, readBackups }
@@ -23,6 +24,16 @@ export function restoreBackup(store, i = 0) {
 const NO_ROOM = '瀏覽器的儲存空間不夠，沒辦法先備份另一邊，所以先不替換。請先用「匯出資料」存一份'
 const NO_SAVE = '瀏覽器的儲存空間不夠，這台的存檔寫不進去。請先用「匯出資料」存一份，再清出一些空間'
 const LOAD_FAILED = '這台的存檔讀不進來，雲端也拿不到資料：先不把範例島傳上去，等連上雲端再拿回來'
+// 兩份小島只差在計時（跨裝置的計時，見 main.js 的 shareTimer）和版本：兩邊都先照讀檔的規則整理過再比（欄位順序、預設值一樣）；
+// 比不出來就當成不一樣，照樣備份
+const onlyTimer = (a, b) => {
+  const strip = (s) => JSON.stringify({ ...migrate(s), timer: null, rev: '', updatedAt: 0 })
+  try {
+    return strip(a) === strip(b)
+  } catch {
+    return false
+  }
+}
 const readKey = (k) => {
   try {
     return localStorage.getItem(k) || ''
@@ -219,8 +230,9 @@ export class SyncEngine {
 
   _load(remote, { strict = false } = {}) {
     const st = this.store.state
-    // 一般拉取時這台沒改過（雲端已經有比較新的那一版），備份只是保險；選邊時一定要備份成功
-    if (st.rev && !keepBackup(st, 'local', st.updatedAt) && strict) return this._set('error', NO_ROOM)
+    // 一般拉取時這台沒改過（雲端已經有比較新的那一版），備份只是保險；選邊時一定要備份成功。
+    // 雲端那一版只換了計時（別台按了開始、暫停）：這台的這一份跟它只差在計時，不另外留（不然幾次就把真正有用的備份擠掉）
+    if (st.rev && (strict || !onlyTimer(st, remote.state)) && !keepBackup(st, 'local', st.updatedAt) && strict) return this._set('error', NO_ROOM)
     try {
       this.store.replaceState(remote.state, remote.savedAt, { soft: true, rev: remote.rev })
     } catch (e) {

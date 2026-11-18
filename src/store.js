@@ -1230,6 +1230,8 @@ export class Store {
     const next = migrate(obj)
     next.updatedAt = updatedAt
     next.rev = rev
+    // 匯入、還原備份：計時照現在的樣子（那份檔案裡的計時是當時的，換過去的話別台會把那一輪接回來重新倒數）
+    if (!soft && !peer) next.timer = this.state?.timer ?? null
     // 同步拉回別台的、換成別的分頁的那一版：回神紀錄（自動記的、只會往上加）每天取比較大的那個，
     // 這台還沒同步出去的提醒次數不會被蓋掉。匯入、還原備份是整份換掉：換一個 gen，之後誰拿到這一份都照它的數字
     let raised = false

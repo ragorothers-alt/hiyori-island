@@ -2508,7 +2508,8 @@ test('建議類的提示：打字中先不說、停下來再說；兩則至少�
 })
 
 test('專注頁的鍵盤：有按鈕的提示卡用 Tab 轉得到（在第一顆按 Shift+Tab 就到）、焦點在上面時不收；收掉、換成新的一張、按了之後，焦點交回剛才的地方；「先記下來」按 Esc 焦點到旁邊的「記下」；Dock 上的時間指向專注頁', async ({ page, context, site }) => {
-  test.setTimeout(90000)
+  // 步驟多：同時跑很多個測試、機器很忙時光是打開頁面就可能要一分多鐘
+  test.setTimeout(150000)
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)

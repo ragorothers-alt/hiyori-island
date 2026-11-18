@@ -2118,21 +2118,43 @@ async function boot() {
   // ── 跨裝置的計時：計時的樣子放在小島資料裡跟著同步走（store.state.timer，記著是哪一台、哪一次）。
   // 這台按了開始、暫停、延長、結束，或到點時接手了：馬上送（不等平常的 1.5 秒）；別台打開、切回來、定期同步時換成同一份，
   // 到點的通知、Android 的即時倒數跟著排，那一台也會響。到點時由這一輪的主人記（見 focus.js 的 _hold），每一輪只記一次 ──
+  // 最後一次同步好是什麼時候（開著的同步裡最近的那一個）：開機還沒同步過是 0
+  const lastSynced = () => Math.max(cloudSync._canSync() ? cloudSync.lastSync : 0, fileSync._canSync() ? fileSync.lastSync : 0)
   timerShared = () => {
     if (syncBooted && !syncLinked()) return null
     const t = store.state.timer
-    return { mine: !t || t.by === deviceId(), sync: () => syncBoot.then(() => (syncLinked() ? syncAll() : null)) }
+    return {
+      mine: !t || t.by === deviceId(),
+      // 剛同步過（看著的時候每 30 秒一次）：到點照做；不然先同步一次（見 focus.js 的 _hold）
+      fresh: syncBooted && Date.now() - lastSynced() < 45000,
+      sync: () => syncBoot.then(() => (syncLinked() ? syncAll() : null)),
+    }
+  }
+  // 這台最後送出去的是哪一次：拉回來的是這台以前送的、比較舊的那一份（兩邊都改過、選了用雲端的）時，換回那一份
+  const SENT_KEY = 'hiyori-focus-sent'
+  let sentMem = ''
+  const sentV = () => {
+    try {
+      return localStorage.getItem(SENT_KEY) ?? sentMem
+    } catch {
+      return sentMem
+    }
   }
   shareTimer = (t) => {
     if (!syncLinked()) return
-    store.setTimer({ ...t, by: deviceId(), v: newRev().slice(0, 24) })
+    const v = newRev().slice(0, 24)
+    sentMem = v
+    try {
+      localStorage.setItem(SENT_KEY, v)
+    } catch {}
+    store.setTimer({ ...t, by: deviceId(), v })
     syncAll()
   }
   // 別台的計時換過來了：說一聲（開始、暫停、繼續、那一輪記下了、結束；只換了目標就不說）
   const timerToast = (r) => {
     const what = r.target ? `「${short(r.target, 12)}」` : ''
     let o = null
-    if (r.mode === 'focus' && r.was.mode !== 'focus') o = { title: '另一台開始專注了', sub: `${what}這台也跟著計時` }
+    if (r.mode === 'focus' && r.was.mode !== 'focus') o = r.paused ? { title: '另一台的專注暫停中', sub: `${what}按繼續就接著算` } : { title: '另一台開始專注了', sub: `${what}這台也跟著計時` }
     else if (r.mode === 'focus' && r.paused && !r.was.paused) o = { title: '另一台暫停了計時', sub: what || '按繼續就接著算' }
     else if (r.mode === 'focus' && !r.paused && r.was.paused) o = { title: '另一台繼續計時了', sub: what || '接著算' }
     else if (r.mode === 'break' && r.was.mode === 'focus') o = { title: '這一輪在另一台記下了', sub: r.rounds > 1 && r.round < r.rounds ? `休息一下，接著第 ${r.round + 1} 輪` : '這台也跟著休息' }
@@ -2141,11 +2163,11 @@ async function boot() {
     ui.toast({ icon: '時', ms: 5000, tag: 'focus', ...o })
     return true
   }
-  // 同步拉回來的那一份（soft）：不是這台送的就換過來。同一台的另一個分頁有自己的通道（focus.js 的 storage 事件）；
-  // 匯入、還原備份不算（那份裡的計時是舊的）
+  // 同步拉回來的那一份（soft）：不是這台最後送的那一次就換過來。同一台的另一個分頁有自己的通道（focus.js 的 storage 事件）；
+  // 匯入、還原備份不算（store 那邊留著現在的計時）
   store.on('reload', ({ soft } = {}) => {
     const t = store.state.timer
-    if (!soft || !t || t.by === deviceId()) return
+    if (!soft || !t || (t.by === deviceId() && t.v === sentV())) return
     const r = ui.focus.fromSync(t)
     if (r && timerToast(r)) timerSaid = Date.now()
   })

@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store } from '../src/store.js'
-import { FileSync } from '../src/sync.js'
+import { FileSync, readBackups } from '../src/sync.js'
 
 // 模擬兩台裝置：各自一份 localStorage，共用同一個雲端檔案
 class Mem {
@@ -97,6 +97,39 @@ afterEach(() => {
 
 const later = (ms = 60000) => vi.setSystemTime(Date.now() + ms)
 const titles = (x) => (x.state ?? x).tasks.map((t) => t.title)
+
+describe('跨裝置的計時跟著同步走', () => {
+  it('別台只換了計時：拉回來時不另外留備份（不會把有用的備份擠掉）；換了別的照樣留', async () => {
+    const a = device()
+    await link(a, file)
+    later()
+    const b = device()
+    await link(b, file)
+    const backups = () => b.run(() => readBackups().length)
+    const n0 = await backups()
+    for (const v of ['t1', 't2', 't3', 't4']) {
+      later()
+      await a.run(async (s, sync) => {
+        s.setTimer({ mode: 'focus', by: 'deva1234', v, endAt: Date.now() + 600000, sid: `s-${v}` })
+        await sync.sync()
+      })
+      later()
+      await b.run(async (s, sync) => {
+        await sync.sync()
+        expect(s.state.timer.v).toBe(v)
+      })
+    }
+    expect(await backups()).toBe(n0)
+    later()
+    await a.run(async (s, sync) => {
+      s.addTask({ title: 'A 的任務' })
+      await sync.sync()
+    })
+    later()
+    await b.run((_s, sync) => sync.sync())
+    expect(await backups()).toBe(n0 + 1)
+  })
+})
 
 describe('雲端資料夾同步', () => {
   it('只有例行實例生成與跨日的存檔不算使用者變更', () => {

@@ -324,7 +324,13 @@ export class FocusTimer {
     if (t.mode !== 'idle' && clock.isStale(clock.restoreState(t, this), Date.now())) saved = { mode: 'idle', taskId: t.taskId, projectId: t.projectId }
     const before = { mode: this.mode, paused: this.paused != null, sid: this.sid, endAt: this.endAt, rounds: this.rounds, key: this._targetKey() }
     const same = saved.mode === this.mode && (saved.mode === 'idle' || (saved.sid === this.sid && saved.endAt === this.endAt && (saved.paused ?? null) === this.paused && saved.rounds === this.rounds))
+    // 同一輪（只是換了目標、暫停、繼續）：這台記著的中途離開次數、限時去照舊（那是這台的事，別台送的沒有）
+    const local = saved.sid && saved.sid === this.sid ? { away: this.away, detour: this.detour, detourRang: this.detourRang } : null
     this._adopt(saved)
+    if (local && this.sid === saved.sid) {
+      this.away = Math.max(this.away || 0, local.away || 0)
+      if (this.mode === 'focus' && this.paused == null && local.detour) Object.assign(this, { detour: local.detour, detourRang: local.detourRang })
+    }
     if (same && this._targetKey() === before.key) return null
     this._persist()
     this.hooks.focusPlan?.(this.boundary)
@@ -334,14 +340,16 @@ export class FocusTimer {
 
   // 這一段到點了，這台要不要先等一下（step 先不做，回傳 true）：開了同步時，到點由這一輪的主人做（記專注、換到休息），
   // 別台先等著：到點 PEEK_AT 後同步看一次，TAKE_OVER 後還沒消息（主人關著、睡著、斷線）才接手；看不到這一頁的不接手（回來時再說）。
-  // 主人準時到點就照做；晚了（剛睡醒、剛打開）先同步一次，別台已經接手了就換成那一份。同步一直沒回來最多等 HOLD_MAX
-  _hold(at) {
+  // 主人準時到點、剛同步過（fresh：開著看著的時候每 30 秒同步一次）就照做；晚了、很久沒同步（剛打開、剛睡醒、在背景很久）
+  // 先同步一次，別台已經接手、取消了就換成那一份。放太久的（expire）也一樣：剛同步過就照常回到待機，不然先同步再說。
+  // 同步一直沒回來最多等 HOLD_MAX
+  _hold(at, expire = false) {
     const sh = at == null ? null : this.hooks.shared?.()
     if (!sh) return false
     const now = Date.now()
-    if (sh.mine && now - at < OWNER_LATE) return false
+    if (sh.fresh && (expire || (sh.mine && now - at < OWNER_LATE))) return false
     const w = this._wait?.at === at ? this._wait : (this._wait = { at })
-    if (!sh.mine) {
+    if (!sh.mine && !expire) {
       if (this.hooks.pageAway?.()) return true
       if (now - at < TAKE_OVER) {
         if (now - at >= PEEK_AT && !w.peek) {
@@ -1420,8 +1428,8 @@ export class FocusTimer {
       return
     }
     let step = clock.due(this, Date.now())
-    // 開了同步、這一輪是別台開始的（或這台晚了）：先等一下，看那一台做了沒（見 _hold）。放太久的照常回到待機
-    const held = !!step && step.do !== 'expire' && this._hold(clock.nextEnd(this))
+    // 開了同步、這一輪是別台開始的（或這台晚了、很久沒同步）：先等一下，看那一台做了沒（見 _hold）
+    const held = !!step && this._hold(clock.nextEnd(this), step.do === 'expire')
     if (held) step = null
     // 限時去的時間到了：叫你回來（一次）。這一輪剛好也到點、放太久失效了的話，交給下面到點的那邊（不先叫一聲才結束）。
     // 另一個分頁已經叫過、已經回來了：照存著的，不再叫。叫的那邊說先不叫（Android 的 App 在背景：手機的那一則會叫）就等等再看

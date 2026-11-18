@@ -23,6 +23,15 @@ describe('跨裝置的計時', () => {
     }
   })
 
+  it('匯入、還原備份：計時照現在的樣子（檔案裡的是當時的，換過去的話別台會把那一輪接回來）', () => {
+    const store = new Store()
+    store.setTimer({ mode: 'idle', by: 'abc12345', v: 'now1' })
+    const old = JSON.parse(JSON.stringify(store.state))
+    old.timer = { mode: 'focus', by: 'abc12345', v: 'old1', endAt: Date.now() + 600000, sid: 's-old' }
+    store.replaceState(old)
+    expect(store.state.timer).toMatchObject({ mode: 'idle', v: 'now1' })
+  })
+
   it('存起來算這台改了資料（會同步出去）；同步拉回、重新讀檔都還在', () => {
     const store = new Store()
     let dirty = 0
