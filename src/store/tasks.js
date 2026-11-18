@@ -258,6 +258,36 @@ export const tasksMethods = {
     this._finish()
     return true
   },
+  // 排進某一天的某個時段（編輯面板、日程、今日總覽的「排進最近空檔」）：回傳撤銷用的紀錄（null＝沒排成）。
+  // 跟往後挪一樣記下排完的樣子，撤銷時認得出之後又改過
+  slotTask(id, date, at, dur) {
+    const t = this._find('tasks', id)
+    if (!t || t.done || floating(t) || !DATE_RE.test(date || '')) return null
+    const snap = (x) => ({ date: x.date, at: x.at ?? null, dur: x.dur ?? null, moved: x.moved || 0, star: !!x.star, first: !!x.first })
+    const undo = { id, ...snap(t) }
+    if (t.date !== date) this.updateTask(id, { date })
+    this.scheduleTask(id, at, dur)
+    if (!t.at) return null
+    undo.after = snap(t)
+    return undo
+  },
+  // 撤銷剛才的排進時段：日期、時段、長度、往後挪的次數、本命、先做這件都回到原本的樣子。
+  // 之後又改過（換了天、時段、長度，做完了）就不動，回傳 false
+  undoSlot(u) {
+    const t = u?.after && this._find('tasks', u.id)
+    if (!t || t.done || t.date !== u.after.date || (t.at ?? null) !== u.after.at || (t.dur ?? null) !== u.after.dur) return false
+    this._editedTask(t)
+    t.date = u.date
+    t.at = u.at
+    t.dur = u.dur
+    t.moved = Math.max(0, (t.moved || 0) - (u.after.moved - u.moved))
+    if (u.star && t.star === u.after.star && !floating(t) && t.date >= this.today) t.star = true
+    if (u.first && t.first === !!u.after.first && !floating(t) && t.date >= this.today) t.first = true
+    this._fitStar(t)
+    this._editedTask(t)
+    this._finish()
+    return true
+  },
   // 任務歸到（另一個）專案：在任務頁寫的紀錄跟著搬過去。只是移出專案時紀錄留在原本的專案，當成那個專案的進度
   // （之後放回來也還認得）。搬過去的紀錄不再指著原本專案的里程碑
   _gatherTaskLogs(t) {

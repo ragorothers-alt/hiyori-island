@@ -1131,7 +1131,8 @@ export async function createIsland(ctx) {
   let lastTalk = performance.now()
   addEventListener('pointerdown', () => (lastTalk = performance.now()))
   setInterval(() => {
-    if (document.hidden || duo.focusing) return
+    // 設定裡關了「小島上的閒聊和招呼」：不自己開口（點她們、做完事情時照常說）
+    if (document.hidden || duo.focusing || store.state.settings.chatOn === false) return
     if (performance.now() - lastTalk > 70000 && Math.random() < 0.5) {
       lastTalk = performance.now()
       // 小鎮有居民的話，有時換店長在自己店門口說一句

@@ -28,13 +28,24 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
 /* 版面：寬的時候三欄（進度＋一句話＋行程／前三要務／每日任務＋習慣），中等兩欄，窄的時候一欄 */
 /* 一欄（手機）：最上面是現在該做的、前三要務、今天的行程，進度和其他的往下排 */
 .td-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "now" "top" "sched" "prog" "quest" "habit" "ref" "quote"; }
+/* 晚上還沒回顧：今日反思排在「現在」下面 */
+.td-grid.eve { grid-template-areas: "now" "ref" "top" "sched" "prog" "quest" "habit" "quote"; }
 @container (min-width: 700px) {
   .td-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "now now" "prog quote" "top top" "sched sched" "quest habit" "ref ref"; }
+  .td-grid.eve { grid-template-areas: "now now" "ref ref" "prog quote" "top top" "sched sched" "quest habit"; }
 }
 @container (min-width: 920px) {
   .td-grid { grid-template-columns: 1.12fr .78fr 1.1fr; grid-template-areas: "now now sched" "prog quote sched" "top top sched" "quest habit habit" "ref ref ref"; }
+  .td-grid.eve { grid-template-areas: "now now sched" "ref ref sched" "prog quote sched" "top top sched" "quest habit habit"; }
   .td-sched { max-height: 760px; }
 }
+.td-ref-eve { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: -4px 0 10px; font-size: 13px; color: var(--ink-soft); }
+.td-ref.eve { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--sakura, #f19bb2) 55%, transparent), var(--lg-shadow, 0 8px 24px rgba(0, 0, 0, .06)); }
+/* 上週的回顧卡（新的一週，看過或收起來就不放） */
+.td-weekc { margin-bottom: 18px; }
+.td-weekc .td-h { margin-bottom: 6px; }
+.td-weekc-p { margin: 0 0 10px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+.td-weekc-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 /* 先記下的事：專注時冒出來的（沒有就不放），在格子上面一整條 */
 .td-park { margin-bottom: 18px; }
 .td-park .td-h { margin-bottom: 6px; }

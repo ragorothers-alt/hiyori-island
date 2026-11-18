@@ -772,6 +772,14 @@ body.night .dex-cell.unknown img { filter: brightness(0) invert(1) opacity(.16);
 .set-row > div { flex: 1; min-width: 0; }
 .set-row b { font-weight: 500; font-size: 13px; display: block; }
 .set-row small { font-size: max(var(--fmin), 11px); color: var(--ink-faint); line-height: 1.5; display: block; }
+/* 通知與提醒：四個總開關一組，「更多」裡是建議和鼓勵底下一項一項的開關（總開關關著時淡一點，照樣改得了） */
+.set-group-t { margin: 10px 2px 2px; font-size: 13px; font-weight: 600; color: var(--ink-soft); letter-spacing: .04em; }
+.set-group-t small { display: block; margin-top: 2px; font-size: max(var(--fmin), 11px); font-weight: 400; color: var(--ink-faint); letter-spacing: 0; }
+.set-more { display: grid; gap: 6px; margin: -2px 0 0 14px; padding-left: 10px; border-left: 2px solid var(--glass-border); }
+.set-more > summary { cursor: pointer; padding: 6px 4px; font-size: 12.5px; color: var(--ink-soft); list-style-position: inside; border-radius: 10px; }
+.set-more > summary small { margin-left: 6px; font-size: max(var(--fmin), 11px); color: var(--ink-faint); }
+.set-more > summary:focus-visible { outline: 2px solid var(--accent, #e58aa6); outline-offset: 2px; }
+.set-more.muted > .set-row { opacity: .6; }
 .sync-row { flex-direction: column; align-items: stretch; gap: 8px; }
 .backup-list { display: grid; gap: 6px; }
 .set-row b .bk-n { margin-left: 6px; font-family: var(--font-num); font-size: max(var(--fmin), 11px); font-weight: 500; color: var(--ink-faint); }

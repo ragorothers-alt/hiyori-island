@@ -201,6 +201,18 @@ describe('快速輸入解析', () => {
   })
 })
 
+describe('寫了時間的那一行原本想要多長（span）', () => {
+  it('跨過半夜的照原本的長度、沒寫結束的照寫的時長或一小時；日程本身照樣排在同一天；沒要 span 時不多給', () => {
+    const at = (text) => parseQuick(text, { today: TODAY, span: true })
+    expect(at('23:00-01:00 趕報告')).toMatchObject({ start: '23:00', end: '23:59', span: 120 })
+    expect(at('23:30 寫日記')).toMatchObject({ start: '23:30', end: '23:59', span: 60 })
+    expect(at('23:30 寫日記 90分鐘')).toMatchObject({ end: '23:59', span: 90 })
+    expect(at('15:00-16:30 開會')).toMatchObject({ end: '16:30', span: 90 })
+    expect(at('買牛奶').span).toBeUndefined()
+    expect(parseQuick('23:00-01:00 趕報告', { today: TODAY }).span).toBeUndefined()
+  })
+})
+
 describe('日曆上沒有的日子', () => {
   it('2/30、4/31、13/5 不當成日期，留在標題裡；2/28、2026-03-01 照常', () => {
     for (const text of ['2/30 繳費', '4/31 繳費', '13/5 繳費', '2027-02-30 繳費']) {

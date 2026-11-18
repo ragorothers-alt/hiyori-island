@@ -108,7 +108,8 @@ const layerZ = (el) => {
 }
 // 寫了時間的一行字（「明天 15:00 牙醫」）預設是日程；預覽上點一下可以改成「有時段的任務」（整天的、會重複的不行）
 const canSwap = (p, repeat = null) => p?.kind === 'event' && !p.allDay && !p.repeat && !repeat
-const asTimedTask = (p) => ({ ...p, kind: 'task', at: p.start, dur: Math.max(5, Math.min(600, toMin(p.end) - toMin(p.start))), start: null, end: null })
+// 長度照原本想要的（「23:00 到 1:00」兩小時、沒寫結束一小時；parseQuick 的 span），最多 10 小時
+const asTimedTask = (p) => ({ ...p, kind: 'task', at: p.start, dur: Math.max(5, Math.min(600, p.span ?? toMin(p.end) - toMin(p.start))), start: null, end: null })
 // 預覽的小標籤：有時段的任務寫成「任務・15:00」；可以換的時候後面多一顆換的按鈕
 const quickChips = (p, today, asTask) => {
   const q = asTask ? asTimedTask(p) : p
@@ -200,7 +201,7 @@ export class UI {
     // 快速記錄：加在今天（字裡寫了日期就照寫的），不跟著上面選的日期走
     this.capture = new CaptureView($('#capture'), {
       preview: (text, asTask = false) => {
-        const p = parseQuick(text, { today: store.today, projects: store.activeProjects() })
+        const p = parseQuick(text, { today: store.today, projects: store.activeProjects(), span: true })
         if (!p.title) return []
         const task = asTask && canSwap(p)
         const chips = quickChips(p, store.today, task)
@@ -209,7 +210,7 @@ export class UI {
         return chips
       },
       // 這一行字可以在日程和有時段的任務之間換嗎
-      canSwap: (text) => canSwap(parseQuick(text, { today: store.today, projects: store.activeProjects() })),
+      canSwap: (text) => canSwap(parseQuick(text, { today: store.today, projects: store.activeProjects(), span: true })),
       // 剛過午夜、每秒的 tick 還沒跑到：先換日再記，不然會記到昨天
       add: (text, asTask = false) => {
         store.tick()
@@ -329,6 +330,11 @@ export class UI {
       snoozeIdle: (id) => this.snoozeIdle(id),
       openTask: (pid, tid) => this.openProject(pid, undefined, tid),
       agentCard: () => this.agentCard || null,
+      // 晚上還沒回顧：今日反思移到最上面；「之後再說」放回原位
+      reviewEve: () => this.reviewEve(),
+      reviewLater: () => this.reviewLater(),
+      // 新的一週：上週的回顧卡（看過、收起來就不放）
+      weekDue: () => this.store.weekCardDue(),
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
     this._project = lazy(() =>
@@ -756,7 +762,7 @@ export class UI {
     const since = this._awaySince()
     const yesterday = addDays(today, -1)
     const days = [-3, -2, -1, 0].map((n) => addDays(today, n))
-    const on = s.state.settings.stuckNudge
+    const on = s.nudge('stuckNudge')
     const stuck = on ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
     const idle = this.idleTasks()[0]
     // 範例不算進摘要（只在最上面說一聲島上的是範例）
@@ -789,7 +795,7 @@ export class UI {
   // 正在專注、有別的視窗開著、正在打字、分頁在背景時不出來（也不算看過），之後再回來時才說
   maybeShowBrief() {
     const s = this.store
-    if (s.state.settings.brief === false || this.brief.open || document.hidden) return false
+    if (!s.nudge('brief') || this.brief.open || document.hidden) return false
     // 開著過了午夜：先換到新的一天，說的才是新的一天（日期和內容是同一天）
     s.tick()
     if (readLocal(BRIEF_KEY, '') === s.today) return false
@@ -1325,7 +1331,7 @@ export class UI {
   //   sub：加到哪裡的一句話（快速記錄列出來用）；undo()：拿掉剛加的；toasts：任務頁要跳的提示
   quickAdd(raw, { base = this.store.selectedDate, repeat: picked = null, project: pickedProj = null, asTask = false } = {}) {
     const s = this.store
-    let p = parseQuick(raw, { today: s.today, projects: s.activeProjects() })
+    let p = parseQuick(raw, { today: s.today, projects: s.activeProjects(), span: true })
     if (!p.title) return null
     // 預覽上點了「改成任務」：寫了時間的那一行記成有時段的任務
     if (asTask && canSwap(p, picked)) p = asTimedTask(p)
@@ -1368,11 +1374,22 @@ export class UI {
       task: !repeat && made ? made.id : null,
       icon: repeat ? '↻' : '種', title: p.title, toasts,
       sub: [repeat ? '例行任務' : '任務', p.at ? `${day} ${p.at}` : day, tagOf(t.tag).label, proj && !repeat ? proj.name : ''].filter(Boolean).join('・'),
-      undo: made ? () => (repeat ? this._undoRoutine(made.id) : s.deleteTask(made.id)) : null,
+      undo: made ? (repeat ? () => this._undoRoutine(made.id) : this._undoAdd(made)) : null,
     }
   }
   // 復原剛加的例行公事：連它已經產生、還沒做的那幾件一起拿掉。
   // （deleteRoutine 會把今天以前的留著當紀錄：加完跨了午夜才按復原，昨天那件會變成逾期）
+  // 撤銷剛記下的任務：之後改過（改名、做完、排了時間、加了子任務）就留著，說一聲
+  _undoAdd(made) {
+    const snap = JSON.stringify(made)
+    const id = made.id
+    return () => {
+      const cur = this.store.state.tasks.find((t) => t.id === id)
+      if (!cur) return
+      if (JSON.stringify(cur) !== snap) return this.toast({ icon: '種', title: '記下之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
+      this.store.deleteTask(id)
+    }
+  }
   _undoRoutine(id) {
     const s = this.store
     s.deleteRoutine(id)
@@ -1446,7 +1463,7 @@ export class UI {
   _renderQuickPreview() {
     const box = $('#quickPreview')
     const v = $('#taskTitle').value
-    const p = v.trim() ? parseQuick(v, { today: this.store.today, projects: this.store.activeProjects() }) : null
+    const p = v.trim() ? parseQuick(v, { today: this.store.today, projects: this.store.activeProjects(), span: true }) : null
     // 寫了時間的那一行：可以點一下改成有時段的任務（換成別的字、不能換了就回到預設）
     const swap = canSwap(p, this._repeatValue('#taskRepeat'))
     if (!swap) this.quickAsTask = false
@@ -1860,7 +1877,12 @@ export class UI {
     const s = this.store
     const t = s.state.tasks.find((x) => x.id === id)
     if (!t) return
-    if (t.date !== s.selectedDate && !floating(t)) s.selectDate(t.date < s.today ? s.today : t.date)
+    this._calendar.view?.close()
+    // 長期的不在每天的清單上：打開專案裡的那一件
+    if (floating(t) && t.project) return this.openProject(t.project, undefined, t.id)
+    // 還沒做完的過去任務在今天的「逾期」裡；做完的在那一天
+    const day = !t.done && t.date < s.today ? s.today : t.date
+    if (day !== s.selectedDate) s.selectDate(day)
     this.setTab('tasks')
     this.subsView.set(id, true)
     this.renderTasks()
@@ -1871,7 +1893,7 @@ export class UI {
     })
   }
   // 排進時段之後：說排在哪裡，可以看位置、撤銷（回到原本的日子和時段）
-  scheduled(id, prev) {
+  scheduled(id, undo) {
     const s = this.store
     const t = s.state.tasks.find((x) => x.id === id)
     if (!t?.at) return
@@ -1880,13 +1902,7 @@ export class UI {
       icon: '時', title: `排在${day} ${t.at}`, sub: `${t.title}・${fmtDur(taskDur(t))}`, ms: 6000, tag: 'scheduled',
       actions: [
         { label: '看位置', soft: true, run: () => this.showOnTimeline(id) },
-        {
-          label: '撤銷', soft: true,
-          run: () => {
-            if (prev.date && prev.date !== t.date) s.updateTask(id, { date: prev.date })
-            s.scheduleTask(id, prev.at, prev.dur)
-          },
-        },
+        { label: '撤銷', soft: true, run: () => s.undoSlot(undo) || this.toast({ icon: '時', title: '排好之後又改過了', sub: '就留著現在的樣子', ms: 3400 }) },
       ],
     })
   }
@@ -1894,6 +1910,8 @@ export class UI {
   showOnTimeline(id) {
     const t = this.store.state.tasks.find((x) => x.id === id)
     if (!t) return
+    // 月曆蓋在上面的話先收起來
+    this._calendar.view?.close()
     this.store.selectDate(t.date)
     this.setTab('schedule')
     requestAnimationFrame(() => {
@@ -2076,7 +2094,7 @@ export class UI {
   _renderStuck(isToday) {
     const s = this.store
     const box = $('#stuckBox')
-    const st = isToday && s.state.settings.stuckNudge ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
+    const st = isToday && s.nudge('stuckNudge') ? s.stuckTasks(new Set(readLocal(STUCK_OFF_KEY, [])))[0] : null
     if (!st) return this._renderIdle(box, isToday)
     const t = st.task
     const why = st.moved >= 2 ? `已經往後挪了 ${st.moved} 次` : `已經逾期 ${st.late} 天`
@@ -2099,7 +2117,7 @@ export class UI {
   // ふじ每天開口一次。跟卡關提醒共用設定裡的開關
   idleTasks() {
     const s = this.store
-    if (!s.state.settings.stuckNudge) return []
+    if (!s.nudge('stuckNudge')) return []
     const off = readLocal(IDLE_OFF_KEY, {})
     return s.idleLongTasks(IDLE_DAYS, new Set(Object.keys(off).filter((id) => off[id] > s.today)))
   }
@@ -2194,7 +2212,7 @@ export class UI {
     }).join('')
     let msg
     if (s.selectedDate === s.today && s.peekDay(s.today).starAll) msg = '本命全清，今天很棒'
-    else if (stars.length < MAX_STARS) msg = `按任務旁的 ☆ 選出最重要的 ${MAX_STARS} 件・完成雙倍 XP`
+    else if (stars.length < MAX_STARS) msg = touchUI() ? `點任務、按「★ 本命」選出最重要的 ${MAX_STARS} 件・完成雙倍 XP` : `按任務旁的 ☆ 選出最重要的 ${MAX_STARS} 件・完成雙倍 XP`
     else if (done < MAX_STARS) msg = `全部完成再 +${XP.starAll} XP`
     else msg = '本命全清'
     bar.hidden = false
@@ -2778,6 +2796,17 @@ export class UI {
     $('#hapticInfo').textContent = IOS
       ? '打勾、選本命、開始專注時輕輕震一下（iPhone 只有部分 iOS 版本震得動・只改這台裝置）'
       : '打勾、選本命、全部完成、番茄鐘到點時手機輕輕震一下（只改這台裝置）'
+    // 通知與提醒的四個總開關；「更多」裡的那幾項在總開關關著時看得到、改得了，只是先不說
+    const st = this.store.state.settings
+    const master = (id, on) => {
+      setOn($(id), on)
+      $(id).textContent = on ? '開' : '關'
+    }
+    master('#remindOnBtn', st.remindOn !== false)
+    master('#nudgeOnBtn', st.nudgeOn !== false)
+    master('#chatOnBtn', st.chatOn !== false)
+    master('#mottoOnBtn', this.store.mottoOn())
+    $('#nudgeMore').classList.toggle('muted', st.nudgeOn === false)
     const stuck = this.store.state.settings.stuckNudge
     setOn($('#stuckBtn'), stuck)
     $('#stuckBtn').textContent = stuck ? '開' : '關'
@@ -3122,16 +3151,19 @@ export class UI {
     if ($('#weekModal').hidden) return
     $('#weekModal').hidden = true
     // 只有上週那張算「看過了」（每週一自動跳出的那張）
-    if (this.weekOpen === addDays(weekKey(this.store.today), -7)) this.store.seenWeekCard()
+    if (this.weekOpen === addDays(weekKey(this.store.today), -7)) {
+      this.store.seenWeekCard()
+      // 總覽上那張上週的回顧卡跟著收起來
+      this.dropToasts('week')
+      if (this.tab === 'today') this.today.render()
+    }
     this.hooks.modalClosed?.()
   }
 
-  // 新的一週第一次打開：如果上週有在用，就給一張回顧卡（其他視窗開著時先不打擾）
-  maybeShowWeekCard() {
-    // 正在快速記錄：不要蓋上去打斷（下次打開再出來）
-    if (!this.store.weekCardDue() || !$('#levelModal').hidden || !$('#reviewModal').hidden || this.capture?.isOpen) return false
-    this.openWeekCard()
-    return true
+  // 新的一週、上週有在用：總覽上放一張上週的回顧卡（不再自己跳成對話框），main.js 再說一則提示。
+  // 現在能說嗎：別的視窗開著、正在快速記錄時先不說
+  weekDue() {
+    return this.store.weekCardDue() && $('#levelModal').hidden && $('#reviewModal').hidden && $('#weekModal').hidden && !this.capture?.isOpen
   }
 
   // ── 晚間回顧 ──
@@ -3195,19 +3227,44 @@ export class UI {
     $('#reviewModal').hidden = true
   }
 
-  // 晚上 9 點後、今天還沒寫、也沒按「之後再說」時，邀請回顧
-  maybeAskReview() {
+  // 晚上 9 點後、今天還沒寫、也沒按「之後再說」：總覽把今日反思移到最上面（不再自己跳成對話框），main.js 再說一則提示
+  reviewEve() {
     const s = this.store
     if (new Date().getHours() < 21 || s.state.journal[s.today]) return false
     let later = null
     try {
       later = localStorage.getItem('hiyori-review-later')
     } catch {}
-    if (later === s.today || !$('#reviewModal').hidden || !$('#levelModal').hidden || this.capture?.isOpen) return false
-    // 今日摘要先說（還開著、或今天還沒說過）：回顧等它關掉，下一分鐘再問
-    if (this.brief.open || this.maybeShowBrief()) return false
-    this.openReview()
-    return true
+    return later !== s.today
+  }
+  // 現在能說嗎：回顧、升級的視窗開著、正在快速記錄時先不說；今日摘要先說（還開著、或今天還沒說過），下一分鐘再看
+  reviewDue() {
+    if (!this.reviewEve() || !$('#reviewModal').hidden || !$('#levelModal').hidden || this.capture?.isOpen) return false
+    return !(this.brief.open || this.maybeShowBrief())
+  }
+  // 每分鐘：晚上回顧該不該排到最上面換了（過了 9 點、跨了日）就重畫總覽
+  tickEve() {
+    const eve = this.reviewEve()
+    if (eve === this._eve) return
+    this._eve = eve
+    if (this.tab === 'today') this.today.render()
+  }
+  reviewLater() {
+    try {
+      localStorage.setItem('hiyori-review-later', this.store.today)
+    } catch {}
+    this.dropToasts('review')
+    if (this.tab === 'today') this.today.render()
+  }
+  // 提示卡上的「寫回顧」：App 模式到總覽，焦點放在今日反思的天氣上；小島模式打開回顧的視窗
+  goReview() {
+    if (!this.appMode) return this.openReview()
+    this.setTab('today')
+    requestAnimationFrame(() => {
+      const card = $('#todayRoot .td-ref')
+      card?.scrollIntoView({ block: 'start', behavior: scrollMode() })
+      ;($('.td-mood.on', card) || $('.td-mood', card))?.focus({ preventScroll: true })
+    })
   }
 
   _bindRecords() {
@@ -3262,6 +3319,32 @@ export class UI {
       haptic('done')
       this.renderSettings()
     }
+    // 通知與提醒的四個總開關
+    $('#remindOnBtn').onclick = () => {
+      this.store.setSetting('remindOn', this.store.state.settings.remindOn === false)
+      this.renderSettings()
+    }
+    $('#nudgeOnBtn').onclick = () => {
+      const on = this.store.state.settings.nudgeOn === false
+      this.store.setSetting('nudgeOn', on)
+      // 關掉時已經在畫面上的建議收起來
+      if (!on) for (const tag of ['back', 'next', 'review', 'week', 'fuji-notes']) this.dropToasts(tag)
+      this.renderSettings()
+      this.renderTasks()
+      if (this.tab === 'today') this.today.render()
+    }
+    $('#chatOnBtn').onclick = () => {
+      this.store.setSetting('chatOn', this.store.state.settings.chatOn === false)
+      this.renderSettings()
+    }
+    $('#mottoOnBtn').onclick = () => {
+      this.store.setMottoOn(!this.store.mottoOn())
+      if (!this.store.mottoOn()) this.dropToasts('motto')
+      this.mottoBar?.render()
+      this.renderSettings()
+    }
+    // 警語怎麼提醒（間隔、念哪幾句）：捲到同一頁上警語的那一區
+    $('#mottoSetBtn').onclick = () => $('#mottoRoot').scrollIntoView({ block: 'start', behavior: scrollMode() })
     $('#stuckBtn').onclick = () => {
       this.store.setSetting('stuckNudge', !this.store.state.settings.stuckNudge)
       this.renderSettings()

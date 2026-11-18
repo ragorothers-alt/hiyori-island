@@ -73,10 +73,14 @@ function readTime(match, offset, evening = false, inherit = null) {
 }
 
 // projects：[{ id, name }]，給「@專案名」對照用（打開頭幾個字就夠）
-export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
+// span：多給一個 span（原本想要幾分鐘：「23:00 到 1:00」是兩小時、沒寫結束是寫的時長或一小時）。
+// 日程只能排在同一天（結束最晚 23:59），改成有時段的任務時照這個算長度
+export function parseQuick(input, { today = dateStr(), projects = [], span = false } = {}) {
   let text = ` ${input} `
   // 對到專案時才會多 project（id）和 projectName
   const out = { title: '', kind: 'task', date: null, start: null, end: null, priority: null, tag: null, repeat: null, star: false, chips: [] }
+  // 寫了時間的那一行原本想要幾分鐘（見上面的 span）
+  let want = null
   const take = (re, fn) => {
     text = text.replace(re, (...m) => {
       const r = fn(...m)
@@ -217,6 +221,7 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
         start -= 1440
         if (end >= 1440) end -= 1440
       }
+      want = end > start ? end - start : end < start ? end + 1440 - start : 60
       // 結束在半夜：那天的最後一分鐘
       if (end >= 1440) end = 1439
       if (end <= start) end = Math.min(start + 60, 1439)
@@ -251,7 +256,8 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
   }
   if (out.start != null && out.end == null) {
     const dur = takeDur(/(\d+)\s*(?:分鐘|分钟|min|m)(?![a-z])/gi) ?? 60
-    out.end = Math.min(out.start + Math.max(5, dur), 1439)
+    want = Math.max(5, dur)
+    out.end = Math.min(out.start + want, 1439)
   }
 
   // 沒有時間的任務：「寫報告 1.5小時」「回信 20分鐘」當作預估時間（排時段用）。
@@ -274,6 +280,7 @@ export function parseQuick(input, { today = dateStr(), projects = [] } = {}) {
   }
   // 截止日只有任務有
   if (out.kind === 'event') delete out.due
+  if (span && out.kind === 'event' && want != null) out.span = want
   out.title = text.replace(/\s+/g, ' ').replace(/^[\s,，、:：]+|[\s,，、:：]+$/g, '').trim()
   return out
 }

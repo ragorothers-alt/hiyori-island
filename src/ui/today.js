@@ -173,15 +173,21 @@ export class TodayView {
       // 排進眼前這段空檔：提示卡說排在哪裡，可以看位置、撤銷
       case 'slot': {
         const t = s.state.tasks.find((x) => x.id === id)
-        const prev = t && { date: t.date, at: t.at, dur: t.dur }
-        s.updateTask(id, { at: b.dataset.v })
-        return prev && this.hooks.scheduled?.(id, prev)
+        const u = t && s.slotTask(id, t.date < s.today ? s.today : t.date, b.dataset.v)
+        return u && this.hooks.scheduled?.(id, u)
       }
       case 'mood':
         this.refMood = b.dataset.v
         this.refDate = s.today
         return this.render()
       case 'refSave': return this._saveRef()
+      // 晚上的回顧：「之後再說」今日反思回到原本的位置
+      case 'review-later': return this.hooks.reviewLater?.()
+      // 上週的回顧卡：看看（看完就算看過了）、收起來
+      case 'week-open': return this.hooks.openWeekCard?.()
+      case 'week-seen':
+        s.seenWeekCard()
+        return this.render()
       // 明天先做的那一件：挑一件（再挑別件就換過去）、把今天沒做完的挪過去當成那一件、換一件、不挑了
       case 'first':
         this.firstEdit = false
@@ -289,20 +295,25 @@ export class TodayView {
     const agEl = this.hooks.agentCard?.()?.el || null
     const agFocus = agEl?.contains(a) ? a : null
     const agCaret = agFocus?.matches('input') ? [agFocus.selectionStart, agFocus.selectionEnd] : null
+    // 晚上還沒回顧：今日反思移到「現在」下面（畫面上和 Tab 的順序都是）
+    const eve = !!this.hooks.reviewEve?.()
+    const ref = this._refHTML(today, eve)
     this.root.innerHTML = `<div class="td${this._drawn ? '' : ' td-enter'}">
       ${this._heroHTML(today, tasks, now)}
       <div data-slot="agent"></div>
+      ${this._lastWeekHTML()}
       ${this._parkHTML()}
       ${this._firstHTML(today, tasks, nowMin)}
-      <div class="td-grid">
+      <div class="td-grid${eve ? ' eve' : ''}">
         ${this._nowHTML(today, tasks, nowMin)}
+        ${eve ? ref : ''}
         ${this._topHTML(today, tasks)}
         ${this._schedHTML(today, tasks, nowMin)}
         ${this._progHTML(tasks, nowMin)}
         ${this._quoteHTML(today)}
         ${this._questHTML()}
         ${this._habitHTML(today)}
-        ${this._refHTML(today)}
+        ${eve ? '' : ref}
       </div>
     </div>`
     this._drawn = true
@@ -801,7 +812,21 @@ export class TodayView {
   }
 
   // ── 今日反思：選今天的天氣、寫幾句話（就是晚間回顧那一篇，第一次記下有經驗值） ──
-  _refHTML(today) {
+  // 新的一週：上週的回顧卡（以前會自己跳成對話框）。看看＝打開那張卡；收起來＝這週不再放
+  _lastWeekHTML() {
+    if (!this.hooks.weekDue?.()) return ''
+    const s = this.store
+    const wk = addDays(weekKey(s.today), -7)
+    const w = s.weekSummary(wk)
+    const nums = [w.tasks ? `${w.tasks} 朵花綻放` : '', w.focus ? `專注 ${w.focus} 分鐘` : '', w.activeDays ? `${w.activeDays} 天有前進` : ''].filter(Boolean).join('・')
+    return `<section class="td-card td-weekc" aria-label="上週的回顧">
+      <header class="td-h">${IC.cal}<h3>上週的回顧<small>せんしゅうのふりかえり</small></h3></header>
+      <p class="td-weekc-p">${esc(nums || '上週的心情和一點點前進')}</p>
+      <div class="td-weekc-acts"><button type="button" class="btn-primary" data-act="week-open" data-fk="week-open">看看</button><button type="button" class="btn-ghost" data-act="week-seen" data-fk="week-seen">收起來</button></div>
+    </section>`
+  }
+
+  _refHTML(today, eve = false) {
     const s = this.store
     const saved = s.state.journal[today]
     const mood = this._refMood() || saved?.mood || null
@@ -814,8 +839,9 @@ export class TodayView {
       : saved
         ? '晚上的回顧也是這一篇；紀錄頁的小日記和日曆上看得到'
         : `第一次記下 +${XP.review} XP・Ctrl＋Enter 也可以記下`
-    return `<section class="td-card td-ref${pending ? ' dirty' : ''}" aria-label="今日反思">
+    return `<section class="td-card td-ref${pending ? ' dirty' : ''}${eve ? ' eve' : ''}" aria-label="今日反思">
       <header class="td-h">${IC.pen}<h3>今日反思<small>きょうのふりかえり</small></h3>${stamp}</header>
+      ${eve ? '<p class="td-ref-eve">晚上了，回顧一下今天吧<button type="button" class="td-link" data-act="review-later" data-fk="review-later">之後再說</button></p>' : ''}
       ${this._backHTML(today)}
       <div class="td-moods" role="group" aria-label="今天的天氣（心情）">${moods}</div>
       <textarea class="td-ref-text" data-fk="ref-text" data-day="${today}" rows="3" maxlength="${REVIEW_TEXT}" aria-label="今日反思"

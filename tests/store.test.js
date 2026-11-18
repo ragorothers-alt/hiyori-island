@@ -1473,6 +1473,72 @@ describe('晚間回顧', () => {
   })
 })
 
+describe('排進時段的撤銷', () => {
+  it('排到別天的時段：撤銷時日期、時段、長度、挪的次數、本命都回到原本的樣子', () => {
+    const t = store.addTask({ title: '寫報告', date: TODAY, dur: 30 })
+    store.toggleStar(t.id)
+    const tmr = addDays(TODAY, 1)
+    const u = store.slotTask(t.id, tmr, '14:00', 60)
+    expect(store.state.tasks.find((x) => x.id === t.id)).toMatchObject({ date: tmr, at: '14:00', dur: 60, moved: 1 })
+    expect(store.undoSlot(u)).toBe(true)
+    expect(store.state.tasks.find((x) => x.id === t.id)).toMatchObject({ date: TODAY, at: null, dur: 30, moved: 0, star: true })
+  })
+
+  it('排好之後又改過（換了時段、做完了）：撤銷不動，回傳 false', () => {
+    const t = store.addTask({ title: '回信', date: TODAY })
+    const u = store.slotTask(t.id, TODAY, '10:00', 30)
+    store.scheduleTask(t.id, '16:00')
+    expect(store.undoSlot(u)).toBe(false)
+    expect(store.state.tasks.find((x) => x.id === t.id).at).toBe('16:00')
+    const u2 = store.slotTask(t.id, TODAY, '11:00', 30)
+    store.toggleTask(t.id)
+    expect(store.undoSlot(u2)).toBe(false)
+    expect(store.state.tasks.find((x) => x.id === t.id).at).toBe('11:00')
+    // 做完的、長期的不排
+    expect(store.slotTask(t.id, TODAY, '12:00', 30)).toBeNull()
+  })
+})
+
+describe('通知與提醒的總開關', () => {
+  it('建議和鼓勵：總開關關著時底下每一項都不說，各自的開關留著；打開總開關就回到原本的樣子', () => {
+    store.setSetting('backNudge', false)
+    expect(store.nudge()).toBe(true)
+    expect(store.nudge('backNudge')).toBe(false)
+    expect(store.nudge('nextNudge')).toBe(true)
+    store.setSetting('nudgeOn', false)
+    expect(['brief', 'nextNudge', 'stuckNudge'].map((k) => store.nudge(k))).toEqual([false, false, false])
+    expect(store.nudge()).toBe(false)
+    store.setSetting('nudgeOn', true)
+    expect([store.nudge('backNudge'), store.nudge('nextNudge')]).toEqual([false, true])
+    // 舊的存檔沒有這幾個：當成開著
+    const other = new Store()
+    other.importJSON(JSON.stringify({ ...JSON.parse(store.exportJSON()), settings: { backNudge: true } }))
+    expect([other.state.settings.remindOn, other.state.settings.nudgeOn, other.state.settings.chatOn]).toEqual([true, true, true])
+  })
+
+  it('警語：關掉時三樣都關、記下原本的樣子，打開時放回去；沒記過（或記的也是關著）用預設', () => {
+    Object.assign(store.state.settings, { mottoEvery: 30, catMotto: 0, mottoBar: true })
+    expect(store.mottoOn()).toBe(true)
+    store.setMottoOn(false)
+    expect(store.state.settings).toMatchObject({ mottoEvery: 0, catMotto: 0, mottoBar: false })
+    expect(store.mottoOn()).toBe(false)
+    // 記下的跟著存檔（換一台裝置、匯入也記得）
+    const other = new Store()
+    other.importJSON(store.exportJSON())
+    other.setMottoOn(true)
+    expect(other.state.settings).toMatchObject({ mottoEvery: 30, catMotto: 0, mottoBar: true })
+    store.setMottoOn(true)
+    expect(store.state.settings).toMatchObject({ mottoEvery: 30, catMotto: 0, mottoBar: true })
+    // 已經開著：不動
+    store.setMottoOn(true)
+    expect(store.state.settings.mottoEvery).toBe(30)
+    // 一樣一樣自己關掉的（沒經過總開關）：打開總開關用預設
+    Object.assign(store.state.settings, { mottoEvery: 0, catMotto: 0, mottoBar: false, mottoWasEvery: 0, mottoWasCat: -1, mottoWasBar: false })
+    store.setMottoOn(true)
+    expect(store.state.settings).toMatchObject({ mottoEvery: 60, catMotto: 15, mottoBar: true })
+  })
+})
+
 describe('範例資料', () => {
   const fresh = () => {
     localStorage.clear()

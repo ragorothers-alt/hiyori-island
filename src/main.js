@@ -1,5 +1,5 @@
 import './styles.css'
-import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey } from './store.js'
 import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
@@ -110,7 +110,7 @@ async function boot() {
   store.on('dateChanged', () =>
     setTimeout(() => {
       ui.maybeShowBrief()
-      ui.afterBrief(() => ui.maybeShowWeekCard())
+      ui.afterBrief(() => askWeek())
     }, 3000),
   )
   // 在背景打開的、鎖著過了一天的：回到 App 時才說
@@ -156,6 +156,114 @@ async function boot() {
     for (let d = dateStr(new Date(now)), k = 0; d <= to && k < 4; d = addDays(d, 1), k++) out.push(...eventQuiet(store.timedEventsOn(d).filter((e) => !store.isSample(e)), d))
     return out
   }
+  // ── 建議類的提示：回來了、下一件、卡關、好久沒碰、截止日的風險、晚上回顧、上週的回顧卡、要不要通知 ──
+  // 時間到的提醒（日程、就寢、截止日當天…）、警語照自己的規則；ふじ做了什麼的提示卡、按了按鈕之後的回應不算。
+  // 打字中、專注中不跳（wait 給了的話等停下來再說，等太久就算了）；兩則之間至少隔 SUGGEST_GAP，一天最多 SUGGEST_MAX 則；
+  // 設定裡「建議和鼓勵」關掉就都不說。記在這台裝置（每台各自算）；瀏覽器空間滿了存不進去時記在記憶體
+  const SUGGEST_GAP = 20 * 60000
+  const SUGGEST_MAX = 6
+  const SUGGEST_KEY = 'hiyori-suggest'
+  let suggestMem = { day: '', n: 0, at: 0 }
+  const suggestLog = () => {
+    try {
+      const v = JSON.parse(localStorage.getItem(SUGGEST_KEY) || 'null')
+      // 兩邊取比較新的（記憶體裡的可能是存不進去的那幾次）
+      if (v && typeof v.day === 'string' && Number.isFinite(v.n) && Number.isFinite(v.at)) return v.at >= suggestMem.at ? v : suggestMem
+    } catch {}
+    return suggestMem
+  }
+  // 最後一次在輸入框裡按鍵的時間
+  let lastKey = 0
+  addEventListener('keydown', (e) => e.target?.closest?.('input, textarea, [contenteditable]') && (lastKey = Date.now()), { capture: true })
+  addEventListener('input', () => (lastKey = Date.now()), { capture: true })
+  // 正在打字：焦點在輸入框裡，而且框裡有字、或幾秒內才按過鍵（點進空的框就走開了不算）
+  const typing = () => {
+    const a = document.activeElement
+    if (!a?.closest?.('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]), textarea, [contenteditable]')) return false
+    return !!String(a.value ?? a.textContent ?? '').trim() || Date.now() - lastKey < 8000
+  }
+  const suggestBusy = () => typing() || ui.focus.mode === 'focus'
+  // 現在能說一則嗎（不管打字、專注；只看開關、間隔、今天的則數）
+  const suggestRoom = (now = Date.now()) => {
+    if (!store.nudge()) return false
+    const m = suggestLog()
+    const n = m.day === store.today ? m.n : 0
+    return n < SUGGEST_MAX && Math.abs(now - m.at) >= SUGGEST_GAP
+  }
+  // 等著的那一則（一次只等一則，新的換掉舊的）
+  let suggestHeld = null
+  // show() 回傳 false 是說不出來了（那一件做完了、條件不成立）：不算一則。回傳有沒有說
+  const suggest = (kind, show, wait = 0) => {
+    if (!store.nudge()) return false
+    const now = Date.now()
+    if (suggestBusy()) {
+      if (wait) suggestHeld = { kind, show, until: now + wait }
+      return false
+    }
+    if (!suggestRoom(now)) return false
+    if (show() === false) return false
+    if (suggestHeld?.kind === kind) suggestHeld = null
+    const m = suggestLog()
+    suggestMem = { day: store.today, n: (m.day === store.today ? m.n : 0) + 1, at: now }
+    try {
+      localStorage.setItem(SUGGEST_KEY, JSON.stringify(suggestMem))
+    } catch {}
+    return true
+  }
+  // 每秒看一次：停下來了（不在打字、沒在專注）就說等著的那一則；等太久的算了
+  const suggestRetry = () => {
+    const h = suggestHeld
+    if (!h) return
+    if (Date.now() > h.until) return (suggestHeld = null)
+    if (suggestBusy()) return
+    suggestHeld = null
+    suggest(h.kind, h.show)
+  }
+  // 卡關、好久沒碰的那一句只是那張小卡的旁白：能說的時候才說，不佔間隔、不算則數
+  const aside = (fn) => store.nudge() && !suggestBusy() && suggestRoom() && fn()
+  // 晚上回顧、上週的回顧卡：不再自己跳成對話框。總覽上放一張卡（晚上把今日反思移到最上面、新的一週放上週的回顧卡），
+  // 再說一則提示（建議類的一則；回顧一天一次、回顧卡一週一次，說不出來的話之後每分鐘再看）
+  const REVIEW_ASKED_KEY = 'hiyori-review-asked'
+  const WEEK_ASKED_KEY = 'hiyori-week-asked'
+  const askedOn = (key, v) => {
+    try {
+      return localStorage.getItem(key) === v
+    } catch {
+      return false
+    }
+  }
+  const markAsked = (key, v) => {
+    try {
+      localStorage.setItem(key, v)
+    } catch {}
+  }
+  const askReview = () => {
+    if (askedOn(REVIEW_ASKED_KEY, store.today) || !ui.reviewDue()) return false
+    return suggest('review', () => {
+      if (ui._topLayer() || !ui.reviewDue()) return false
+      markAsked(REVIEW_ASKED_KEY, store.today)
+      ui.toast({
+        icon: '筆', title: '今天過得怎麼樣？', sub: ui.appMode ? '在總覽的今日反思選個天氣、寫兩句就好' : '選個天氣、寫兩句就好', ms: 12000, tag: 'review',
+        actions: [{ label: '寫回顧', run: () => ui.goReview() }, { label: '之後再說', soft: true, run: () => ui.reviewLater() }],
+      })
+    })
+  }
+  const askWeek = () => {
+    const wk = weekKey(store.today)
+    if (askedOn(WEEK_ASKED_KEY, wk) || !ui.weekDue()) return false
+    return suggest('week', () => {
+      if (ui._topLayer() || ui.brief.open || !ui.weekDue()) return false
+      markAsked(WEEK_ASKED_KEY, wk)
+      ui.toast({ icon: '週', title: '上週的回顧卡好了', sub: '做了多少、哪天最充實，總覽上也看得到', ms: 12000, tag: 'week', actions: [{ label: '看看', run: () => ui.openWeekCard() }] })
+    })
+  }
+  // 寫著「現在該做」的提示卡（回來了、下一件、警語）同時只留一張：新的出來時收掉其他兩種
+  const NOW_TAGS = ['back', 'next', 'motto']
+  const nowToast = (opts) => {
+    for (const tag of NOW_TAGS) if (tag !== opts.tag) ui.dropToasts(tag)
+    ui.toast(opts)
+  }
+
   // ── 回來了，現在該做：離開 App 一陣子（BACK_MIN）才回來、沒在計時（專注、休息、暫停都不算）、醒著、不在日程中、警語沒先停：
   // 提示卡寫現在該做的那一件（和下一步），一鍵開始專注或只做 5 分鐘，ふじ說一聲。剛從別的事回來的那一刻最好接回正事。
   // 今天第一次打開有今日摘要（裡面就寫了），不再說；BACK_GAP 內只說一次（切來切去不會一直跳）；設定裡可以關 ──
@@ -172,18 +280,25 @@ async function boot() {
     const st = store.state.settings
     // 頁面又看不到了（剛回來又馬上切走、Android 的 App 已經在背景）：不說，也不算說過
     if (!backReady || document.hidden || (native && nativeAway())) return false
-    if (st.backNudge === false || ui.awayMs() < BACK_MIN || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer()) return false
+    if (!store.nudge('backNudge') || ui.awayMs() < BACK_MIN || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer()) return false
     const p = pauseOf(st)
     if (!awakeAt(store.state.rhythm, now) || (p.until > now && p.from <= now) || inQuiet(eventsQuiet(now), now)) return false
-    // 警語的提示卡還在（上面就寫著現在該做）、正在打字：不疊上去
-    if (ui.hasToast('motto') || document.activeElement?.closest?.('input, textarea, select, [contenteditable]')) return false
+    // 警語的提示卡還在（上面就寫著現在該做）：不疊上去
+    if (ui.hasToast('motto')) return false
     let last = backAt
     try {
       last = Math.max(last, Number(JSON.parse(localStorage.getItem(BACK_KEY) || '0')) || 0)
     } catch {}
-    if (Math.abs(now - last) < BACK_GAP) return false
-    const t = nowTask()
-    if (!t) return false
+    if (Math.abs(now - last) < BACK_GAP || !nowTask()) return false
+    // 正在打字：打完再說（兩分鐘內）；說的時候再看一次（開始計時了、打開了別的視窗、切走了、這件做完了就不說）
+    return suggest('back', () => {
+      if (document.hidden || (native && nativeAway()) || ui.focus.mode !== 'idle' || ui.brief.open || ui._topLayer() || ui.hasToast('motto')) return false
+      const t = nowTask()
+      return t ? sayBack(t) : false
+    }, 2 * 60000)
+  }
+  const sayBack = (t) => {
+    const now = Date.now()
     backAt = now
     try {
       localStorage.setItem(BACK_KEY, JSON.stringify(now))
@@ -197,7 +312,7 @@ async function boot() {
       const cur = store.tasksOn(store.today).find((x) => x.id === t.id && !x.done) || nowTask()
       if (cur) fn(cur.id)
     }
-    ui.toast({
+    nowToast({
       icon: '回', title: '歡迎回來', sub: `現在該做：${t.title}${step ? `・下一步：${short(step.title, 16)}` : ''}`, ms: 12000, tag: 'back',
       actions: [
         { label: '▶ 開始專注', run: go((id) => ui.focus.startWith(id)) },
@@ -218,7 +333,7 @@ async function boot() {
   const NEXT_GAP = 20 * 60000
   let nextAt = 0
   // 現在可以說嗎：沒關掉這個提醒、沒在計時、今日摘要沒開著
-  const nextOk = () => store.state.settings.nextNudge !== false && ui.focus.mode === 'idle' && !ui.brief.open
+  const nextOk = () => store.nudge('nextNudge') && ui.focus.mode === 'idle' && !ui.brief.open
   store.on('taskDone', (t) => {
     // 長期任務（專案裡慢慢推進的事）勾掉之前不在今天的清單上：不是「現在該做的那一件」
     if (!nextOk() || t.ongoing) return
@@ -238,26 +353,32 @@ async function boot() {
     setTimeout(() => {
       if (!store.state.tasks.some((x) => x.id === t.id && x.done)) return (nextAt = 0)
       if (!nextOk() || dateStr() !== day) return
-      const cur = doFirst(mine())[0]
-      if (!cur) return
-      const step = nextStep(cur)
-      talk('nextTask', { task: short(cur.title) }, 5200, `接下來做「${short(cur.title)}」吧，趁手感還在。`, 'fuji')
-      // 按的時候已經在計時了（別的分頁開始了）就不動；那一件做完了、刪掉了，換成現在排在最前面的那一件
-      const go = (fn) => () => {
-        if (ui.focus.mode !== 'idle') return
-        store.tick()
-        const now = store.tasksOn(store.today).find((x) => x.id === cur.id && !x.done) || nowTask()
-        if (now) fn(now.id)
-      }
-      ui.toast({
-        icon: '次', title: `下一件：${cur.title}`, sub: step ? `下一步：${short(step.title, 16)}` : '趁手感還在，接著做', ms: 10000, tag: 'next',
-        actions: [
-          { label: '▶ 開始專注', run: go((id) => ui.focus.startWith(id)) },
-          { label: '只做 5 分鐘', soft: true, run: go((id) => ui.focus.startSmall(id)) },
-        ],
-      })
+      // 建議類的一則：剛說過別的（20 分鐘內）、今天說夠了、正在打字就不說（這次不算，之後再勾照樣看）
+      if (!suggest('next', () => sayNext(day, mine))) nextAt = 0
     }, 2600)
   })
+  // 下一件：照現在的樣子重新挑（剛才排第二的那一件可能移到明天、做完了、刪掉了）
+  const sayNext = (day, mine) => {
+    if (!nextOk() || dateStr() !== day) return false
+    const cur = doFirst(mine())[0]
+    if (!cur) return false
+    const step = nextStep(cur)
+    talk('nextTask', { task: short(cur.title) }, 5200, `接下來做「${short(cur.title)}」吧，趁手感還在。`, 'fuji')
+    // 按的時候已經在計時了（別的分頁開始了）就不動；那一件做完了、刪掉了，換成現在排在最前面的那一件
+    const go = (fn) => () => {
+      if (ui.focus.mode !== 'idle') return
+      store.tick()
+      const now = store.tasksOn(store.today).find((x) => x.id === cur.id && !x.done) || nowTask()
+      if (now) fn(now.id)
+    }
+    nowToast({
+      icon: '次', title: `下一件：${cur.title}`, sub: step ? `下一步：${short(step.title, 16)}` : '趁手感還在，接著做', ms: 10000, tag: 'next',
+      actions: [
+        { label: '▶ 開始專注', run: go((id) => ui.focus.startWith(id)) },
+        { label: '只做 5 分鐘', soft: true, run: go((id) => ui.focus.startSmall(id)) },
+      ],
+    })
+  }
   // 警語通知上的按鈕（跟 public/sw.js 的 mottoActions、Android 殼的 MottoNotice 一樣）：有現在該做的那一件才有「開始專注」。
   // 按了打開 App，由下面的 doAct 去做
   const mottoActions = (task) => [...(task ? [{ action: 'focus', title: '▶ 開始專注' }] : []), { action: 'pause', title: '先停 1 小時' }]
@@ -507,7 +628,7 @@ async function boot() {
     // 卡關提醒：nudge 是第一次看到卡關小卡（n：挪了幾次或逾期幾天），其他是按了哪個選項
     stuck: (kind, t, n) => {
       const task = short(t.title)
-      if (kind === 'nudge') talk('stuck', { task, n }, 6000, `「${task}」好像卡住了，拆小一點好嗎？`, 'fuji')
+      if (kind === 'nudge') aside(() => talk('stuck', { task, n }, 6000, `「${task}」好像卡住了，拆小一點好嗎？`, 'fuji'))
       else if (kind === 'split') {
         talk('stuckSplit', { task }, 5000, '拆好了，先做第一步就好。', 'fuji')
         setTimeout(() => talk('stuckSplit', { task }, 4200, '', 'mochi'), 2200)
@@ -515,7 +636,7 @@ async function boot() {
       else if (kind === 'drop') talk('stuckDrop', { task }, 4600, '先放下了，鬆一口氣吧。', 'fuji')
     },
     // 好久沒碰的長期任務：第一次看到那張小卡時ふじ說一句（一天一次）
-    idle: (t, n) => talk('idleLong', { task: short(t.title), n }, 6000, `「${short(t.title)}」${n} 天沒碰了，今天碰一下就好。`, 'fuji'),
+    idle: (t, n) => aside(() => talk('idleLong', { task: short(t.title), n }, 6000, `「${short(t.title)}」${n} 天沒碰了，今天碰一下就好。`, 'fuji')),
     // 專注以番茄鐘為準：小島只負責兩人進出小木屋、花圃標記；獎勵和台詞在這裡，沒有小島也照常
     // info：{ round, rounds, free, projectId }，連續幾輪的第幾輪、是不是正向計時、目標是不是直接選了專案
     focusStarted: (resumed, taskId, info = {}) => {
@@ -1278,6 +1399,8 @@ async function boot() {
     if (cur) fn(cur.id)
   }
   const reminders = new Reminders(store, (e, min, kind = 'event') => {
+    // 設定裡「時間到的提醒」關著：警語以外的都不說（照樣記成提醒過了，打開時不會一口氣補一串）
+    if (kind !== 'motto' && store.state.settings.remindOn === false) return
     // 重要日子：前一天ふじ提醒，當天もち也來打氣
     // 里程碑期限：一樣前一天ふじ提醒、當天もち打氣；說得出還差幾個細項
     if (kind === 'date' && e.pid) {
@@ -1380,7 +1503,7 @@ async function boot() {
         store.mottoAnswered('back', e.at)
         run()
       })
-      ui.toast({
+      nowToast({
         icon: '戒',
         title: e.text,
         sub: next ? `現在該做：${next.title}${nextStep(next) ? `・下一步：${short(nextStep(next).title, 16)}` : ''}` : '寫給自己的警語',
@@ -1968,6 +2091,12 @@ async function boot() {
     const mins = n.getHours() * 60 + n.getMinutes()
     if (mins < 480 || mins >= Math.min(bedAt(store.state.rhythm), 1440)) return
     riskAt = Date.now()
+    // 建議類的一則：打字中、剛說過別的、今天說夠了、關掉了建議就先不比（等下次再比，不會漏掉）
+    if (!store.nudge() || suggestBusy() || !suggestRoom()) return
+    suggest('risk', riskSay)
+  }
+  // 比一次、說變差的那一個；沒有要說的回傳 false（不算一則）
+  const riskSay = () => {
     // App 關著時已經用通知說過的，先記成說過了（打開時不再說一次）
     settleRisk(riskAt)
     const got = risk.check()
@@ -1993,12 +2122,12 @@ async function boot() {
         say('fuji', `${titles}${day(r.date)}截止，時間有點緊，先把它分段排進前幾天吧。`, 6000)
         ui.toast({ icon: '旗', title: `${titles}${day(r.date)}截止，時間有點緊`, sub: `還要大約 ${fmtDur(r.need)}，到那天能用的大約 ${fmtDur(r.room)}${more}`, ms: 10000, actions: [{ label: '看看', soft: true, run: () => ui.setTab('tasks') }] })
       }
-      return
+      return true
     }
     const p = got.projects[0]
-    if (!p) return
+    if (!p) return false
     const proj = store.state.projects.find((x) => x.id === p.id)
-    if (!proj) return
+    if (!proj) return false
     const pname = `「${short(proj.name, 16)}」`
     sfx.chime()
     if (p.level === 'late') {
@@ -2018,19 +2147,23 @@ async function boot() {
   // ── 第一次：問一聲要不要在 App 關著時通知（還沒選過、這台是手機、接著 Claude、ふじ會自己動、送得出去）。
   // 沒回答的話照預設送（手機先送），一天最多問一次；打開 App 半分鐘後才問（不跟開場的提示卡擠在一起）──
   const NOTES_ASK_KEY = 'hiyori-fuji-notes-asked'
-  const notesFrom = Date.now() + 30000
+  let notesFrom = Date.now() + 30000
   let notesAsked = false
   const askNotes = () => {
     if (notesAsked || !booted || document.hidden || ui.focus.mode === 'focus' || Date.now() < notesFrom) return
     const s = store.state.settings
     if (s.fujiNotify || !phoneLike || !agent.ready() || s.agentMode === 'off') return
     if (['old-app', 'none'].includes(fujiNotes.reach())) return
-    notesAsked = true
     try {
       if (localStorage.getItem(NOTES_ASK_KEY) === store.today) return
-      localStorage.setItem(NOTES_ASK_KEY, store.today)
     } catch {}
-    ui.afterBrief(() =>
+    // 建議類的一則：打字中、剛說過別的、今天說夠了就晚一分鐘再看
+    if (ui.brief.open || !suggestRoom() || suggestBusy()) return (notesFrom = Date.now() + 60000)
+    notesAsked = true
+    suggest('notes', () => {
+      try {
+        localStorage.setItem(NOTES_ASK_KEY, store.today)
+      } catch {}
       ui.toast({
         icon: '藤', stamp: true, tag: 'fuji-notes', ms: 30000,
         title: 'App 關著的時候，要我通知你嗎？',
@@ -2039,8 +2172,8 @@ async function boot() {
           { label: '好', run: async () => (await fujiNotes.set(true)) && ui.toast({ icon: '藤', stamp: true, title: '好，之後從這台通知你', sub: '想換一台或不要了，到ふじ的頁面改' }) },
           { label: '不用', soft: true, run: () => fujiNotes.set(false) },
         ],
-      }),
-    )
+      })
+    })
   }
   setInterval(() => {
     ui.tickClock()
@@ -2051,6 +2184,7 @@ async function boot() {
     if (booted) reminders.check()
     riskTick()
     askNotes()
+    suggestRetry()
     syncMottos()
     tabNudge()
     // 到點自動延長時留著的慶祝（升級、成就、任務達成）：延長做完了（休息、結束、另一個分頁結束了），
@@ -2082,7 +2216,8 @@ async function boot() {
       lastMin = minute
       // 日程頁沒在看就不重畫（切過去時會重畫）
       if (store.selectedDate === store.today && ui.tab === 'schedule') ui.renderSchedule(false)
-      if (!scene?.placing && ui.focus.mode !== 'focus') ui.maybeAskReview()
+      ui.tickEve()
+      if (!scene?.placing && ui.focus.mode !== 'focus') askWeek() || askReview()
       if (!nativeOut || Date.now() - lastInput < 60000) ui.markSeen()
       // ふじ：該不該自己整理一次（早上、晚上、進度落後）
       if (!nativeOut) agent.tick()
@@ -2293,13 +2428,15 @@ async function boot() {
         // 今天第一次打開：貓咪走進來說今日摘要（牠在說的時候兩人先不搶話）。
         // 今天看過摘要、離開一陣子才又打開（App 被收掉了、關掉分頁）：提示卡寫現在該做的那一件，ふじ那一句代替打招呼
         const brief = ui.maybeShowBrief() || ui.brief.open
-        if (!brief && !welcomeBack() && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
+        // 設定裡關了「小島上的閒聊和招呼」：不打招呼（回來了的提示照常）
+        const chat = store.state.settings.chatOn !== false
+        if (!brief && !welcomeBack() && chat && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
         scene?.greet()
       }, 900)
       // 摘要還開著就等它關掉：回顧和提醒不要疊在上面
       setTimeout(() => ui.afterBrief(() => {
-        if (ui.maybeShowWeekCard()) return
-        if (ui.maybeAskReview()) return
+        if (askWeek() || askReview()) return
+        if (store.state.settings.chatOn === false) return
         // 範例不算
         const overdue = store.overdue().filter(own).length
         const mineToday = store.tasksOn(store.today).filter(own)

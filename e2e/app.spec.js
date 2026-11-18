@@ -493,8 +493,9 @@ test.describe('打開時的今日摘要', () => {
     await page.waitForTimeout(2500)
     expect(await page.evaluate(() => window.hiyori.ui.brief.open)).toBe(false)
 
-    // 設定裡「現在看」再看一次，Esc 關掉；關掉開關後，隔天也不出來
+    // 設定裡（通知與提醒 → 建議和鼓勵的「更多」）「現在看」再看一次，Esc 關掉；關掉開關後，隔天也不出來
     await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.locator('#nudgeMore > summary').click()
     await page.locator('#briefNow').click()
     await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await page.keyboard.press('Escape')
@@ -608,8 +609,9 @@ test.describe('打開時的今日摘要', () => {
     await expect(missed).toContainText('那時沒提醒到')
     await missed.click()
     expect(await page.evaluate(() => [window.hiyori.ui.tab, window.hiyori.store.selectedDate])).toEqual(['schedule', yesterday])
-    // 同一天再看一次：這一段還在
+    // 同一天再看一次（設定的建議和鼓勵 → 更多）：這一段還在
     await page.evaluate(() => window.hiyori.ui.setTab('records'))
+    await page.locator('#nudgeMore > summary').click()
     await page.locator('#briefNow').click()
     await expect(card.locator('.bf-body')).toBeVisible({ timeout: 20000 })
     await expect(card).toContainText('昨天 15:00 牙醫回診')
@@ -2299,6 +2301,149 @@ test('做完一件，接著下一件（提示卡出來前的那一下子）：�
   expect(await nexts()).toHaveLength(2)
 })
 
+test('建議類的提示：打字中先不說、停下來再說；兩則至少隔 20 分鐘、一天最多 6 則；「現在該做」同時只留一張；晚上回顧和上週的回顧卡放在總覽上、不再自己跳出來；設定裡的四個總開關', async ({ page, context, site }) => {
+  test.setTimeout(180000)
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = (hms) => new Date(`${ymd}T${hms}+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => !!window.__hidden, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
+    if (!localStorage.getItem('hiyori-daily-v1')) {
+      const tasks = [
+        { id: 'e2e-b1', title: '寫期末報告', priority: 3, date: ymd, star: true },
+        { id: 'e2e-b2', title: '整理筆記', priority: 3, date: ymd },
+        { id: 'e2e-b3', title: '回信', priority: 1, date: ymd },
+      ]
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks, player: {}, settings: {} }))
+      // 今天的摘要看過了
+      localStorage.setItem('hiyori-brief-day', JSON.stringify(ymd))
+    }
+  }, { ymd })
+  await useAppMode(context)
+  await page.clock.setFixedTime(T('10:00:00'))
+  await page.goto(site.url)
+  await bootReady(page)
+  const away = async (from, to) => {
+    await page.clock.setFixedTime(T(from))
+    await page.evaluate(() => {
+      window.__hidden = true
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await page.clock.setFixedTime(T(to))
+    await page.evaluate(() => {
+      window.__hidden = false
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+  }
+  const seen = (t) => page.evaluate((t) => (window.__toasts || []).filter((x) => x.includes(t)).length, t)
+  const shown = (t) => page.locator('#toasts .toast:not(.out)', { hasText: t })
+  const done = (id) => page.evaluate((id) => window.hiyori.store.toggleTask(id), id)
+  const log = (v) => page.evaluate((v) => localStorage.setItem('hiyori-suggest', JSON.stringify(v)), v)
+
+  // 打字打到一半時回來：先不說；打完（框空了、離開輸入框）就說
+  await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+  await page.locator('#taskTitle').fill('買')
+  await away('10:00:00', '10:30:00')
+  await page.waitForTimeout(2000)
+  expect(await seen('歡迎回來')).toBe(0)
+  await page.locator('#taskTitle').fill('')
+  await page.evaluate(() => document.activeElement.blur())
+  await expect(shown('歡迎回來')).toContainText('現在該做：寫期末報告')
+
+  // 20 分鐘內：勾掉現在該做的那一件，不說下一件；過了 20 分鐘再勾，說
+  await page.clock.setFixedTime(T('10:31:00'))
+  await done('e2e-b1')
+  await page.waitForTimeout(3200)
+  expect(await seen('下一件')).toBe(0)
+  await page.clock.setFixedTime(T('10:51:00'))
+  await done('e2e-b2')
+  await expect(shown('下一件：回信')).toBeVisible()
+  // 警語到點：寫著「現在該做」的只留一張（下一件那張收起來）
+  await page.evaluate(() => window.hiyori.reminders.onRemind({ text: '手機放遠一點', at: Date.now() }, 0, 'motto'))
+  await expect(shown('手機放遠一點')).toContainText('現在該做：回信')
+  await expect(shown('下一件')).toHaveCount(0)
+
+  // 今天已經說了 6 則：離開夠久回來也不說
+  await log({ day: ymd, n: 6, at: T('09:00:00').getTime() })
+  await away('12:05:00', '12:35:00')
+  await page.waitForTimeout(2000)
+  expect(await seen('歡迎回來')).toBe(1)
+  await log({ day: ymd, n: 0, at: 0 })
+
+  // 設定的「通知與提醒」：時間到的提醒關掉，日程到點不說；打開照常
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#alertT')).toBeVisible()
+  const remind = page.locator('#remindOnBtn')
+  await expect(remind).toHaveText('開')
+  await remind.click()
+  await expect(remind).toHaveText('關')
+  const ring = () => page.evaluate(() => window.hiyori.reminders.onRemind({ id: 'e2e-ev', title: '和老師開會', start: '12:50' }, 10, 'event'))
+  await ring()
+  await page.waitForTimeout(500)
+  expect(await seen('和老師開會')).toBe(0)
+  await remind.click()
+  await ring()
+  await expect(shown('和老師開會')).toBeVisible()
+  // 建議和鼓勵關掉：回來了也不說；「更多」裡一項一項的開關淡一點、照樣改得了
+  const nudge = page.locator('#nudgeOnBtn')
+  await nudge.click()
+  await expect(nudge).toHaveText('關')
+  await expect(page.locator('#nudgeMore')).toHaveClass(/muted/)
+  await away('14:05:00', '14:35:00')
+  await page.waitForTimeout(2000)
+  expect(await seen('歡迎回來')).toBe(1)
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await nudge.click()
+  await expect(nudge).toHaveText('開')
+  // 警語關掉：三樣都關；打開時放回原本的樣子
+  const motto = page.locator('#mottoOnBtn')
+  await page.evaluate(() => Object.assign(window.hiyori.store.state.settings, { mottoEvery: 30, catMotto: 10, mottoBar: true }))
+  await page.evaluate(() => window.hiyori.ui.renderSettings())
+  await expect(motto).toHaveText('開')
+  await motto.click()
+  await expect(motto).toHaveText('關')
+  const mottoSet = () => page.evaluate(() => (({ mottoEvery, catMotto, mottoBar }) => [mottoEvery, catMotto, mottoBar])(window.hiyori.store.state.settings))
+  expect(await mottoSet()).toEqual([0, 0, false])
+  await motto.click()
+  expect(await mottoSet()).toEqual([30, 10, true])
+
+  // 晚上 9 點後還沒回顧：不跳出回顧的視窗，總覽的今日反思排到「現在」下面，提示卡問一聲
+  await page.evaluate(() => window.hiyori.ui.setTab('today'))
+  await page.clock.setFixedTime(T('21:30:00'))
+  const ask = shown('今天過得怎麼樣')
+  await expect(ask).toBeVisible()
+  await expect(page.locator('#reviewModal')).toBeHidden()
+  const order = () => page.evaluate(() => [...document.querySelectorAll('#todayRoot .td-grid > section')].slice(0, 2).map((x) => x.className.match(/td-(nowc|ref|top)/)?.[1]))
+  await expect.poll(order).toEqual(['nowc', 'ref'])
+  // 「寫回顧」：焦點放在今日反思的天氣上
+  await ask.locator('.toast-act', { hasText: '寫回顧' }).click()
+  await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('td-mood'))).toBe(true)
+  // 今日反思上的「之後再說」：放回原本的位置
+  await page.locator('#todayRoot [data-act="review-later"]').click()
+  await expect.poll(order).toEqual(['nowc', 'top'])
+
+  // 新的一週、上週有在用：總覽上放上週的回顧卡，提示卡說一聲（不自己打開回顧卡的視窗）
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = new Date(s.today + 'T00:00:00')
+    const mon = new Date(t.getFullYear(), t.getMonth(), t.getDate() - ((t.getDay() + 6) % 7) - 7)
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    Object.assign(s.day(ymd(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 1))), { tasks: 3, focus: 50 })
+    s.state.weekCard = ''
+    s.save()
+  })
+  await page.clock.setFixedTime(T('21:55:00'))
+  const week = shown('上週的回顧卡好了')
+  await expect(week).toBeVisible()
+  await expect(page.locator('#weekModal')).toBeHidden()
+  const card = page.locator('#todayRoot .td-weekc')
+  await expect(card).toContainText('3 朵花綻放')
+  await card.locator('[data-act="week-open"]').click()
+  await expect(page.locator('#weekModal')).toBeVisible()
+  await page.locator('#weekClose').click()
+  await expect(card).toHaveCount(0)
+})
+
 test('專注頁的鍵盤：有按鈕的提示卡用 Tab 轉得到（在第一顆按 Shift+Tab 就到）、焦點在上面時不收；收掉、換成新的一張、按了之後，焦點交回剛才的地方；「先記下來」按 Esc 焦點到旁邊的「記下」；Dock 上的時間指向專注頁', async ({ page, context, site }) => {
   test.setTimeout(90000)
   await useAppMode(context)
@@ -2635,6 +2780,32 @@ test.describe('手機上的任務', () => {
     expect((await task()).at).toMatch(/^\d\d:\d\d$/)
     await toast.locator('.toast-act', { hasText: '撤銷' }).click()
     await expect.poll(async () => (await task()).at).toBe(null)
+    // 排好之後又改了時段：舊的撤銷不蓋掉新的
+    await row.locator('.item-title').click()
+    await sheet.locator('[data-ec="slot"]').click()
+    const again = page.locator('#toasts .toast:not(.out)', { hasText: '排在今天' })
+    await expect(again).toBeVisible()
+    await page.evaluate((id) => window.hiyori.store.scheduleTask(id, '20:00'), id)
+    await again.locator('.toast-act', { hasText: '撤銷' }).click()
+    await expect(page.locator('#toasts .toast', { hasText: '排好之後又改過了' })).toBeVisible()
+    expect((await task()).at).toBe('20:00')
+    // 面板開著時別處改了名稱：這邊只改截止日，名稱不會被蓋回去
+    await row.locator('.item-title').click()
+    await expect(sheet).toBeVisible()
+    await page.evaluate((id) => window.hiyori.store.updateTask(id, { title: '寫期末報告' }), id)
+    await sheet.locator('[name="due"]').fill('')
+    await sheet.locator('button[type="submit"]').click()
+    expect(await task()).toMatchObject({ title: '寫期末報告', due: null })
+    // 草稿：長度改成 2 小時，「分成幾段」跟著出現；名稱清空時按工具不動、面板留著
+    await row.locator('.item-title').click()
+    await expect(sheet.locator('[data-ec="split"]')).toBeHidden()
+    await sheet.locator('[name="dur"]').selectOption('120')
+    await expect(sheet.locator('[data-ec="split"]')).toBeVisible()
+    await sheet.locator('[name="title"]').fill('')
+    await sheet.locator('[data-ec="split"]').click()
+    await expect(sheet).toBeVisible()
+    expect(await page.evaluate(() => window.hiyori.store.state.tasks.filter((t) => t.title.includes('報告')).length)).toBe(1)
+    await sheet.locator('[data-ec="cancel"]').click()
     // 快速記錄：「明天 15:00 牙醫」預設是日程，點「改成任務」記成明天 15:00 的任務（一小時）
     await page.locator('#captureBtn').click()
     const input = page.locator('#capInput')
@@ -2648,9 +2819,13 @@ test.describe('手機上的任務', () => {
     await input.press('Enter')
     await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '牙醫'))).toMatchObject({ date: tmr, at: '15:00', dur: 60 })
     expect(await page.evaluate(() => window.hiyori.store.state.events.length)).toBe(events)
-    // 下一行回到預設（日程）
+    // 下一行回到預設（日程）；跨過半夜的改成任務照原本的長度（兩小時）
     await input.fill('後天 9:00 開會')
     await expect(swap).toHaveText('改成任務')
+    await input.fill('明天 23:00-01:00 趕報告')
+    await swap.click()
+    await input.press('Enter')
+    await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '趕報告'))).toMatchObject({ date: tmr, at: '23:00', dur: 120 })
     await input.fill('')
     await page.keyboard.press('Escape')
     // 任務頁的輸入框記下一件：提示卡說記下了，可以撤銷

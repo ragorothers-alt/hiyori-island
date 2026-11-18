@@ -100,6 +100,12 @@ export const DEFAULT_SETTINGS = {
   fujiNotify: '',
   // 範例收起來時按過撤銷：之後不再自動收（設定裡的「清除範例資料」照常能清）
   keepSamples: false,
+  // 四個總開關（設定的「通知與提醒」）：remindOn 時間到的提醒（日程、排了時段的任務、就寢、截止日、重要日子、習慣、訂閱）；
+  // nudgeOn 建議和鼓勵（回來了、下一件、卡關、截止日的風險、晚上回顧、上週的回顧卡、今日摘要；底下各自的開關留著）；
+  // chatOn 小島上的閒聊和招呼（打開時打招呼、偶爾閒聊；做完事情的那一句照常）
+  remindOn: true, nudgeOn: true, chatOn: true,
+  // 警語的總開關關掉時，記下原本的間隔、貓咪念的間隔、面板上方那一條（打開時放回去；-1／0 是沒記）
+  mottoWasEvery: 0, mottoWasCat: -1, mottoWasBar: false,
 }
 export const FONT_SCALES = [0.9, 1, 1.12, 1.25]
 export const NOISES = ['off', 'rain', 'brown', 'pink']

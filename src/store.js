@@ -4,8 +4,9 @@
 // store/tasks.js、projects.js、habits.js、extras.js、coach.js：各領域的方法。
 // 這裡保留 Store 核心與其餘區段，並轉出原本的公開名稱。
 
-import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS } from './store/util.js'
-import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM } from './theme.js'
+import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS } from './store/util.js'
+import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM, CAT_MOTTOS } from './theme.js'
+import { MOTTO_EVERY } from './mottos.js'
 import { isEvent, CHEERS } from './events.js'
 import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE } from './store/migrate.js'
 import { projectProgress, progressAll } from './projects.js'
@@ -1148,6 +1149,32 @@ export class Store {
   }
   setSetting(key, value) {
     this.state.settings[key] = value
+    this.save()
+  }
+  // 建議和鼓勵：總開關關著時底下的每一項都不說；key 是底下那一項自己的開關（backNudge、nextNudge、stuckNudge、brief）
+  nudge(key) {
+    const st = this.state.settings
+    return st.nudgeOn !== false && (key == null || st[key] !== false)
+  }
+  // 警語的總開關：醒著時的提醒、面板上方那一條、專注時貓咪念的，有一樣開著就算開著
+  mottoOn() {
+    const st = this.state.settings
+    return st.mottoEvery > 0 || st.catMotto > 0 || !!st.mottoBar
+  }
+  // 關掉：三樣都關，原本的樣子記下來；打開：放回記下的（沒記過、記的也是關著的，用預設）。
+  // 改的是原本那三個設定，手機、伺服器排的警語和舊版的 App 都照著停
+  setMottoOn(on) {
+    const st = this.state.settings
+    if (on === this.mottoOn()) return
+    if (!on) {
+      Object.assign(st, { mottoWasEvery: st.mottoEvery, mottoWasCat: st.catMotto, mottoWasBar: !!st.mottoBar, mottoEvery: 0, catMotto: 0, mottoBar: false })
+    } else {
+      const none = !(st.mottoWasEvery > 0) && !(st.mottoWasCat > 0) && !st.mottoWasBar
+      const pick = (list, v, d) => (!none && list.includes(v) ? v : d)
+      st.mottoEvery = pick(MOTTO_EVERY, st.mottoWasEvery, DEFAULT_SETTINGS.mottoEvery)
+      st.catMotto = pick(CAT_MOTTOS, st.mottoWasCat, DEFAULT_SETTINGS.catMotto)
+      st.mottoBar = none ? DEFAULT_SETTINGS.mottoBar : !!st.mottoWasBar
+    }
     this.save()
   }
 
