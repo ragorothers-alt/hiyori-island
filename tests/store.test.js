@@ -2098,19 +2098,21 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(store.state.coach.plans).toHaveLength(1)
   })
 
-  it('撤銷一件都還沒做的計畫：不算一次套用，那次拿到的成就收回；做了其中幾件的照舊算', () => {
+  it('撤銷一件都還沒做過的計畫：不算一次套用，次數不夠了成就收回；做過其中一件的照舊算（做完之後刪掉了也算）', () => {
     store.stats.plansApplied = 9
     const got = store.state.player.achievements
     const { id } = store.applyCoachPlan(res())
-    expect(store.stats.plansApplied).toBe(10)
-    // 這次拿到的成就記在那次計畫上，重新開啟也記得
-    store.flushSave()
-    expect(new Store().state.coach.plans.at(-1).won).toEqual({ planner_10: got.planner_10 })
+    expect([store.stats.plansApplied, !!got.planner_10]).toEqual([10, true])
     store.undoCoachPlan(id)
     expect([store.stats.plansApplied, got.planner_10]).toEqual([9, undefined])
     const r2 = store.applyCoachPlan(res())
     expect(got.planner_10).toBeTruthy()
-    store.toggleTask(store.state.tasks.find((t) => t.coach === r2.id).id)
+    // 做完一件、再把它刪掉：計畫記得做過（重新開啟也記得）
+    const one = store.state.tasks.find((t) => t.coach === r2.id)
+    store.toggleTask(one.id)
+    store.deleteTask(one.id)
+    store.flushSave()
+    expect(new Store().state.coach.plans.at(-1).used).toBe(true)
     store.undoCoachPlan(r2.id)
     expect([store.stats.plansApplied, !!got.planner_10]).toEqual([10, true])
   })

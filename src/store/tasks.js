@@ -106,6 +106,9 @@ export const tasksMethods = {
     this._refreshToday()
     t.done = !t.done
     t.doneAt = t.done ? Date.now() : null
+    // ふじ的計畫裡做完過一件：撤銷那次計畫時照舊算一次套用（之後刪掉這件也一樣）
+    const plan = t.done && t.coach && this.state.coach.plans.find((p) => p.id === t.coach)
+    if (plan) plan.used = true
     // 長期任務記在完成的那天：花開在今天的花圃、算進今天完成的件數（不算補做逾期的）
     if (t.done && t.ongoing) t.date = this.today
     // 取消完成又回到長期：不排在哪一天，以前排的時段和本命拿掉（跟改成長期、讀存檔時一樣）

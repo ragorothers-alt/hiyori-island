@@ -1304,8 +1304,8 @@ async function boot() {
     achWait.set(a.id, setTimeout(() => {
       achWait.delete(a.id)
       achDelay = Math.max(0, achDelay - 700)
-      // 還沒跳出來就被收回了（剛套用就撤銷最佳化時程）：不慶祝
-      if (store.state.player.achievements[a.id] !== at) return
+      // 還沒跳出來就被收回了（剛套用就撤銷最佳化時程、同步換回沒拿到的那一版）：不慶祝
+      if (!at || store.state.player.achievements[a.id] !== at) return
       sfx.chime()
       ui.toast({ icon: a.kanji, stamp: true, title: `${a.name}・${a.title}`, sub: a.desc, ms: 4200 })
     }, 1500 + achDelay))

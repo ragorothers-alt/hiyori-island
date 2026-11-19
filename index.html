@@ -8,7 +8,7 @@
     if (/iP(hone|ad|od)/.test(navigator.userAgent) || (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1))
       document.querySelector('meta[name=viewport]').content += ', maximum-scale=1'
   </script>
-  <meta name="theme-color" content="#cfe8f5" />
+  <meta name="theme-color" content="#cfe8f6" />
   <!-- 夜晚打開時，載入畫面、狀態列一開始就是深色：等程式載完才算的話，會先亮一下白天的天空。
        放在樣式表前面：字型的樣式表還在下載時，狀態列就先換好；body 一出來就照 data-night 加上 night。
        外觀設定讀 store.js 另外記的 hiyori-look（「存檔版本|外觀」，版本跟存檔對得上才用，不然讀存檔；都讀不到就跟著時間）。

@@ -250,10 +250,9 @@ function cleanCoach(c) {
   const last = isObj(l)
     ? { focus: labels(l.focus, 60, 50), slots: labels(l.slots), days: COACH_DAYS.includes(l.days) ? l.days : 5, len: num(l.len, 15, 120, 50) }
     : null
-  // won：這次套用剛拿到的成就 { id: 拿到的時間 }，撤銷時收回用
-  const won = (w) => (isObj(w) ? Object.fromEntries(Object.entries(w).filter(([k, v]) => ID_RE.test(k) && ts(v)).map(([k, v]) => [k, +v])) : {})
+  // used：做完過其中一件（撤銷時照舊算一次套用）
   const plans = cleanList(c.plans, (p) => ({
-    id: str(p.id), createdAt: ts(p.createdAt) || Date.now(), title: str(p.title, 40), from: ymd(p.from, ''), to: ymd(p.to, ''), count: num(p.count, 0, 99, 0), won: won(p.won),
+    id: str(p.id), createdAt: ts(p.createdAt) || Date.now(), title: str(p.title, 40), from: ymd(p.from, ''), to: ymd(p.to, ''), count: num(p.count, 0, 99, 0), used: p.used === true,
   })).slice(-10)
   return { items, last, plans }
 }
