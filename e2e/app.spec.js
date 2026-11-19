@@ -1,8 +1,8 @@
 // App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
 import { bootReady, chatSaid, expect, noFonts, swReady, test, toastSeen, useAppMode } from './fixtures.js'
 
-// 計時那幾張提示卡上的按鈕：每日任務、每週挑戰達成那張也有「領取」，不算（做完一輪專注時常常剛好達成）
-const timerActs = (page) => page.locator('#toasts .toast').filter({ hasNotText: /每日任務|每週挑戰/ }).locator('.toast-acts')
+// 計時那幾張提示卡上的按鈕：每日任務、每週挑戰達成那張有「領取」，不算（做完一輪專注時常常剛好達成）
+const timerActs = (page) => page.locator('#toasts .toast').filter({ hasNot: page.getByRole('button', { name: '領取', exact: true }) }).locator('.toast-acts')
 
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -82,7 +82,9 @@ test('心情和週回顧：生活記錄的精神和「心」出現在今日反�
   })
   const feel = page.locator('#todayRoot .td-ref .td-feel')
   await expect(feel).toContainText('精神 不錯')
-  await expect(feel.locator('.td-feel-m')).toHaveText(['10:20有點煩'])
+  await expect(feel.locator('.td-feel-m [aria-hidden="true"]')).toHaveText(['10:20', '有點煩'])
+  // 讀螢幕軟體念的是時間和完整的字
+  await expect(feel.locator('.td-feel-m .sr-only')).toHaveText(['10:20 有點煩'])
   // 記下今日反思：小日記那一天多一行精神和心情
   await page.locator('#todayRoot .td-ref [data-act="mood"]').first().click()
   await page.locator('#todayRoot .td-ref [data-act="refSave"]').click()
@@ -150,6 +152,8 @@ test('小島模式開機：小島在背景建，面板先能用；還在建的�
 
 test('每日任務只放一個地方：任務頁沒有那張；小島模式面板開著總覽時左下角那張收起來；達成時提示卡上直接領；新增習慣寫著跟例行公事、生活記錄的差別', async ({ page, site }) => {
   test.setTimeout(120000)
+  // 減少動態效果：提示卡不跑進場動畫，機器很忙時也點得到「領取」
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto(site.url)
   await bootReady(page)
   await expect(page.locator('#questMini')).toHaveCount(0)
@@ -167,8 +171,7 @@ test('每日任務只放一個地方：任務頁沒有那張；小島模式面�
     for (const title of ['一', '二', '三']) s.toggleTask(s.addTask({ title, date: s.today }).id)
   })
   const toast = page.locator('#toasts .toast', { hasText: '每日任務' }).filter({ hasText: '達成' })
-  // 按鈕一出現就按（小島模式、機器很忙時，進場動畫一直沒停穩，等它停穩之前提示卡就收掉了）
-  await toast.getByRole('button', { name: '領取' }).evaluate((b) => b.click())
+  await toast.getByRole('button', { name: '領取' }).click()
   await expect.poll(() => page.evaluate(() => window.hiyori.store.quests().find((q) => q.id === 'tasks3').claimed)).toBe(true)
   // 習慣頁：新增習慣時寫著跟例行公事、生活記錄的差別
   await page.evaluate(() => window.hiyori.ui.setTab('habits'))
@@ -3252,6 +3255,8 @@ test.describe('手機的觸控', () => {
     await useAppMode(context)
     await page.goto(site.url)
     await bootReady(page)
+    // 開場的載入畫面拿掉了（它還蓋著的話手指按不到提示卡）
+    await page.waitForFunction(() => !document.getElementById('loader'), null, { timeout: 30000 })
     await expect(page.locator('#toasts .toast')).toHaveCount(0, { timeout: 15000 })
     await page.evaluate(() => {
       window.__ptr = []

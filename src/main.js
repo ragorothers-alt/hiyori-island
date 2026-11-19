@@ -77,7 +77,7 @@ async function boot() {
     if (scene && !replay) return fn(scene)
     const line = { key, fn, at: Date.now() }
     if (replay) replay.push(line)
-    else if (islandWait && !quiet(key)) islandWait = [...islandWait, line].slice(-3)
+    else if (islandWait && !quiet(key)) islandWait = [...islandWait, line].slice(-5)
   }
   const CHAT_KEYS = /^(greet|morning)/
   // 說之前再看一次：換成 App 模式了（下方的對話框已經說過）、留太久了、招呼和閒聊被關掉了，就不說
@@ -113,7 +113,9 @@ async function boot() {
     if (!list?.length) return false
     const other = self === 'mochi' ? 'fuji' : 'mochi'
     const lines = pick(list).map(([who, text]) => [who === 'self' ? self : who === 'other' ? other : who, fill(text, vars)])
-    onScene(key, (s) => s.duet(lines))
+    // 小島還在建、或正在一句一句說留著的話：拆成一句一句排進去（每一句說之前都再看一次，中途換成 App、關掉閒聊就停）
+    if (scene && !replay) scene.duet(lines)
+    else for (const [who, text] of lines) onScene(key, (s) => s.say(who, text, 3500))
     if (!quiet(key)) chatter?.(...lines[0])
     return true
   }

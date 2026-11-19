@@ -87,11 +87,11 @@ export const coachMethods = {
     }
     const list = u.items.map((x) => [x, this._find('tasks', x.id)]).filter(([x, t]) => same(x, t))
     const mine = new Set(list.map(([, t]) => t.id))
-    // 原本那個時段現在空著嗎：那天的日程（含還沒生成的例行日程）、這次沒有要搬回去的任務
+    // 原本那個時段現在空著嗎：那天還沒做完的日程（含還沒生成的例行日程；做完的不佔時段，跟排程一樣）、這次沒有要搬回去的任務
     const free = (date, at, dur, self) => {
       const s0 = toMin(at)
       const e0 = s0 + dur
-      if (this._busyEvents(date).some((e) => toMin(e.start) < e0 && s0 < toMin(e.end))) return false
+      if (this._busyEvents(date).some((e) => !e.done && toMin(e.start) < e0 && s0 < toMin(e.end))) return false
       return !this.tasksOn(date).some((o) => o !== self && !mine.has(o.id) && o.at && !o.done && toMin(o.at) < e0 && s0 < toMin(o.at) + taskDur(o))
     }
     let back = 0

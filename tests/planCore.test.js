@@ -192,6 +192,13 @@ describe('不排太滿', () => {
     store.addEvent({ title: '會議', date: tomorrow, start: '08:00', end: '09:00' })
     expect(store.undoPlan(u).back).toBe(2)
     expect([low.date, low.at]).toEqual([tomorrow, null])
+    // 做完的日程不佔時段（跟排程一樣）：會議勾掉了，撤銷就放回原本的 08:00
+    store.scheduleTask(low.id, '08:00')
+    const u1 = store.applyPlan(tomorrow, [{ id: low.id, at: '10:00', dur: 60 }])
+    expect(low.at).toBe('10:00')
+    store.state.events.find((e) => e.title === '會議').done = true
+    expect(store.undoPlan(u1).back).toBe(1)
+    expect(low.at).toBe('08:00')
     // 正在計時的那件（skip）留著
     const a = store.addTask({ title: '甲', date: TODAY, dur: 30 })
     const b = store.addTask({ title: '乙', date: TODAY, dur: 30 })

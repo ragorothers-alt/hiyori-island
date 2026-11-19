@@ -823,7 +823,7 @@ export class TodayView {
     // 小籤上的字截短；完整的放在 title（滑過去看得到）和念出來的內容
     return `<div class="td-feel" role="group" aria-label="今天記下的精神和心情">
       ${f.energy ? `<span class="td-feel-e" style="--ec:${ENERGY_COLORS[f.energy]}">精神 <b>${ENERGY[f.energy]}</b></span>` : ''}
-      ${f.moods.slice(-4).map((x) => `<span class="td-feel-m" title="${esc(x.text)}" aria-label="${x.t} ${esc(x.text)}"><time aria-hidden="true">${x.t}</time><span aria-hidden="true">${esc(clipText(x.text, 24))}</span></span>`).join('')}${more}
+      ${f.moods.slice(-4).map((x) => `<span class="td-feel-m" title="${esc(x.text)}"><time aria-hidden="true">${x.t}</time><span aria-hidden="true">${esc(clipText(x.text, 24))}</span><span class="sr-only">${x.t} ${esc(x.text)}</span></span>`).join('')}${more}
     </div>`
   }
 

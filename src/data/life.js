@@ -17,7 +17,9 @@ export const ENERGY_COLORS = ['', '#a9b8d6', '#98cbe0', '#9fd6b8', '#f1c97c', '#
 // 截短：照字素算（表情符號、組合字不會被切成半個）
 const SEG = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('zh-Hant', { granularity: 'grapheme' }) : null
 export const clipText = (s, n) => {
-  const parts = SEG ? [...SEG.segment(String(s))].map((x) => x.segment) : [...String(s)]
+  // 這個瀏覽器分不出字素（很舊）：不截，整句留著（照碼位切會把國旗、組合字切壞）
+  if (!SEG) return String(s)
+  const parts = [...SEG.segment(String(s))].map((x) => x.segment)
   return parts.length > n ? `${parts.slice(0, n - 1).join('')}…` : String(s)
 }
 export const feelOf = (day) => ({ energy: Math.round(day?.energy) || 0, moods: (day?.items || []).filter((x) => x.kind === 'mood' && x.text) })
