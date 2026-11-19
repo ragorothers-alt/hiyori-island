@@ -209,6 +209,55 @@ describe('不排太滿', () => {
     expect([a.at, b.at]).toEqual([at, null])
   })
 
+  it('逾期的本命搬到今天時被擠掉：撤銷回到原本那天，本命、先做這件都放回去；那天之間另外挑了先做的就不放', () => {
+    const past = addDays(TODAY, -2)
+    for (const title of ['今一', '今二', '今三']) store.toggleStar(store.addTask({ title, date: TODAY }).id)
+    store.setFirst(store.tasksOn(TODAY)[0].id)
+    const old = store.addTask({ title: '舊的', date: past, dur: 30 })
+    Object.assign(old, { star: true, first: true })
+    const p = store.planDay(TODAY)
+    const u = store.applyPlan(TODAY, p.plan, p.left.length, p.unslot)
+    // 今天已經有三件本命、也挑好先做的了：搬過來就不是
+    expect(old).toMatchObject({ date: TODAY, star: false, first: false })
+    expect(store.undoPlan(u).back).toBeGreaterThan(0)
+    expect(old).toMatchObject({ date: past, star: true, first: true })
+    // 撤銷前原本那天另外有一件被當成先做的：只放回本命
+    const u2 = store.applyPlan(TODAY, store.planDay(TODAY).plan)
+    const other = store.addTask({ title: '那天的', date: past })
+    other.first = true
+    store.undoPlan(u2)
+    expect(old).toMatchObject({ date: past, star: true, first: false })
+  })
+
+  it('第十次套用拿到的成就，撤銷後次數不夠就收回，再套用一次會再拿到；之前就拿到的不收回', () => {
+    const tomorrow = addDays(TODAY, 1)
+    const t = store.addTask({ title: '甲', date: tomorrow, dur: 30 })
+    store.stats.plansApplied = 9
+    const got = store.state.player.achievements
+    const u = store.applyPlan(tomorrow, [{ id: t.id, at: '10:00', dur: 30 }])
+    expect(got.planner_10).toBeTruthy()
+    store.undoPlan(u)
+    expect([store.stats.plansApplied, got.planner_10]).toEqual([9, undefined])
+    const seen = vi.fn()
+    store.on('achievement', seen)
+    const u2 = store.applyPlan(tomorrow, [{ id: t.id, at: '10:00', dur: 30 }])
+    expect(seen).toHaveBeenCalledWith(expect.objectContaining({ id: 'planner_10' }))
+    // 第十一次套用再撤銷：次數還有十次，第十次拿到的成就留著
+    vi.advanceTimersByTime(1000)
+    const u3 = store.applyPlan(tomorrow, [{ id: t.id, at: '11:00', dur: 30 }])
+    store.undoPlan(u3)
+    expect([store.stats.plansApplied, !!got.planner_10]).toEqual([10, true])
+    // 再撤銷拿到成就的那一次：收回
+    store.undoPlan(u2)
+    expect([store.stats.plansApplied, got.planner_10]).toEqual([9, undefined])
+    // 不是這次套用拿到的（之前就有了）：撤銷時次數不夠也不收回
+    const before = Date.now() - 60000
+    got.planner_10 = before
+    vi.advanceTimersByTime(1000)
+    store.undoPlan(store.applyPlan(tomorrow, [{ id: t.id, at: '12:00', dur: 30 }]))
+    expect([store.stats.plansApplied, got.planner_10]).toEqual([9, before])
+  })
+
   it('比哪一段空檔都長的大任務：標成 big（可以分段）', () => {
     // 最大的一段空檔是午餐後到晚餐前（13:00–18:30，330 分）
     const tasks = [{ id: 'big', title: '寫論文', priority: 2, dur: 400, date: TODAY }]

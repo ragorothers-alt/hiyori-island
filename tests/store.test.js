@@ -2606,6 +2606,16 @@ describe('卡關提醒與設定', () => {
     expect(g.moved).toBe(2)
     expect(store.undoPostpone(ug)).toBe(true)
     expect(g).toMatchObject({ date: TODAY, moved: 1 })
+
+    // 逾期的本命挪到本命已經滿了的明天（被擠掉）：復原回到原本那天（過去的日子），本命也放回去
+    const h = store.addTask({ title: '七', date: addDays(TODAY, -3) })
+    h.star = true
+    for (const title of ['明一', '明二', '明三']) store.toggleStar(store.addTask({ title, date: tomorrow }).id)
+    expect(store.starsOn(tomorrow).length).toBe(3)
+    const uh = store.postponeTask(h.id, tomorrow)
+    expect(h).toMatchObject({ date: tomorrow, star: false })
+    expect(store.undoPostpone(uh)).toBe(true)
+    expect(h).toMatchObject({ date: addDays(TODAY, -3), star: true })
   })
 
   it('卡住的任務：挪了 2 次以上或逾期 3 天以上，例行公事和不再提醒的不算，挪最多的在前', () => {

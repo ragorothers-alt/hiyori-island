@@ -2,6 +2,7 @@ import { floating, TIME_RE, cleanRhythm, num, DATE_RE, str, blankTask } from './
 import { optimizeDay, sleepMinutes, busyOf, estimateRatio, taskDur } from '../planner.js'
 import { toMin, repeatMatches, uid } from './util.js'
 import { XP, TAGS } from '../theme.js'
+import { ACHIEVEMENTS } from '../data/achievements.js'
 // 排進時段之前、之後的樣子（撤銷時用來放回去、認出之後又改過）
 const snapSlot = (t) => ({ date: t.date, at: t.at ?? null, dur: t.dur ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first })
 export const coachMethods = {
@@ -35,7 +36,7 @@ export const coachMethods = {
   },
   // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數。
   // unslot：重排時原本有時段、這次沒排進去的（位置被別件佔走了）：清掉時段，不然會跟新排的疊在一起。
-  // 回傳撤銷用的紀錄 { date, count, items: [{ id, 原本的樣子, after: 排完的樣子 }] }（沒排成是 null），給 undoPlan
+  // 回傳撤銷用的紀錄 { date, count, at：套用的時間, items: [{ id, 原本的樣子, after: 排完的樣子 }] }（沒排成是 null），給 undoPlan
   applyPlan(date, plan, left = 0, unslot = []) {
     this._refreshToday()
     // 過去的日子不排；今天已經過去的時段也不排（預覽放太久時，介面會先重新預覽）
@@ -72,9 +73,10 @@ export const coachMethods = {
       this._gain(XP.plan, fx, { kind: 'plan' })
     }
     fx.push(['planApplied', { date, count: n, left }])
+    const at = Date.now()
     this._finish(fx)
     const items = [...before].map(([id, b]) => ({ id, ...b, after: snapSlot(this._find('tasks', id)) }))
-    return { date, count: n, items }
+    return { date, count: n, at, items }
   },
   // 撤銷剛才的最佳化時程：每一件回到原本的日子、時段、長度、往後挪的次數、本命、先做這件。
   // 之後又改過的那一件（換了天、時段、長度，做完了、刪掉了、改成長期）、正在專注的那一件（skip）就留著現在的樣子；
@@ -102,15 +104,18 @@ export const coachMethods = {
       t.dur = x.dur
       t.at = x.at && free(x.date, x.at, taskDur(t), t) ? x.at : null
       t.moved = Math.max(0, (t.moved || 0) - (a.moved - x.moved))
-      if (x.star && t.star === a.star && !floating(t) && t.date >= this.today) t.star = true
-      if (x.first && t.first === a.first && !floating(t) && t.date >= this.today) t.first = true
-      this._fitStar(t)
+      this._restoreMarks(t, x, a)
       this._editedTask(t)
       back++
     }
-    // 撤銷了就不算一次（成就「累計套用 10 次」不能靠套用、撤銷刷出來）；今天的「替今天安排時段」照舊算完成
+    // 撤銷了就不算一次（成就「累計套用 10 次」不能靠套用、撤銷刷出來）；今天的「替今天安排時段」照舊算完成。
+    // 這次套用才拿到的那個成就，次數扣回去就不夠了：先收回，下次套用時再拿一次（會再慶祝一次）
     if (back) {
       this.stats.plansApplied = Math.max(0, this.stats.plansApplied - 1)
+      const got = this.state.player.achievements
+      for (const a of ACHIEVEMENTS) {
+        if (a.cond.stat === 'plansApplied' && got[a.id] >= (u.at ?? Infinity) && this.stats.plansApplied < a.cond.gte) delete got[a.id]
+      }
       this._finish()
     }
     return { back, kept: u.items.length - back }

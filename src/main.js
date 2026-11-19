@@ -1,5 +1,5 @@
 import './styles.css'
-import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev, rememberLook } from './store.js'
 import { UI, savedAppMode } from './ui.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
@@ -49,8 +49,9 @@ async function boot() {
   const loadIsland = () => (islandMod ??= import('./islandScene.js'))
   if (!savedAppMode()) loadIsland()
   const store = new Store()
-  // 選了夜晚的話，載入畫面就先用深色，不要先閃一下白
+  // 選了夜晚的話，載入畫面就先用深色，不要先閃一下白（index.html 開機時已經照 LOOK_KEY 先算過一次；這裡照存檔再算一次，順便記下來給下次開機）
   const theme = store.state.settings.theme
+  rememberLook(theme)
   // 現在幾點（網址帶 ?hour= 時用那個）；還沒有小島時天色照時間和外觀設定算（有小島就跟著天空）
   const clockHour = () => (params.has('hour') ? parseFloat(params.get('hour')) : realHour())
   const lookNight = () => nightAt(lookHour(((clockHour() % 24) + 24) % 24, store.state.settings.theme, systemDark()))
@@ -1294,6 +1295,8 @@ async function boot() {
     achDelay += 700
     setTimeout(() => {
       achDelay = Math.max(0, achDelay - 700)
+      // 還沒跳出來就被收回了（剛套用就撤銷最佳化時程）：不慶祝
+      if (!store.state.player.achievements[a.id]) return
       sfx.chime()
       ui.toast({ icon: a.kanji, stamp: true, title: `${a.name}・${a.title}`, sub: a.desc, ms: 4200 })
     }, 1500 + achDelay)

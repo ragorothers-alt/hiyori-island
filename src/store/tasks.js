@@ -40,6 +40,14 @@ export const tasksMethods = {
     // 那天先做的那一件也只有一件：搬過去的那天已經挑好別件了，就留那天挑的
     if (t.first && this.tasksOn(t.date).some((x) => x !== t && x.first)) t.first = false
   },
+  // 撤銷時把本命、那天先做的那一件放回去：原本有、之後沒被拿掉的才放。回到過去的日子也放（那天原本就是本命，
+  // 跟「過去的日子不能新選」不衝突）；那天的名額之間已經滿了（另外選了別件），_fitStar 會拿掉
+  _restoreMarks(t, was, after) {
+    if (floating(t)) return
+    if (was.star && !!t.star === !!after.star) t.star = true
+    if (was.first && !!t.first === !!after.first) t.first = true
+    this._fitStar(t)
+  },
   // 那天先做的那一件（前一晚挑好，早上起來不用再想先做什麼）：一天一件，挑了別件就換過去；on=false 取消。
   // 做完的、還沒排在哪一天的長期任務、過去的日子都不能挑。回傳有沒有改
   setFirst(id, on = true) {
@@ -250,10 +258,7 @@ export const tasksMethods = {
     t.date = u.date
     t.at = u.at
     t.moved = Math.max(0, (t.moved || 0) - (u.after.moved - u.moved))
-    if (u.star && t.star === u.after.star && !floating(t) && t.date >= this.today) t.star = true
-    // 那天先做的那一件也放回去（原本那天之間另外挑了別件的話，_fitStar 會拿掉）
-    if (u.first && t.first === !!u.after.first && !floating(t) && t.date >= this.today) t.first = true
-    this._fitStar(t)
+    this._restoreMarks(t, u, u.after)
     this._editedTask(t)
     this._finish()
     return true
@@ -281,9 +286,7 @@ export const tasksMethods = {
     t.at = u.at
     t.dur = u.dur
     t.moved = Math.max(0, (t.moved || 0) - (u.after.moved - u.moved))
-    if (u.star && t.star === u.after.star && !floating(t) && t.date >= this.today) t.star = true
-    if (u.first && t.first === !!u.after.first && !floating(t) && t.date >= this.today) t.first = true
-    this._fitStar(t)
+    this._restoreMarks(t, u, u.after)
     this._editedTask(t)
     this._finish()
     return true

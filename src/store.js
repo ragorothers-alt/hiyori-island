@@ -39,6 +39,13 @@ const readSeq = () => {
   }
 }
 const BACKUP_KEY = 'hiyori-backup'
+// 外觀設定（settings.theme）另外記一份小的：index.html 開機時還沒載入程式、讀存檔之前，先照它決定載入畫面要不要用深色
+export const LOOK_KEY = 'hiyori-look'
+export const rememberLook = (theme) => {
+  try {
+    if (localStorage.getItem(LOOK_KEY) !== theme) localStorage.setItem(LOOK_KEY, theme)
+  } catch {}
+}
 // 讀不進來的存檔原文（壞掉了、或清洗時出錯）：另外留一份，不會被接下來的存檔蓋掉
 export const RESCUE_KEY = 'hiyori-rescue'
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
@@ -396,6 +403,7 @@ export class Store {
       writeMain(JSON.stringify(this.state), keep)
       this._slowSave = performance.now() - t0 > SLOW_SAVE
       localStorage.setItem(REV_KEY, this.state.rev || '')
+      rememberLook(this.state.settings.theme)
       this._diskRev = this.state.rev || ''
       this._seq = uid()
       try {
