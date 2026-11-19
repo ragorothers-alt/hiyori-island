@@ -180,6 +180,28 @@ describe('不排太滿', () => {
     expect(store.applyPlan(TODAY, [{ id: 'nope', at: '10:00', dur: 30 }])).toBeNull()
   })
 
+  it('撤銷時原本的時段被後來加的日程佔走：回到那天、不排時段；正在計時的那件、改成長期的那件留著', () => {
+    const tomorrow = addDays(TODAY, 1)
+    store.state.rhythm = { ...DEFAULT_RHYTHM, wake: '08:00', sleep: '12:00', meals: [], buffer: 0, work: null }
+    const low = store.addTask({ title: '低', date: tomorrow, dur: 60, at: '08:00', priority: 1 })
+    store.addTask({ title: '高', date: tomorrow, dur: 240, priority: 3 })
+    const p = store.planDay(tomorrow, { replan: true })
+    const u = store.applyPlan(tomorrow, p.plan, p.left.length, p.unslot)
+    expect(low.at).toBeNull()
+    // 撤銷前，原本 08:00 那段加了會議
+    store.addEvent({ title: '會議', date: tomorrow, start: '08:00', end: '09:00' })
+    expect(store.undoPlan(u).back).toBe(2)
+    expect([low.date, low.at]).toEqual([tomorrow, null])
+    // 正在計時的那件（skip）留著
+    const a = store.addTask({ title: '甲', date: TODAY, dur: 30 })
+    const b = store.addTask({ title: '乙', date: TODAY, dur: 30 })
+    const p2 = store.planDay(TODAY)
+    const u2 = store.applyPlan(TODAY, p2.plan, p2.left.length, p2.unslot)
+    const at = a.at
+    expect(store.undoPlan(u2, { skip: [a.id] })).toEqual({ back: 1, kept: 1 })
+    expect([a.at, b.at]).toEqual([at, null])
+  })
+
   it('比哪一段空檔都長的大任務：標成 big（可以分段）', () => {
     // 最大的一段空檔是午餐後到晚餐前（13:00–18:30，330 分）
     const tasks = [{ id: 'big', title: '寫論文', priority: 2, dur: 400, date: TODAY }]

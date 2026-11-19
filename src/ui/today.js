@@ -7,7 +7,7 @@ import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
 import { applies, countOn, doneOn, streak } from '../habits.js'
 import { taskDur, nowGuide, toHHMM, firstPickIn } from '../planner.js'
 import { order as doFirst } from '../brief.js'
-import { ENERGY, ENERGY_COLORS, feelOf } from '../data/life.js'
+import { ENERGY, ENERGY_COLORS, feelOf, clipText } from '../data/life.js'
 import heroDay from '../assets/today/hero-day.webp'
 import heroNight from '../assets/today/hero-night.webp'
 
@@ -819,11 +819,11 @@ export class TodayView {
   _feelHTML(today) {
     const f = feelOf(this.store.lifeOn(today))
     if (!f.energy && !f.moods.length) return ''
-    const clip = (s) => (s.length > 24 ? `${s.slice(0, 23)}…` : s)
     const more = f.moods.length > 4 ? `<small>還有 ${f.moods.length - 4} 則</small>` : ''
-    return `<div class="td-feel" aria-label="今天記下的精神和心情">
+    // 小籤上的字截短；完整的放在 title（滑過去看得到）和念出來的內容
+    return `<div class="td-feel" role="group" aria-label="今天記下的精神和心情">
       ${f.energy ? `<span class="td-feel-e" style="--ec:${ENERGY_COLORS[f.energy]}">精神 <b>${ENERGY[f.energy]}</b></span>` : ''}
-      ${f.moods.slice(-4).map((x) => `<span class="td-feel-m"><time>${x.t}</time>${esc(clip(x.text))}</span>`).join('')}${more}
+      ${f.moods.slice(-4).map((x) => `<span class="td-feel-m" title="${esc(x.text)}" aria-label="${x.t} ${esc(x.text)}"><time aria-hidden="true">${x.t}</time><span aria-hidden="true">${esc(clipText(x.text, 24))}</span></span>`).join('')}${more}
     </div>`
   }
 

@@ -4,7 +4,7 @@ import { CaptureView } from './ui/capture.js'
 import { flipItems, noteTap, calmMotion, countUp } from './ui/motion.js'
 import { bindSwipe } from './ui/swipe.js'
 import { canHaptics, hapticsOn, setHaptics, haptic, IOS } from './ui/haptics.js'
-import { lifeKindOf, ENERGY, feelOf } from './data/life.js'
+import { lifeKindOf, ENERGY, feelOf, clipText } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM, pullOf } from './theme.js'
@@ -246,6 +246,8 @@ export class UI {
       split: (id) => this._split(id),
       scheduled: (id, prev) => this.scheduled(id, prev),
       coachDay: (date) => this.coachDay(date),
+      // 正在計時（專注、休息）的那一件：撤銷排程時不搬走它
+      timing: () => (this.focus && this.focus.mode !== 'idle' ? this.focus.taskId || null : null),
       openReview: (date) => this.openReview(date),
       openCalendar: (date) => this._use(this._calendar, (c) => c.open(date)),
       closeCalendar: () => this._calendar.view?.close(),
@@ -3669,8 +3671,10 @@ export class UI {
         const dd = parseDate(d)
         // 那天在生活記錄記下的精神和心情（「心」）：跟回顧放在一起看
         const f = feelOf(s.lifeOn(d))
-        const feel = [f.energy ? `精神 ${ENERGY[f.energy]}` : '', ...f.moods.map((x) => `${x.t} ${x.text}`)].filter(Boolean)
-        const feelLine = feel.length ? `<small class="jr-feel">${esc(feel.slice(0, 4).join('・'))}${feel.length > 4 ? `・還有 ${feel.length - 4} 則` : ''}</small>` : ''
+        // 一天記了很多則時只列最後三則、每則截短（不讓小日記一天就佔掉一大塊）；完整的在紀錄頁上面的生活記錄
+        const moods = f.moods.slice(-3).map((x) => `${x.t} ${clipText(x.text, 16)}`)
+        const feel = [f.energy ? `精神 ${ENERGY[f.energy]}` : '', ...(f.moods.length > 3 ? [`還有 ${f.moods.length - 3} 則`] : []), ...moods].filter(Boolean)
+        const feelLine = feel.length ? `<small class="jr-feel">${esc(feel.join('・'))}</small>` : ''
         return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p>${feelLine}</div></li>`
       })
       .join(''))

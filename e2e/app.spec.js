@@ -1,6 +1,9 @@
 // App 模式的主要流程：ふじ排的計畫套用、撤銷；專案搜尋；平板上專案的任務欄；練習曲的速度；番茄鐘計時重新整理後接著算；專注頁的貓咪
 import { bootReady, chatSaid, expect, noFonts, swReady, test, toastSeen, useAppMode } from './fixtures.js'
 
+// 計時那幾張提示卡上的按鈕：每日任務、每週挑戰達成那張也有「領取」，不算（做完一輪專注時常常剛好達成）
+const timerActs = (page) => page.locator('#toasts .toast').filter({ hasNotText: /每日任務|每週挑戰/ }).locator('.toast-acts')
+
 test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後又拿掉', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
@@ -164,7 +167,8 @@ test('每日任務只放一個地方：任務頁沒有那張；小島模式面�
     for (const title of ['一', '二', '三']) s.toggleTask(s.addTask({ title, date: s.today }).id)
   })
   const toast = page.locator('#toasts .toast', { hasText: '每日任務' }).filter({ hasText: '達成' })
-  await toast.getByRole('button', { name: '領取' }).click()
+  // 按鈕一出現就按（小島模式、機器很忙時，進場動畫一直沒停穩，等它停穩之前提示卡就收掉了）
+  await toast.getByRole('button', { name: '領取' }).evaluate((b) => b.click())
   await expect.poll(() => page.evaluate(() => window.hiyori.store.quests().find((q) => q.id === 'tasks3').claimed)).toBe(true)
   // 習慣頁：新增習慣時寫著跟例行公事、生活記錄的差別
   await page.evaluate(() => window.hiyori.ui.setTab('habits'))
@@ -976,7 +980,7 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await skip(26 * 60000)
   await expect.poll(async () => (await state()).mode).toBe('break')
   expect(await state()).toMatchObject({ pomos: 1, mins: 25, round: 1, rounds: 1 })
-  await expect(page.locator('.toast-acts .toast-act')).toHaveText(['還沒做完，延長', '再加一輪'])
+  await expect(timerActs(page).locator('.toast-act')).toHaveText(['還沒做完，延長', '再加一輪'])
 
   // 專注頁的休息畫面上也有這兩顆；時間下面寫休息到幾點、最上面寫今天專注了多久
   await page.evaluate(() => window.hiyori.ui.focus.toggleBig(true))
@@ -992,7 +996,7 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   expect(await state()).toMatchObject({ mode: 'focus', ext: true, up: true })
   await expect(page.locator('#ffKicker')).toHaveText('加時中')
   await expect(page.locator('#ffTime')).toHaveText(/^01:\d\d$/)
-  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  await expect(timerActs(page)).toHaveCount(0)
   // 重新整理後還是加時中
   await page.reload()
   await bootReady(page)
@@ -1005,7 +1009,7 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   expect(await state()).toMatchObject({ mode: 'break', ext: false, up: false, pomos: 1, mins: 33 })
   // 專注頁開著：按鈕在頁面上，提示卡只說一聲，不再放一次按鈕蓋住計時
   await expect(page.locator('#toasts .toast', { hasText: '多做了 8 分鐘' })).toBeVisible()
-  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  await expect(timerActs(page)).toHaveCount(0)
 
   // 最後一輪的休息：再加一輪，休息完自動開始第 2 輪
   await page.locator('#ffAddRound').click()
@@ -1032,7 +1036,7 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await page.locator('.toast-acts .toast-act', { hasText: '再來一輪' }).click()
   expect(await state()).toMatchObject({ mode: 'focus', round: 1, rounds: 1, ext: false })
   expect(await page.evaluate(() => window.hiyori.ui.focus.focusMin)).toBe(25)
-  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  await expect(timerActs(page)).toHaveCount(0)
   await page.evaluate(() => {
     window.hiyori.ui.focus.stop()
     window.hiyori.store.setSetting('focusMin', 25)
@@ -1111,7 +1115,7 @@ test('到點自動延長：原定的照常記下、不休息，接著往上數�
   await expect(page.locator('#ffKicker')).toHaveText('自動延長中')
   await expect(page.locator('#ffSub')).toHaveText(/^25 分記下了・最晚 \d\d:\d\d$/)
   await expect(page.locator('#ffStop')).toHaveText('做完了')
-  await expect(page.locator('.toast-acts')).toHaveCount(0)
+  await expect(timerActs(page)).toHaveCount(0)
   // 貓咪說了一聲（貓在的話）或一張不響的提示卡
   await expect.poll(() => page.evaluate(() => document.querySelector('#ffSay').textContent || (window.__toasts || []).find((t) => t.includes('自動延長中')) || '')).not.toBe('')
   // 重新整理後還是自動延長中
@@ -3256,11 +3260,18 @@ test.describe('手機的觸控', () => {
     })
     const card = page.locator('#toasts .toast', { hasText: '有按鈕的提示' })
     const btn = card.locator('.toast-act')
-    const b = await btn.boundingBox()
-    const x = b.x + b.width / 2
-    const y = b.y + b.height / 2
-    // 開場畫面讓開、手指真的按得到按鈕
-    await expect.poll(() => page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.toast-act'), [x, y])).toBe(true)
+    // 開場畫面讓開、手指真的按得到按鈕。位置每次重新量：進場的動畫、上面多出一張提示卡（例如每日任務達成）時按鈕會挪
+    let x = 0
+    let y = 0
+    await expect
+      .poll(async () => {
+        const b = await btn.boundingBox()
+        if (!b) return false
+        x = b.x + b.width / 2
+        y = b.y + b.height / 2
+        return page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.toast-act'), [x, y])
+      })
+      .toBe(true)
     const cdp = await context.newCDPSession(page)
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
     await expect(card).toHaveClass(/held/)

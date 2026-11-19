@@ -619,7 +619,7 @@ export class ScheduleView {
           actions: [{
             label: '撤銷', soft: true,
             run: () => {
-              const r = s.undoPlan(u)
+              const r = s.undoPlan(u, { skip: [this.hooks.timing?.()].filter(Boolean) })
               if (!r.back) return this.hooks.toast({ icon: '時', title: '排好之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
               if (r.kept) this.hooks.toast({ icon: '時', title: `放回 ${r.back} 件`, sub: `${r.kept} 件排好之後又改過，留著現在的樣子`, ms: 4200 })
             },

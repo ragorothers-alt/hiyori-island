@@ -1,5 +1,5 @@
 import { floating, TIME_RE, cleanRhythm, num, DATE_RE, str, blankTask } from './migrate.js'
-import { optimizeDay, sleepMinutes, busyOf, estimateRatio } from '../planner.js'
+import { optimizeDay, sleepMinutes, busyOf, estimateRatio, taskDur } from '../planner.js'
 import { toMin, repeatMatches, uid } from './util.js'
 import { XP, TAGS } from '../theme.js'
 // 排進時段之前、之後的樣子（撤銷時用來放回去、認出之後又改過）
@@ -77,18 +77,30 @@ export const coachMethods = {
     return { date, count: n, items }
   },
   // 撤銷剛才的最佳化時程：每一件回到原本的日子、時段、長度、往後挪的次數、本命、先做這件。
-  // 之後又改過的那一件（換了天、時段、長度，做完了、刪掉了）就留著現在的樣子。回傳 { back：回去幾件, kept：留著幾件 }
-  undoPlan(u) {
+  // 之後又改過的那一件（換了天、時段、長度，做完了、刪掉了、改成長期）、正在專注的那一件（skip）就留著現在的樣子；
+  // 原本的時段之後被別的日程、任務佔走了，就回到那天、不排時段（不疊在一起）。回傳 { back：回去幾件, kept：留著幾件 }
+  undoPlan(u, { skip = [] } = {}) {
     if (!u?.items?.length) return { back: 0, kept: 0 }
-    let back = 0
-    for (const x of u.items) {
-      const t = this._find('tasks', x.id)
+    const same = (x, t) => {
       const a = x.after
-      if (!t || t.done || t.date !== a.date || (t.at ?? null) !== a.at || (t.dur ?? null) !== a.dur) continue
+      return t && !t.done && !floating(t) && !skip.includes(t.id) && t.date === a.date && (t.at ?? null) === a.at && (t.dur ?? null) === a.dur
+    }
+    const list = u.items.map((x) => [x, this._find('tasks', x.id)]).filter(([x, t]) => same(x, t))
+    const mine = new Set(list.map(([, t]) => t.id))
+    // 原本那個時段現在空著嗎：那天的日程（含還沒生成的例行日程）、這次沒有要搬回去的任務
+    const free = (date, at, dur, self) => {
+      const s0 = toMin(at)
+      const e0 = s0 + dur
+      if (this._busyEvents(date).some((e) => toMin(e.start) < e0 && s0 < toMin(e.end))) return false
+      return !this.tasksOn(date).some((o) => o !== self && !mine.has(o.id) && o.at && !o.done && toMin(o.at) < e0 && s0 < toMin(o.at) + taskDur(o))
+    }
+    let back = 0
+    for (const [x, t] of list) {
+      const a = x.after
       this._editedTask(t)
       t.date = x.date
-      t.at = x.at
       t.dur = x.dur
+      t.at = x.at && free(x.date, x.at, taskDur(t), t) ? x.at : null
       t.moved = Math.max(0, (t.moved || 0) - (a.moved - x.moved))
       if (x.star && t.star === a.star && !floating(t) && t.date >= this.today) t.star = true
       if (x.first && t.first === a.first && !floating(t) && t.date >= this.today) t.first = true

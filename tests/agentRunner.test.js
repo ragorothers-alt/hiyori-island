@@ -390,6 +390,10 @@ describe('剛加的任務', () => {
     expect(agent.takes({ ...t, date: addDays(TODAY, 30) })).toBe(false)
     expect(agent.takes({ ...t, date: addDays(TODAY, -1) })).toBe(false)
     expect(agent.takes(null)).toBe(false)
+    // 離線時她不會馬上排（重新整理就忘了）：提示卡照舊給「排進空檔」
+    vi.stubGlobal('navigator', { onLine: false })
+    expect(agent.takes(t)).toBe(false)
+    vi.unstubAllGlobals()
     store.state.settings.agentMode = 'off'
     expect(agent.takes(t)).toBe(false)
     store.state.settings.agentMode = 'auto'

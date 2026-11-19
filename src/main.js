@@ -71,18 +71,29 @@ async function boot() {
   // 小島模式開機、小島還在背景建（islandWait 是陣列）：兩人頭上的話先留著（最後三句），建好再一句一句說（heldLines）；
   // 留太久（超過 20 秒）的就不說了，招呼、閒聊在這段時間被關掉的也不說
   let islandWait = null
+  // 正在一句一句說留著的話（replay 是還沒說的那幾句）：這時新來的話排在後面，不插隊
+  let replay = null
   const onScene = (key, fn) => {
-    if (scene) return fn(scene)
-    if (islandWait && !quiet(key)) islandWait = [...islandWait, { key, fn, at: Date.now() }].slice(-3)
+    if (scene && !replay) return fn(scene)
+    const line = { key, fn, at: Date.now() }
+    if (replay) replay.push(line)
+    else if (islandWait && !quiet(key)) islandWait = [...islandWait, line].slice(-3)
   }
   const CHAT_KEYS = /^(greet|morning)/
+  // 說之前再看一次：換成 App 模式了（下方的對話框已經說過）、留太久了、招呼和閒聊被關掉了，就不說
+  const stillSay = (x) =>
+    !!scene && !document.body.classList.contains('app-mode') && Date.now() - x.at < 20000 && !(store.state.settings.chatOn === false && CHAT_KEYS.test(x.key))
+  const playNext = () => {
+    while (replay?.length && !stillSay(replay[0])) replay.shift()
+    const x = replay?.shift()
+    if (!x) return void (replay = null)
+    x.fn(scene)
+    setTimeout(playNext, 2800)
+  }
   const heldLines = () => {
-    const list = islandWait || []
+    replay = islandWait || []
     islandWait = null
-    const now = Date.now()
-    const keep = list.filter((x) => now - x.at < 20000 && !(store.state.settings.chatOn === false && CHAT_KEYS.test(x.key)))
-    keep.forEach((x, i) => setTimeout(() => scene && x.fn(scene), i * 2800))
-    return keep.length
+    playNext()
   }
   // 直接說一句話（不挑台詞）
   const say = (who, text, ms) => {
@@ -2525,7 +2536,8 @@ async function boot() {
     // 建好之前兩人說的話先留著（回來了、逾期、招呼…），建好再說
     islandWait = []
     islandBoot = ensureIsland()
-    const slow = setTimeout(() => !scene && ui._islandLoading(islandBoot, '可以先繼續用，好了就會出現'), 1500)
+    // （一下子就換成 App 模式的話不說：小島在背景照樣建好）
+    const slow = setTimeout(() => !scene && !ui.appMode && ui._islandLoading(islandBoot, '可以先繼續用，好了就會出現'), 1500)
     islandBoot.then(
       () => {
         clearTimeout(slow)

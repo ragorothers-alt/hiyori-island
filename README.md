@@ -335,7 +335,7 @@ src/
   push.js          到點的推播：番茄鐘（TimerPush）和警語（MottoPush）什麼時候排、什麼時候取消、通知上寫什麼、跟 Service Worker 怎麼分「念到哪」（手機鎖著、頁面關掉時由 worker/ 到點推過來，public/sw.js 顯示）
   focusClock.js    番茄鐘的計時規則：倒數、往上數、暫停、多輪、放太久作廢（純函式，ui.js 的計時器照這裡走）
   catWalk.js       專注頁的貓咪：接下來做什麼（走、坐、理毛、伸懶腰、睡）、每一格的姿勢、身體和尾巴的路徑、每天的毛色（純函式，ui/focusCat.js 照這裡畫）
-  ui/              schedule.js（時間軸、排程、作息設定、編輯面板）、habits.js、life.js、subs.js（訂閱）、mottos.js（警語的卡片和面板上方那一句）、calendar.js、coach.js（ふじ教練：ふじ、排程和週報）、agent.js（自主的ふじ：今日總覽上的卡片、教練分頁的對話和紀錄）、cloud.js（線上同步的設定列、QR code）、ai.js（ふじ的 AI 設定列）、project.js（專案詳情：進度日誌、筆記、里程碑細項、任務清單和任務頁、拆細項與整理進度）、today.js（App 模式的今日總覽）、focusCat.js（專注頁散步的貓咪，SVG）、focus.css（專注頁的樣式）、motion.js（列表重畫時滑到新位置、打勾的花瓣、冒出來的經驗值、花瓣雨）、swipe.js（手機上任務列左右滑）、haptics.js（手機的震動回饋）、dom.js（共用的小工具）與各自的樣式。日曆、教練和專案詳情第一次用到時才載入，開機後閒下來就先載好（離線也能用）
+  ui/              schedule.js（時間軸、排程、作息設定、編輯面板）、habits.js、life.js、subs.js（訂閱）、mottos.js（警語的卡片和面板上方那一句）、calendar.js、coach.js（ふじ教練：ふじ、計畫和週報）、agent.js（自主的ふじ：今日總覽上的卡片、教練分頁的對話和紀錄）、cloud.js（線上同步的設定列、QR code）、ai.js（ふじ的 AI 設定列）、project.js（專案詳情：進度日誌、筆記、里程碑細項、任務清單和任務頁、拆細項與整理進度）、today.js（App 模式的今日總覽）、focusCat.js（專注頁散步的貓咪，SVG）、focus.css（專注頁的樣式）、motion.js（列表重畫時滑到新位置、打勾的花瓣、冒出來的經驗值、花瓣雨）、swipe.js（手機上任務列左右滑）、haptics.js（手機的震動回饋）、dom.js（共用的小工具）與各自的樣式。日曆、教練和專案詳情第一次用到時才載入，開機後閒下來就先載好（離線也能用）
   events.js        所有事件名稱的目錄：發的和聽的都要在裡面（測試會掃過 src/ 檢查）
   parse.js         一行快速輸入的解析
   reminders.js     日程、時段任務與就寢提醒，系統通知
