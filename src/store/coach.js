@@ -2,6 +2,8 @@ import { floating, TIME_RE, cleanRhythm, num, DATE_RE, str, blankTask } from './
 import { optimizeDay, sleepMinutes, busyOf, estimateRatio } from '../planner.js'
 import { toMin, repeatMatches, uid } from './util.js'
 import { XP, TAGS } from '../theme.js'
+// 排進時段之前、之後的樣子（撤銷時用來放回去、認出之後又改過）
+const snapSlot = (t) => ({ date: t.date, at: t.at ?? null, dur: t.dur ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first })
 export const coachMethods = {
   // ── 時段安排 ──
   // 把任務排進時間軸（at 為 null 就收回未排區）；dur 是預估分鐘數
@@ -32,22 +34,31 @@ export const coachMethods = {
     return estimateRatio(this.state.tasks)
   },
   // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數。
-  // unslot：重排時原本有時段、這次沒排進去的（位置被別件佔走了）：清掉時段，不然會跟新排的疊在一起
+  // unslot：重排時原本有時段、這次沒排進去的（位置被別件佔走了）：清掉時段，不然會跟新排的疊在一起。
+  // 回傳撤銷用的紀錄 { date, count, items: [{ id, 原本的樣子, after: 排完的樣子 }] }（沒排成是 null），給 undoPlan
   applyPlan(date, plan, left = 0, unslot = []) {
     this._refreshToday()
     // 過去的日子不排；今天已經過去的時段也不排（預覽放太久時，介面會先重新預覽）
-    if (date < this.today) return
+    if (date < this.today) return null
     const n0 = new Date()
     const nowMin = date === this.today ? n0.getHours() * 60 + n0.getMinutes() : -1
     const fx = []
     let n = 0
+    const before = new Map()
+    const mark = (t) => before.has(t.id) || before.set(t.id, snapSlot(t))
+    // 先看哪些真的會排進去：一件都排不進去的話，什麼都不動（不然清掉的時段會留在記憶體裡，下次存檔才寫進去）
+    const ok = (p, t) => t && !t.done && TIME_RE.test(p.at) && toMin(p.at) >= nowMin
+    if (!plan.some((p) => ok(p, this._find('tasks', p.id)))) return null
     for (const id of unslot) {
       const t = this._find('tasks', id)
-      if (t && !t.done && t.date === date && t.at && toMin(t.at) >= nowMin) t.at = null
+      if (!t || t.done || t.date !== date || !t.at || toMin(t.at) < nowMin) continue
+      mark(t)
+      t.at = null
     }
     for (const p of plan) {
       const t = this._find('tasks', p.id)
-      if (!t || t.done || !TIME_RE.test(p.at) || toMin(p.at) < nowMin) continue
+      if (!ok(p, t)) continue
+      mark(t)
       if (t.date < date) t.moved = (t.moved || 0) + 1
       t.date = date
       this._fitStar(t)
@@ -55,7 +66,6 @@ export const coachMethods = {
       t.dur ||= p.dur
       n++
     }
-    if (!n) return
     this.stats.plansApplied++
     if (date === this.today && !this.day().timebox) {
       this.day().timebox = 1
@@ -63,6 +73,35 @@ export const coachMethods = {
     }
     fx.push(['planApplied', { date, count: n, left }])
     this._finish(fx)
+    const items = [...before].map(([id, b]) => ({ id, ...b, after: snapSlot(this._find('tasks', id)) }))
+    return { date, count: n, items }
+  },
+  // 撤銷剛才的最佳化時程：每一件回到原本的日子、時段、長度、往後挪的次數、本命、先做這件。
+  // 之後又改過的那一件（換了天、時段、長度，做完了、刪掉了）就留著現在的樣子。回傳 { back：回去幾件, kept：留著幾件 }
+  undoPlan(u) {
+    if (!u?.items?.length) return { back: 0, kept: 0 }
+    let back = 0
+    for (const x of u.items) {
+      const t = this._find('tasks', x.id)
+      const a = x.after
+      if (!t || t.done || t.date !== a.date || (t.at ?? null) !== a.at || (t.dur ?? null) !== a.dur) continue
+      this._editedTask(t)
+      t.date = x.date
+      t.at = x.at
+      t.dur = x.dur
+      t.moved = Math.max(0, (t.moved || 0) - (a.moved - x.moved))
+      if (x.star && t.star === a.star && !floating(t) && t.date >= this.today) t.star = true
+      if (x.first && t.first === a.first && !floating(t) && t.date >= this.today) t.first = true
+      this._fitStar(t)
+      this._editedTask(t)
+      back++
+    }
+    // 撤銷了就不算一次（成就「累計套用 10 次」不能靠套用、撤銷刷出來）；今天的「替今天安排時段」照舊算完成
+    if (back) {
+      this.stats.plansApplied = Math.max(0, this.stats.plansApplied - 1)
+      this._finish()
+    }
+    return { back, kept: u.items.length - back }
   },
   // 清空這天任務的時段（已完成的保留）
   clearPlan(date = this.selectedDate) {

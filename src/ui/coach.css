@@ -5,6 +5,8 @@
 .coach-seg button { flex: 1; font-size: 13px; padding: 6px 10px; }
 .coach-seg button small { margin-left: 6px; font-family: var(--font-display); font-size: max(var(--fmin), 10px); color: var(--ink-faint); }
 .coach-seg button.on small { color: var(--sakura); }
+/* 窄螢幕三顆擠在一起（ふじ／計畫／週報）：假名收起來，不要折成兩行 */
+@media (max-width: 420px) { .coach-seg:has(> :nth-child(3)) button small { display: none; } }
 .coach-head .icon-btn { position: relative; width: 34px; height: 34px; }
 .coach-head .icon-btn.on { background: var(--glass-strong); color: var(--ink); }
 .coach-head .icon-btn svg { width: 18px; height: 18px; }
@@ -134,6 +136,7 @@ body.night .dt-chip.soon small { color: #ffb0c4; }
 .wr-card { padding: 14px; border-radius: 20px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow); animation: fadeUp .4s var(--ease); }
 .wr-card h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .wr-card h3 small { font-family: var(--font-num); font-size: max(var(--fmin), 11px); font-weight: 400; color: var(--ink-faint); }
+.wr-card h3 .wr-lastc { margin-left: auto; font-size: 12.5px; font-weight: 400; }
 .wr-badge { margin-left: auto; font-style: normal; font-size: max(var(--fmin), 11px); font-weight: 500; color: var(--ink-soft); background: var(--field); border-radius: 8px; padding: 2px 8px; }
 .wr-stats { display: grid; grid-template-columns: repeat(4, 1fr); border-radius: 16px; padding: 12px 4px; background: linear-gradient(110deg, color-mix(in srgb, #e9ef7a 26%, transparent), color-mix(in srgb, #f6c6d4 26%, transparent)); }
 .wr-stats div { display: flex; flex-direction: column; align-items: center; gap: 2px; }

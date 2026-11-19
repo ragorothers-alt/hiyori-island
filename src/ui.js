@@ -4,7 +4,7 @@ import { CaptureView } from './ui/capture.js'
 import { flipItems, noteTap, calmMotion, countUp } from './ui/motion.js'
 import { bindSwipe } from './ui/swipe.js'
 import { canHaptics, hapticsOn, setHaptics, haptic, IOS } from './ui/haptics.js'
-import { lifeKindOf } from './data/life.js'
+import { lifeKindOf, ENERGY, feelOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM, pullOf } from './theme.js'
@@ -24,7 +24,7 @@ import { LEVEL_TITLES } from './data/lines.js'
 import { $, $$, esc, ICON, armConfirm, inlineEdit, editing, setHTML, setOn, pickOne, scrollMode } from './ui/dom.js'
 import { firstPickIn, taskDur, SPLIT_MIN, fmtDur } from './planner.js'
 import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './daylight.js'
-import { ScheduleView } from './ui/schedule.js'
+import { ScheduleView, COACH_LABEL, COACH_TIP } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
 import { latestLog, msProgress, msSteps, msTasks, projectStats, PROJECT_LIMITS as PL } from './projects.js'
@@ -245,6 +245,7 @@ export class UI {
       openSubs: (id) => this.openSubs(id),
       split: (id) => this._split(id),
       scheduled: (id, prev) => this.scheduled(id, prev),
+      coachDay: (date) => this.coachDay(date),
       openReview: (date) => this.openReview(date),
       openCalendar: (date) => this._use(this._calendar, (c) => c.open(date)),
       closeCalendar: () => this._calendar.view?.close(),
@@ -325,10 +326,7 @@ export class UI {
       // 「種下一件」：留在總覽，直接叫出快速記錄
       addTask: () => this.openCapture('todo'),
       // 「看週報」：教練分頁的週報那一頁
-      openReport: () => {
-        this.setTab('coach')
-        this._use(this._coach, (c) => c.show('report'))
-      },
+      openReport: () => this.openReport(),
       startFocus: (id) => this.focus.ask(id),
       focusTaskId: () => (this.focus.mode === 'focus' ? this.focus.taskId : null),
       idleTasks: () => this.idleTasks(),
@@ -681,13 +679,11 @@ export class UI {
       this.toggleShop(false)
       this.hooks.startPlacing(b.dataset.key)
     })
-    for (const el of [$('#questList'), $('#questMini')]) {
-      el.addEventListener('click', (e) => {
-        const b = e.target.closest('[data-q]')
-        if (b) this.store.claimQuest(b.dataset.q)
-        if (e.target.closest('[data-weekly]')) this.store.claimWeekly()
-      })
-    }
+    $('#questList').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-q]')
+      if (b) this.store.claimQuest(b.dataset.q)
+      if (e.target.closest('[data-weekly]')) this.store.claimWeekly()
+    })
     $('#modalClose').onclick = () => this.closeModal()
     $('#levelModal').addEventListener('click', (e) => {
       if (e.target.id === 'levelModal') this.closeModal()
@@ -1212,6 +1208,8 @@ export class UI {
   // 等的時候又選了別的（例如又切回 App）就不切。回傳最後有沒有換過去
   setAppMode(on, opts = {}) {
     const ticket = (this._modeTicket = (this._modeTicket || 0) + 1)
+    // 換成 App 模式：「小島準備中」那張收掉（小島照樣在背景建好，之後按「小島」就直接換過去）
+    if (on) this._loadingDone?.()
     if (on || !this.appMode || this.hooks.islandReady()) {
       this._applyAppMode(on, opts)
       return Promise.resolve(true)
@@ -1225,7 +1223,7 @@ export class UI {
         return true
       },
       (err) => {
-        const sub = err?.reload ? '重新整理頁面再試一次' : '連上網路再按一次「小島」；還是不行就重新整理頁面'
+        const sub = err?.webgl ? '這個瀏覽器（或顯示卡）畫不出小島，先用 App 模式' : err?.reload ? '重新整理頁面再試一次' : '連上網路再按一次「小島」；還是不行就重新整理頁面'
         if (ticket === this._modeTicket && !err?.updating) this.toast({ icon: '島', title: '小島沒有載入成功', sub, ms: 6000 })
         return false
       },
@@ -1240,11 +1238,14 @@ export class UI {
     $('#toasts').append(el)
     $('#fullBtn').setAttribute('aria-busy', 'true')
     const done = () => {
+      if (this._loadingToast !== el) return
       this._loadingToast = null
+      this._loadingDone = null
       $('#fullBtn').removeAttribute('aria-busy')
       el.classList.add('out')
       setTimeout(() => el.remove(), 500)
     }
+    this._loadingDone = done
     ready.then(done, done)
   }
   _applyAppMode(on, { save = true, cabin = true } = {}) {
@@ -1476,7 +1477,9 @@ export class UI {
     // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去
     const top = this._topLayer()
     if (top && top.id !== 'capture') return false
-    this.capture.open(mode)
+    // 看著紀錄頁（生活記錄在那裡）叫出來：直接是「生活記錄」
+    const onRecords = this.tab === 'records' && !$('#panel').classList.contains('collapsed')
+    this.capture.open(mode ?? (onRecords ? 'log' : undefined))
     return true
   }
   // 生活記錄的一行字：花費把金額拿出來（parse.js 的 parseSpend），其他種類整句照記
@@ -1611,13 +1614,17 @@ export class UI {
       // 重畫完（下一個 task）再找剛加的那件
       setTimeout(() => this._showAdded(before), 0)
       r.toasts.forEach((t) => this.toast(t))
-      // 記下了：說一聲記在哪天，可以直接排進空檔、撤銷（種到別天的上面已經說了）
+      // 記下了：說一聲記在哪天，可以直接排進空檔、撤銷（種到別天的上面已經說了）。
+      // ふじ會自己替它排的話（接上 Claude、自己整理開著）：不放「排進空檔」，說一聲她等一下會排（兩邊一起排會打架）
       if (r.task && !r.toasts.length) {
         const id = r.task
+        const t = this.store.state.tasks.find((x) => x.id === id)
+        const fuji = !t?.at && this.agent?.takes?.(t)
         this.toast({
-          icon: '種', title: `記下了「${r.title.length > 14 ? `${r.title.slice(0, 13)}…` : r.title}」`, sub: r.sub, ms: 4200, tag: 'added',
+          icon: '種', title: `記下了「${r.title.length > 14 ? `${r.title.slice(0, 13)}…` : r.title}」`,
+          sub: fuji ? `${r.sub}・${this.store.state.settings.agentMode === 'ask' ? 'ふじ等一下想好時段先問你' : 'ふじ等一下替它排時段'}` : r.sub, ms: 4200, tag: 'added',
           actions: [
-            { label: '排進空檔', soft: true, run: () => this.schedule._slot(id) },
+            ...(t?.at || fuji ? [] : [{ label: '排進空檔', soft: true, run: () => this.schedule._slot(id) }]),
             ...(r.undo ? [{ label: '撤銷', soft: true, run: r.undo }] : []),
           ],
         })
@@ -1638,15 +1645,11 @@ export class UI {
     })
 
     const onList = (e) => {
-      // 空白時的兩個按鈕：快速加一個、讓ふじ排這天
+      // 空白時的兩個按鈕：快速加一個、讓ふじ排主攻時段
       const ea = e.target.closest('[data-act="quickAdd"], [data-act="coachDay"]')
       if (ea) {
         if (ea.dataset.act === 'quickAdd') $('#taskTitle').focus()
-        else {
-          this.setTab('coach')
-          const date = this.store.selectedDate
-          this._use(this._coach, (c) => c.preset({ scope: date === this.store.today ? 'today' : 'day', date }))
-        }
+        else this.coachDay(this.store.selectedDate)
         return
       }
       const li = e.target.closest('.item')
@@ -1930,6 +1933,11 @@ export class UI {
       li?.querySelector('.sub-add input')?.focus({ preventScroll: true })
     })
   }
+  // 教練的「計畫」那一頁，要排的就是這一天（任務頁、日程頁空著的那天按「讓ふじ排主攻時段」）
+  coachDay(date) {
+    this.setTab('coach')
+    this._use(this._coach, (c) => c.preset({ scope: date === this.store.today ? 'today' : 'day', date }))
+  }
   // 排進時段之後：說排在哪裡，可以看位置、撤銷（回到原本的日子和時段）
   scheduled(id, undo) {
     const s = this.store
@@ -2095,7 +2103,7 @@ export class UI {
       $('#taskList').innerHTML = n
         ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
         : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
-          <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? '<button class="btn-primary" data-act="coachDay">讓ふじ排這天</button>' : ''}</div></li>`
+          <div class="empty-acts"><button class="btn-ghost" data-act="quickAdd">＋ 快速加一個</button>${s.selectedDate >= s.today ? `<button class="btn-primary" data-act="coachDay" title="${COACH_TIP}">${COACH_LABEL}</button>` : ''}</div></li>`
     })
     for (const [box, id, v] of subDrafts) {
       const input = $(`${box} .sub-add[data-id="${CSS.escape(id)}"] input`)
@@ -3149,6 +3157,11 @@ export class UI {
     })
   }
 
+  // 週報（教練分頁的第二頁）：一週的事都從這裡看，上週的回顧卡、每週的記憶圖鑑也在裡面。總覽、紀錄頁的「看週報」都到這裡
+  openReport() {
+    this.setTab('coach')
+    this._use(this._coach, (c) => c.show('report'))
+  }
   // ── 上週回顧卡 ──
   // wk：哪一週（星期一）；不給就是上週。週報的記憶圖鑑點卡片時會帶週次
   openWeekCard(wk) {
@@ -3329,6 +3342,7 @@ export class UI {
     this._bindReview()
     this._bindDex()
     $('#weekBtn').onclick = () => this.openWeekCard()
+    $('#reportBtn').onclick = () => this.openReport()
     $('#weekClose').onclick = () => this.closeWeekCard()
     $('#weekModal').addEventListener('click', (e) => {
       if (e.target.id === 'weekModal') this.closeWeekCard()
@@ -3653,7 +3667,11 @@ export class UI {
       .map(([d, j]) => {
         const m = moodOf(j.mood)
         const dd = parseDate(d)
-        return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p></div></li>`
+        // 那天在生活記錄記下的精神和心情（「心」）：跟回顧放在一起看
+        const f = feelOf(s.lifeOn(d))
+        const feel = [f.energy ? `精神 ${ENERGY[f.energy]}` : '', ...f.moods.map((x) => `${x.t} ${x.text}`)].filter(Boolean)
+        const feelLine = feel.length ? `<small class="jr-feel">${esc(feel.slice(0, 4).join('・'))}${feel.length > 4 ? `・還有 ${feel.length - 4} 則` : ''}</small>` : ''
+        return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p>${feelLine}</div></li>`
       })
       .join(''))
     $('#reviewBtn').textContent = s.state.journal[s.today] ? '修改今天的回顧' : '寫下今天的回顧'
@@ -3727,7 +3745,6 @@ export class UI {
     const weekly = row({ ...w, sub: `${w.sub}・獎勵 ${prize}` }, wAct, 'weekly', '<i class="wk-badge">週</i>')
     const html = [...daily, weekly].join('')
     setHTML($('#questList'), html)
-    setHTML($('#questMini'), html)
   }
 
   render() {

@@ -229,6 +229,8 @@ button.hb-cell { cursor: pointer; }
 
 /* 空狀態 */
 .hb-empty { padding: 0 0 8px; }
+/* 習慣、例行公事、生活記錄的差別（新增習慣的地方） */
+.hb-diff { margin: 10px 4px 4px; font-size: max(var(--fmin), 12px); line-height: 1.7; color: var(--ink-faint); }
 .hb-empty-head { text-align: center; padding: 8px 6px 14px; font-size: 12.5px; line-height: 1.7; color: var(--ink-soft); }
 .hb-empty-head .em { display: block; margin-bottom: 2px; font-family: var(--font-display); font-size: 19px; letter-spacing: .16em; color: var(--ink); }
 .hb-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

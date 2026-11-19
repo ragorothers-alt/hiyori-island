@@ -12,7 +12,7 @@ import { daypart } from '../daylight.js'
 import { weekProjects, tempoVal, fmtMins } from '../projects.js'
 
 // 「教練 · ふじ」分頁，分成兩頁：
-// 排程：ふじ打招呼 → 問卷（全部點選標籤）→ 你的回答 → ふじ排好的預覽 → 套用／換個排法／改答案。
+// 計畫（以前叫排程）：ふじ打招呼 → 問卷（全部點選標籤）→ 你的回答 → ふじ排好的預覽 → 套用／換個排法／改答案。
 //   對話只放在記憶體；套用後的任務記得是哪一次排程，可以整批撤銷。
 // 週報：本週到目前、表現分析（跟上週同一段比）、習慣洞察、記憶圖鑑（每週一張卡）。
 
@@ -181,10 +181,10 @@ export class CoachView {
     this.root.closest('.panel-body')?.scrollTo({ top: 0 })
   }
 
-  // 任務頁「讓ふじ排這天」
+  // 任務頁、日程頁空著的那天按「讓ふじ排主攻時段」
   preset({ scope, date = null }) {
     this._stop()
-    // 從任務頁「讓ふじ排這天」進來：停在週報那一頁時也要切回排程
+    // 從任務頁、日程頁進來：停在週報那一頁時也要切回計畫
     this.view = 'plan'
     this.a.scope = scope
     this.a.date = date
@@ -469,12 +469,12 @@ export class CoachView {
     this.hello ||= say(`coachHello.${greetKey()}`, {}, '想排些什麼？用下面的標籤告訴我吧。')
     const parts = [this._head(), this.history ? this._historyHTML() : '', this._msg('fuji', this.hello)]
     if (this.flash) parts.push(this._msg('fuji', this.flash))
-    if (this.step === 'ask') parts.push(this._askHTML())
+    if (this.step === 'ask') parts.push(this._looseHTML(), this._askHTML())
     else if (this.step === 'think') {
       // 等 Claude 排的時候：ふじ說一句、三個點在跳；可以先改答案
       parts.push(
         this._msg('me', esc(this._summary()), `<button class="cm-link" data-act="edit">改答案</button>`),
-        `<div data-r="reply">${this._msg('fuji', `${esc(this.thinking)}<span class="cm-dots" aria-label="排程中"><i></i><i></i><i></i></span>`)}</div>`,
+        `<div data-r="reply">${this._msg('fuji', `${esc(this.thinking)}<span class="cm-dots" aria-label="正在排"><i></i><i></i><i></i></span>`)}</div>`,
       )
     } else {
       parts.push(this._msg('me', esc(this._summary()), `<button class="cm-link" data-act="edit">改答案</button>`))
@@ -486,7 +486,7 @@ export class CoachView {
         parts.push(
           this._msg('fuji', esc(this.doneText)),
           `<div class="cp-btns solo">
-            <button class="btn-ghost" data-act="undo">撤銷這次排程</button>
+            <button class="btn-ghost" data-act="undo">撤銷這次計畫</button>
             <button class="btn-ghost" data-act="goto" data-date="${r.days[0].date}">到日程看看</button>
             <button class="btn-primary" data-act="again">再排一次</button>
           </div>`,
@@ -513,12 +513,12 @@ export class CoachView {
     const n = this.store.state.coach.plans.length
     const seg = [
       ...(this.hooks.agentView?.() ? [['agent', 'ふじ', 'おまかせ']] : []),
-      ['plan', '排程', 'けいかく'],
+      ['plan', '計畫', 'けいかく'],
       ['report', '週報', 'しゅうほう'],
     ]
       .map(([v, label, kana]) => `<button type="button" data-act="view" data-v="${v}" class="${this.view === v ? 'on' : ''}" aria-pressed="${this.view === v}">${label}<small>${kana}</small></button>`)
       .join('')
-    const hist = this.view === 'plan' ? `<button class="icon-btn small${this.history ? ' on' : ''}" data-act="history" title="最近的排程" aria-label="最近的排程" aria-expanded="${!!this.history}">${CLOCK}${n ? `<i class="ch-n">${n}</i>` : ''}</button>` : ''
+    const hist = this.view === 'plan' ? `<button class="icon-btn small${this.history ? ' on' : ''}" data-act="history" title="最近的計畫" aria-label="最近的計畫" aria-expanded="${!!this.history}">${CLOCK}${n ? `<i class="ch-n">${n}</i>` : ''}</button>` : ''
     return `<div class="coach-head"><div class="seg coach-seg">${seg}</div>${hist}</div>`
   }
   _msg(who, html, extra = '') {
@@ -533,7 +533,24 @@ export class CoachView {
       return `<li><div><b>${esc(p.title || 'ふじ排的計畫')}</b><small>${p.from ? span(p.from, p.to) : ''}・${p.count} 段${left < p.count ? `・做完 ${p.count - left} 段` : ''}</small></div>
         ${left ? `<button class="btn-ghost" data-act="undo" data-id="${esc(p.id)}">撤銷 ${left} 件</button>` : '<span class="ch-done">都做完了</span>'}</li>`
     })
-    return `<div class="coach-hist"><h3>最近的排程<small>撤銷只刪還沒完成的</small></h3>${rows.length ? `<ul>${rows.join('')}</ul>` : '<p class="hint">還沒有排過，從下面的問卷開始吧。</p>'}</div>`
+    return `<div class="coach-hist"><h3>最近的計畫<small>撤銷只刪還沒完成的</small></h3>${rows.length ? `<ul>${rows.join('')}</ul>` : '<p class="hint">還沒有排過，從下面的問卷開始吧。</p>'}</div>`
+  }
+
+  // 要排的那幾天還有沒排時段的任務：這裡是另外排主攻的時段（建新的任務），已經有的任務要到日程用「最佳化時程」排進空檔
+  _looseHTML() {
+    const s = this.store
+    const seen = new Set()
+    let first = null
+    for (const d of this._dates()) {
+      for (const t of s.planTasks(d)) {
+        if (t.done || t.at || seen.has(t.id)) continue
+        seen.add(t.id)
+        first ||= d
+      }
+    }
+    if (!seen.size) return ''
+    const where = this._dates().length > 1 ? '這幾天' : first === s.today ? '今天' : dayLabel(first)
+    return this._msg('fuji', `${where}還有 ${seen.size} 件任務沒排時段。這裡是另外排主攻的時段；要把已經有的任務排進空檔，到日程按「最佳化時程」。`, `<button type="button" class="cm-link" data-act="goto" data-date="${first}">到日程排</button>`)
   }
 
   _summary() {
@@ -652,8 +669,11 @@ export class CoachView {
 
     // 本週到目前
     const range = `${md(w.week)}–${md(w.end)}`
+    // 上週的回顧卡（每週一放在總覽上的那張）：週報裡隨時看得到；上週沒在用就不放
+    const lastWk = addDays(w.week, -7)
+    const lastCard = s.weekSummary(lastWk).activeDays ? `<button type="button" class="cm-link wr-lastc" data-act="week" data-wk="${lastWk}">上週的回顧卡 ›</button>` : ''
     parts.push(`<section class="wr-card wr-now">
-      <h3>本週到目前<small>${range}</small></h3>
+      <h3>本週到目前<small>${range}</small>${lastCard}</h3>
       <div class="wr-stats">
         <div><b>${Math.round(w.rate * 100)}<small>%</small></b><span>完成率</span></div>
         <div><b>${fmtMin(w.focus)}</b><span>投入時數</span></div>

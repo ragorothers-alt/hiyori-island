@@ -239,9 +239,10 @@ export function createAgent(store, hooks = {}) {
       })
   }
   // 剛加的任務：等一下一起整理（ふじ自己加的、例行公事生成的、問卷排出來的不算）
+  // 剛加的這件，ふじ會不會自己替它估時間、排時段（added 照這個判斷；任務頁「記下了」的提示卡也看它，決定要不要放「排進空檔」）
+  agent.takes = (t) => !!(agent.auto() && t && !t.done && !t.coach && !t.routineId && !floating(t) && t.date >= store.today && t.date <= addDays(store.today, AGENT_DAYS - 1))
   agent.added = (t) => {
-    if (!agent.auto() || !t || t.done || t.coach || t.routineId || floating(t)) return
-    if (t.date < store.today || t.date > addDays(store.today, AGENT_DAYS - 1)) return
+    if (!agent.takes(t)) return
     fresh.add(t.id)
     clearTimeout(captureT)
     captureT = setTimeout(capture, CAPTURE_WAIT)

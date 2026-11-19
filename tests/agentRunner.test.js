@@ -382,6 +382,21 @@ describe('剛加的任務', () => {
     expect(notes[0].run).toBe('capture')
   })
 
+  it('takes：她會不會自己排這件（任務頁「記下了」的提示卡照這個決定要不要放「排進空檔」），跟 added 的條件一樣', () => {
+    const t = store.addTask({ title: '甲', date: TODAY })
+    expect(agent.takes(t)).toBe(true)
+    expect(agent.takes({ ...t, coach: 'a-x1' })).toBe(false)
+    expect(agent.takes({ ...t, routineId: 'r1' })).toBe(false)
+    expect(agent.takes({ ...t, date: addDays(TODAY, 30) })).toBe(false)
+    expect(agent.takes({ ...t, date: addDays(TODAY, -1) })).toBe(false)
+    expect(agent.takes(null)).toBe(false)
+    store.state.settings.agentMode = 'off'
+    expect(agent.takes(t)).toBe(false)
+    store.state.settings.agentMode = 'auto'
+    ai.ready = false
+    expect(agent.takes(t)).toBe(false)
+  })
+
   it('離線時加的任務留著，連上之後才處理；請求失敗的也放回去再試', async () => {
     vi.stubGlobal('navigator', { onLine: false })
     const a = store.addTask({ title: '甲', date: TODAY })

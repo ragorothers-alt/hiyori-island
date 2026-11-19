@@ -26,6 +26,151 @@ test('教練：一行輸入排下週，預覽、套用變成任務，撤銷後�
   await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.filter((t) => t.coach).length)).toBe(before)
 })
 
+test('排時間的入口：日程頁空著的那天按「讓ふじ排主攻時段」到教練的計畫；那天有沒排的任務時ふじ先說一聲、可以回日程排；最佳化時程套用後可以整批撤銷', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  // 10 天後：沒有範例、也沒有別的任務
+  const day = await page.evaluate(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 10)
+    const s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    window.hiyori.store.selectDate(s)
+    window.hiyori.ui.setTab('schedule')
+    return s
+  })
+  const bar = page.locator('#planBar')
+  await bar.locator('[data-plan="coach"]', { hasText: '讓ふじ排主攻時段' }).click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('coach')
+  const root = page.locator('#coachRoot')
+  await expect(root.locator('[data-act="view"][data-v="plan"]')).toContainText('計畫')
+  await expect(root.locator('[data-q="scope"] [data-v="day"]')).toHaveClass(/on/)
+  await expect(root.locator('.cmsg', { hasText: '沒排時段' })).toHaveCount(0)
+
+  // 那天加了兩件還沒排時段的任務：計畫那一頁先說一聲，「到日程排」回到那一天
+  const ids = await page.evaluate((d) => ['寫報告', '整理房間'].map((title) => window.hiyori.store.addTask({ title, date: d, dur: 30 }).id), day)
+  const loose = root.locator('.cmsg', { hasText: '還有 2 件任務沒排時段' })
+  await expect(loose).toBeVisible()
+  await loose.locator('[data-act="goto"]').click()
+  expect(await page.evaluate(() => [window.hiyori.ui.tab, window.hiyori.store.selectedDate])).toEqual(['schedule', day])
+  await expect(bar.locator('[data-plan="coach"]')).toHaveCount(0)
+
+  // 最佳化時程：套用之後提示卡上可以整批撤銷
+  const placed = () => page.evaluate((ids) => ids.filter((id) => window.hiyori.store.state.tasks.find((t) => t.id === id)?.at).length, ids)
+  await bar.locator('[data-plan="optimize"]').click()
+  await bar.locator('[data-plan="apply"]').click()
+  await expect.poll(placed).toBe(2)
+  const toast = page.locator('#toasts .toast', { hasText: '排好 2 件' })
+  await toast.getByRole('button', { name: '撤銷' }).click()
+  await expect.poll(placed).toBe(0)
+  await expect(page.locator('#planTray .chip-task')).toHaveCount(2)
+})
+
+test('心情和週回顧：生活記錄的精神和「心」出現在今日反思和小日記；在紀錄頁叫出快速記錄是生活記錄；週報上有上週的回顧卡、紀錄頁有「看週報」', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.setEnergy(s.today, 4)
+    s.addLife(s.today, { kind: 'mood', text: '有點煩', t: '10:20' })
+    s.addLife(s.today, { kind: 'meal', text: '午餐吃拉麵', t: '12:10' })
+    window.hiyori.ui.setTab('today')
+  })
+  const feel = page.locator('#todayRoot .td-ref .td-feel')
+  await expect(feel).toContainText('精神 不錯')
+  await expect(feel.locator('.td-feel-m')).toHaveText(['10:20有點煩'])
+  // 記下今日反思：小日記那一天多一行精神和心情
+  await page.locator('#todayRoot .td-ref [data-act="mood"]').first().click()
+  await page.locator('#todayRoot .td-ref [data-act="refSave"]').click()
+  await page.evaluate(() => window.hiyori.ui.setTab('records'))
+  await expect(page.locator('#journalList .jr-feel').first()).toHaveText('精神 不錯・10:20 有點煩')
+  // 在紀錄頁叫出快速記錄：直接是生活記錄；在任務頁還是待辦
+  await page.locator('#captureBtn').click()
+  await expect(page.locator('#capMode [data-v="log"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.locator('#capClose').click()
+  await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+  await page.locator('#captureBtn').click()
+  await expect(page.locator('#capMode [data-v="todo"]')).toHaveAttribute('aria-pressed', 'true')
+  await page.locator('#capClose').click()
+  // 紀錄頁的「看週報」→ 週報；上週有在用的話，週報最上面有「上週的回顧卡」
+  // 上週一做完了 3 件（上週有在用）
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const d = new Date(`${s.today}T00:00:00`)
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7)
+    const wk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    s.day(wk).tasks = 3
+    window.hiyori.ui.setTab('records')
+  })
+  await expect(page.locator('#weekBtn')).toHaveText('看看上週的回顧卡')
+  await page.locator('#reportBtn').click()
+  expect(await page.evaluate(() => window.hiyori.ui.tab)).toBe('coach')
+  await expect(page.locator('#coachRoot [data-v="report"]')).toHaveClass(/on/)
+  await page.locator('#coachRoot .wr-lastc').click()
+  await expect(page.locator('#weekModal')).toBeVisible()
+  await expect(page.locator('#weekModal .modal-kicker')).toHaveText('先週のふりかえり')
+})
+
+test('小島模式開機：小島在背景建，面板先能用；還在建的時候按的「擺放」等小島好了接著做；換成 App 模式時「小島準備中」收起來', async ({ page, site }) => {
+  test.setTimeout(120000)
+  // 小島的程式先卡住，放行之前小島建不起來
+  let release
+  const gate = new Promise((r) => (release = r))
+  await page.route(/\/assets\/islandScene-[^/]*\.js$/, async (route) => {
+    await gate
+    await route.continue()
+  })
+  await page.goto(site.url)
+  await bootReady(page)
+  // 載入畫面拿掉了、面板能用；小島還沒出來，通知的位置說一聲
+  await page.waitForFunction(() => !document.getElementById('loader') || document.getElementById('loader').classList.contains('done'), null, { timeout: 30000 })
+  expect(await page.evaluate(() => [window.hiyori.ui.appMode, !!window.hiyori.world])).toEqual([false, false])
+  const busy = page.locator('#toasts .toast.busy', { hasText: '小島準備中' })
+  await expect(busy).toBeVisible()
+  // 還在建的時候按「擺放」：先不動，小島好了接著擺
+  await page.evaluate(() => window.hiyori.ui.hooks.startPlacing('mushroom'))
+  await expect(page.locator('#placeBar')).toBeHidden()
+  // 換成 App 模式：那張收起來；再按回小島（小島還在建）又出來
+  await page.evaluate(() => window.hiyori.ui.setAppMode(true, { save: false }))
+  await expect(busy).toHaveCount(0)
+  // （等小島建好才換過去：不等它回傳）
+  await page.evaluate(() => {
+    window.hiyori.ui.setAppMode(false, { save: false })
+  })
+  await expect(busy).toBeVisible()
+  release()
+  await expect(page.locator('#placeBar')).toBeVisible({ timeout: 60000 })
+  await expect(page.locator('#placeName')).toContainText('小蘑菇')
+  await expect(busy).toHaveCount(0)
+})
+
+test('每日任務只放一個地方：任務頁沒有那張；小島模式面板開著總覽時左下角那張收起來；達成時提示卡上直接領；新增習慣寫著跟例行公事、生活記錄的差別', async ({ page, site }) => {
+  test.setTimeout(120000)
+  await page.goto(site.url)
+  await bootReady(page)
+  await expect(page.locator('#questMini')).toHaveCount(0)
+  // 小島模式、寬螢幕：總覽開著時左下角那張藏起來，換到別頁又出來
+  await page.evaluate(() => window.hiyori.ui.setTab('today'))
+  await expect(page.locator('#quests')).toBeHidden()
+  await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
+  await expect(page.locator('#quests')).toBeVisible()
+  // 每日任務達成：提示卡上按「領取」就領到
+  // 今天的每日任務固定成「完成三件」那一組，再做完三件
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.state.quests[s.today] = { ids: ['tasks3', 'focus2', 'step1'], claimed: {} }
+    s._readyQuests = new Set(s.quests().filter((q) => q.ready).map((q) => q.id))
+    for (const title of ['一', '二', '三']) s.toggleTask(s.addTask({ title, date: s.today }).id)
+  })
+  const toast = page.locator('#toasts .toast', { hasText: '每日任務' }).filter({ hasText: '達成' })
+  await toast.getByRole('button', { name: '領取' }).click()
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.quests().find((q) => q.id === 'tasks3').claimed)).toBe(true)
+  // 習慣頁：新增習慣時寫著跟例行公事、生活記錄的差別
+  await page.evaluate(() => window.hiyori.ui.setTab('habits'))
+  await expect(page.locator('#habitsRoot .hb-diff').first()).toContainText('例行公事')
+})
+
 test('專案搜尋：按 / 跳到搜尋框，里程碑也找得到；Esc 清掉字，Enter 打開第一個', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)

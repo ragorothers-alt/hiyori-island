@@ -362,6 +362,14 @@ body.night .tn-slot { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .td-back li b { font-family: var(--font-num); font-weight: 600; color: var(--ink); }
 .td-back li small { margin-left: 6px; font-size: max(var(--fmin), 11px); color: var(--ink-faint); }
 .td-back p { margin: 6px 0 0; font-size: 12.5px; color: var(--ink); }
+/* 今天記下的精神和心情（生活記錄）：一排小籤 */
+.td-feel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 12.5px; color: var(--ink-soft); }
+.td-feel > span { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; padding: 3px 10px; border-radius: 999px; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); }
+.td-feel-e { box-shadow: inset 0 0 0 1.5px var(--ec) !important; }
+.td-feel-e b { font-weight: 600; color: var(--ink); }
+.td-feel-m { overflow-wrap: anywhere; }
+.td-feel-m time { font-family: var(--font-num); font-size: max(var(--fmin), 11px); color: var(--ink-faint); }
+.td-feel > small { font-size: max(var(--fmin), 11px); color: var(--ink-faint); }
 .td-moods { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .td-mood { display: flex; align-items: center; gap: 6px; padding: 4px 12px 4px 4px; border-radius: 999px; background: var(--field); border: 1px solid var(--glass-border); font-size: 12.5px; color: var(--ink-soft); }
 .td-mood b { width: 26px; height: 26px; border-radius: 50%; display: grid; place-content: center; font-family: var(--font-display); font-weight: 400; font-size: 14px; color: var(--mc); border: 1.5px solid var(--mc); }

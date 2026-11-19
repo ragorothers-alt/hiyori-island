@@ -74,6 +74,7 @@ export class HabitsView {
 
     if (this.formOpen) {
       items.push({ k: 'form', cls: 'hb-newform', html: this._formHTML(null) })
+      if (active.length) items.push({ k: 'diff', html: this._diffHTML() })
       const tpl = active.length ? this._tplHTML(this.newKind) : ''
       if (tpl) items.push({ k: 'tpl', cls: 'hb-tpl-box', html: `<h4 class="hb-sub">也可以從常見習慣挑選<small>テンプレート</small></h4>${tpl}` })
     } else {
@@ -141,8 +142,14 @@ export class HabitsView {
         <div class="hb-kind hb-c" style="--mc:${colorOf(1)}"><header><span class="stamp-k">止</span><b>戒除<small>やめる</small></b></header>
           <p>想少做的事。不用打卡，只要數著沒碰它的日子；想做卻忍住了，就按一下「忍住了」。</p></div>
       </div>
+      ${this._diffHTML()}
       <h4 class="hb-sub">常見習慣<small>ひとつえらんで</small></h4>
       ${this._tplHTML('build')}<div class="hb-tpl-gap"></div>${this._tplHTML('quit')}`
+  }
+
+  // 習慣、例行公事、生活記錄分在三個地方的原因：寫在新增習慣的地方，挑之前看得到
+  _diffHTML() {
+    return `<p class="hb-diff">固定時間要做的事（每週二 19:00 健身）用任務或日程的「重複」（例行公事）：會排進時段、時間到會提醒。發生了什麼（吃了什麼、現在的心情）記在紀錄頁的生活記錄。習慣看的是每天有沒有做到、連續了幾天。</p>`
   }
 
   // 一鍵加入的小卡；已經有同名的（含封存）就不顯示

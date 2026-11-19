@@ -7,6 +7,7 @@ import { addDays, parseDate, toMin, weekKey, REVIEW_TEXT } from '../store.js'
 import { applies, countOn, doneOn, streak } from '../habits.js'
 import { taskDur, nowGuide, toHHMM, firstPickIn } from '../planner.js'
 import { order as doFirst } from '../brief.js'
+import { ENERGY, ENERGY_COLORS, feelOf } from '../data/life.js'
 import heroDay from '../assets/today/hero-day.webp'
 import heroNight from '../assets/today/hero-night.webp'
 
@@ -814,6 +815,18 @@ export class TodayView {
     return `<div class="td-back" aria-label="今天的回神"><ul>${items}</ul><p>${praise}</p></div>`
   }
 
+  // ── 今天記下的精神和心情（紀錄頁生活記錄的「精神」和「心」）：寫反思時一起看，選天氣的參考。都沒記就不放 ──
+  _feelHTML(today) {
+    const f = feelOf(this.store.lifeOn(today))
+    if (!f.energy && !f.moods.length) return ''
+    const clip = (s) => (s.length > 24 ? `${s.slice(0, 23)}…` : s)
+    const more = f.moods.length > 4 ? `<small>還有 ${f.moods.length - 4} 則</small>` : ''
+    return `<div class="td-feel" aria-label="今天記下的精神和心情">
+      ${f.energy ? `<span class="td-feel-e" style="--ec:${ENERGY_COLORS[f.energy]}">精神 <b>${ENERGY[f.energy]}</b></span>` : ''}
+      ${f.moods.slice(-4).map((x) => `<span class="td-feel-m"><time>${x.t}</time>${esc(clip(x.text))}</span>`).join('')}${more}
+    </div>`
+  }
+
   // ── 今日反思：選今天的天氣、寫幾句話（就是晚間回顧那一篇，第一次記下有經驗值） ──
   // 新的一週：上週的回顧卡（以前會自己跳成對話框）。看看＝打開那張卡；收起來＝這週不再放
   _lastWeekHTML() {
@@ -846,6 +859,7 @@ export class TodayView {
       <header class="td-h">${IC.pen}<h3>今日反思<small>きょうのふりかえり</small></h3>${stamp}</header>
       ${eve ? '<p class="td-ref-eve">晚上了，回顧一下今天吧<button type="button" class="td-link" data-act="review-later" data-fk="review-later">之後再說</button></p>' : ''}
       ${this._backHTML(today)}
+      ${this._feelHTML(today)}
       <div class="td-moods" role="group" aria-label="今天的天氣（心情）">${moods}</div>
       <textarea class="td-ref-text" data-fk="ref-text" data-day="${today}" rows="3" maxlength="${REVIEW_TEXT}" aria-label="今日反思"
         placeholder="今天過得怎麼樣？做得好的、想改進的、明天想試試的">${esc(saved?.text || '')}</textarea>

@@ -8,6 +8,10 @@ import { haptic } from './haptics.js'
 import { isExternal } from '../calendars.js'
 
 const clipTitle = (s, n = 14) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+// 教練的「計畫」（ふじ照想主攻的事和有空的時段，排成一段一段新的任務）：任務頁、日程頁空著的那天都從這顆進去。
+// 跟「最佳化時程」（把已經有的任務排進空檔）不一樣，名字也分開
+export const COACH_LABEL = '讓ふじ排主攻時段'
+export const COACH_TIP = '說想主攻什麼、什麼時候有空，ふじ排成一段一段的時間'
 
 // 日程分頁：週條、早晨的睡眠小卡、排程列、還沒排時段的任務、可拖曳的一日時間軸、作息設定與編輯面板
 
@@ -183,6 +187,7 @@ export class ScheduleView {
         </div>
         <div class="pb-btns">
           ${placed.length ? '<button class="btn-ghost" data-plan="clear">清除任務時段</button>' : ''}
+          ${!past && !tasks.some((t) => !t.done) ? `<button class="btn-ghost" data-plan="coach" title="${COACH_TIP}">${COACH_LABEL}</button>` : ''}
           <button class="btn-primary pb-opt" data-plan="optimize" ${past || (!unplaced.length && !placed.length) ? 'disabled' : ''} title="${past ? '只能替今天和之後的日子排時段' :'把還沒排的任務放進空檔'}">${ICON.spark}最佳化時程</button>
         </div>`
     }
@@ -196,12 +201,12 @@ export class ScheduleView {
     const list = s.planTasks(date).filter((t) => !t.at && !t.done)
     const planned = new Set(this.preview?.result.plan.map((p) => p.id) || [])
     $('#planTray').innerHTML = list.length
-      ? `<div class="tray-head">還沒排時段<small>點一下放進最近的空檔，或拖到時間軸上</small></div>
+      ? `<div class="tray-head">還沒排時段<small>點一下排進最近的空檔，或拖到時間軸上</small></div>
         <div class="tray-list">${list
           .map(
             // 放進空檔的按鈕和調整時間的按鈕並排（不包在一起：讀螢幕軟體才分得出是兩個按鈕）
             (t) => `<div class="chip-task ${planned.has(t.id) ? 'planned' : ''} ${t.date < date ? 'late' : ''}" data-id="${esc(t.id)}" style="--c:${tagOf(t.tag).color}">
-              <button type="button" class="chip-slot" data-slot title="放進最近的空檔"><i class="pri p${t.priority}" title="${PRIORITIES[t.priority].label}優先"></i>${t.star ? '<em class="star" title="本命">★</em>' : ''}${t.date < date ? '<em class="late-tag">逾期</em>' : ''}<span>${esc(t.title)}</span></button><button type="button" class="dur" data-dur title="預估時間（點一下調整）" aria-label="預估 ${fmtDur(taskDur(t))}，點一下調整">${fmtDur(taskDur(t))}</button></div>`,
+              <button type="button" class="chip-slot" data-slot title="排進最近的空檔"><i class="pri p${t.priority}" title="${PRIORITIES[t.priority].label}優先"></i>${t.star ? '<em class="star" title="本命">★</em>' : ''}${t.date < date ? '<em class="late-tag">逾期</em>' : ''}<span>${esc(t.title)}</span></button><button type="button" class="dur" data-dur title="預估時間（點一下調整）" aria-label="預估 ${fmtDur(taskDur(t))}，點一下調整">${fmtDur(taskDur(t))}</button></div>`,
           )
           .join('')}</div>`
       : ''
@@ -603,8 +608,23 @@ export class ScheduleView {
           return
         }
         this.preview = null
-        s.applyPlan(p.date, p.result.plan, p.result.left.length, p.result.unslot)
-        if (p?.result.left.length) this.hooks.toast({ icon: '満', title: `還有 ${p.result.left.length} 件未排入`, sub: '這天的空檔有點滿，改天安排也沒關係' })
+        const u = s.applyPlan(p.date, p.result.plan, p.result.left.length, p.result.unslot)
+        if (!u) return this.render(false)
+        // 排好了：說排了幾件、到幾點，可以整批撤銷（之後又改過的那幾件留著現在的樣子）
+        const left = p.result.left.length
+        const end = this._current(p.date).endAt
+        this.hooks.toast({
+          icon: '時', title: `排好 ${u.count} 件${left ? `，還有 ${left} 件沒排入` : ''}`,
+          sub: left ? '這天的空檔有點滿，改天安排也沒關係' : end ? `任務排到 ${end}` : '', ms: 6000, tag: 'scheduled',
+          actions: [{
+            label: '撤銷', soft: true,
+            run: () => {
+              const r = s.undoPlan(u)
+              if (!r.back) return this.hooks.toast({ icon: '時', title: '排好之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
+              if (r.kept) this.hooks.toast({ icon: '時', title: `放回 ${r.back} 件`, sub: `${r.kept} 件排好之後又改過，留著現在的樣子`, ms: 4200 })
+            },
+          }],
+        })
       } else if (act === 'split') {
         // 放不下的大任務分段，再照新的樣子預覽一次
         const p = this.preview
@@ -618,6 +638,8 @@ export class ScheduleView {
           icon: '分', title: `分成 ${undo.reduce((a, u) => a + u.made.length + 1, 0)} 段了`, sub: `排在 ${days.map(md).join('、')}，有截止日的都在截止日前`, ms: 5200,
           actions: [{ label: '復原', run: () => { undo.forEach((u) => s.undoSplit(u)); this.preview = null; this.render(false) } }],
         })
+      } else if (act === 'coach') {
+        this.hooks.coachDay?.(date)
       } else if (act === 'cancel') {
         this.preview = null
         this.render(false)

@@ -11,3 +11,7 @@ export const lifeKindOf = (key) => LIFE_KINDS.find((k) => k.key === key) || LIFE
 
 // 今天的精神／體力：1～5
 export const ENERGY = ['', '好累', '有點累', '普通', '不錯', '元氣滿滿']
+// 精神 1–5 的顏色：好累（灰藍）→ 元氣滿滿（櫻色）
+export const ENERGY_COLORS = ['', '#a9b8d6', '#98cbe0', '#9fd6b8', '#f1c97c', '#f3a0b8']
+// 那天的精神和一路記下的心情（生活記錄的「心」，照時間排）：今日反思、小日記寫回顧時一起看
+export const feelOf = (day) => ({ energy: Math.round(day?.energy) || 0, moods: (day?.items || []).filter((x) => x.kind === 'mood' && x.text) })

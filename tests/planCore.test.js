@@ -149,6 +149,37 @@ describe('不排太滿', () => {
     expect(low.at).toBeNull()
   })
 
+  it('套用之後可以整批撤銷：被清掉的時段放回去、逾期搬過來的回原本那天；之後又改過的那件留著', () => {
+    const tomorrow = addDays(TODAY, 1)
+    store.state.rhythm = { ...DEFAULT_RHYTHM, wake: '08:00', sleep: '12:00', meals: [], buffer: 0, work: null }
+    const low = store.addTask({ title: '低', date: tomorrow, dur: 60, at: '08:00', priority: 1 })
+    const high = store.addTask({ title: '高', date: tomorrow, dur: 240, priority: 3 })
+    const plans = store.stats.plansApplied
+    const p = store.planDay(tomorrow, { replan: true })
+    const u = store.applyPlan(tomorrow, p.plan, p.left.length, p.unslot)
+    expect(u.count).toBe(1)
+    expect(store.stats.plansApplied).toBe(plans + 1)
+    expect(store.undoPlan(u)).toEqual({ back: 2, kept: 0 })
+    expect([high.at, low.at]).toEqual([null, '08:00'])
+    // 撤銷了就不算一次（成就不能靠套用、撤銷刷）
+    expect(store.stats.plansApplied).toBe(plans)
+    // 再套用一次，之後自己把「高」挪到 09:00：它留著，「低」放回 08:00
+    const p2 = store.planDay(tomorrow, { replan: true })
+    const u2 = store.applyPlan(tomorrow, p2.plan, p2.left.length, p2.unslot)
+    store.scheduleTask(high.id, '09:00')
+    expect(store.undoPlan(u2)).toEqual({ back: 1, kept: 1 })
+    expect([high.at, low.at]).toEqual(['09:00', '08:00'])
+    // 逾期的搬到今天：撤銷後回到原本那天，往後挪的次數也扣回去
+    const old = store.addTask({ title: '舊的', date: addDays(TODAY, -2), dur: 30 })
+    const p3 = store.planDay(TODAY)
+    const u3 = store.applyPlan(TODAY, p3.plan, p3.left.length, p3.unslot)
+    expect([old.date, old.moved]).toEqual([TODAY, 1])
+    expect(store.undoPlan(u3).back).toBe(1)
+    expect([old.date, old.at, old.moved || 0]).toEqual([addDays(TODAY, -2), null, 0])
+    // 一件都排不進去：什麼都不動，回傳 null
+    expect(store.applyPlan(TODAY, [{ id: 'nope', at: '10:00', dur: 30 }])).toBeNull()
+  })
+
   it('比哪一段空檔都長的大任務：標成 big（可以分段）', () => {
     // 最大的一段空檔是午餐後到晚餐前（13:00–18:30，330 分）
     const tasks = [{ id: 'big', title: '寫論文', priority: 2, dur: 400, date: TODAY }]

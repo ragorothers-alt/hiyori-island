@@ -462,6 +462,8 @@ body.night .rec-nav button.on { color: #ffb3c8; }
 .sec-title { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 18px 2px 8px; letter-spacing: .12em; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
 .sec-title small { font-size: max(var(--fmin), 10.5px); color: var(--ink-deco); letter-spacing: .16em; }
 .sec-title .count { margin-left: auto; font-family: var(--font-num); font-size: 12px; color: var(--ink-soft); }
+/* 段落標題右邊的連結（紀錄頁「最近七天」的「看週報」） */
+.sec-title .sec-link { margin-left: auto; font-family: var(--font-body); letter-spacing: normal; }
 .week-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 120px; padding: 10px 8px 4px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
 .wk { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
 .wk-bar { width: 100%; max-width: 22px; border-radius: 8px 8px 4px 4px; background: linear-gradient(180deg, #f6b4c8, #a7d4f0); min-height: 3px; transition: height .8s var(--ease); position: relative; }
@@ -520,9 +522,6 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .quest.weekly .q-bar i { background: linear-gradient(90deg, #f6c38b, #f2a6bd); }
 .wk-badge { font-style: normal; font-size: max(var(--fmin), 10px); padding: 0 5px; margin-right: 5px; border-radius: 6px; color: #fff; background: linear-gradient(135deg, #f3b37f, #ee9ab5); vertical-align: 1px; }
 
-.quest-mini { display: none; margin: -4px 0 12px; padding: 10px 12px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
-.quest-mini h3 { margin: 0 0 6px; font-family: var(--font-display); font-weight: 400; font-size: 13px; letter-spacing: .1em; }
-.quest-mini ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 
 /* ── Dock ── */
 .dock { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 10; display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-radius: 22px; }
@@ -678,7 +677,6 @@ body.night .stage-fade { background: #1d1a2a; }
   .panel.collapsed { transform: translateY(calc(100% - 66px)); opacity: 1; pointer-events: auto; }
   .panel.collapsed .panel-body { visibility: hidden; }
   .quests { display: none; }
-  .quest-mini { display: block; }
   .dock { left: 50%; right: auto; transform: translateX(-50%); bottom: calc(50dvh + 10px); padding: 5px 6px; gap: 2px; transition: bottom .5s var(--ease); }
   .dock .icon-btn { width: 34px; height: 34px; }
   .focus { gap: 6px; }
@@ -697,10 +695,9 @@ body.night .stage-fade { background: #1d1a2a; }
   .tabs { touch-action: none; }
   /* 新增表單平常只露出標題欄，點進去才展開其他選項（ui.js _bindFold） */
   .add-form[data-fold]:not(.open) > :not(:first-child) { display: none; }
-  /* 任務頁：每日任務移到清單後面，打開面板先看到今天的花苞 */
+  /* 任務頁：一欄排下來（每日任務在今日總覽） */
   .tab-page.active[data-page="tasks"] { display: flex; flex-direction: column; }
   [data-page="tasks"] > :is(.pg-side, .pg-main) { display: contents; }
-  [data-page="tasks"] .quest-mini { order: 1; margin: 12px 0 0; }
 }
 /* ── もち的好感度 ── */
 .bond { padding: 12px 14px; border-radius: 16px; background: var(--field); }
@@ -847,6 +844,7 @@ body:not(.app-mode) .gear-btn { display: none; }
 .journal .stamp-k { width: 30px; height: 30px; font-size: 14px; flex: none; color: var(--mc); border-color: var(--mc); background: transparent; }
 .journal small { display: block; color: var(--ink-faint); font-family: var(--font-num); font-size: max(var(--fmin), 11px); }
 .journal p { margin: 0; word-break: break-word; white-space: pre-line; }
+.journal .jr-feel { margin-top: 3px; font-family: inherit; word-break: break-word; }
 .wk-m { font-family: var(--font-display); font-size: max(var(--fmin), 11px); color: var(--mc); height: 14px; }
 
 /* ── 專注任務 ── */
@@ -1099,7 +1097,6 @@ body.night .bubble.res small { filter: saturate(1.1) brightness(1.25); }
 @keyframes panelFull { from { opacity: .5; transform: scale(.985); } }
 .panel.full .panel-body { padding: 20px 28px 32px; }
 .panel.full .tab-page { max-width: 1240px; margin: 0 auto; }
-.panel.full .quest-mini { display: block; }
 .panel.full .stats-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
 /* 專案：卡片排成格狀 */
@@ -1187,6 +1184,8 @@ body.app-mode #scene { visibility: hidden; }
 /* App 模式的底是透明的（後面是桌布）：小島上的名牌和光暈也要藏起來，不然會從卡片之間透出來 */
 body.app-mode :is(#labels, .haze) { display: none; }
 body.app-mode :is(.hud, .quests, .brand) { display: none; }
+/* 小島模式：面板開著今日總覽時，左下角那張每日任務收起來（總覽裡就有同一張，可以直接領） */
+body[data-tab="today"]:not(.panel-collapsed) .quests { opacity: 0; pointer-events: none; visibility: hidden; }
 body.app-mode .app-bar { display: flex; align-items: center; position: fixed; top: 0; left: 0; right: 0; height: 76px; padding: 0 28px; z-index: 9; background: transparent; }
 .ab-hi b { display: block; font-family: var(--font-display); font-weight: 400; font-size: 24px; letter-spacing: .14em; line-height: 1.2; }
 .ab-hi small { font-size: max(var(--fmin), 11.5px); color: var(--ink-faint); letter-spacing: .04em; }
@@ -1389,7 +1388,7 @@ body.night .tab-n { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
    卡片上把 --field／--glass-border 換掉，裡面用到這兩個的東西就跟著換；卡片自己的底色另外寫死 */
 body.app-mode { --card-bg: #fff; --card-fill: rgba(118, 118, 128, .08); --card-sep: rgba(60, 60, 67, .12); --card-r: 26px; --card-r-s: 18px; }
 body.app-mode.night { --card-bg: #27243c; --card-fill: rgba(160, 160, 190, .1); --card-sep: rgba(255, 255, 255, .1); }
-body.app-mode :is(.td-card, .add-form, .quest-mini, .dayline, .rhythm-box, .ccard, .cplan, .coach-hist, .wr-card, .dt-form, .hb-card, .hb-form, .hb-kind,
+body.app-mode :is(.td-card, .add-form, .dayline, .rhythm-box, .ccard, .cplan, .coach-hist, .wr-card, .dt-form, .hb-card, .hb-form, .hb-kind,
   .proj, .pd-sum, .pd-compose, .pd-note, .life-energy, .life-spend, .slp-chart, .week-chart, .bond, .town, .stuck-card, .overdue) {
   --field: var(--card-fill); --glass-border: transparent;
   background: var(--card-bg); border-color: transparent; box-shadow: none; backdrop-filter: none; border-radius: var(--card-r);

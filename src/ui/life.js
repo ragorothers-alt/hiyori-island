@@ -1,14 +1,12 @@
 import './life.css'
 import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, setHTML } from './dom.js'
-import { LIFE_KINDS, lifeKindOf, ENERGY } from '../data/life.js'
+import { LIFE_KINDS, lifeKindOf, ENERGY, ENERGY_COLORS } from '../data/life.js'
 import { moodOf } from '../theme.js'
 import { sleepStats, fmtDur } from '../planner.js'
 import { addDays, parseDate, toMin, minToHHMM } from '../store.js'
 
 // 生活記錄＋睡眠統計：放在「紀錄」分頁最上方，內容跟著面板上方選的日期走
 
-// 精神 1–5 的顏色：好累（灰藍）→ 元氣滿滿（櫻色）
-const ENERGY_COLORS = ['', '#a9b8d6', '#98cbe0', '#9fd6b8', '#f1c97c', '#f3a0b8']
 const SLEEP_Q = ['', '沒睡好', '不太好', '普通', '不錯', '很好']
 const SHORT = 360 // 睡不到 6 小時
 

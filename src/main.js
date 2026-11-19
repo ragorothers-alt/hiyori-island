@@ -68,15 +68,31 @@ async function boot() {
   let chatter = null
   const QUIET = new Set(['idle', 'pat', 'pet', 'water', 'season'])
   const quiet = (key) => QUIET.has(key.split('.')[0])
+  // 小島模式開機、小島還在背景建（islandWait 是陣列）：兩人頭上的話先留著（最後三句），建好再一句一句說（heldLines）；
+  // 留太久（超過 20 秒）的就不說了，招呼、閒聊在這段時間被關掉的也不說
+  let islandWait = null
+  const onScene = (key, fn) => {
+    if (scene) return fn(scene)
+    if (islandWait && !quiet(key)) islandWait = [...islandWait, { key, fn, at: Date.now() }].slice(-3)
+  }
+  const CHAT_KEYS = /^(greet|morning)/
+  const heldLines = () => {
+    const list = islandWait || []
+    islandWait = null
+    const now = Date.now()
+    const keep = list.filter((x) => now - x.at < 20000 && !(store.state.settings.chatOn === false && CHAT_KEYS.test(x.key)))
+    keep.forEach((x, i) => setTimeout(() => scene && x.fn(scene), i * 2800))
+    return keep.length
+  }
   // 直接說一句話（不挑台詞）
   const say = (who, text, ms) => {
-    scene?.say(who, text, ms)
+    onScene('say', (s) => s.say(who, text, ms))
     chatter?.(who, text, ms)
   }
   // who：'mochi' 或 'fuji'；回傳說話的是誰
   const talk = (key, vars = {}, ms, fallback = '', who = voice(key), avoid = null) => {
     const text = line(key, vars, who, avoid) || fallback
-    scene?.say(who, text, ms)
+    onScene(key, (s) => s.say(who, text, ms))
     if (!quiet(key)) chatter?.(who, text, ms)
     return who
   }
@@ -86,7 +102,7 @@ async function boot() {
     if (!list?.length) return false
     const other = self === 'mochi' ? 'fuji' : 'mochi'
     const lines = pick(list).map(([who, text]) => [who === 'self' ? self : who === 'other' ? other : who, fill(text, vars)])
-    scene?.duet(lines)
+    onScene(key, (s) => s.duet(lines))
     if (!quiet(key)) chatter?.(...lines[0])
     return true
   }
@@ -589,17 +605,18 @@ async function boot() {
     // 小島：App 模式開機時還沒建，ui.setAppMode(false) 會先等 ensureIsland() 建好再換畫面
     islandReady: () => !!scene,
     ensureIsland: () => ensureIsland(),
-    // 只動小島上的東西（擺放、標示、鏡頭）：還沒有小島就沒有東西可動（商店和「在島上查看」都會先切回小島）
-    startPlacing: (key) => scene?.startPlacing(key),
+    // 只動小島上的東西（擺放、標示、鏡頭）：還沒有小島就沒有東西可動（商店和「在島上查看」都會先切回小島）。
+    // 小島模式開機、小島還在背景建的時候按的（擺放、看某件任務／建築）：建好再做最後按的那一件（onIsland）；滑過去的標示不等
+    startPlacing: (key) => onIsland((s) => s.startPlacing(key)),
     hoverTask: (id) => scene?.hoverTask(id),
     hoverEvent: (id) => scene?.hoverEvent(id),
     hoverProject: (id) => scene?.hoverProject(id),
-    focusTask: (id) => scene?.focusTask(id),
-    focusEvent: (id) => scene?.focusEvent(id),
-    focusProject: (id) => scene?.focusProject(id),
+    focusTask: (id) => onIsland((s) => s.focusTask(id)),
+    focusEvent: (id) => onIsland((s) => s.focusEvent(id)),
+    focusProject: (id) => onIsland((s) => s.focusProject(id)),
     // ひより町的建築卡片：還沒開張的就看看它會浮出來的地方
-    focusTown: (key) => scene?.focusTown(key),
-    focusProjectTown: () => scene?.focusProjectTown(),
+    focusTown: (key) => onIsland((s) => s.focusTown(key)),
+    focusProjectTown: () => onIsland((s) => s.focusProjectTown()),
     resetView: () => (ui.appMode ? ui.setAppMode(false) : scene?.resetView()),
     // 切換 App 模式：進 App 時先離開小木屋；回小島時正在專注、兩人已經在屋裡，就直接進屋陪讀
     appModeChanged: (on, opts) => scene?.appModeChanged(on, opts),
@@ -1104,7 +1121,8 @@ async function boot() {
   // ── 每週挑戰 ──
   store.on('questProgress', () => ui.renderQuests())
   store.on('weeklyReady', (w) => {
-    ui.toast({ icon: '週', title: `每週挑戰「${w.title}」達成`, sub: '到左下角領取限定擺飾吧', ms: 5200 })
+    // 直接在提示卡上領（以前叫你「到左下角」：手機、App 模式沒有左下角那張，要到今日總覽找）
+    ui.toast({ icon: '週', title: `每週挑戰「${w.title}」達成`, sub: '限定擺飾可以領了（今日總覽的每日任務也領得到）', ms: 7000, actions: [{ label: '領取', run: () => store.claimWeekly() }] })
     talk('weeklyReady', {}, undefined, '這週的挑戰完成了。')
   })
   store.on('weeklyClaimed', ({ item }) => {
@@ -1267,7 +1285,7 @@ async function boot() {
       ui.toast({ icon: a.kanji, stamp: true, title: `${a.name}・${a.title}`, sub: a.desc, ms: 4200 })
     }, 1500 + achDelay)
   })
-  store.on('questReady', (q) => ui.toast({ icon: '済', title: `每日任務「${q.title}」達成`, sub: '到左下角領取 +30 XP 吧' }))
+  store.on('questReady', (q) => ui.toast({ icon: '済', title: `每日任務「${q.title}」達成`, sub: `+${XP.quest} XP 可以領了（今日總覽也領得到）`, ms: 6000, actions: [{ label: '領取', run: () => store.claimQuest(q.id) }] }))
   store.on('questClaimed', () => {
     sfx.chime()
     const who = talk('questDone')
@@ -2376,6 +2394,15 @@ async function boot() {
       })
       .catch((err) => {
         console.warn('[hiyori] 小島載入失敗', err)
+        // 這台畫不出 3D（瀏覽器關了 WebGL、顯示卡不支援）：連上網路、重新整理都沒用，照實說
+        // （建到一半才發現的話不重建：同一頁再建一次會重複綁事件，之後再按「小島」也是這句）
+        if (/WebGL/i.test(String(err?.message || err))) {
+          if (!started) {
+            islandMod = null
+            islandP = null
+          }
+          throw Object.assign(new Error('這台畫不出小島', { cause: err }), { webgl: true })
+        }
         // 還沒開始建（多半是離線、下載失敗）：之後可以再按一次「小島」重試
         if (!started) {
           islandMod = null
@@ -2385,6 +2412,26 @@ async function boot() {
         // 建到一半才失敗（多半是程式或顯示卡的問題）：同一頁再建一次只會重複綁事件，請使用者重新整理
         throw Object.assign(new Error('小島建到一半失敗', { cause: err }), { reload: true })
       }))
+
+  // 小島上的動作（擺放、看某件任務／建築）：小島在了就做；小島模式、小島還在建的話，建好再做最後按的那一件
+  // （說一聲「小島準備中」）；App 模式、沒在建就沒有東西可動
+  let islandLater = null
+  function onIsland(fn) {
+    if (scene) return fn(scene)
+    if (ui.appMode || !islandP) return
+    const mine = (islandLater = fn)
+    ui._islandLoading(islandP, '好了就接著做')
+    // 建好之後等一下再做：中途換成 App 又按回「小島」的話，先讓畫面換回小島（setAppMode 的那一段）；一直留在 App 模式就不做了
+    islandP.then(
+      () =>
+        setTimeout(() => {
+          if (islandLater !== mine) return
+          islandLater = null
+          if (scene && !ui.appMode) mine(scene)
+        }, 0),
+      () => (islandLater = null),
+    )
+  }
 
   // 方便除錯：在 console 用 hiyori.store；小島建好後還有 hiyori.sky.hourOverride = 20、hiyori.world…
   window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise, agent, reminders }
@@ -2475,14 +2522,23 @@ async function boot() {
   // 好了就出現在後面；一下子還沒好就說一聲。建不起來（離線又沒快取、瀏覽器不支援 WebGL）就先用 App 模式，之後還能再按「小島」
   let islandBoot = null
   if (!ui.appMode) {
+    // 建好之前兩人說的話先留著（回來了、逾期、招呼…），建好再說
+    islandWait = []
     islandBoot = ensureIsland()
     const slow = setTimeout(() => !scene && ui._islandLoading(islandBoot, '可以先繼續用，好了就會出現'), 1500)
     islandBoot.then(
-      () => clearTimeout(slow),
+      () => {
+        clearTimeout(slow)
+        heldLines()
+      },
       (err) => {
         clearTimeout(slow)
+        // App 模式下方的對話框已經說過了，留著的不用再說
+        islandWait = null
         ui.setAppMode(true, { save: false })
-        if (!err?.updating) ui.toast({ icon: '島', title: '小島沒有載入成功', sub: err.reload ? '先用 App 模式；重新整理頁面再試一次' : '先用 App 模式；連上網路再按「小島」試試', ms: 7000 })
+        // 照原因說：這台不支援 WebGL 的話，連上網路也沒用
+        const sub = err.reload ? '先用 App 模式；重新整理頁面再試一次' : err.webgl ? '這個瀏覽器（或顯示卡）畫不出小島，先用 App 模式' : '先用 App 模式；連上網路再按「小島」試試'
+        if (!err?.updating) ui.toast({ icon: '島', title: '小島沒有載入成功', sub, ms: 7000 })
       },
     )
   }
@@ -2551,13 +2607,10 @@ async function boot() {
         // 設定裡關了「小島上的閒聊和招呼」：不打招呼（回來了的提示照常）
         const chat = store.state.settings.chatOn !== false
         const back = !brief && welcomeBack()
-        const hi = () => {
-          if (!brief && !back && chat && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
-          scene?.greet()
-        }
-        // 小島模式、小島還在建：等它出來再打招呼（兩人頭上的那一句才有人看得到）；建不起來換成 App 模式的話照樣說
-        if (islandBoot && !scene) islandBoot.then(hi, hi)
-        else hi()
+        // 小島還在建的話，這一句先留著（talk 的 onScene），建好再說；揮手等兩人出來
+        if (!brief && !back && chat && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
+        if (islandBoot && !scene) islandBoot.then(() => scene?.greet(), () => {})
+        else scene?.greet()
       }, 900)
       // 摘要還開著就等它關掉：回顧和提醒不要疊在上面
       setTimeout(() => ui.afterBrief(() => {
