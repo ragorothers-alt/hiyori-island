@@ -2471,14 +2471,20 @@ async function boot() {
 
   // ── 開場 ──
   ui.render()
-  // 小島模式：小島建好才拿掉載入畫面；建不起來（離線又沒快取、瀏覽器不支援 WebGL）就先用 App 模式，之後還能再按「小島」
+  // 小島模式：小島在背景建，不等它——面板、輸入、Dock 先能用（以前要等整座島建好才拿掉載入畫面，慢的手機要多等好幾秒），
+  // 好了就出現在後面；一下子還沒好就說一聲。建不起來（離線又沒快取、瀏覽器不支援 WebGL）就先用 App 模式，之後還能再按「小島」
+  let islandBoot = null
   if (!ui.appMode) {
-    try {
-      await ensureIsland()
-    } catch (err) {
-      ui.setAppMode(true, { save: false })
-      if (!err?.updating) ui.toast({ icon: '島', title: '小島沒有載入成功', sub: err.reload ? '先用 App 模式；重新整理頁面再試一次' : '先用 App 模式；連上網路再按「小島」試試', ms: 7000 })
-    }
+    islandBoot = ensureIsland()
+    const slow = setTimeout(() => !scene && ui._islandLoading(islandBoot, '可以先繼續用，好了就會出現'), 1500)
+    islandBoot.then(
+      () => clearTimeout(slow),
+      (err) => {
+        clearTimeout(slow)
+        ui.setAppMode(true, { save: false })
+        if (!err?.updating) ui.toast({ icon: '島', title: '小島沒有載入成功', sub: err.reload ? '先用 App 模式；重新整理頁面再試一次' : '先用 App 模式；連上網路再按「小島」試試', ms: 7000 })
+      },
+    )
   }
   store.flushPending()
   // 原本的存檔讀不進來，換成了範例島：原文另外留著（hiyori-rescue），有開同步的話會從雲端拉回來
@@ -2544,8 +2550,14 @@ async function boot() {
         }, brief ? 0 : 5600)
         // 設定裡關了「小島上的閒聊和招呼」：不打招呼（回來了的提示照常）
         const chat = store.state.settings.chatOn !== false
-        if (!brief && !welcomeBack() && chat && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
-        scene?.greet()
+        const back = !brief && welcomeBack()
+        const hi = () => {
+          if (!brief && !back && chat && !(g === 'greet.morning' && !avoid && Math.random() < 0.5 && duet('morning'))) talk(g, {}, 3800, '', undefined, avoid)
+          scene?.greet()
+        }
+        // 小島模式、小島還在建：等它出來再打招呼（兩人頭上的那一句才有人看得到）；建不起來換成 App 模式的話照樣說
+        if (islandBoot && !scene) islandBoot.then(hi, hi)
+        else hi()
       }, 900)
       // 摘要還開著就等它關掉：回顧和提醒不要疊在上面
       setTimeout(() => ui.afterBrief(() => {

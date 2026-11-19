@@ -1231,12 +1231,12 @@ export class UI {
       },
     )
   }
-  // 第一次載入小島時，在通知的位置顯示「準備中」，好了（或失敗）就收掉
-  _islandLoading(ready) {
+  // 第一次載入小島時，在通知的位置顯示「準備中」，好了（或失敗）就收掉。sub：底下那一行（小島模式開機時小島在背景建）
+  _islandLoading(ready, sub = '第一次打開要下載一下，可以先繼續用') {
     if (this._loadingToast) return
     const el = (this._loadingToast = document.createElement('div'))
     el.className = 'toast busy'
-    el.innerHTML = '<div class="t-icon">島</div><div><b>小島準備中…</b><small>第一次打開要下載一下，可以先繼續用</small></div>'
+    el.innerHTML = `<div class="t-icon">島</div><div><b>小島準備中…</b><small>${esc(sub)}</small></div>`
     $('#toasts').append(el)
     $('#fullBtn').setAttribute('aria-busy', 'true')
     const done = () => {

@@ -68,6 +68,8 @@ button { cursor: pointer; border: 0; background: none; }
 svg { display: block; }
 
 #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+/* 小島在背景建的那幾秒（小島模式開機）：夜晚的背景先用深色，不要先閃一片白天的天空 */
+body.night:not(.app-mode) { background: linear-gradient(180deg, #192147, #283667 70%, #3a3f72); }
 
 /* 日系底片光暈 */
 .haze {
