@@ -248,12 +248,12 @@ export const tasksMethods = {
     return undo
   },
   // 復原剛才的往後挪：日期、時段、往後挪的次數（卡關提醒用）、本命都回到原本的樣子。
-  // 之後又被改過就不動：已經不在挪過去的那天、做完了，或是在新的那天排了時段（自己排的、別的裝置同步過來的，
+  // 之後又被改過就不動：已經不在挪過去的那天、做完了、改成長期，或是在新的那天排了時段（自己排的、別的裝置同步過來的，
   // 那是為新的那天排的，不要蓋掉）。挪的次數只扣掉這一次加的；本命挪過去之後被拿掉的不再放回去；
   // 原本那天的本命已經滿了（之間另外選了別件）就不再當本命
   undoPostpone(u) {
     const t = u?.after && this._find('tasks', u.id)
-    if (!t || t.done || t.date !== u.to || (t.at ?? null) !== u.after.at) return false
+    if (!t || t.done || floating(t) || t.date !== u.to || (t.at ?? null) !== u.after.at) return false
     this._editedTask(t)
     t.date = u.date
     t.at = u.at
@@ -277,10 +277,10 @@ export const tasksMethods = {
     return undo
   },
   // 撤銷剛才的排進時段：日期、時段、長度、往後挪的次數、本命、先做這件都回到原本的樣子。
-  // 之後又改過（換了天、時段、長度，做完了）就不動，回傳 false
+  // 之後又改過（換了天、時段、長度，做完了、改成長期）就不動，回傳 false
   undoSlot(u) {
     const t = u?.after && this._find('tasks', u.id)
-    if (!t || t.done || t.date !== u.after.date || (t.at ?? null) !== u.after.at || (t.dur ?? null) !== u.after.dur) return false
+    if (!t || t.done || floating(t) || t.date !== u.after.date || (t.at ?? null) !== u.after.at || (t.dur ?? null) !== u.after.dur) return false
     this._editedTask(t)
     t.date = u.date
     t.at = u.at

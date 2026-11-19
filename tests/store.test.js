@@ -2098,6 +2098,23 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(store.state.coach.plans).toHaveLength(1)
   })
 
+  it('撤銷一件都還沒做的計畫：不算一次套用，那次拿到的成就收回；做了其中幾件的照舊算', () => {
+    store.stats.plansApplied = 9
+    const got = store.state.player.achievements
+    const { id } = store.applyCoachPlan(res())
+    expect(store.stats.plansApplied).toBe(10)
+    // 這次拿到的成就記在那次計畫上，重新開啟也記得
+    store.flushSave()
+    expect(new Store().state.coach.plans.at(-1).won).toEqual({ planner_10: got.planner_10 })
+    store.undoCoachPlan(id)
+    expect([store.stats.plansApplied, got.planner_10]).toEqual([9, undefined])
+    const r2 = store.applyCoachPlan(res())
+    expect(got.planner_10).toBeTruthy()
+    store.toggleTask(store.state.tasks.find((t) => t.coach === r2.id).id)
+    store.undoCoachPlan(r2.id)
+    expect([store.stats.plansApplied, !!got.planner_10]).toEqual([10, true])
+  })
+
   it('套用時也避開預覽後才加、還沒生成的例行日程；最佳化時程也一樣', () => {
     store.addRoutine({ kind: 'event', title: '每天的晚課', repeat: { type: 'daily' }, start: '19:00', end: '20:00', date: TODAY })
     // 後天的晚課還沒生成：19:30 那段撞到它
@@ -2616,6 +2633,19 @@ describe('卡關提醒與設定', () => {
     expect(h).toMatchObject({ date: tomorrow, star: false })
     expect(store.undoPostpone(uh)).toBe(true)
     expect(h).toMatchObject({ date: addDays(TODAY, -3), star: true })
+
+    // 挪過去之後改成長期任務：復原、撤銷排進時段都不動（不把原本的時段放回去）
+    const proj = store.addProject({ name: '作品集' })
+    const k = store.addTask({ title: '八', date: TODAY, at: '08:15' })
+    const uk = store.postponeTask(k.id, tomorrow)
+    store.updateTask(k.id, { project: proj.id, ongoing: true })
+    expect(store.undoPostpone(uk)).toBe(false)
+    expect(k.at).toBeNull()
+    const m = store.addTask({ title: '九', date: TODAY })
+    const um = store.slotTask(m.id, tomorrow, '10:00', 30)
+    store.updateTask(m.id, { project: proj.id, ongoing: true })
+    expect(store.undoSlot(um)).toBe(false)
+    expect(m.at).toBeNull()
   })
 
   it('卡住的任務：挪了 2 次以上或逾期 3 天以上，例行公事和不再提醒的不算，挪最多的在前', () => {

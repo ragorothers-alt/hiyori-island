@@ -5,6 +5,10 @@ import { XP, TAGS } from '../theme.js'
 import { ACHIEVEMENTS } from '../data/achievements.js'
 // 排進時段之前、之後的樣子（撤銷時用來放回去、認出之後又改過）
 const snapSlot = (t) => ({ date: t.date, at: t.at ?? null, dur: t.dur ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first })
+// 看「累計套用幾次」的成就（套用、撤銷時要跟著收回）
+const PLAN_ACH = ACHIEVEMENTS.filter((a) => a.cond.stat === 'plansApplied')
+// 這次套用剛拿到的那幾個：{ id: 拿到的時間 }
+const wonSince = (had, got) => Object.fromEntries(PLAN_ACH.filter((a) => got[a.id] && !had[a.id]).map((a) => [a.id, got[a.id]]))
 export const coachMethods = {
   // ── 時段安排 ──
   // 把任務排進時間軸（at 為 null 就收回未排區）；dur 是預估分鐘數
@@ -36,7 +40,7 @@ export const coachMethods = {
   },
   // 套用排程：逾期任務會一起搬到這一天；left 是塞不下的件數。
   // unslot：重排時原本有時段、這次沒排進去的（位置被別件佔走了）：清掉時段，不然會跟新排的疊在一起。
-  // 回傳撤銷用的紀錄 { date, count, at：套用的時間, items: [{ id, 原本的樣子, after: 排完的樣子 }] }（沒排成是 null），給 undoPlan
+  // 回傳撤銷用的紀錄 { date, count, won：這次拿到的成就, items: [{ id, 原本的樣子, after: 排完的樣子 }] }（沒排成是 null），給 undoPlan
   applyPlan(date, plan, left = 0, unslot = []) {
     this._refreshToday()
     // 過去的日子不排；今天已經過去的時段也不排（預覽放太久時，介面會先重新預覽）
@@ -73,10 +77,10 @@ export const coachMethods = {
       this._gain(XP.plan, fx, { kind: 'plan' })
     }
     fx.push(['planApplied', { date, count: n, left }])
-    const at = Date.now()
+    const had = { ...this.state.player.achievements }
     this._finish(fx)
     const items = [...before].map(([id, b]) => ({ id, ...b, after: snapSlot(this._find('tasks', id)) }))
-    return { date, count: n, at, items }
+    return { date, count: n, won: wonSince(had, this.state.player.achievements), items }
   },
   // 撤銷剛才的最佳化時程：每一件回到原本的日子、時段、長度、往後挪的次數、本命、先做這件。
   // 之後又改過的那一件（換了天、時段、長度，做完了、刪掉了、改成長期）、正在專注的那一件（skip）就留著現在的樣子；
@@ -108,17 +112,19 @@ export const coachMethods = {
       this._editedTask(t)
       back++
     }
-    // 撤銷了就不算一次（成就「累計套用 10 次」不能靠套用、撤銷刷出來）；今天的「替今天安排時段」照舊算完成。
-    // 這次套用才拿到的那個成就，次數扣回去就不夠了：先收回，下次套用時再拿一次（會再慶祝一次）
+    // 撤銷了就不算一次（成就「累計套用 10 次」不能靠套用、撤銷刷出來）；今天的「替今天安排時段」照舊算完成
     if (back) {
-      this.stats.plansApplied = Math.max(0, this.stats.plansApplied - 1)
-      const got = this.state.player.achievements
-      for (const a of ACHIEVEMENTS) {
-        if (a.cond.stat === 'plansApplied' && got[a.id] >= (u.at ?? Infinity) && this.stats.plansApplied < a.cond.gte) delete got[a.id]
-      }
+      this._unapply(u.won)
       this._finish()
     }
     return { back, kept: u.items.length - back }
+  },
+  // 撤銷一次套用：累計套用次數扣回去；這次套用才拿到的成就（won，拿到的時間對得上），次數不夠了就收回，
+  // 下次套用時再拿一次（會再慶祝一次）。之前就拿到的、之後又重新拿到的不動
+  _unapply(won = {}) {
+    this.stats.plansApplied = Math.max(0, this.stats.plansApplied - 1)
+    const got = this.state.player.achievements
+    for (const a of PLAN_ACH) if (won[a.id] && got[a.id] === won[a.id] && this.stats.plansApplied < a.cond.gte) delete got[a.id]
   },
   // 清空這天任務的時段（已完成的保留）
   clearPlan(date = this.selectedDate) {
@@ -238,19 +244,29 @@ export const coachMethods = {
     }
     const count = fx.filter(([k]) => k === 'taskAdded').length
     fx.push(['coachApplied', { id, count, days: dates.length, skipped }])
+    const had = { ...this.state.player.achievements }
     this._finish(fx)
+    // 記下這次拿到的成就（撤銷時收回用）：存檔在這個動作結束時才寫，會一起寫進去
+    const won = wonSince(had, this.state.player.achievements)
+    if (Object.keys(won).length) {
+      c.plans.find((p) => p.id === id).won = won
+      this.save(false)
+    }
     return { id, count, skipped }
   },
   // 那次排程還沒完成、可以撤銷的任務數
   coachLeft(id) {
     return this.state.tasks.filter((t) => t.coach === id && !t.done).length
   },
-  // 撤銷一次排程：刪掉還沒完成的那幾件，做完的留著
+  // 撤銷一次排程：刪掉還沒完成的那幾件，做完的留著。一件都沒做的話整個收回，不算一次套用（跟最佳化時程一樣，成就不能靠套用、撤銷刷）
   undoCoachPlan(id) {
     const before = this.state.tasks.length
+    const plan = this.state.coach.plans.find((p) => p.id === id)
+    const used = this.state.tasks.some((t) => t.coach === id && t.done)
     this.state.tasks = this.state.tasks.filter((t) => t.coach !== id || t.done)
     this._dropTaskRefs()
     const count = before - this.state.tasks.length
+    if (plan && !used) this._unapply(plan.won)
     this.state.coach.plans = this.state.coach.plans.filter((p) => p.id !== id)
     this._finish([['coachUndone', { id, count }]])
     return count

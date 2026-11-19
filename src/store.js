@@ -39,11 +39,13 @@ const readSeq = () => {
   }
 }
 const BACKUP_KEY = 'hiyori-backup'
-// 外觀設定（settings.theme）另外記一份小的：index.html 開機時還沒載入程式、讀存檔之前，先照它決定載入畫面要不要用深色
+// 外觀設定（settings.theme）另外記一份小的：index.html 開機時還沒載入程式、讀存檔之前，先照它決定載入畫面要不要用深色。
+// 記成「存檔版本|外觀」：版本跟 REV_KEY 對得上才用（存檔沒寫進去、另一個分頁換了存檔、只有這個沒寫進去，都對不上，開機時改讀存檔）
 export const LOOK_KEY = 'hiyori-look'
 export const rememberLook = (theme) => {
   try {
-    if (localStorage.getItem(LOOK_KEY) !== theme) localStorage.setItem(LOOK_KEY, theme)
+    const v = `${localStorage.getItem(REV_KEY) || ''}|${theme}`
+    if (localStorage.getItem(LOOK_KEY) !== v) localStorage.setItem(LOOK_KEY, v)
   } catch {}
 }
 // 讀不進來的存檔原文（壞掉了、或清洗時出錯）：另外留一份，不會被接下來的存檔蓋掉

@@ -1029,7 +1029,8 @@ async function boot() {
   let isNight = null
   // fade：自己切換的（設定、Dock 的切換鈕）才淡淡地換過去
   const syncNight = (night, fade = false) => {
-    const on = isNight ? night > 0.45 : night > 0.55
+    // 第一次照 0.5 算（跟開機時 index.html、上面那一行一樣，天剛亮的那幾分鐘才不會先暗再亮）；之後留一點緩衝，不會來回閃
+    const on = isNight === null ? night > 0.5 : isNight ? night > 0.45 : night > 0.55
     if (on === isNight) return false
     const first = isNight === null
     isNight = on
@@ -1291,15 +1292,23 @@ async function boot() {
     }, 1200)
   })
   let achDelay = 0
+  const achWait = new Map()
   store.on('achievement', (a) => {
+    // 同一個成就還沒跳出來又拿到一次（剛套用就撤銷、又馬上套用）：只跳最新那次
+    if (achWait.has(a.id)) {
+      clearTimeout(achWait.get(a.id))
+      achDelay = Math.max(0, achDelay - 700)
+    }
+    const at = store.state.player.achievements[a.id]
     achDelay += 700
-    setTimeout(() => {
+    achWait.set(a.id, setTimeout(() => {
+      achWait.delete(a.id)
       achDelay = Math.max(0, achDelay - 700)
       // 還沒跳出來就被收回了（剛套用就撤銷最佳化時程）：不慶祝
-      if (!store.state.player.achievements[a.id]) return
+      if (store.state.player.achievements[a.id] !== at) return
       sfx.chime()
       ui.toast({ icon: a.kanji, stamp: true, title: `${a.name}・${a.title}`, sub: a.desc, ms: 4200 })
-    }, 1500 + achDelay)
+    }, 1500 + achDelay))
   })
   store.on('questReady', (q) => ui.toast({ icon: '済', title: `每日任務「${q.title}」達成`, sub: `+${XP.quest} XP 可以領了（今日總覽也領得到）`, ms: 6000, actions: [{ label: '領取', run: () => store.claimQuest(q.id) }] }))
   store.on('questClaimed', () => {
