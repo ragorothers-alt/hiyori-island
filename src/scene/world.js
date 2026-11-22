@@ -349,8 +349,9 @@ export class World {
     this.busyUntil = Math.max(this.busyUntil, performance.now() + ms)
   }
 
-  // 編譯跟第一次讀 shader 資料分開做。軟體 WebGL 即使有平行編譯，第一次讀也可能卡住
-  async precompile() {
+  // 編譯跟第一次讀 shader 資料分開做。軟體 WebGL 即使有平行編譯，第一次讀也可能卡住。
+  // light：藏著的時候（App 模式）只編譯、趁瀏覽器有空檔傳貼圖，不逐支等、不試畫（不跟正在用的面板搶 CPU）
+  async precompile({ light = false } = {}) {
     const r = this.renderer
     // 場景是畫進 composer 的 render target（線性、不做色調映射），編譯時也要對著它，快取才對得上
     const prev = r.getRenderTarget()
@@ -362,6 +363,7 @@ export class World {
       r.setRenderTarget(prev)
     }
     await done
+    if (light) return this._idleTextures()
     const start = performance.now()
     let work = 0
     for (const program of [...(r.info.programs ?? [])]) {
@@ -377,7 +379,20 @@ export class World {
     if (!this._started && (work > 100 || performance.now() - start > 800)) await this._warmDraws()
   }
 
-  async _uploadTextures() {
+  // 貼圖一次傳一張，等瀏覽器有空檔再傳下一張；已經回到小島就不用了（第一幀會一起傳）
+  _idleTextures() {
+    const left = [...this._textures()]
+    const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 200))
+    const next = (deadline) => {
+      do {
+        if (!this.hidden || !left.length) return
+        this.renderer.initTexture(left.pop())
+      } while (deadline?.timeRemaining() > 8)
+      idle(next)
+    }
+    idle(next)
+  }
+  _textures() {
     const list = new Set()
     this.scene.traverseVisible((o) => {
       for (const m of [o.material].flat()) {
@@ -387,7 +402,11 @@ export class World {
         for (const u of Object.values(uniforms || {})) if (u?.value?.isTexture && u.value.image) list.add(u.value)
       }
     })
-    for (const texture of list) {
+    return list
+  }
+
+  async _uploadTextures() {
+    for (const texture of this._textures()) {
       if (this._started) return
       this.renderer.initTexture(texture)
       await yieldToPage()

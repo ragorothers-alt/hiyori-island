@@ -1328,8 +1328,9 @@ export async function createIsland(ctx) {
     // 方便除錯：在 console 用 hiyori.sky.hourOverride = 20
     debug: { world, sky, mochi, fuji, duo, cabin, room, fx, decor, placed, town, ptown, houses, resizeIsland, visit: startVisit },
   }
-  // 先把能提早做的 WebGL 工作分開處理，第一幀才不用一口氣等著色器和貼圖
-  await Promise.race([world.precompile().catch(() => {}), sleep(18000)])
+  // 看得到小島：先把能提早做的 WebGL 工作分開處理，第一幀才不用一口氣等著色器和貼圖。
+  // App 模式（小島藏在後面）不在這裡做：見最後面
+  if (!world.hidden) await Promise.race([world.precompile().catch(() => {}), sleep(18000)])
   // 預熱期間還是能用面板；接手時用現在的設定及番茄鐘狀態
   world.powerSave = store.state.settings.powerSave
   applyQuality(store.state.settings.quality)
@@ -1341,5 +1342,8 @@ export async function createIsland(ctx) {
   }
   world.start()
   ctx.attach(scene)
+  // App 模式（小島藏在後面建好的）：照舊先接手，背景只編著色器、趁空檔傳貼圖，切回小島的第一幀才不會卡住。
+  // 不在背景逐支等著色器、試畫：沒有顯示卡、核心少的機器上會把 CPU 吃滿，拖慢正在用的面板
+  if (world.hidden) await Promise.race([world.precompile({ light: true }).catch(() => {}), sleep(4000)])
   return scene
 }
