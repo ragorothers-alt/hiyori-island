@@ -32,7 +32,7 @@ import { SearchView } from './ui/search.js'
 import { isExternal } from './calendars.js'
 import { latestLog, msProgress, msSteps, msTasks, projectStats, PROJECT_LIMITS as PL } from './projects.js'
 import { markHTML, queryTerms, searchProjects } from './projectSearch.js'
-import { CHANGELOG } from './data/changelog.js'
+import { LATEST } from './data/latest.js'
 import { DatesView } from './ui/dates.js'
 import { SubsView } from './ui/subs.js'
 import { MottosView, MottoBar } from './ui/mottos.js'
@@ -91,7 +91,7 @@ const STUCK_SAID_KEY = 'hiyori-stuck-said'
 const IDLE_OFF_KEY = 'hiyori-idle-off'
 const IDLE_SAID_KEY = 'hiyori-idle-said'
 const IDLE_DAYS = 7
-const newsVersion = () => `${CHANGELOG[0].id}:${CHANGELOG[0].items.length}`
+const newsVersion = () => `${LATEST.id}:${LATEST.n}`
 const readLocal = (k, dflt) => {
   try {
     return JSON.parse(localStorage.getItem(k)) ?? dflt
@@ -592,7 +592,11 @@ export class UI {
   }
   // 開場後閒下來時把月曆、教練、專案詳情先載好（一個一個來，不搶開場的資源）
   preloadViews() {
-    return [this._calendar, this._coach, this._project].reduce((p, lz) => p.then(() => lz.get()).catch(() => {}), Promise.resolve())
+    // 更新紀錄（「這一版的新功能」）也先載好：離線時打得開
+    return [this._calendar, this._coach, this._project]
+      .reduce((p, lz) => p.then(() => lz.get()).catch(() => {}), Promise.resolve())
+      .then(() => import('./data/changelog.js'))
+      .catch(() => {})
   }
 
   // ── 靜態元件 ──
@@ -2440,7 +2444,14 @@ export class UI {
     $('#newsDot').hidden = !fresh
     $('.tab[data-tab="records"]').classList.toggle('has-dot', fresh)
   }
-  openNews() {
+  // 整份更新紀錄很大：打開這裡才載入（離線時沒有快取就說一聲）
+  async openNews() {
+    let CHANGELOG
+    try {
+      ;({ CHANGELOG } = await import('./data/changelog.js'))
+    } catch {
+      return this.toast({ icon: '新', title: '更新紀錄還沒下載', sub: '連上網路再打開一次' })
+    }
     $('#newsList').innerHTML = CHANGELOG.slice(0, 8)
       .map((e) => `<section><h4>${+e.date.slice(5, 7)}/${+e.date.slice(8)}<b>${esc(e.title)}</b></h4><ul>${e.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>`)
       .join('')
@@ -3122,7 +3133,7 @@ export class UI {
     const brief = this.store.state.settings.brief !== false
     setOn($('#briefBtn'), brief)
     $('#briefBtn').textContent = brief ? '開' : '關'
-    $('#newsInfo').textContent = `${CHANGELOG[0].date.slice(5).replace('-', '/')}・${CHANGELOG[0].title}`
+    $('#newsInfo').textContent = `${LATEST.date.slice(5).replace('-', '/')}・${LATEST.title}`
     this.renderNewsDot()
     // 第一次打開時放的範例還在才顯示
     const n = this.store.sampleCount()
@@ -4260,7 +4271,7 @@ export class UI {
   // 意見回饋：開 GitHub 的新議題，先填好版本、畫面、這台最近記到的錯誤（只有訊息和位置，不含任務內容；送出前看得到、可以刪）
   openFeedback() {
     const errs = errorDigest()
-    const body = `## 想說的話\n\n\n\n---\n版本：${CHANGELOG[0].id}\n畫面：${innerWidth}×${innerHeight}・${matchMedia('(pointer: coarse)').matches ? '觸控' : '滑鼠'}・${this.appMode ? 'App 模式' : '小島模式'}${errs ? `\n最近的錯誤：\n${errs}` : ''}`
+    const body = `## 想說的話\n\n\n\n---\n版本：${LATEST.id}\n畫面：${innerWidth}×${innerHeight}・${matchMedia('(pointer: coarse)').matches ? '觸控' : '滑鼠'}・${this.appMode ? 'App 模式' : '小島模式'}${errs ? `\n最近的錯誤：\n${errs}` : ''}`
     window.open(`${FEEDBACK_URL}?title=${encodeURIComponent('意見回饋：')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener')
   }
   // 常駐的警示列（存不進去、這個分頁的 App 比較舊）：問題解決之前一直留著，不會自己消失。

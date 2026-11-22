@@ -2,7 +2,7 @@ import './styles.css'
 import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev, rememberLook, SAVE_KEY } from './store.js'
 import { UI, savedAppMode, FEEDBACK_URL } from './ui.js'
 import { watchErrors, bootFailed } from './errors.js'
-import { CHANGELOG } from './data/changelog.js'
+import { LATEST } from './data/latest.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
@@ -2685,8 +2685,8 @@ async function boot() {
 
 // 沒接住的錯誤：開場前就開始記（src/errors.js）；介面建好之後才說得出來（tellError）
 let tellError = null
-watchErrors({ version: CHANGELOG[0].id, onNew: (d) => tellError?.(d) })
+watchErrors({ version: LATEST.id, onNew: (d) => tellError?.(d) })
 // 開場就壞掉：載入畫面換成「開不起來」（重新整理、另存存檔、回報）；介面已經出來了就交給上面的全域錯誤
 boot().catch((err) => {
-  if (!bootFailed(err, { version: CHANGELOG[0].id, saveKey: SAVE_KEY, feedback: FEEDBACK_URL })) throw err
+  if (!bootFailed(err, { version: LATEST.id, saveKey: SAVE_KEY, feedback: FEEDBACK_URL })) throw err
 })

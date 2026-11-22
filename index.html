@@ -53,7 +53,10 @@
   <meta name="description" content="用 three.js 打造的遊戲化日程與專案管理小島：任務會開花、專案在小鎮蓋成房子、日程化成時之環。" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- 字型的樣式表不擋第一次畫面：先用系統字畫出來，下載好了再換上（連到 Google 要多一段時間，慢的網路上會讓整個 App 晚出來）。
+       onload 換成 stylesheet；沒有 JavaScript 的時候用 noscript 那一份 -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=Quicksand:wght@400;500;600;700&display=swap" onload="this.onload = null; this.rel = 'stylesheet'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet" /></noscript>
 </head>
 <body>
   <script>document.documentElement.hasAttribute('data-night') && document.body.classList.add('night')</script>
