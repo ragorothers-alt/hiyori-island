@@ -27,6 +27,16 @@ const MOTTO_LATE = 10 * 60000
 const TIMER_LATE = 15 * 60000
 // 推播送到時問頁面「正看著 App 嗎」，等它回答：問題的 id → 收到回答時叫的函式
 const asking = new Map()
+// 首頁用到的入口 JS／CSS（打包後帶 hash 的 assets/ 檔）
+const entryAssets = (html) => [...html.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)].map((m) => m[1])
+// 離線用的首頁只換成「它要的入口 JS／CSS 這個快取裡都有」的那一份。新版部署了、這一版的 Service Worker 還在管頁面時，
+// 網路拿到的是新版首頁：新版還沒裝好（或裝失敗、留在舊版）就先不換，不然離線時首頁是新版、程式卻只有舊版，整個打不開
+async function keepHome(res) {
+  const cache = await caches.open(VERSION)
+  const html = await res.clone().text()
+  for (const a of entryAssets(html)) if (!(await cache.match(new URL(a, self.registration.scope).href, { ignoreVary: true }))) return
+  await cache.put('./index.html', res)
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -40,7 +50,7 @@ self.addEventListener('install', (event) => {
         await cache.put('./', res.clone())
         await cache.put('./index.html', res)
         // 打包後帶 hash 的入口 JS／CSS 一起快取，第一次安裝後就能離線
-        const assets = [...html.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)].map((m) => m[1])
+        const assets = entryAssets(html)
         await cache.addAll([...SHELL.filter((f) => f !== './' && f !== './index.html'), ...assets])
       } catch (err) {
         // 有檔案沒抓到就不要裝：舊版繼續用、舊快取也不會被清掉，下次打開再試
@@ -85,11 +95,8 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req, { cache: 'no-cache' })
         .then((res) => {
-          // 404、500 這類錯誤頁不能存成離線用的首頁
-          if (res.ok) {
-            const copy = res.clone()
-            caches.open(VERSION).then((c) => c.put('./index.html', copy))
-          }
+          // 404、500 這類錯誤頁不能存成離線用的首頁；跟這個快取裡的程式不同版的也不存（keepHome）
+          if (res.ok) keepHome(res.clone()).catch(() => {})
           return res
         })
         .catch(() => caches.match('./index.html')),

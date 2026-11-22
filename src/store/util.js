@@ -56,11 +56,14 @@ export const uid = () => Date.now().toString(36).slice(-5) + Math.random().toStr
 const REV_RE = /^[\w-]{1,40}$/
 
 // ── 例行公事（重複任務／日程） ──
-export const REPEAT_TYPES = ['daily', 'weekdays', 'weekly']
+// monthly：每月幾號（rep.day，1–31）。那個月沒有那一天（31 號、2 月的 30 號）就在月底那天
+export const REPEAT_TYPES = ['daily', 'weekdays', 'weekly', 'monthly']
 export function repeatMatches(rep, date) {
-  const d = parseDate(date).getDay()
+  const p = parseDate(date)
+  const d = p.getDay()
   if (rep.type === 'daily') return true
   if (rep.type === 'weekdays') return d >= 1 && d <= 5
+  if (rep.type === 'monthly') return p.getDate() === Math.min(rep.day || 1, new Date(p.getFullYear(), p.getMonth() + 1, 0).getDate())
   return rep.days.includes(d)
 }
 // 季節（與 scene/season.js 的 seasonOf 相同規則；store 不依賴場景模組）

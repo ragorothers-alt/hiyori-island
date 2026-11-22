@@ -1,7 +1,7 @@
 import './schedule.css'
 import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn, keepFocus } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
-import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey, floating } from '../store.js'
+import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey, floating, overnight } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes, SPLIT_MIN } from '../planner.js'
 import { taskMilestone } from '../projects.js'
 import { haptic } from './haptics.js'
@@ -372,6 +372,7 @@ export class ScheduleView {
           <label class="ec-timed"${ad ? ' hidden' : ''}>結束<input type="time" name="end" value="${ad ? '10:00' : item.end}"></label>
           <label class="ec-until"${ad ? '' : ' hidden'}>到<input type="date" name="until" value="${item.endDate || item.date}" aria-label="最後一天（只有一天就跟開始同一天）"></label>
         </div>
+        <small class="hint ec-over" aria-live="polite" hidden></small>
         ${routine ? '' : `<div class="form-row"><button type="button" class="chip-toggle${ad ? ' on' : ''}" data-allday aria-pressed="${ad}" title="沒有時段的日程，例如朋友來玩、旅行（可以好幾天）">整天</button></div>`}
         <div class="swatches ec-colors">${swatches}</div>
         <textarea name="note" maxlength="200" rows="2" placeholder="備註：地點、要帶的東西…" aria-label="備註">${esc(item.note || '')}</textarea>`
@@ -401,6 +402,7 @@ export class ScheduleView {
       </div>
     </form>`
     $('#editSheet').hidden = false
+    if (ev) this._overHint(item)
     const title = $('#editSheet [name="title"]')
     if (ed.create) title.focus()
     // 打開時的樣子：存的時候只送改過的欄位（面板開著時別的裝置、別的分頁改了其他欄位，不會被蓋回去）
@@ -431,8 +433,36 @@ export class ScheduleView {
     if (ed.allDay) return { title, color: ed.color, date, note, allDay: true, endDate: form.until.value }
     const start = form.start.value || '09:00'
     let end = form.end.value || '10:00'
-    if (toMin(end) <= toMin(start)) end = hm(toMin(start) + 30)
+    // 結束比開始早：跨過午夜，存成兩段（store 的 overnight）；一樣、或跨過去太久（多半填錯）：補成半小時
+    if (!overnight(start, end) && toMin(end) <= toMin(start)) end = hm(toMin(start) + 30)
     return { title, start, end, color: ed.color, date, note, allDay: false }
+  }
+  // 日程面板的時段：改開始時結束跟著挪（長度不變，像一般的行事曆）；結束比開始早時說一聲會接到隔天
+  // 跨過午夜存成的那幾段（item.link）：說另一天那段會一起改；結束在 23:59 的那段（後面接著隔天）改開始時結束不跟著挪
+  _overHint(item = {}) {
+    const form = $('#editSheet form')
+    const hint = form.querySelector('.ec-over')
+    const { start, end } = form.elements
+    let prev = start.value
+    const linked = !!item.link && this.store.state.events.some((x) => x.link === item.link && x.id !== item.id)
+    const show = () => {
+      const over = !this.editing?.allDay && overnight(start.value, end.value) && toMin(end.value) > 0
+      hint.hidden = !over && !linked
+      if (over) hint.textContent = `到隔天 ${end.value} 才結束：存成這天到 23:59、隔天 00:00 起兩段（改名稱、刪除兩段一起）`
+      else if (linked) hint.textContent = '跨過午夜的日程：另一天的那一段會一起改名稱、顏色、備註，刪除也一起'
+    }
+    start.addEventListener('change', () => {
+      const a = toMin(prev)
+      const b = toMin(end.value)
+      if (start.value && end.value && prev && end.value !== '23:59') {
+        const len = b > a ? b - a : b < a && overnight(prev, end.value) ? b + 1440 - a : 0
+        if (len) end.value = hm((toMin(start.value) + len) % 1440)
+      }
+      prev = start.value
+      show()
+    })
+    end.addEventListener('change', show)
+    show()
   }
   // 草稿改了日期、長度、長期：本命（過去的日子、長期的不行）、分成幾段（90 分鐘以上）、排進空檔（長期的不行）跟著出現或藏起來
   _syncTools() {

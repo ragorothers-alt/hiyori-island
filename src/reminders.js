@@ -77,7 +77,8 @@ export class Reminders {
   _items(date, offset) {
     const own = (x) => !this.store.isSample?.(x)
     return [
-      ...this.store.eventsOn(date).filter(own).map((e) => [e, e.start, 'event', date, offset]),
+      // 跨過午夜的日程接到隔天的那一段不另外提醒（第一段開始前已經提醒過）
+      ...this.store.eventsOn(date).filter((e) => own(e) && !this.store.isCont?.(e)).map((e) => [e, e.start, 'event', date, offset]),
       ...this.store.tasksOn(date).filter((t) => t.at && own(t)).map((t) => [t, t.at, 'task', date, offset]),
     ]
   }

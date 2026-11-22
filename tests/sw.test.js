@@ -31,6 +31,24 @@ describe('Service Worker', () => {
     expect(await (await caches.match('./index.html')).text()).toBe('<html>')
   })
 
+  it('頁面：網路拿到的首頁要的程式不在這個快取裡（新版還沒裝好、裝失敗）就不換掉離線首頁；都在才換', async () => {
+    const caches = new FakeCaches()
+    const cur = await caches.open('hiyori-new')
+    await cur.put('./index.html', new Response('old home'))
+    await cur.put('./assets/index-a.js', new Response('a'))
+    const page = (html) => loadSW({ caches, fetch: async () => new Response(html) })
+    const req = { method: 'GET', mode: 'navigate', url: SCOPE }
+    const other = '<script type="module" src="./assets/index-b.js"></script><link rel="stylesheet" href="./assets/index-a.css">'
+    expect(await (await run(page(other).fetch, { request: req })).text()).toBe(other)
+    await new Promise((r) => setTimeout(r))
+    expect(await (await cur.match('./index.html')).text()).toBe('old home')
+    // 同一版（程式都在快取裡）：換成網路拿到的
+    const same = '<script type="module" src="./assets/index-a.js"></script>'
+    await run(page(same).fetch, { request: req })
+    await new Promise((r) => setTimeout(r))
+    expect(await (await cur.match('./index.html')).text()).toBe(same)
+  })
+
   const HTML = '<script type="module" src="./assets/index-new.js"></script><link rel="stylesheet" href="./assets/index-new.css">'
   const fetcher = (fail = null) => async (u) => {
     const url = String(u)

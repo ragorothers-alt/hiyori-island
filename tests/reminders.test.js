@@ -49,6 +49,16 @@ describe('日程提醒', () => {
     expect(callback).toHaveBeenCalledTimes(1)
   })
 
+  it('跨過午夜的日程只在第一段開始前提醒，接到隔天 00:00 的那一段不再響', () => {
+    const night = store.addEvent({ title: '夜班交接', date: TODAY, start: '23:30', end: '00:30' })
+    reminders.check(at(23, 20))
+    expect(callback).toHaveBeenLastCalledWith(night, 10, 'event')
+    const n = callback.mock.calls.length
+    reminders.check(at(23, 50))
+    reminders.check(new Date(2026, 9, 26, 0, 0))
+    expect(callback).toHaveBeenCalledTimes(n)
+  })
+
   it('範例的日程、任務不提醒', () => {
     localStorage.clear()
     const fresh = new Store()

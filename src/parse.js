@@ -121,6 +121,11 @@ export function parseQuick(input, { today = dateStr(), projects = [], span = fal
   take(/平日|工作日|週一到週五|周一到周五/g, () => {
     out.repeat = { type: 'weekdays' }
   })
+  // 每月幾號：「每月5日」「每個月 25 號」（日期本身不會再被當成哪天做）
+  take(/每(?:個)?月\s*(\d{1,2})\s*(?:日|號|号)/g, (_, n) => {
+    if (+n < 1 || +n > 31) return false
+    out.repeat = { type: 'monthly', day: +n }
+  })
   take(/每(?:個)?(?:週|周|星期|禮拜|礼拜)([一二三四五六日天、]+)/g, (_, ds) => {
     const days = [...new Set([...ds].filter((c) => c in WD).map((c) => WD[c]))]
     if (!days.length) return false
@@ -231,7 +236,10 @@ export function parseQuick(input, { today = dateStr(), projects = [], span = fal
       want = late > start ? late - start : late < start ? late + 1440 - start : 60
       // 結束在半夜：那天的最後一分鐘
       if (end >= 1440) end = 1439
-      if (end <= start) end = Math.min(start + 60, 1439)
+      // 跨過午夜、16 小時以內（23:30 到 00:30、23:00 到 1:00）：結束留著隔天的時間（比開始早），存的時候分成兩段（store 的 overnight）。
+      // 剛好到 0 點的是那天的最後一分鐘
+      if (late < start && late + 1440 - start <= 960) end = late === 0 ? 1439 : late
+      else if (end <= start) end = Math.min(start + 60, 1439)
       out.start = start
       out.end = end
       text = text.replace(rm[0], ' ')
@@ -310,6 +318,9 @@ export function parseSpend(raw) {
   return tail ? cut(tail) : { text: src, amount: 0 }
 }
 
+// 日程的時段：結束比開始早的是隔天才結束（跨過午夜）
+export const timeRange = (start, end) => (end < start ? `${start}–隔天 ${end}` : `${start}–${end}`)
+
 // 給輸入框下方的預覽用
 export function describeQuick(p, today) {
   const chips = []
@@ -324,9 +335,9 @@ export function describeQuick(p, today) {
     const d = parseDate(p.date)
     chips.push(`${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`)
   } else if (p.date) chips.push('今天')
-  if (p.start) chips.push(`${p.start}–${p.end}`)
+  if (p.start) chips.push(timeRange(p.start, p.end))
   // 整天的日程不會重複（例行公事只有有時段的）：不顯示「↻ 每天」免得以為會重複
-  if (p.repeat && !p.allDay) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
+  if (p.repeat && !p.allDay) chips.push(p.repeat.type === 'daily' ? '↻ 每天' : p.repeat.type === 'weekdays' ? '↻ 平日' : p.repeat.type === 'monthly' ? `↻ 每月 ${p.repeat.day} 日` : '↻ 每週' + p.repeat.days.map((d) => '日一二三四五六'[d]).join('、'))
   if (p.priority && p.kind === 'task') chips.push(['', '低', '中', '高'][p.priority] + '優先')
   if (p.due && p.kind === 'task') {
     const d = parseDate(p.due)

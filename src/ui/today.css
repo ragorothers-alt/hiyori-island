@@ -42,10 +42,12 @@ body.night .td::before { background-image: var(--td-hero-night); mix-blend-mode:
 /* 右上的齒輪：App 模式在總覽上藏起了日期列，設定從這裡進。字不要跑到齒輪底下 */
 .td-hero { position: relative; }
 .td-hero:has(> .td-gear) { padding-right: 48px; }
-.td-gear { position: absolute; top: 0; right: 0; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 14px; border: 0; background: var(--field); color: var(--ink-soft); cursor: pointer; }
-.td-gear svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
-.td-gear:hover { color: var(--ink); }
-.td-gear:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.td-hero:has(> .td-find) { padding-right: 96px; }
+.td-gear, .td-find { position: absolute; top: 0; right: 0; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 14px; border: 0; background: var(--field); color: var(--ink-soft); cursor: pointer; }
+.td-gear svg, .td-find svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.td-gear:hover, .td-find:hover { color: var(--ink); }
+.td-gear:focus-visible, .td-find:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.td-find { right: 48px; }
 .td-ref-eve { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: -4px 0 10px; font-size: 13px; color: var(--ink-soft); }
 .td-ref.eve { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--sakura, #f19bb2) 55%, transparent), var(--lg-shadow, 0 8px 24px rgba(0, 0, 0, .06)); }
 /* 上週的回顧卡（新的一週，看過或收起來就不放） */

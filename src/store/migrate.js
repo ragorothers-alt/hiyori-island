@@ -673,6 +673,8 @@ function migrate(s) {
       id: str(e.id), title, date, start: allDay ? '00:00' : start, end: allDay ? '23:59' : end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done,
       routineId: ID_RE.test(e.routineId) ? e.routineId : null, note: str(e.note, 200),
       allDay, endDate: allDay ? allDayEnd(e.endDate, date) : '',
+      // 跨過午夜存成的幾段（store.js 的 _pieces）：一樣的 link
+      ...(!allDay && ID_RE.test(e.link) ? { link: e.link } : {}),
     }
   })
   const routines = cleanList(s.routines, (r) => {
@@ -682,13 +684,14 @@ function migrate(s) {
     const type = REPEAT_TYPES.includes(rep.type) ? rep.type : 'daily'
     const days = Array.isArray(rep.days) ? [...new Set(rep.days.map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))] : []
     if (type === 'weekly' && !days.length) return null
+    const day = type === 'monthly' ? num(rep.day, 1, 31, 1) : 0
     const start = TIME_RE.test(r.start) ? r.start : '09:00'
     let end = TIME_RE.test(r.end) ? r.end : '10:00'
     if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const made = {}
     if (isObj(r.made)) for (const d of Object.keys(r.made)) if (DATE_RE.test(d)) made[d] = true
     return {
-      id: str(r.id), kind: r.kind === 'event' ? 'event' : 'task', title, repeat: { type, days },
+      id: str(r.id), kind: r.kind === 'event' ? 'event' : 'task', title, repeat: day ? { type, days, day } : { type, days },
       priority: num(r.priority, 1, 3, 2), tag: tags.has(r.tag) ? r.tag : 'life', start, end, color: num(r.color, 0, 99, 0),
       startDate: ymd(r.startDate, today), made, createdAt: ts(r.createdAt) || Date.now(),
     }

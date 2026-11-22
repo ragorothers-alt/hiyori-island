@@ -331,6 +331,18 @@ body.night .pri-3 { color: #e08aa2; }
 .overdue h4 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--warn-ink); display: flex; justify-content: space-between; align-items: center; }
 .overdue h4 button { font-size: max(var(--fmin), 11.5px); color: var(--warn-ink); padding: 2px 8px; border-radius: 8px; background: rgba(255, 255, 255, .5); }
 body.night .overdue h4 button { background: rgba(255, 255, 255, .1); }
+.overdue h4 .od-btns { display: flex; gap: 6px; }
+.overdue .od-more { display: block; width: 100%; margin-top: 6px; padding: 6px; border-radius: 10px; font-size: max(var(--fmin), 12px); color: var(--warn-ink); background: rgba(255, 255, 255, .35); }
+body.night .overdue .od-more { background: rgba(255, 255, 255, .06); }
+.overdue .od-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.overdue .od-row label { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, .45); cursor: pointer; }
+body.night .overdue .od-row label { background: rgba(255, 255, 255, .06); }
+.overdue .od-row input { width: 18px; height: 18px; accent-color: #e48aa8; flex: none; }
+.overdue .od-row .od-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.overdue .od-row small { color: var(--ink-faint); }
+.overdue .od-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.overdue .od-acts button { margin: 0; }
+.overdue .od-acts button b { font-weight: inherit; }
 .overdue .item { background: rgba(255, 255, 255, .4); }
 body.night .overdue .item { background: rgba(255, 255, 255, .05); }
 
@@ -558,6 +570,21 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .focus.break .focus-label { color: var(--mint); }
 
 /* ── Toast ── */
+/* 常駐的警示列（存不進去、這個分頁比較舊）：最上面置中，問題解決前一直留著 */
+.alerts { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%; transform: translateX(-50%); z-index: 120; display: flex; flex-direction: column; gap: 8px; width: min(560px, calc(100vw - 24px)); pointer-events: none; }
+.alerts:empty { display: none; }
+.alert-bar { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 10px; border-radius: 16px; font-size: 13px; background: var(--lg-bg-strong); border-color: rgba(232, 120, 120, .55); box-shadow: 0 0 0 1px rgba(232, 120, 120, .35), var(--shadow); animation: toastIn .5s var(--ease) both; }
+.alert-bar .t-icon { flex: none; width: 30px; height: 30px; border-radius: 10px; display: grid; place-content: center; font-family: var(--font-display); background: linear-gradient(135deg, #f6c7c7, #fde3eb); color: #b2475d; }
+.alert-bar .ab-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.alert-bar .ab-text small { color: var(--ink-soft); line-height: 1.45; }
+.alert-bar .ab-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 520px) { .alert-bar { flex-wrap: wrap; } .alert-bar .ab-acts { width: 100%; } }
+/* 開場就壞掉：載入畫面換成「開不起來」 */
+#loader.failed { gap: 12px; padding: 24px; text-align: center; }
+#loader.failed .loader-mochi { animation: none; filter: grayscale(.4); }
+#loader.failed small { max-width: 340px; letter-spacing: .04em; line-height: 1.6; font-family: var(--font-ui, inherit); }
+#loader .loader-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+#loader .loader-acts button { font: inherit; letter-spacing: .06em; padding: 8px 14px; border-radius: 12px; border: 1px solid var(--glass-border, rgba(0,0,0,.12)); background: rgba(255,255,255,.75); color: #3e4a5c; cursor: pointer; }
 .toasts { position: fixed; top: 92px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
 .toast {
   display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 10px; border-radius: 16px; font-size: 13px;
@@ -1492,4 +1519,4 @@ body.in-room .hud, body.in-room .datebar, body.in-room .quests { opacity: 0; poi
 body.app-mode .tabs.has-ink .tab-ink { display: block; position: absolute; left: 0; top: 0; z-index: 0; background: var(--lg-sel); pointer-events: none; }
 body.app-mode .tabs.has-ink .tab.active { background: none; }
 body.app-mode .tabs.has-ink .tab { z-index: 1; }
-@media (min-width: 861px) { body.app-mode .panel.full .tabs { position: relative; } }
+@media (min-width: 861px) { body.app-mode .panel.full .tabs { position: relative; } }#loader .loader-slow { display: flex; flex-direction: column; align-items: center; gap: 6px; letter-spacing: .04em; animation: toastIn .5s var(--ease) both; }

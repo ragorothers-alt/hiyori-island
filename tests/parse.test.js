@@ -14,6 +14,17 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('每月重複', () => {
+  it('「每月5日」「每個月 25 號」是每月重複，日期本身不當成哪天做；預覽寫「↻ 每月 5 日」', () => {
+    const p = parseQuick('每月5日 繳房租', { today: TODAY })
+    expect(p).toMatchObject({ title: '繳房租', repeat: { type: 'monthly', day: 5 }, date: null })
+    expect(describeQuick(p, TODAY)).toContain('↻ 每月 5 日')
+    expect(parseQuick('每個月 25 號 對帳', { today: TODAY }).repeat).toEqual({ type: 'monthly', day: 25 })
+    // 不是日期的不算
+    expect(parseQuick('每月40日 怪怪的', { today: TODAY }).repeat).toBeNull()
+  })
+})
+
 describe('快速輸入解析', () => {
   const cases = [
     {
@@ -202,15 +213,19 @@ describe('快速輸入解析', () => {
 })
 
 describe('寫了時間的那一行原本想要多長（span）', () => {
-  it('跨過半夜的照原本的長度、沒寫結束的照寫的時長或一小時；日程本身照樣排在同一天；沒要 span 時不多給', () => {
+  it('跨過半夜的照原本的長度：結束留著隔天的時間（存的時候分成兩段）；沒寫結束的照寫的時長或一小時、截在那天；沒要 span 時不多給', () => {
     const at = (text) => parseQuick(text, { today: TODAY, span: true })
-    expect(at('23:00-01:00 趕報告')).toMatchObject({ start: '23:00', end: '23:59', span: 120 })
+    expect(at('23:00-01:00 趕報告')).toMatchObject({ start: '23:00', end: '01:00', span: 120 })
+    expect(describeQuick(at('23:30-00:30 夜班交接'), TODAY)).toContain('23:30–隔天 00:30')
+    // 剛好到 0 點：那天的最後一分鐘；跨過去超過 16 小時的（多半是寫錯）照舊補一小時
+    expect(at('22:00-00:00 守歲')).toMatchObject({ start: '22:00', end: '23:59' })
+    expect(at('12:00-11:00 怪怪的')).toMatchObject({ start: '12:00', end: '13:00' })
     expect(at('23:30 寫日記')).toMatchObject({ start: '23:30', end: '23:59', span: 60 })
     expect(at('23:30 寫日記 90分鐘')).toMatchObject({ end: '23:59', span: 90 })
     expect(at('15:00-16:30 開會')).toMatchObject({ end: '16:30', span: 90 })
     // 「到 1:00」的結束沿用了晚上會讀成 13:00：跨過半夜的當成凌晨
-    expect(at('23:00 到 1:00 趕報告')).toMatchObject({ start: '23:00', span: 120 })
-    expect(at('晚上10點到2點 跨年')).toMatchObject({ start: '22:00', span: 240 })
+    expect(at('23:00 到 1:00 趕報告')).toMatchObject({ start: '23:00', end: '01:00', span: 120 })
+    expect(at('晚上10點到2點 跨年')).toMatchObject({ start: '22:00', end: '02:00', span: 240 })
     expect(at('買牛奶').span).toBeUndefined()
     expect(parseQuick('23:00-01:00 趕報告', { today: TODAY }).span).toBeUndefined()
   })

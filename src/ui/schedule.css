@@ -174,6 +174,8 @@ body.night .ec-proj select option { color: #222; }
 .ec-long-tip { font-size: max(var(--fmin), 11px); color: var(--ink-faint); line-height: 1.4; }
 .edit-card textarea { width: 100%; border: 0; outline: 0; resize: vertical; border-radius: 12px; padding: 8px 10px; font-size: 13px; line-height: 1.6; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); }
 .ec-hint { margin: 0; }
+.ec-over { display: block; margin: -2px 0 2px; color: var(--accent-ink, var(--ink-soft)); }
+.ec-over[hidden] { display: none; }
 /* 任務的編輯面板上直接做的事（排進空檔、子任務、分段）：一排小按鈕，在存檔那一排上面 */
 .ec-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .ec-tools .btn-ghost { padding: 6px 10px; font-size: 12.5px; }

@@ -1,0 +1,20 @@
+/* 找找看（src/ui/search.js）：跟快速記錄一樣是靠上放的一張卡，結果分組列在輸入框下面 */
+.find .find-card { width: min(560px, calc((100vw - 24px) / var(--ui-zoom, 1))); display: flex; flex-direction: column; gap: 8px; }
+.find-row input { padding-left: 38px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a97ab' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6'/%3E%3Cpath d='M20 20l-4.2-4.2'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 12px 50%; background-size: 18px; }
+.find-row input::-webkit-search-cancel-button { display: none; }
+.find-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; max-height: calc((100dvh - 230px - env(safe-area-inset-top)) / var(--ui-zoom, 1)); }
+.find-list:empty { display: none; }
+.fd-h { margin: 8px 4px 2px; font-size: max(var(--fmin, 11px), 11.5px); letter-spacing: .12em; color: var(--ink-faint); }
+.fd-h:first-child { margin-top: 2px; }
+.fd-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 12px; }
+.fd-row.sel { background: rgba(140, 170, 200, .16); box-shadow: inset 0 0 0 1px rgba(140, 170, 200, .35); }
+.fd-row .check { flex: none; }
+.fd-dot { flex: none; display: grid; place-content: center; width: 26px; height: 26px; border-radius: 50%; font: 400 12px var(--font-display); color: var(--c, var(--ink-soft)); border: 1px dashed var(--c, var(--glass-border)); }
+.fd-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 4px; text-align: left; border-radius: 10px; }
+.fd-main:hover { background: var(--glass-hover, rgba(140, 170, 200, .12)); }
+.fd-t { max-width: 100%; font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-m, .fd-hit { max-width: 100%; font-size: max(var(--fmin, 11px), 11.5px); color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-hit b { font-weight: 500; margin-right: 6px; color: var(--ink-soft); }
+.fd-row.done .fd-t { color: var(--ink-faint); text-decoration: line-through; text-decoration-color: rgba(140, 150, 170, .5); }
+.find-list mark { background: rgba(255, 214, 120, .45); color: inherit; border-radius: 3px; padding: 0 1px; }
+.find-tip:empty { display: none; }

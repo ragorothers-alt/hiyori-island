@@ -408,15 +408,39 @@ export const tasksMethods = {
     this._finish()
     return true
   },
-  moveToToday(ids) {
+  // 把幾件任務搬到 to 那天（逾期的「移到今天」、挑幾件移到明天）。做完的、長期的不搬。
+  // 回傳撤銷用的紀錄 { to, items: [{ id, 原本的日子、往後挪的次數、本命、先做這件, after: 搬完的樣子 }] }（一件都沒搬是 null），給 undoMove
+  moveToToday(ids, to = this.today) {
+    this._refreshToday()
+    const items = []
     for (const id of ids) {
       const t = this._find('tasks', id)
-      if (!t) continue
-      if (t.date < this.today && !t.done) t.moved = (t.moved || 0) + 1
-      t.date = this.today
+      if (!t || t.done || floating(t) || t.date === to) continue
+      const was = { id, date: t.date, moved: t.moved || 0, star: !!t.star, first: !!t.first }
+      if (t.date < this.today) t.moved = (t.moved || 0) + 1
+      t.date = to
       this._fitStar(t)
+      items.push({ ...was, after: { at: t.at ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first } })
     }
     this._finish()
+    return items.length ? { to, items } : null
+  },
+  // 撤銷剛才的整批搬動：每一件回到各自原本的那天（往後挪的次數、本命、先做這件也放回去）。
+  // 之後又動過的那一件（換了天、排了時段、做完了、改成長期）留著現在的樣子。回傳回去了幾件
+  undoMove(u) {
+    let back = 0
+    for (const x of u?.items || []) {
+      const t = this._find('tasks', x.id)
+      if (!t || t.done || floating(t) || t.date !== u.to || (t.at ?? null) !== x.after.at) continue
+      this._editedTask(t)
+      t.date = x.date
+      t.moved = Math.max(0, (t.moved || 0) - (x.after.moved - x.moved))
+      this._restoreMarks(t, x, x.after)
+      this._editedTask(t)
+      back++
+    }
+    if (back) this._finish()
+    return back
   },
   // ── 卡關提醒 ──
   // 卡住的任務：往後挪了 2 次以上，或逾期 3 天以上（例行公事不算）。off：不再提醒的 id

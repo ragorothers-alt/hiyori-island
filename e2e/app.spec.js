@@ -178,7 +178,7 @@ test('每日任務只放一個地方：任務頁沒有那張；小島模式面�
   await expect(page.locator('#habitsRoot .hb-diff').first()).toContainText('例行公事')
 })
 
-test('專案搜尋：按 / 跳到搜尋框，里程碑也找得到；Esc 清掉字，Enter 打開第一個', async ({ page, context, site }) => {
+test('專案搜尋：在專案頁按 / 跳到那一頁的搜尋框，里程碑也找得到；Esc 清掉字，Enter 打開第一個', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
@@ -188,7 +188,8 @@ test('專案搜尋：按 / 跳到搜尋框，里程碑也找得到；Esc 清掉�
     for (const [name, milestones] of list) s.addProject({ name, milestones })
   })
   const q = page.locator('#projectQuery')
-  // 從總覽頁按 / ：切到專案、游標在搜尋框
+  // 在專案頁按 / ：游標在這一頁的搜尋框（別的頁是「找找看」）
+  await page.evaluate(() => window.hiyori.ui.setTab('projects'))
   await page.keyboard.press('/')
   await expect(q).toBeFocused()
   await q.fill('模擬考')
@@ -5203,4 +5204,150 @@ test.describe('跨裝置的計時', () => {
     expect(await b.evaluate(() => window.hiyori.cloudSync.state)).toBe('linked')
     await ctxB.close()
   })
+})
+
+test('跨過午夜的日程：日程頁填 23:30 到 00:30，存成這天和隔天兩段，隔天的時間軸看得到；改開始時結束跟著挪', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  // 5 天後：沒有範例
+  const [day, next] = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const d = s.today
+    const add = (n) => {
+      const x = new Date(d)
+      x.setDate(x.getDate() + n)
+      return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    }
+    s.selectDate(add(5))
+    window.hiyori.ui.setTab('schedule')
+    return [add(5), add(6)]
+  })
+  await page.locator('#eventTitle').fill('夜班交接')
+  await page.locator('#eventStart').fill('21:00')
+  await page.locator('#eventEnd').fill('22:00')
+  // 開始挪到 23:30：結束跟著挪成 00:30（長度不變）
+  await page.locator('#eventStart').focus()
+  await page.locator('#eventStart').fill('23:30')
+  await page.locator('#eventStart').dispatchEvent('change')
+  await expect(page.locator('#eventEnd')).toHaveValue('00:30')
+  await page.locator('#eventForm').evaluate((f) => f.requestSubmit())
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.events.filter((e) => e.title === '夜班交接').map((e) => `${e.date} ${e.start}–${e.end}`))).toEqual([`${day} 23:30–23:59`, `${next} 00:00–00:30`])
+  await page.evaluate((d) => window.hiyori.store.selectDate(d), next)
+  await expect(page.locator('.blk', { hasText: '夜班交接' })).toBeVisible()
+})
+
+test('存不進去：上方一直留著警示列，可以馬上匯出；又存得進去時收起來', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const real = Storage.prototype.setItem
+    window.__realSet = real
+    Storage.prototype.setItem = function (k, v) {
+      if (k === 'hiyori-daily-v1') throw new DOMException('full', 'QuotaExceededError')
+      return real.call(this, k, v)
+    }
+    window.hiyori.store.addTask({ title: '存不進去的任務' })
+  })
+  const bar = page.locator('#alerts .alert-bar')
+  await expect(bar).toContainText('資料還沒存好')
+  const download = page.waitForEvent('download')
+  await bar.getByRole('button', { name: '匯出資料' }).click()
+  expect((await download).suggestedFilename()).toMatch(/^hiyori-.*\.json$/)
+  // 提示卡會自己收掉，警示列不會
+  await page.waitForTimeout(4000)
+  await expect(bar).toBeVisible()
+  await page.evaluate(() => (Storage.prototype.setItem = window.__realSet))
+  await bar.getByRole('button', { name: '再試一次' }).click()
+  await expect(bar).toHaveCount(0)
+  await expect(page.locator('#toasts')).toContainText('又存得進去了')
+})
+
+test('找找看：別的頁按 / 或 Ctrl+K、點放大鏡都叫得出來；哪一天的任務都找得到，可以直接打勾、點了打開編輯面板；日程、專案也找', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const ids = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const add = (n) => {
+      const x = new Date(s.today)
+      x.setDate(x.getDate() + n)
+      return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    }
+    const old = s.addTask({ title: '報價單給陳小姐', date: add(-12) })
+    const later = s.addTask({ title: '整理報價單範本', date: add(20) })
+    s.addEvent({ title: '報價會議', date: add(3), start: '14:00', end: '15:00' })
+    s.addProject({ name: '報價系統', milestones: ['需求'] })
+    window.hiyori.ui.setTab('tasks')
+    return { old: old.id, later: later.id, day: add(20) }
+  })
+  await page.keyboard.press('/')
+  const input = page.locator('#findInput')
+  await expect(input).toBeFocused()
+  await input.fill('報價')
+  const list = page.locator('#findList')
+  await expect(list.locator('.fd-row')).toHaveCount(4)
+  await expect(list.locator('.fd-h')).toHaveText(['任務', '日程', '專案'])
+  // 逾期的那件排在前面，寫著逾期
+  await expect(list.locator('.fd-row').first()).toContainText('報價單給陳小姐')
+  await expect(list.locator('.fd-row').first()).toContainText('逾期')
+  // 直接打勾
+  await list.locator('.fd-row').first().locator('[data-act="toggle"]').click()
+  await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).done, ids.old)).toBe(true)
+  // ↓ 選第二件（還沒做的「整理報價單範本」排到前面了）、Enter 打開編輯面板，日期換到那天
+  await input.fill('報價單')
+  await expect(list.locator('.fd-row').first()).toContainText('整理報價單範本')
+  await input.press('Enter')
+  await expect(page.locator('#search')).toBeHidden()
+  await expect(page.locator('#editSheet [name="title"]')).toHaveValue('整理報價單範本')
+  expect(await page.evaluate(() => window.hiyori.store.selectedDate)).toBe(ids.day)
+  await page.keyboard.press('Escape')
+  // 日期列的放大鏡、Ctrl+K 也叫得出來；找不到時說一聲
+  await page.locator('#findBtn').click()
+  await expect(input).toBeFocused()
+  await input.fill('沒有這種東西')
+  await expect(page.locator('#findTip')).toContainText('找不到')
+  await page.keyboard.press('Control+k')
+  await expect(page.locator('#search')).toBeHidden()
+})
+
+test('逾期的任務：超過 4 件時先列最要緊的 3 件、可以展開；挑幾件一起移到明天，撤銷後回到各自原本那天', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const dates = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const add = (n) => {
+      const x = new Date(s.today)
+      x.setDate(x.getDate() + n)
+      return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    }
+    const out = {}
+    for (let i = 1; i <= 6; i++) out[`逾期${i}`] = s.addTask({ title: `逾期${i}`, date: add(-i), priority: i === 5 ? 3 : 2 }).date
+    window.hiyori.ui.setTab('tasks')
+    return out
+  })
+  const box = page.locator('#overdueBox')
+  await expect(box.locator('h4')).toContainText('· 6')
+  await expect(box.locator('.list .item')).toHaveCount(3)
+  // 優先度高的排前面
+  await expect(box.locator('.list .item').first()).toContainText('逾期5')
+  await box.getByRole('button', { name: /還有 3 件/ }).click()
+  await expect(box.locator('.list .item')).toHaveCount(6)
+
+  await box.getByRole('button', { name: '挑幾件' }).click()
+  await box.locator('label', { hasText: '逾期1' }).locator('input').check()
+  await box.locator('label', { hasText: '逾期4' }).locator('input').check()
+  await box.getByRole('button', { name: /移到明天（2）/ }).click()
+  const moved = () => page.evaluate(() => Object.fromEntries(window.hiyori.store.state.tasks.filter((t) => /^逾期[14]$/.test(t.title)).map((t) => [t.title, t.date])))
+  await expect(box.locator('h4')).toContainText('· 4')
+  const tomorrow = await page.evaluate(() => {
+    const x = new Date(window.hiyori.store.today)
+    x.setDate(x.getDate() + 1)
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+  })
+  expect(await moved()).toEqual({ 逾期1: tomorrow, 逾期4: tomorrow })
+  await page.locator('#toasts .toast', { hasText: '2 件移到明天了' }).getByRole('button', { name: '撤銷' }).click()
+  await expect.poll(moved).toEqual({ 逾期1: dates['逾期1'], 逾期4: dates['逾期4'] })
 })

@@ -72,6 +72,11 @@ describe('日期、時間與重複規則', () => {
     ['平日的週日', { type: 'weekdays', days: [] }, TODAY, false],
     ['指定的週三', { type: 'weekly', days: [1, 3, 5] }, '2026-10-28', true],
     ['未指定的週二', { type: 'weekly', days: [1, 3, 5] }, '2026-10-27', false],
+    ['每月 5 日的 5 日', { type: 'monthly', days: [], day: 5 }, '2026-11-05', true],
+    ['每月 5 日的 6 日', { type: 'monthly', days: [], day: 5 }, '2026-11-06', false],
+    ['每月 31 日在 11 月底（30 日）', { type: 'monthly', days: [], day: 31 }, '2026-11-30', true],
+    ['每月 30 日在 2 月底（28 日）', { type: 'monthly', days: [], day: 30 }, '2027-02-28', true],
+    ['每月 31 日在 12 月 30 日', { type: 'monthly', days: [], day: 31 }, '2026-12-30', false],
   ])('重複規則會判斷%s是否符合', (_name, repeat, date, expected) => {
     expect(repeatMatches(repeat, date)).toBe(expected)
   })
@@ -727,6 +732,19 @@ describe('例行公事與跨日', () => {
     store.selectDate(TODAY)
     expect(instances(TODAY)).toHaveLength(0)
     expect(instances('2026-10-26')).toHaveLength(1)
+  })
+
+  it('每月例行公事只在那一天生成（沒給日期就是開始那天的日期）；讀存檔時留著；顯示「每月 5 日」', () => {
+    const r = store.addRoutine({ title: '繳房租', repeat: { type: 'monthly', day: 5 } })
+    expect(r.repeat).toEqual({ type: 'monthly', days: [], day: 5 })
+    expect(repeatLabel(r.repeat)).toBe('每月 5 日')
+    for (const [date, count] of [['2026-11-04', 0], ['2026-11-05', 1], ['2026-12-05', 1]]) {
+      store.selectDate(date)
+      expect(store.tasksOn(date).filter((t) => t.title === '繳房租')).toHaveLength(count)
+    }
+    const again = migrate(JSON.parse(JSON.stringify(store.state)))
+    expect(again.routines.find((x) => x.title === '繳房租').repeat).toEqual({ type: 'monthly', days: [], day: 5 })
+    expect(store.addRoutine({ title: '月初', repeat: { type: 'monthly' }, date: '2026-10-28' }).repeat.day).toBe(28)
   })
 
   it('每週例行公事只在指定星期生成', () => {
@@ -2728,6 +2746,80 @@ describe('卡關提醒與設定', () => {
     expect(store.state.settings).toMatchObject({ focusNoise: 'brown', noiseVol: 5 })
     store.importJSON(JSON.stringify({ tasks: [], player: {}, settings: { focusNoise: 7, noiseVol: 43 } }))
     expect(store.state.settings).toMatchObject({ focusNoise: 'off', noiseVol: 45 })
+  })
+})
+
+describe('逾期的整批移動', () => {
+  it('移到今天（或明天）回傳撤銷紀錄：每一件回到各自原本那天，挪的次數、被擠掉的本命放回去；之後又動過的那件留著；做完的、長期的不搬', () => {
+    const tomorrow = addDays(TODAY, 1)
+    const a = store.addTask({ title: '甲', date: addDays(TODAY, -5) })
+    const b = store.addTask({ title: '乙', date: addDays(TODAY, -2) })
+    const c = store.addTask({ title: '丙', date: addDays(TODAY, -1) })
+    b.star = true
+    for (const title of ['今一', '今二', '今三']) store.toggleStar(store.addTask({ title, date: TODAY }).id)
+    const u = store.moveToToday([a.id, b.id, c.id])
+    expect(u.items.map((x) => x.id)).toEqual([a.id, b.id, c.id])
+    expect([a.date, b.date, b.star, a.moved]).toEqual([TODAY, TODAY, false, 1])
+    // 撤銷前自己把「丙」排了時段：它留著
+    store.scheduleTask(c.id, '20:00')
+    expect(store.undoMove(u)).toBe(2)
+    expect([a.date, a.moved || 0, b.date, b.star, c.date]).toEqual([addDays(TODAY, -5), 0, addDays(TODAY, -2), true, TODAY])
+    // 移到明天
+    const u2 = store.moveToToday([a.id], tomorrow)
+    expect([a.date, u2.to]).toEqual([tomorrow, tomorrow])
+    expect(store.undoMove(u2)).toBe(1)
+    // 做完的不搬；一件都沒搬是 null
+    store.toggleTask(a.id)
+    expect(store.moveToToday([a.id])).toBeNull()
+  })
+})
+
+describe('跨過午夜的日程', () => {
+  const tomorrow = addDays(TODAY, 1)
+  const pieces = (e) => store.state.events.filter((x) => x.link && x.link === e.link).map((x) => `${x.date} ${x.start}–${x.end}`)
+
+  it('結束比開始早：存成那天到 23:59、隔天 00:00 起兩段，名稱、顏色、備註、完成、刪除都一起；XP 只給一次', () => {
+    const e = store.addEvent({ title: '夜班交接', date: TODAY, start: '23:30', end: '00:30', color: 2, note: '帶鑰匙' })
+    expect(pieces(e)).toEqual([`${TODAY} 23:30–23:59`, `${tomorrow} 00:00–00:30`])
+    const next = store.eventsOn(tomorrow)[0]
+    expect(next).toMatchObject({ title: '夜班交接', color: 2, note: '帶鑰匙', link: e.link })
+    store.updateEvent(e.id, { title: '交班', color: 4 })
+    expect(next).toMatchObject({ title: '交班', color: 4 })
+    const xp = store.player.xp
+    store.toggleEvent(next.id)
+    expect([e.done, next.done, store.stats.eventsDone, store.player.xp - xp]).toEqual([true, true, 1, XP.event])
+    store.toggleEvent(e.id)
+    store.toggleEvent(e.id)
+    expect(store.stats.eventsDone).toBe(1)
+    store.deleteEvent(next.id)
+    expect(store.state.events.some((x) => x.title === '交班')).toBe(false)
+  })
+
+  it('改時間：自己把結束改到開始之前就接到隔天；改回午夜前結束，隔天那段拿掉；換日子一起挪；只挪開始時結束跟著挪、長度不變', () => {
+    const e = store.addEvent({ title: '值班', date: TODAY, start: '21:00', end: '22:00' })
+    store.updateEvent(e.id, { end: '02:00' })
+    expect(pieces(e)).toEqual([`${TODAY} 21:00–23:59`, `${tomorrow} 00:00–02:00`])
+    store.updateEvent(e.id, { end: '03:00' })
+    expect(pieces(e)).toEqual([`${TODAY} 21:00–23:59`, `${tomorrow} 00:00–03:00`])
+    store.updateEvent(e.id, { date: tomorrow })
+    expect(pieces(e)).toEqual([`${tomorrow} 21:00–23:59`, `${addDays(TODAY, 2)} 00:00–03:00`])
+    store.updateEvent(e.id, { end: '23:00' })
+    expect(store.state.events.filter((x) => x.title === '值班').map((x) => `${x.date} ${x.start}–${x.end}`)).toEqual([`${tomorrow} 21:00–23:00`])
+    expect(e.link).toBeUndefined()
+    // 只改開始、挪到結束之後：結束跟著挪（兩小時），不會變成跨到隔天
+    store.updateEvent(e.id, { start: '23:30' })
+    expect(store.state.events.filter((x) => x.title === '值班').map((x) => `${x.start}–${x.end}`)).toEqual(['23:30–23:59'])
+    // 跨過去超過 16 小時（多半是寫錯）：照舊補一小時
+    const odd = store.addEvent({ title: '怪', date: TODAY, start: '12:00', end: '11:00' })
+    expect([odd.end, odd.link]).toEqual(['13:00', undefined])
+  })
+
+  it('讀存檔時留著 link；ふじ刪掉的只刪那一段（撤銷放回的也是那一段）', () => {
+    const e = store.addEvent({ title: '夜車', date: TODAY, start: '22:00', end: '01:00' })
+    const again = migrate(JSON.parse(JSON.stringify(store.state)))
+    expect(again.events.filter((x) => x.link === e.link)).toHaveLength(2)
+    store.deleteEvent(e.id, { only: true })
+    expect(pieces({ link: e.link })).toEqual([`${tomorrow} 00:00–01:00`])
   })
 })
 

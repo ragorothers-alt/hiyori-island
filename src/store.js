@@ -27,6 +27,8 @@ import { agentOpsMethods } from './store/agentOps.js'
 
 
 const KEY = 'hiyori-daily-v1'
+// 開場就壞掉時另存存檔原文用（src/errors.js）
+export const SAVE_KEY = KEY
 // 存檔的版本號另外存一份小的：寫之前先看一眼，就知道另一個分頁是不是剛寫過（不用每次讀整份）
 const REV_KEY = 'hiyori-daily-rev'
 // 每寫一次存檔換一個：同一版（自動記的回神紀錄不換 rev）另一個分頁剛寫過，也看得出來
@@ -147,6 +149,7 @@ export const SEASON_ZH = { spring: '春', summer: '夏', autumn: '秋', winter: 
 export function repeatLabel(rep) {
   if (rep.type === 'daily') return '每天'
   if (rep.type === 'weekdays') return '平日'
+  if (rep.type === 'monthly') return `每月 ${rep.day} 日`
   return '每週' + [...rep.days].sort().map((d) => WEEK_ZH[d]).join('、')
 }
 const hash01 = (str) => {
@@ -183,6 +186,9 @@ function keepTallies(from, to) {
 // 之後別的分頁、別台裝置拿到這一份時，舊的數字不會再被取比較大的加回來
 const sameGen = (a, b) => (a?.tallyGen || '') === (b?.tallyGen || '')
 
+// 日程的結束比開始早，而且跨過午夜後不超過 16 小時（23:30–00:30、22:00–06:00）：當成隔天才結束。
+// 超過的（12:00–11:00）多半是填錯，照舊補成一小時
+export const overnight = (start, end) => toMin(end) < toMin(start) && toMin(end) + 1440 - toMin(start) <= 16 * 60
 export class Store {
   constructor() {
     this.handlers = {}
@@ -989,9 +995,11 @@ export class Store {
     title = title.trim()
     if (!title || !REPEAT_TYPES.includes(repeat?.type)) return null
     const days = repeat.type === 'weekly' ? (repeat.days?.length ? repeat.days : [parseDate(date).getDay()]) : []
+    // 每月幾號：沒給就是開始那天的日期
+    const day = repeat.type === 'monthly' ? Math.min(31, Math.max(1, Math.round(repeat.day) || parseDate(date).getDate())) : 0
     if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const r = {
-      id: uid(), kind, title, repeat: { type: repeat.type, days }, priority, tag, start, end, color,
+      id: uid(), kind, title, repeat: day ? { type: repeat.type, days, day } : { type: repeat.type, days }, priority, tag, start, end, color,
       startDate: date < this.today ? this.today : date, made: {}, createdAt: Date.now(),
     }
     this.state.routines.push(r)
@@ -1012,28 +1020,58 @@ export class Store {
 
   // ── 日程 ──
   // allDay：整天的（沒有時段），endDate 是最後一天（不填就是一天）
+  // 結束比開始早（23:30–00:30）：跨過午夜，到隔天才結束（overnight）。結束跟開始一樣、或「跨過午夜」要超過 16 小時（多半是填錯）：補成一小時
   addEvent({ title, start = '09:00', end = '10:00', color = 0, date = this.selectedDate, note = '', allDay = false, endDate = '' }) {
     if (!title.trim()) return null
+    let over = null
     if (allDay) [start, end] = ['00:00', '23:59']
+    else if (overnight(start, end)) [over, end] = [end, '23:59']
     else if (toMin(end) <= toMin(start)) end = start === '23:30' ? '23:59' : minToHHMM(Math.min(toMin(start) + 60, 1439))
     const e = {
       id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false, note: String(note || '').trim().slice(0, 200),
       allDay: !!allDay, endDate: allDay ? allDayEnd(endDate, date) : '',
     }
     this.state.events.push(e)
+    if (over) this._nextPiece(e, over)
     this._finish([['eventAdded', e]])
     return e
+  }
+  // ── 跨過午夜的日程：存成連著的幾段（跟匯入的行事曆一樣，每一段都在同一天裡）──
+  // 23:30–00:30 是那天 23:30–23:59、隔天 00:00–00:30 兩段，link 一樣。改名稱、顏色、備註、完成、刪除都一起；
+  // 時段各段自己的（時間軸上拖的是那一天的那一段）
+  _pieces(e) {
+    return e?.link ? this.state.events.filter((x) => x.link === e.link) : e ? [e] : []
+  }
+  // 接在前一天後面的那一段（00:00 開始的）：提醒只在第一段開始前響
+  isCont(e) {
+    return !!e?.link && this.state.events.some((x) => x.link === e.link && x.date < e.date)
+  }
+  // e 這一段結束在午夜（23:59），隔天 00:00 起接到 over：已經有隔天那段就改它，沒有就加一段。over 是 00:00 就是剛好在午夜結束，不用接
+  _nextPiece(e, over) {
+    e.end = '23:59'
+    if (toMin(over) <= 0) return null
+    const date = addDays(e.date, 1)
+    const next = this._pieces(e).find((x) => x !== e && x.date > e.date)
+    if (next) return Object.assign(next, { date, start: '00:00', end: over })
+    e.link ||= uid()
+    const n = { ...e, id: uid(), date, start: '00:00', end: over }
+    this.state.events.push(n)
+    return n
   }
   toggleEvent(id) {
     const e = this._find('events', id)
     if (!e) return
     this._refreshToday()
-    e.done = !e.done
+    const done = !e.done
+    const all = this._pieces(e)
+    // 跨過午夜的那幾段一起勾、一起取消；XP 只給一次
+    const paid = all.some((x) => x.rewarded)
+    for (const x of all) x.done = done
     const fx = []
-    if (e.done) {
+    if (done) {
       fx.push(['eventDone', e])
-      if (!e.rewarded) {
-        e.rewarded = true
+      if (!paid) {
+        for (const x of all) x.rewarded = true
         this.stats.eventsDone++
         this.day().events++
         this._gain(XP.event, fx, { kind: 'event', id: e.id })
@@ -1044,7 +1082,10 @@ export class Store {
   updateEvent(id, patch) {
     const e = this._find('events', id)
     if (!e) return
-    Object.assign(e, cleanPatch(e, patch, EVENT_PATCH))
+    const was = e.date
+    const len = toMin(e.end) - toMin(e.start)
+    const clean = cleanPatch(e, patch, EVENT_PATCH)
+    Object.assign(e, clean)
     // 例行公事長出來的那一天不能改成整天（例行公事本身有時段）
     if (e.routineId) e.allDay = false
     if (e.allDay) {
@@ -1052,12 +1093,31 @@ export class Store {
       e.end = '23:59'
       e.endDate = allDayEnd(e.endDate, e.date)
     } else e.endDate = ''
-    // 結束要在開始之後（跟讀存檔時一樣：不然補成一小時）
-    if (toMin(e.end) <= toMin(e.start)) e.end = minToHHMM(Math.min(toMin(e.start) + 60, 1439))
+    // 跨過午夜的其他段：名稱、顏色、備註跟著改；換了日子就一起挪
+    const others = this._pieces(e).filter((x) => x !== e)
+    const shift = e.date !== was ? daysBetween(was, e.date) : 0
+    for (const x of others) {
+      for (const k of ['title', 'color', 'note']) if (k in clean) x[k] = e[k]
+      if (shift) x.date = addDays(x.date, shift)
+    }
+    // 自己填的結束比開始早：跨過午夜（只改開始、開始被挪到結束之後的不算：結束跟著挪，長度不變）
+    if (!e.allDay && !e.routineId && 'end' in clean && overnight(e.start, e.end)) this._nextPiece(e, e.end)
+    else {
+      if (toMin(e.end) <= toMin(e.start)) e.end = minToHHMM(Math.min(toMin(e.start) + ('end' in clean || len <= 0 ? 60 : len), 1439))
+      // 改成在午夜前結束（或改成整天）：隔天接著的那幾段拿掉
+      if ('end' in clean || e.allDay) {
+        const later = new Set(others.filter((x) => x.date > e.date && (e.allDay || e.end !== '23:59')).map((x) => x.id))
+        if (later.size) this.state.events = this.state.events.filter((x) => !later.has(x.id))
+      }
+    }
+    if (this._pieces(e).length < 2) delete e.link
     this._finish([['eventChanged', e]])
   }
-  deleteEvent(id) {
-    this.state.events = this.state.events.filter((e) => e.id !== id)
+  // only：只刪這一段（ふじ刪掉、撤銷時放回的是那一筆），平常跨過午夜的幾段一起刪
+  deleteEvent(id, { only = false } = {}) {
+    const e = this._find('events', id)
+    const gone = new Set(only || !e ? [id] : this._pieces(e).map((x) => x.id))
+    this.state.events = this.state.events.filter((x) => !gone.has(x.id))
     this._finish()
   }
 

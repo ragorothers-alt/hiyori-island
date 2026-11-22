@@ -1,6 +1,8 @@
 import './styles.css'
-import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev, rememberLook } from './store.js'
-import { UI, savedAppMode } from './ui.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev, rememberLook, SAVE_KEY } from './store.js'
+import { UI, savedAppMode, FEEDBACK_URL } from './ui.js'
+import { watchErrors, bootFailed } from './errors.js'
+import { CHANGELOG } from './data/changelog.js'
 import { SEASONS, seasonOf } from './scene/season.js'
 import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
@@ -1192,15 +1194,36 @@ async function boot() {
   })
 
   // ── 存檔 ──
-  // 存不進去（多半是瀏覽器空間滿了）：畫面上的資料還在，但重新整理就會不見，要讓使用者知道
+  // 存不進去（多半是瀏覽器空間滿了）：畫面上的資料還在，但重新整理就會不見。上方的警示列一直留著，直到又存得進去：
+  // 可以馬上匯出一份、或清出空間後再試一次。關掉頁面前也會問一聲
   const saveFailedToast = () =>
-    ui.toast({ icon: '存', title: '資料存不進去', sub: '瀏覽器的儲存空間可能滿了。先別關掉頁面，到「紀錄」的設定裡「匯出資料」存一份', ms: 15000 })
+    ui.alertBar('save', {
+      icon: '存', title: '資料還沒存好', sub: '瀏覽器的儲存空間可能滿了。關掉或重新整理之前，先匯出一份',
+      actions: [{ label: '匯出資料', run: () => ui.exportData() }, { label: '再試一次', soft: true, run: () => store.saveNow() || ui.toast({ icon: '存', title: '還是存不進去', sub: '先匯出一份；清出一些空間（例如刪掉不用的分頁資料）再試' }) }],
+    })
   store.on('saveFailed', saveFailedToast)
-  store.on('saveRecovered', () => ui.toast({ icon: '存', title: '又存得進去了', sub: '剛才的變更都已經存好' }))
-  // 另一個分頁已經更新成新版：這個分頁還是舊的程式，再存下去會洗掉新版的資料
+  store.on('saveRecovered', () => {
+    ui.alertBar('save', null)
+    ui.toast({ icon: '存', title: '又存得進去了', sub: '剛才的變更都已經存好' })
+  })
+  // 另一個分頁已經更新成新版：這個分頁還是舊的程式，再存下去會洗掉新版的資料（之後的變更都不存，警示列一直留著）
   const newerToast = () =>
-    ui.toast({ icon: '新', title: '這個分頁的 App 比較舊', sub: '另一個分頁已經更新到新版。重新整理這一頁再繼續，這裡的變更先不會存', ms: 15000 })
+    ui.alertBar('newer', {
+      icon: '新', title: '這個分頁的 App 比較舊', sub: '另一個分頁已經更新到新版。這裡的變更先不會存，重新整理這一頁再繼續',
+      actions: [{ label: '重新整理', run: () => location.reload() }],
+    })
   store.on('newerApp', newerToast)
+  addEventListener('beforeunload', (e) => {
+    if (!store.saveError) return
+    e.preventDefault()
+    e.returnValue = ''
+  })
+  // 沒接住的錯誤（src/errors.js 記著）：這次開啟第一次遇到時說一聲，可以回報（附上記到的錯誤）
+  tellError = () =>
+    ui.toast({
+      icon: '錯', title: '出了一點問題', sub: '剛才的動作可能沒做完。重新整理通常就好了；一直發生的話可以回報', ms: 9000, tag: 'error',
+      actions: [{ label: '回報', soft: true, run: () => ui.openFeedback() }, ...(ui.hasDraft() ? [] : [{ label: '重新整理', run: () => location.reload() }])],
+    })
 
   // ── 本命 ──
   store.on('starPicked', (t) => {
@@ -2660,4 +2683,10 @@ async function boot() {
   idle(() => ui.preloadViews().then(keepOffline), { timeout: 8000 })
 }
 
-boot()
+// 沒接住的錯誤：開場前就開始記（src/errors.js）；介面建好之後才說得出來（tellError）
+let tellError = null
+watchErrors({ version: CHANGELOG[0].id, onNew: (d) => tellError?.(d) })
+// 開場就壞掉：載入畫面換成「開不起來」（重新整理、另存存檔、回報）；介面已經出來了就交給上面的全域錯誤
+boot().catch((err) => {
+  if (!bootFailed(err, { version: CHANGELOG[0].id, saveKey: SAVE_KEY, feedback: FEEDBACK_URL })) throw err
+})

@@ -370,7 +370,7 @@ export function saneOps(ops) {
 export const hasOps = (ops) => !!ops && ['set', 'create', 'done', 'drop'].some((k) => ops[k]?.length)
 
 // ── 對話時多帶的資料 ──
-const repeatText = (rep) => (rep?.type === 'daily' ? '每天' : rep?.type === 'weekdays' ? '平日' : `每週${(rep?.days || []).map((d) => WEEK_ZH[d]).join('')}`)
+const repeatText = (rep) => (rep?.type === 'daily' ? '每天' : rep?.type === 'weekdays' ? '平日' : rep?.type === 'monthly' ? `每月 ${rep.day} 日` : `每週${(rep?.days || []).map((d) => WEEK_ZH[d]).join('')}`)
 const statusOf = (p) => (p.archived ? 'archived' : p.completedAt ? 'done' : p.pausedAt ? 'paused' : 'active')
 // here：{ page, date, project, task }（真正的 id）
 export function worldOf(store, ids, here = null) {

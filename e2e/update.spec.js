@@ -77,6 +77,8 @@ test('新版有檔案下載不到：不裝新版，舊版和舊快取都留著�
   expect(await checkUpdate(page)).toBe('redundant')
   expect(await cacheNames(page)).toEqual([swVersion('a')])
 
+  // 還在線上時重新整理：拿到的是新版首頁（它的程式抓不到，這一次打不開）。離線用的首頁不能因此換成新版的
+  await page.reload()
   await goOffline(site, context)
   await page.reload()
   await bootReady(page)

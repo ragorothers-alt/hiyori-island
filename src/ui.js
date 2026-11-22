@@ -8,11 +8,12 @@ import { lifeKindOf, ENERGY, feelOf, clipText } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM, pullOf } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating } from './store.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating, overnight } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
 import { native, nativeMottos, nativeBack, deskWeb } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
-import { parseQuick, describeQuick, parseSpend } from './parse.js'
+import { parseQuick, describeQuick, parseSpend, timeRange } from './parse.js'
+import { errorDigest } from './errors.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { FLOWERS, RARITIES, RARITY_ORDER, flowerOf } from './data/flowers.js'
 import { BOND_LEVELS, BOND_ACTS, OUTFITS, outfitLevel, outfitOf } from './data/bond.js'
@@ -27,6 +28,8 @@ import { lookHour, nightAt, realHour, systemDark, daypart, GREETING } from './da
 import { ScheduleView, COACH_LABEL, COACH_TIP } from './ui/schedule.js'
 import { HabitsView } from './ui/habits.js'
 import { LifeView } from './ui/life.js'
+import { SearchView } from './ui/search.js'
+import { isExternal } from './calendars.js'
 import { latestLog, msProgress, msSteps, msTasks, projectStats, PROJECT_LIMITS as PL } from './projects.js'
 import { markHTML, queryTerms, searchProjects } from './projectSearch.js'
 import { CHANGELOG } from './data/changelog.js'
@@ -136,7 +139,7 @@ const SIDE_KEY = 'hiyori-side-mini'
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
 const ISLAND_ICON = '<svg viewBox="0 0 24 24"><path d="M3 16.5c3 0 4.5-1.8 9-1.8s6 1.8 9 1.8"/><path d="M6.5 16.5l1.8 3.5h7.4l1.8-3.5"/><path d="M12 14.7V7"/><path d="M12 7c-2.4-1.6-5-1.2-6.5.6 2-.2 3.6.3 4.6 1.4M12 7c2.4-1.6 5-1.2 6.5.6-2-.2-3.6.3-4.6 1.4M12 7c-.8-1.6-2.3-2.6-4-2.8"/></svg>'
 // 回饋：到 GitHub 開一則 issue，先填好版本和裝置大小（不帶任何個人資料）
-const FEEDBACK_URL = 'https://github.com/ragorothers-alt/hiyori-island/issues/new'
+export const FEEDBACK_URL = 'https://github.com/ragorothers-alt/hiyori-island/issues/new'
 const QUALITY_INFO = {
   auto: '電腦用高畫質，手機用標準，比較省電',
   high: '反鋸齒、白天也有柔光，畫面最細緻',
@@ -202,6 +205,16 @@ export class UI {
       },
     })
     // 快速記錄：加在今天（字裡寫了日期就照寫的），不跟著上面選的日期走
+    // 找找看：任務（哪一天的都找）、日程、專案、生活記錄
+    this.search = new SearchView($('#search'), {
+      state: () => store.state,
+      today: () => store.today,
+      external: () => store.external || [],
+      isExternal: (e) => isExternal(e),
+      projectName: (id) => store.state.projects.find((p) => p.id === id)?.name || '',
+      toggleTask: (id) => store.toggleTask(id),
+      open: (r) => this._openFound(r),
+    })
     this.capture = new CaptureView($('#capture'), {
       preview: (text, asTask = false) => {
         const p = parseQuick(text, { today: store.today, projects: store.activeProjects(), span: true })
@@ -344,6 +357,7 @@ export class UI {
       // 新的一週：上週的回顧卡（看過、收起來就不放）
       weekDue: () => this.store.weekCardDue(),
       openSettings: () => this.openSettings(),
+      openSearch: () => this.openSearch(),
     })
     // 專案詳情：進度日誌、筆記、里程碑細項，蓋在專案分頁的列表上
     this._project = lazy(() =>
@@ -620,6 +634,7 @@ export class UI {
     $('#nextDay').onclick = () => this.store.selectDate(addDays(this.store.selectedDate, 1))
     $('#todayBtn').onclick = () => this.store.selectDate(this.store.today)
     for (const id of ['#gearBtn', '#setBtn', '#openSetBtn']) $(id).onclick = () => this.openSettings()
+    for (const id of ['#findBtn', '#findDockBtn']) $(id).onclick = () => this.openSearch()
     $('#viewBtn').onclick = () => {
       this.toggleFull(false)
       this.hooks.resetView()
@@ -701,11 +716,12 @@ export class UI {
       if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return
       const typing = !!document.activeElement?.closest?.('input, textarea, select, [contenteditable]')
       if (e.key === 'Escape') return this._escape(typing)
-      // Ctrl／⌘＋K 搜尋專案：在別的欄位打字時也能用
+      // Ctrl／⌘＋K 找找看：在別的欄位打字時也能用；開著時再按一次收起來
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
-        if (this._topLayer()) return
+        const top = this._topLayer()
+        if (top && top.id !== 'search') return
         e.preventDefault()
-        return this.findProject()
+        return this.search.isOpen ? this.search.close() : this.openSearch()
       }
       // Ctrl／⌘＋J 叫ふじ（跟 Notion AI 一樣）：在別的欄位打字時也能用；開著時再按一次收起來
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j' && this.fuji && this.agent?.ready()) {
@@ -750,7 +766,7 @@ export class UI {
       else if (e.key === 'ArrowRight') $('#nextDay').click()
       else if (e.key === '/') {
         e.preventDefault()
-        this.findProject()
+        this.openSearch()
       } else if (/^[1-7]$/.test(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
     })
   }
@@ -855,6 +871,7 @@ export class UI {
         weekModal: () => this.closeWeekCard(),
         brief: () => this.brief.close(),
         capture: () => this.capture.close(),
+        search: () => this.search.close(),
         fujiSheet: () => this.fuji?.close(),
         levelModal: () => this.closeModal(),
         focusSet: () => this.focus.toggleSet(false),
@@ -1380,16 +1397,18 @@ export class UI {
       // 整天的日程不會重複（例行公事只有有時段的）
       const allDay = !!p.allDay
       const routine = !allDay && !!repeat
-      const ev = allDay ? { title: p.title, color: this.eventColor, date, allDay: true, endDate: p.endDate } : { title: p.title, start: p.start, end: p.end, color: this.eventColor, date }
+      // 例行日程每天都在同一天裡：跨過午夜的那一段截到 23:59
+      const end = routine && p.end < p.start ? '23:59' : p.end
+      const ev = allDay ? { title: p.title, color: this.eventColor, date, allDay: true, endDate: p.endDate } : { title: p.title, start: p.start, end, color: this.eventColor, date }
       const made = routine ? s.addRoutine({ kind: 'event', ...ev, repeat }) : s.addEvent(ev)
       this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length
       this._syncPickers()
       const until = allDay && p.endDate && p.endDate !== date ? `–${p.endDate.slice(5).replace('-', '/')}` : ''
       if (allDay) toasts.push({ icon: '環', title: '已加入整天的日程', sub: `${p.title}・${md}${until}${repeat ? '（整天的日程不會重複）' : ''}` })
-      else toasts.push({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${p.start}–${p.end}` })
+      else toasts.push({ icon: '環', title: '已加入日程', sub: `${p.title}・${md} ${timeRange(p.start, end)}` })
       return {
         icon: '環', title: p.title, toasts,
-        sub: allDay ? `整天的日程・${day}${until}` : `${routine ? '例行日程' : '日程'}・${day} ${p.start}–${p.end}`,
+        sub: allDay ? `整天的日程・${day}${until}` : `${routine ? '例行日程' : '日程'}・${day} ${timeRange(p.start, end)}`,
         undo: made ? (routine ? () => this._undoRoutine(made.id) : this._undoAdd(made, 'event')) : null,
       }
     }
@@ -1475,6 +1494,41 @@ export class UI {
     this.toast({ icon: '先', title: `${word}先做哪一件？`, sub: '現在挑好一件，起床後打開 App 就從它開始', ms: 9000, tag: 'first-ask', actions: [{ label: '挑一件', run: () => this.openFirst() }] })
     return true
   }
+  // 找找看（src/ui/search.js）：別的對話框開著就不疊上去。text：先填好的字
+  openSearch(text) {
+    const top = this._topLayer()
+    if (top && top.id !== 'search') return false
+    // 正看著專案列表：用那一頁自己的搜尋框（篩選卡片、找不到時可以直接開新專案）
+    if (!this.search.isOpen && text == null && this.tab === 'projects' && !this._project.view?.id && !$('#panel').classList.contains('collapsed')) {
+      this.findProject()
+      return true
+    }
+    this.search.open(text)
+    return true
+  }
+  // 點了找到的那一筆：任務、日程打開編輯面板（先換到那一天）；長期任務、專案打開專案詳情；生活記錄到紀錄頁的那一天
+  _openFound(r) {
+    const s = this.store
+    this.search.close()
+    if (r.kind === 'project') return this.openProject(r.item.id)
+    if (r.kind === 'task') {
+      const t = r.item
+      if (floating(t) && t.project) return this.openProject(t.project, undefined, t.id)
+      s.selectDate(t.date)
+      this.setTab('tasks')
+      return this.schedule.openEdit('task', t.id)
+    }
+    if (r.kind === 'event') {
+      const e = r.item
+      s.selectDate(e.date)
+      this.setTab('schedule')
+      if (!isExternal(e)) this.schedule.openEdit('event', e.id)
+      return
+    }
+    s.selectDate(r.date)
+    this.setTab('records')
+    requestAnimationFrame(() => $('#lifeRoot')?.scrollIntoView({ block: 'start', behavior: scrollMode() }))
+  }
   openCapture(mode) {
     // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去
     const top = this._topLayer()
@@ -1524,14 +1578,16 @@ export class UI {
     const v = $(sel).value
     if (v === 'none') return null
     if (v === 'weekly') return { type: 'weekly', days: [parseDate(this.store.selectedDate).getDay()] }
+    if (v === 'monthly') return { type: 'monthly', day: parseDate(this.store.selectedDate).getDate() }
     return { type: v }
   }
 
   _renderRepeatOptions() {
-    const wd = WEEK_ZH[parseDate(this.store.selectedDate).getDay()]
+    const d = parseDate(this.store.selectedDate)
+    const wd = WEEK_ZH[d.getDay()]
     for (const sel of [$('#taskRepeat'), $('#eventRepeat')]) {
       const v = sel.value || 'none'
-      sel.innerHTML = `<option value="none">不重複</option><option value="daily">每天</option><option value="weekdays">平日</option><option value="weekly">每週${wd}</option>`
+      sel.innerHTML = `<option value="none">不重複</option><option value="daily">每天</option><option value="weekdays">平日</option><option value="weekly">每週${wd}</option><option value="monthly">每月 ${d.getDate()} 日</option>`
       sel.value = v
     }
   }
@@ -1756,11 +1812,43 @@ export class UI {
       this.hooks.stuck?.(act, t)
     })
     $('#overdueBox').addEventListener('click', (e) => {
-      if (e.target.closest('[data-act="allToday"]')) {
-        this.store.moveToToday(this.store.overdue().map((t) => t.id))
-        return
+      const b = e.target.closest('[data-act]')
+      const act = b?.dataset.act
+      const s = this.store
+      if (act === 'allToday') return this._moveOverdue(s.overdue().map((t) => t.id), s.today)
+      if (act === 'odMore') {
+        this._odOpen = !this._odOpen
+        return this.renderTasks()
       }
+      // 挑幾件：勾起來，再一起移到今天或明天
+      if (act === 'odPick') {
+        this._odPick = new Set()
+        this.renderTasks()
+        return $('#overdueBox [data-pick]')?.focus({ preventScroll: true })
+      }
+      if (act === 'odCancel') {
+        this._odPick = null
+        return this.renderTasks()
+      }
+      if (act === 'odToday' || act === 'odTomorrow') {
+        const ids = [...(this._odPick || [])]
+        this._odPick = null
+        if (!ids.length) return this.renderTasks()
+        return this._moveOverdue(ids, act === 'odToday' ? s.today : addDays(s.today, 1))
+      }
+      if (this._odPick) return
       onList(e)
+    })
+    $('#overdueBox').addEventListener('change', (e) => {
+      const c = e.target.closest('[data-pick]')
+      if (!c || !this._odPick) return
+      if (c.checked) this._odPick.add(c.dataset.pick)
+      else this._odPick.delete(c.dataset.pick)
+      const n = this._odPick.size
+      for (const btn of $$('#overdueBox .od-acts [data-n]')) {
+        btn.disabled = !n
+        btn.querySelector('b').textContent = n ? `（${n}）` : ''
+      }
     })
     for (const el of [$('#taskList'), $('#overdueBox')]) {
       el.addEventListener('mouseover', (e) => {
@@ -1982,6 +2070,45 @@ export class UI {
     })
   }
 
+  // 逾期的先看哪幾件：本命、先做這件、截止日近的、優先度高的，再來是比較近的日子
+  _overdueOrder(list) {
+    const due = (t) => t.due || '9999-12-31'
+    return [...list].sort((a, b) => !!b.star - !!a.star || !!b.first - !!a.first || due(a).localeCompare(due(b)) || b.priority - a.priority || b.date.localeCompare(a.date))
+  }
+  // 逾期的那一塊：超過 3 件時先收起來，只列最要緊的 3 件（越堆越多也不會把今天的任務擠到好幾頁之後）；
+  // 「挑幾件」時每一件前面有勾選框，勾好一起移到今天或明天
+  _overdueHTML(overdue) {
+    const pick = this._odPick
+    const head = `<h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><span class="od-btns">${
+      pick ? '' : `${overdue.length > 1 ? '<button data-act="odPick">挑幾件</button>' : ''}<button data-act="allToday">全部移到今天</button>`
+    }</span></h4>`
+    if (pick) {
+      const n = pick.size
+      const rows = overdue
+        .map((t) => `<li class="od-row"><label><input type="checkbox" data-pick="${esc(t.id)}" ${pick.has(t.id) ? 'checked' : ''}><span class="od-t">${esc(t.title)}</span><small>${esc(t.date.slice(5).replace('-', '/'))}</small></label></li>`)
+        .join('')
+      return `<div class="overdue picking">${head}<ul class="od-list">${rows}</ul>
+        <div class="od-acts"><button class="btn-primary" data-act="odToday" data-n ${n ? '' : 'disabled'}>移到今天<b>${n ? `（${n}）` : ''}</b></button><button class="btn-ghost" data-act="odTomorrow" data-n ${n ? '' : 'disabled'}>移到明天<b>${n ? `（${n}）` : ''}</b></button><button class="btn-ghost" data-act="odCancel">取消</button></div></div>`
+    }
+    const SHOW = 3
+    const open = this._odOpen || overdue.length <= SHOW + 1
+    const shown = open ? overdue : overdue.slice(0, SHOW)
+    const more = overdue.length > SHOW + 1 ? `<button class="od-more" data-act="odMore" aria-expanded="${open}">${open ? '收起來 ▴' : `還有 ${overdue.length - SHOW} 件 ▾`}</button>` : ''
+    return `<div class="overdue">${head}<ul class="list">${shown.map((t) => this._taskItem(t, true)).join('')}</ul>${more}</div>`
+  }
+  // 整批移動逾期的任務（全部、挑的那幾件）：提示卡上可以撤銷，每一件回到各自原本的那天
+  _moveOverdue(ids, to) {
+    const s = this.store
+    const u = s.moveToToday(ids, to)
+    this.renderTasks()
+    if (!u) return
+    const n = u.items.length
+    const day = to === s.today ? '今天' : to === addDays(s.today, 1) ? '明天' : to.slice(5).replace('-', '/')
+    this.toast({
+      icon: '今', title: `${n} 件移到${day}了`, sub: n > 1 ? '撤銷的話，每一件回到原本那天' : '撤銷的話回到原本那天', ms: 8000,
+      actions: [{ label: '撤銷', run: () => s.undoMove(u) }],
+    })
+  }
   _taskItem(t, overdue = false) {
     const tag = tagOf(t.tag)
     const pri = PRIORITIES[t.priority] || PRIORITIES[2]
@@ -2096,12 +2223,11 @@ export class UI {
     const subDrafts = $$('#taskList .sub-add input, #overdueBox .sub-add input')
       .filter((i) => i.value)
       .map((i) => [i.closest('#overdueBox') ? '#overdueBox' : '#taskList', i.closest('.sub-add').dataset.id, i.value])
-    const overdue = isToday ? s.overdue() : []
+    const overdue = isToday ? this._overdueOrder(s.overdue()) : []
+    if (!overdue.length) this._odPick = null
     // 整串重畫：原本就在的那幾件不重播淡入，位置變了的滑過去（做完的排到後面、從逾期移到今天）
     flipItems([$('#overdueBox'), $('#taskList')], () => {
-      $('#overdueBox').innerHTML = overdue.length
-        ? `<div class="overdue"><h4><span>還沒完成的昨日花苞 · ${overdue.length}</span><button data-act="allToday">全部移到今天</button></h4><ul class="list">${overdue.map((t) => this._taskItem(t, true)).join('')}</ul></div>`
-        : ''
+      $('#overdueBox').innerHTML = overdue.length ? this._overdueHTML(overdue) : ''
       $('#taskList').innerHTML = n
         ? [...todo, ...done].map((t) => this._taskItem(t)).join('')
         : `<li class="empty"><span class="em">ひとつめの種を</span>${this.appMode ? '輸入任務並按 Enter，就種下一株花苞。<br>完成時它會綻放，回到小島就看得到。' : '輸入任務並按 Enter，花圃就會長出一株花苞。<br>完成時它會綻放，もち和ふじ也會跑來慶祝。'}
@@ -2273,9 +2399,19 @@ export class UI {
       this.eventColor = +b.dataset.i
       this._syncPickers()
     })
+    // 改開始時結束跟著挪（長度不變，像一般的行事曆）：挪過午夜就接到隔天（存的時候分成兩段，跟日程面板一樣）。
+    // 原本就沒有長度（結束不在開始之後）的補成一小時。程式自己填的時段（加完一件後換成下一段、點時間軸）不會發 change：
+    // 開始時間在點進去的那一刻記下來
+    let evPrev = $('#eventStart').value
+    $('#eventStart').addEventListener('focus', () => (evPrev = $('#eventStart').value))
     $('#eventStart').addEventListener('change', () => {
-      const st = toMin($('#eventStart').value)
-      if (toMin($('#eventEnd').value) <= st) $('#eventEnd').value = minToHHMM(Math.min(st + 60, 1439))
+      const a = toMin(evPrev)
+      const b = toMin($('#eventEnd').value)
+      const st = $('#eventStart').value
+      // 原本的長度：結束已經接到隔天的（23:30–00:30）也算
+      const len = !evPrev ? 0 : b > a ? b - a : overnight(evPrev, $('#eventEnd').value) ? b + 1440 - a : 0
+      if (st && st !== evPrev) $('#eventEnd').value = minToHHMM(len ? (toMin(st) + len) % 1440 : Math.min(toMin(st) + 60, 1439))
+      evPrev = st
     })
     // 整天：藏起時段和重複（例行公事只有有時段的），換成「到哪天」
     const allDayMode = (on) => {
@@ -3475,10 +3611,7 @@ export class UI {
       requestAnimationFrame(() => $('#mottoRoot').scrollIntoView({ block: 'start', behavior: scrollMode() }))
     }
     $('#agentSetBtn').onclick = () => this.openAgent()
-    $('#feedbackBtn').onclick = () => {
-      const body = `## 想說的話\n\n\n\n---\n版本：${CHANGELOG[0].id}\n畫面：${innerWidth}×${innerHeight}・${matchMedia('(pointer: coarse)').matches ? '觸控' : '滑鼠'}`
-      window.open(`${FEEDBACK_URL}?title=${encodeURIComponent('意見回饋：')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener')
-    }
+    $('#feedbackBtn').onclick = () => this.openFeedback()
     $('#qualityPick').addEventListener('click', (e) => {
       const b = e.target.closest('[data-v]')
       if (!b) return
@@ -3492,14 +3625,7 @@ export class UI {
       this.hooks.setPowerSave?.(on)
       this.renderSettings()
     }
-    $('#exportBtn').onclick = () => {
-      const blob = new Blob([this.store.exportJSON()], { type: 'application/json' })
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `hiyori-${this.store.today}.json`
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000)
-    }
+    $('#exportBtn').onclick = () => this.exportData()
     $('#importInput').onchange = async (e) => {
       const f = e.target.files[0]
       if (!f) return
@@ -4024,6 +4150,43 @@ export class UI {
     })
     // 開始倒數（換掉同一類的上一張時，焦點已經先交到這一張的按鈕上了：那就先停著）
     focusCheck()
+  }
+
+  // 匯出資料：整份小島存成一個 JSON 檔（設定裡的「匯出資料」、存不進去時的警示列）
+  exportData() {
+    const blob = new Blob([this.store.exportJSON()], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `hiyori-${this.store.today}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
+  // 意見回饋：開 GitHub 的新議題，先填好版本、畫面、這台最近記到的錯誤（只有訊息和位置，不含任務內容；送出前看得到、可以刪）
+  openFeedback() {
+    const errs = errorDigest()
+    const body = `## 想說的話\n\n\n\n---\n版本：${CHANGELOG[0].id}\n畫面：${innerWidth}×${innerHeight}・${matchMedia('(pointer: coarse)').matches ? '觸控' : '滑鼠'}・${this.appMode ? 'App 模式' : '小島模式'}${errs ? `\n最近的錯誤：\n${errs}` : ''}`
+    window.open(`${FEEDBACK_URL}?title=${encodeURIComponent('意見回饋：')}&body=${encodeURIComponent(body)}`, '_blank', 'noopener')
+  }
+  // 常駐的警示列（存不進去、這個分頁的 App 比較舊）：問題解決之前一直留著，不會自己消失。
+  // key 一樣的換掉；content 是 null 就收起來。content：{ icon, title, sub, actions: [{ label, run, soft }] }
+  alertBar(key, content) {
+    const box = $('#alerts')
+    const old = box.querySelector(`[data-key="${key}"]`)
+    if (!content) return void old?.remove()
+    const el = document.createElement('div')
+    el.className = 'alert-bar glass'
+    el.dataset.key = key
+    el.innerHTML = `<div class="t-icon">${esc(content.icon || '!')}</div><div class="ab-text"><b>${esc(content.title)}</b><small>${esc(content.sub || '')}</small></div><div class="ab-acts"></div>`
+    for (const a of content.actions || []) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = `toast-act${a.soft ? ' soft' : ''}`
+      b.textContent = a.label
+      b.addEventListener('click', () => a.run())
+      el.querySelector('.ab-acts').append(b)
+    }
+    if (old) old.replaceWith(el)
+    else box.append(el)
   }
 
   // ── 通知 ──

@@ -257,7 +257,7 @@ const findNew = (s, u) => (u.kind === 'sleep' ? s.state.sleep?.[u.date] : K[u.ki
 
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
 const repeatOf = (days) => (!days?.length || days.length === 7 ? { type: 'daily' } : days.join() === '1,2,3,4,5' ? { type: 'weekdays' } : { type: 'weekly', days })
-const repeatWord = (rep) => (rep.type === 'daily' ? '每天' : rep.type === 'weekdays' ? '平日' : `每週${rep.days.map((d) => '日一二三四五六'[d]).join('')}`)
+const repeatWord = (rep) => (rep.type === 'daily' ? '每天' : rep.type === 'weekdays' ? '平日' : rep.type === 'monthly' ? `每月 ${rep.day} 日` : `每週${rep.days.map((d) => '日一二三四五六'[d]).join('')}`)
 
 // 新增：回傳 { ref, ent, text }（新的那一筆在哪、它本身、給人看的一句）；做不到是 null
 const CREATE = {
@@ -328,7 +328,7 @@ const CREATE = {
 
 // 刪掉那一筆：list 是它待的那一串、del 走 store 的刪除。專案、習慣不刪（改成收起來，走 set）
 const DROP = {
-  event: (s, e) => ({ list: () => s.state.events, del: () => s.deleteEvent(e.id) }),
+  event: (s, e) => ({ list: () => s.state.events, del: () => s.deleteEvent(e.id, { only: true }) }),
   date: (s, d) => ({ list: () => s.state.dates, del: () => s.deleteDate(d.id) }),
   motto: (s, m) => ({ list: () => s.state.mottos, del: () => s.deleteMotto(m.id) }),
   subscription: (s, b) => ({ list: () => s.state.subscriptions, del: () => s.deleteSubscription(b.id) }),
