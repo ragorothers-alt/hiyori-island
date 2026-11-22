@@ -27,8 +27,7 @@ const ACT_FILE = '__act'
 const MOTTO_LATE = 10 * 60000
 // 日程、排定的任務、就寢的提醒（src/remindPlan.js 排的，跟警語排在同一串，remind: true）：顯示過的 [{ key, date, at }]，
 // 頁面回來時讀（src/push.js 的 remindShown），記成提醒過了。晚了這麼久就不顯示（跟頁面一樣：開始後 15 分鐘內還補）
-// 一則一個檔案（REMIND_DIR + key|date）：頁面和 Service Worker 同時記也不會互相蓋掉（讀了整份、加一筆、寫回去，會蓋掉對方剛加的）。
-// 舊版記的整份 REMIND_SHOWN 照樣讀
+// 同一則提醒，頁面記在 page/、Service Worker 記在 sw/。舊版放在 REMIND_DIR 下的單筆和整份 REMIND_SHOWN 照樣讀
 const REMIND_SHOWN = '__remind-shown'
 const REMIND_DIR = '__remind-shown/'
 const REMIND_KEEP = 3 * 86400000
@@ -240,7 +239,7 @@ async function readJSON(cache, name) {
   }
 }
 const putJSON = (cache, name, v) => cache.put(fileUrl(name), new Response(JSON.stringify(v), { headers: { 'Content-Type': 'application/json' } }))
-const remindFile = (x) => REMIND_DIR + encodeURIComponent(`${x.key}|${x.date}`)
+const remindFile = (x) => REMIND_DIR + 'sw/' + encodeURIComponent(`${x.key}|${x.date}`)
 // 顯示過的提醒 [{ key, date, at }]：一則一個檔案的，加上舊版記的那一份
 async function readReminds(cache) {
   const out = []
@@ -258,7 +257,6 @@ async function readReminds(cache) {
 }
 // 記下這幾則顯示過了（一則一個檔案），順便清掉三天以前的
 async function addReminds(cache, list, now) {
-  // by：是誰記的（顯示失敗時只拿掉自己記的那一則，頁面剛好也記了的留著）
   for (const x of list) await putJSON(cache, remindFile(x), { key: x.key, date: x.date, at: x.at, by: 'sw' })
   // 舊版記的整份：裡面的都過了三天就整個拿掉
   const old = await readJSON(cache, REMIND_SHOWN)
@@ -402,7 +400,7 @@ async function showPush() {
       try {
         if (s.kind === 'timer' && (await readJSON(cache, SHOWN_FILE))?.at === s.at) await putJSON(cache, SHOWN_FILE, shownBefore || {})
         if (s.kind === 'motto' && Number((await readJSON(cache, MOTTO_DONE))?.at) === s.at) await putJSON(cache, MOTTO_DONE, doneBefore || { at: 0 })
-        if (s.kind === 'remind' && (await readJSON(cache, remindFile(s)))?.by === 'sw') await cache.delete(fileUrl(remindFile(s)))
+        if (s.kind === 'remind') await cache.delete(fileUrl(remindFile(s)))
       } catch {}
     }
   }

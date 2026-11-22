@@ -287,6 +287,117 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
     merge3(base, a, b)
     expect(JSON.stringify([a, b])).toBe(before)
   })
+
+  it('同一筆兩台都收回了（「不算這段」兩台都按了）：只扣一次；一台收回、另一台做別的：照樣收回；合好的不能再收回一次', () => {
+    const base = seedWith((s) => {
+      s.completePomodoro(50, null, null, 's0')
+      s.completePomodoro(9, null, null, 's1', { extra: true })
+    })
+    const a = fork(base, (s) => expect(s.undoPomodoro('s1')).toBe(true))
+    const b = fork(base, (s) => s.undoPomodoro('s1'))
+    const r = merge(base, a, b)
+    expect(r.player.stats.focusMinutes).toBe(a.player.stats.focusMinutes)
+    expect(r.player.stats.focusMinutes).toBe(base.player.stats.focusMinutes - 9)
+    expect(xp(r)).toBe(xp(a))
+    expect(r.grants['f:s1']).toMatchObject({ d: {}, off: 1 })
+    const c = fork(base, (s) => s.addTask({ title: '別的' }))
+    expect(merge(base, a, c).player.stats.focusMinutes).toBe(a.player.stats.focusMinutes)
+    expect(fork(r, (s) => expect(s.undoPomodoro('s1')).toBe(false)).player.stats.focusMinutes).toBe(a.player.stats.focusMinutes)
+  })
+
+  it('同一輪兩台在不同天記的（跨過午夜）：那天的紀錄、專案的專注只留一天；之後收回兩邊都清乾淨', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 10, 22, 12))
+      let pid
+      const base = seedWith((s) => (pid = s.addProject({ name: '琴', milestones: ['一'] }).id))
+      const a = fork(base, (s) => s.completePomodoro(9, null, pid, 's9', { extra: true }))
+      vi.setSystemTime(new Date(2026, 10, 23, 0, 5))
+      const b = fork(base, (s) => s.completePomodoro(9, null, pid, 's9', { extra: true }))
+      const r = merge(base, a, b)
+      const focus = (x) => (x.history['2026-11-22']?.focus || 0) + (x.history['2026-11-23']?.focus || 0)
+      const pf = (x) => Object.values(x.projects.find((p) => p.id === pid).focus).reduce((n, v) => n + v, 0)
+      expect([focus(r), pf(r), r.player.stats.focusMinutes]).toEqual([9, 9, base.player.stats.focusMinutes + 9])
+      const u = fork(r, (s) => expect(s.undoPomodoro('s9')).toBe(true))
+      expect([focus(u), pf(u), u.player.stats.focusMinutes]).toEqual([0, 0, base.player.stats.focusMinutes])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('同一筆兩邊記的多少不一樣（一邊同一天又加了）：合好的帳記著實際算進去的那麼多，收回時扣得剛好', () => {
+    const at = (n, grants, updatedAt) => S({ updatedAt, player: { ...S().player, stats: { tasksDone: 5, focusMinutes: n } }, grants })
+    const g = (n) => ({ 'f:x': { at: 1, day: '2026-11-22', d: { 's:focusMinutes': n } } })
+    const r = merge3(at(50, {}, 1), at(59, g(9), 3), at(68, g(18), 2)).state
+    expect(r.player.stats.focusMinutes).toBe(68)
+    expect(r.grants['f:x'].d).toEqual({ 's:focusMinutes': 18 })
+  })
+
+  it('記過的那一輪過了 20 輪再送來一次（另一台很晚才同步）：帳上記著，不再算一次', () => {
+    const base = seedWith((s) => s.completePomodoro(9, null, null, 'old', { extra: true }))
+    fork(base, (s) => {
+      for (let i = 0; i < 25; i++) s.completePomodoro(1, null, null, `o${i}`)
+      expect(s.state.pomoSids).not.toContain('old')
+      expect(s.completePomodoro(9, null, null, 'old')).toBe(false)
+      expect(s.undoPomodoro('old')).toBe(true)
+      expect(s.completePomodoro(9, null, null, 'old')).toBe(false)
+    })
+  })
+
+  it('另一台還是舊版（沒有這本帳，只記了完成時拿了幾點經驗）：兩台各用新、舊版勾了同一件任務也只算一次', () => {
+    let id
+    const base = seedWith((s) => (id = s.addTask({ title: '寫報告', priority: 3 }).id))
+    const a = fork(base, (s) => s.toggleTask(id))
+    const b = fork(base, (s) => s.toggleTask(id))
+    const got = b.grants[`t:${id}`].d.xp
+    delete b.grants
+    Object.assign(b.tasks.find((t) => t.id === id), { xpGot: got })
+    const r = merge(base, a, b)
+    expect([xp(r), r.player.coins, r.player.stats.tasksDone, r.player.stats.highTasksDone, today(r).tasks]).toEqual([
+      xp(a), a.player.coins, a.player.stats.tasksDone, 1, 1,
+    ])
+  })
+
+  it('習慣目標 2 次、兩台各打了一次卡：合起來到了目標，補給習慣當天的獎勵（只給一次）', () => {
+    let hid
+    const base = seedWith((s) => (hid = s.addHabit({ name: '喝水', target: 2 }).id))
+    const a = fork(base, (s) => s.checkHabit(hid))
+    const b = fork(base, (s) => s.checkHabit(hid))
+    expect([a.player.stats.habitChecks, b.player.stats.habitChecks]).toEqual([base.player.stats.habitChecks, base.player.stats.habitChecks])
+    const r = fork(merge(base, a, b), (s) => s.settleMerged())
+    const h = r.habits.find((x) => x.id === hid)
+    expect(h.log[dateStr()]).toBe(2)
+    expect(h.paid).toBe(dateStr())
+    expect(r.player.stats.habitChecks).toBe(base.player.stats.habitChecks + 1)
+    expect(xp(r) - xp(a)).toBe(XP.habit)
+    expect(fork(r, (s) => s.settleMerged()).player.xp).toBe(xp(r))
+  })
+
+  it('同一個日程一台先改成跨過午夜再勾、另一台直接勾：還是同一筆，只算一次', () => {
+    let eid
+    const base = seedWith((s) => (eid = s.addEvent({ title: '聚餐', date: s.today, start: '21:00', end: '22:00' }).id))
+    const a = fork(base, (s) => {
+      s.updateEvent(eid, { end: '01:00' })
+      s.toggleEvent(eid)
+    })
+    const b = fork(base, (s) => s.toggleEvent(eid))
+    const r = merge(base, a, b)
+    expect(r.player.stats.eventsDone).toBe(a.player.stats.eventsDone)
+    expect(xp(r)).toBe(xp(a))
+  })
+
+  it('お守り兩台各買了最後一個：只留上限那幾個，多扣的金平糖還回去', () => {
+    const base = seedWith((s) => {
+      s.state.player.coins = 500
+      s.state.player.charms = 1
+      s.save()
+    })
+    const a = fork(base, (s) => s.buyCharm())
+    const b = fork(base, (s) => s.buyCharm())
+    expect([a.player.charms, b.player.charms]).toEqual([2, 2])
+    const r = merge(base, a, b)
+    expect([r.player.charms, r.player.coins]).toEqual([2, a.player.coins])
+  })
 })
 
 // ── 同步時自動合併（兩台裝置，各自一份 localStorage 和 base 的那一份，共用同一個同步檔）──
@@ -574,6 +685,75 @@ describe('同步時兩台都改過：自動合在一起', () => {
     const p = b.store.state.projects.find((x) => x.id === pid)
     expect(p.milestones.every((m) => m.done)).toBe(true)
     expect(p.completedAt).toBeTruthy()
+  })
+
+  it('合起來才落成的那一份存不進去：記憶體、存檔都還是原本那一份（不會存了合好的、沒存補算的落成）；之後存得進去再合一次', async () => {
+    const a = device()
+    const b = device()
+    await link(a, file)
+    later()
+    const pid = await a.run(async (s, sync) => {
+      const p = s.addProject({ name: '兩台一起', milestones: ['一', '二'] })
+      await sync.sync()
+      return p.id
+    })
+    later()
+    await link(b, file)
+    later()
+    const ms = (s) => s.state.projects.find((p) => p.id === pid).milestones
+    await a.run(async (s, sync) => (s.toggleMilestone(pid, ms(s)[0].id), sync.sync()))
+    later()
+    let full = false
+    const set = b.mem.setItem.bind(b.mem)
+    // 合好、補算了落成的那一份放不下
+    b.mem.setItem = (k, v) => {
+      if (full && k === 'hiyori-daily-v1' && JSON.parse(v).projects.some((p) => p.id === pid && p.completedAt)) throw new Error('quota')
+      return set(k, v)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await b.run(async (s, sync) => {
+      s.toggleMilestone(pid, ms(s)[1].id)
+      s.flushSave()
+      full = true
+      await sync.sync()
+    })
+    expect(b.sync.state).toBe('error')
+    const disk = JSON.parse(b.mem.getItem('hiyori-daily-v1')).projects.find((p) => p.id === pid)
+    expect(disk.milestones.map((m) => m.done)).toEqual([false, true])
+    expect(ms(b.store).map((m) => m.done)).toEqual([false, true])
+    full = false
+    await b.run((_s, sync) => sync.sync())
+    warn.mockRestore()
+    expect(b.sync.state).toBe('linked')
+    expect(b.store.state.projects.find((p) => p.id === pid).completedAt).toBeTruthy()
+    expect(b.store.state.player.stats.projectsDone).toBe(1)
+  })
+
+  it('選「用雲端的」時這台這一份的備份和雲端那一份放不下：不換（這台的資料、備份都留著），回到錯誤狀態', async () => {
+    const a = device()
+    const b = device({ bases: { read: async () => null, write: async () => {} } })
+    await link(a, file)
+    later()
+    await link(b, file)
+    b.sync._snap = null
+    later()
+    await a.run(async (s, sync) => (s.addTask({ title: 'A 改的' }), sync.sync()))
+    later()
+    await b.run(async (s, sync) => (s.addTask({ title: 'B 改的' }), sync.sync()))
+    expect(b.sync.state).toBe('conflict')
+    const set = b.mem.setItem.bind(b.mem)
+    // 這台這一份的備份留著時，主存檔放不下
+    b.mem.setItem = (k, v) => {
+      if (k === 'hiyori-daily-v1' && (b.mem.getItem('hiyori-backup') || '').includes('"from":"local"')) throw new Error('quota')
+      return set(k, v)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await b.run((_s, sync) => sync.resolve('remote'))
+    warn.mockRestore()
+    expect(b.sync.state).toBe('error')
+    expect(titles(b.store)).toContain('B 改的')
+    expect(titles(JSON.parse(b.mem.getItem('hiyori-daily-v1')))).toContain('B 改的')
+    expect(b.mem.getItem('hiyori-backup') || '').not.toContain('"from":"local"')
   })
 
   it('合起來超過上限（兩台各寫了專案的第 100 則筆記）：不自動合，讓使用者選邊', async () => {

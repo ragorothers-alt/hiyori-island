@@ -75,20 +75,24 @@ export const habitsMethods = {
       if (h.start === h.start0) delete h.start0
     }
     const fx = [['habitCheck', { habit: h, date, count: n, delta }]]
-    // 獎勵只給今天該做的習慣；休息日多做也能記，但不算進完成與連續天數
-    if (!before && doneOn(h, date) && date === this.today && h.paid !== this.today && !h.paidDays?.includes(this.today) && applies(h, date)) {
-      this._grant(grantKey('h', h.id, this.today), () => {
-        h.paid = this.today
-        h.paidDays = [...(h.paidDays || []), this.today].sort().slice(-HABIT_PAID_DAYS)
-        this.day().habits++
-        this.stats.habitChecks++
-        this._touchStreak()
-        this._gain(XP.habit, fx, { kind: 'habit', id: h.id })
-      })
-      fx.push(['habitDone', { habit: h, streak: habitStreak(h, this.today) }])
-      this._habitAll(fx)
-    }
+    if (!before && date === this.today && this._payHabit(h, fx)) this._habitAll(fx)
     this._finish(fx)
+  },
+  // 今天的目標做到了、今天還沒給過：習慣當天的獎勵（打卡時；兩台各打了一次卡、合起來才湊齊時 settleMerged 也會叫）。
+  // 獎勵只給今天該做的習慣；休息日多做也能記，但不算進完成與連續天數。回傳有沒有給
+  _payHabit(h, fx) {
+    const day = this.today
+    if (h.kind !== 'build' || h.archived || h.paid === day || h.paidDays?.includes(day) || !doneOn(h, day) || !applies(h, day)) return false
+    this._grant(grantKey('h', h.id, day), () => {
+      h.paid = day
+      h.paidDays = [...(h.paidDays || []), day].sort().slice(-HABIT_PAID_DAYS)
+      this.day().habits++
+      this.stats.habitChecks++
+      this._touchStreak()
+      this._gain(XP.habit, fx, { kind: 'habit', id: h.id })
+    })
+    fx.push(['habitDone', { habit: h, streak: habitStreak(h, day) }])
+    return true
   },
   // 今天該做的養成習慣（2 個以上）都做完了（每天只給一次）
   _habitAll(fx) {

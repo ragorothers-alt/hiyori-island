@@ -553,12 +553,12 @@ export const agentOpsMethods = {
       const parent = r.kind === 'step' ? () => ms(this, r) : r.kind === 'subtask' ? () => this._find('tasks', r.tid) : null
       const wasDone = !!parent?.()?.done
       const p0 = r.kind === 'milestone' ? proj(this, r.pid) : null
-      const pWas = p0 && { completedAt: p0.completedAt, pausedAt: p0.pausedAt, onTime: !!p0.onTime }
+      const pWas = p0 && { completedAt: p0.completedAt, pausedAt: p0.pausedAt, onTime: !!p0.onTime, paid: !!p0.paid }
       how.del()
       if (K[r.kind].find(this, r)) continue
       const par = parent?.()
       if (par && !wasDone && par.done && par.doneAt) u.auto = par.doneAt
-      if (pWas && !pWas.completedAt && p0.completedAt) Object.assign(u, { pat: p0.completedAt, ppause: pWas.pausedAt || null, ponTime: !!p0.onTime && !pWas.onTime })
+      if (pWas && !pWas.completedAt && p0.completedAt) Object.assign(u, { pat: p0.completedAt, ppause: pWas.pausedAt || null, ponTime: !!p0.onTime && !pWas.onTime, ppaid: !pWas.paid })
       note(`刪掉${name}`, u)
     }
   },
@@ -662,18 +662,20 @@ export const agentOpsMethods = {
       if (m?.done && m.doneAt === u.auto) this.toggleMilestone(u.pid, u.mid)
       if (t?.done && t.doneAt === u.auto) this.toggleTask(u.tid)
     }
-    // 刪掉最後一個沒做完的里程碑讓專案落成的：專案退回進行中（暫停的回到暫停），落成、準時的次數扣回來
+    // 刪掉最後一個沒做完的里程碑讓專案落成的：專案退回進行中（暫停的回到暫停）
     if (u.kind === 'milestone' && u.pat && !x.done) {
       const p = proj(this, u.pid)
       if (p && p.completedAt === u.pat) {
         p.completedAt = null
         p.pausedAt = u.ppause || null
-        // 落成的獎勵照帳收回（之後真的再落成時照常給）；舊的、帳上沒有的只扣次數
-        p.paid = false
-        if (!this.revokeGrant(grantKey('p', p.id))) this.stats.projectsDone = Math.max(0, this.stats.projectsDone - 1)
-        if (u.ponTime) {
-          p.onTime = false
-          if (!this.revokeGrant(grantKey('po', p.id))) this.stats.projectsOnTime = Math.max(0, this.stats.projectsOnTime - 1)
+        // 這次刪掉才第一次落成、領了落成的獎勵：照帳收回（之後真的再落成時照常給）。
+        // 本來就領過的（落成過、重開了）這次沒有給，什麼都不收；帳已經清掉了（很多天前）就跟重開一樣：獎勵留著、之後不再給
+        if (u.ppaid !== false && this.revokeGrant(grantKey('p', p.id))) {
+          p.paid = false
+          if (u.ponTime) {
+            p.onTime = false
+            this.revokeGrant(grantKey('po', p.id))
+          }
         }
         this._edited(p)
       }

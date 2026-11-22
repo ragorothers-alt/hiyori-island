@@ -203,7 +203,7 @@ export const coachMethods = {
   },
   // 套用ふじ排的計畫：一次建好所有任務（有時段、有預估時間）。meta：{ title, answers（下次的預設）, custom（自己加的主攻項目） }
   // 回傳 { id, count：建了幾件, skipped：已經過去或撞到行程、沒建的段數 }；一件都沒建時 id 是 null
-  // projects：{ 主攻項目的名字: { id: 專案, ms: 里程碑 } }（主攻的是專案時，那幾段歸到那個專案）
+  // projects 用主攻項目的 key 對應專案和里程碑；舊排程沒有 key，才用名字找
   applyCoachPlan(res, { title = '', answers = null, custom = [], projects = {} } = {}) {
     this._refreshToday()
     const id = uid()
@@ -236,7 +236,8 @@ export const coachMethods = {
             continue
           }
         }
-        const pj = isObj(projects) && typeof it.label === 'string' ? projects[it.label] : null
+        const key = it.focusKey ?? it.label
+        const pj = isObj(projects) && typeof key === 'string' && Object.hasOwn(projects, key) ? projects[key] : null
         const p = pj && this._find('projects', pj.id)
         const own = p && !p.archived && !p.completedAt ? { project: p.id, ms: p.milestones.some((m) => m.id === pj.ms && !m.done) ? pj.ms : null } : {}
         const t = blankTask({ title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', dur, at, coach: id, ...own })

@@ -4,7 +4,7 @@
 // 兩種管道共用這套判斷，各自記自己的 base，可以同時開：
 //   FileSync（這個檔案）：資料寫進使用者選的檔案，放在 OneDrive／Dropbox 的同步資料夾裡（不需後端，只有電腦版 Chrome／Edge）
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
-import { dropBackup, keepBackup, newRev, readBackup, readBackups, newerData, NEWER_MSG, NEWER_TAB_MSG, NO_SAVE_MSG } from './store.js'
+import { dropBackup, keepBackup, newRev, readBackup, readBackups, snapBackups, putBackups, newerData, NEWER_MSG, NEWER_TAB_MSG, NO_SAVE_MSG } from './store.js'
 import { migrate } from './store/migrate.js'
 import { merge3 } from './merge.js'
 
@@ -279,27 +279,27 @@ export class SyncEngine {
     // 上一輪合好了卻存不進去、換回了原本那一份：備份裡已經是這一版，不再留一份（連試幾次也不會把更早的備份擠掉）
     const last = first ? readBackups()[0] : null
     const had = !!last && last.from === 'merge' && last.state?.rev === st.rev
+    // 備份清單原本的樣子：合好的存不進去時整份放回去（剛留的那一份拿掉、被它擠掉的最舊那一份放回來）
+    const backups = first && !had ? snapBackups() : undefined
     if (first && !had && !keepBackup(st, 'merge', st.updatedAt)) {
       this._set('error', NO_ROOM)
       return true
     }
     if (first) this._runMerge = { rev: st.rev }
+    const undo = () => {
+      if (backups !== undefined) putBackups(backups)
+      if (first) this._runMerge = null
+    }
     // 存合好的那一份時，剛留的備份不能被擠掉（擠不下就是存不進去，換回原本那一份）。
-    // 合起來才湊齊的（兩台各勾了最後幾個里程碑、本命）補算落成、全清，也在這裡一起存好
+    // 合起來才湊齊的（兩台各勾了最後幾個里程碑、本命、習慣的目標）補算落成、全清，在寫進存檔之前就補好、一起寫一次（settle）
     this.store.keepBackups = 1
     try {
-      this.store.replaceState(out.state, Math.max(Date.now(), (st.updatedAt || 0) + 1, (remote.savedAt || 0) + 1), { soft: true })
-      if (this.store.saved) {
-        this.store.settleMerged?.()
-        this.store.flushSave()
-      }
+      this.store.replaceState(out.state, Math.max(Date.now(), (st.updatedAt || 0) + 1, (remote.savedAt || 0) + 1), { soft: true, settle: true })
+      if (this.store.saved) this.store.flushSave()
     } catch (e) {
       console.warn('[hiyori] 合併出來的資料讀不進去', e)
       this.store.keepBackups = 0
-      if (first) {
-        if (!had) dropBackup(0)
-        this._runMerge = null
-      }
+      undo()
       return false
     } finally {
       this.store.keepBackups = 0
@@ -309,6 +309,7 @@ export class SyncEngine {
       try {
         this.store.replaceState(st, st.updatedAt, { soft: true, rev: st.rev, peer: true })
       } catch {}
+      undo()
       this._set('error', NO_SAVE)
       return true
     }
@@ -386,11 +387,26 @@ export class SyncEngine {
     const st = this.store.state
     // 一般拉取時這台沒改過（雲端已經有比較新的那一版），備份只是保險；選邊時一定要備份成功。
     // 雲端那一版只換了計時（別台按了開始、暫停）：這台的這一份跟它只差在計時，不另外留（不然幾次就把真正有用的備份擠掉）
-    if (st.rev && !ahead && (strict || !onlyTimer(st, remote.state)) && !keepBackup(st, 'local', st.updatedAt) && strict) return this._set('error', NO_ROOM)
+    const backups = strict ? snapBackups() : undefined
+    const keep = st.rev && !ahead && (strict || !onlyTimer(st, remote.state))
+    if (keep && !keepBackup(st, 'local', st.updatedAt) && strict) return this._set('error', NO_ROOM)
+    // 選邊（用雲端的）：存雲端那一份時，這台這一份的備份不能被擠掉。兩份放不下就不換：記憶體換回這台的，
+    // 備份清單放回原本的樣子（存檔裡還是這台的），下次同步再問一次
+    if (strict && keep) this.store.keepBackups = 1
+    let saved = false
     try {
-      this.store.replaceState(remote.state, remote.savedAt, { soft: true, rev: remote.rev })
+      saved = this.store.replaceState(remote.state, remote.savedAt, { soft: true, rev: remote.rev })
     } catch (e) {
       return this._fail(e)
+    } finally {
+      this.store.keepBackups = 0
+    }
+    if (strict && !saved) {
+      try {
+        this.store.replaceState(st, st.updatedAt, { soft: true, rev: st.rev, peer: true })
+      } catch {}
+      putBackups(backups)
+      return this._set('error', NO_SAVE)
     }
     let json = ''
     try {

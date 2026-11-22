@@ -66,6 +66,47 @@ function saveWeekAI(v) {
   } catch {}
 }
 
+// 排程和 Claude 都靠名字認主攻項目。同名的在這次問卷裡加個編號，排好再換回原名。
+export async function planCoachWeek(req, ai = null, examProjectId = null) {
+  const selected = req.focus
+  const byLabel = new Map()
+  let serial = 0
+  const focus = selected.map((f) => {
+    let label = f.label
+    if (selected.some((other) => other !== f && other.label === label)) {
+      // 留點位置給 Claude 寫這一段要做的事，也避開使用者自己取的「展覽（1）」。
+      const short = [...label].slice(0, 12).join('')
+      do { label = `${short}（${++serial}）` } while (selected.some((other) => other.label.includes(label)))
+    }
+    byLabel.set(label, f)
+    return { ...f, label }
+  })
+  let exam = req.exam
+  if (exam && examProjectId) {
+    const target = focus.find((f) => f.project === examProjectId)
+    exam = target ? { ...exam, only: target.label } : null
+  }
+  const result = await askCoach({ ...req, focus, exam }, ai)
+  for (const day of result.days) {
+    for (const item of day.items) {
+      const f = byLabel.get(item.label)
+      if (!f) continue
+      item.focusKey = f.key
+      if (item.label !== f.label && item.title.startsWith(item.label)) {
+        item.title = f.label + item.title.slice(item.label.length)
+        item.label = f.label
+      }
+    }
+  }
+  if (result.ai) {
+    for (const [label, f] of byLabel) {
+      if (label !== f.label) result.notes = result.notes.map((note) => note.replaceAll(label, () => f.label))
+    }
+  }
+  result.projects = Object.fromEntries(selected.filter((f) => f.project).map((f) => [f.key, { id: f.project, ms: f.ms }]))
+  return result
+}
+
 export class CoachView {
   constructor(root, store, hooks) {
     this.root = root
@@ -147,16 +188,16 @@ export class CoachView {
     const out = []
     for (const key of this.a.focus) {
       const [kind, v] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
-      if (kind === 'tag') out.push({ label: tagOf(v).label, tag: v })
+      if (kind === 'tag') out.push({ key, label: tagOf(v).label, tag: v })
       else if (kind === 'proj') {
         const p = this._projects().find((x) => x.id === v)
         if (p) {
           const ms = p.milestones.find((m) => !m.done)
-          out.push({ label: p.name, tag: 'work', milestone: ms?.title || null, project: p.id, ms: ms?.id || null })
+          out.push({ key, label: p.name, tag: 'work', milestone: ms?.title || null, project: p.id, ms: ms?.id || null })
         }
       } else {
         const it = this._items().find((x) => x.label === v)
-        if (it) out.push({ label: it.label, tag: it.tag })
+        if (it) out.push({ key, label: it.label, tag: it.tag })
       }
     }
     return out
@@ -204,7 +245,7 @@ export class CoachView {
     const dates = this._dates()
     const exam = this._exam()
     const req = {
-      dates, focus: this._focusList(), slots: [...a.slots], exam: exam ? { title: exam.title, date: exam.date, only: exam.project ? exam.title : exam.pid ? exam.projectName : null } : null,
+      dates, focus: this._focusList(), slots: [...a.slots], exam: exam ? { title: exam.title, date: exam.date, only: null } : null,
       days: a.days, len: a.len, total: a.total, seed: this.seed, ctx: this.store.coachContext(dates),
     }
     // 設了 Claude 的通行碼就交給 Claude 排（要等一下）；排不出來會自己改用本機規則
@@ -216,7 +257,7 @@ export class CoachView {
       this.flash = ''
       this.render()
     }
-    const res = await askCoach(req, ai)
+    const res = await planCoachWeek(req, ai, exam?.project ? exam.id : exam?.pid)
     // 等的時候按了「改答案」或又送出一次：這次的結果不要了
     if (ticket !== this._ticket) return
     this.thinking = ''
@@ -250,7 +291,7 @@ export class CoachView {
       answers: { focus: focus.map((f) => f.label), slots: [...a.slots], days: a.days, len: a.len },
       custom: a.custom.filter((c) => a.focus.has('item:' + c.label)),
       // 主攻的是專案：排出來的那幾段歸到那個專案（和下一個還沒完成的里程碑），回專案就找得到
-      projects: Object.fromEntries(focus.filter((f) => f.project).map((f) => [f.label, { id: f.project, ms: f.ms }])),
+      projects: r.projects,
     })
     // 預覽之後時間過了、又加了行程：照實說建了幾段、哪些沒放
     const late = skipped ? `有 ${skipped} 段的時間已經過了、或撞到後來加的行程，沒有放進去。` : ''

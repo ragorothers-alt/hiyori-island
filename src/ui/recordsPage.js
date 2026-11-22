@@ -161,10 +161,12 @@ export const recordsMethods = {
     $('#exportBtn').onclick = () => this.exportData()
     // 匯入：按鈕（鍵盤也按得到）打開選檔；選好先列出檔案裡有什麼、會換掉現在的哪些，確定了才換
     $('#importBtn').onclick = () => $('#importInput').click()
+    let importSeq = 0
     $('#importInput').onchange = async (e) => {
       const f = e.target.files[0]
       e.target.value = ''
       if (!f) return
+      const seq = ++importSeq
       // 又選了一個檔案：上一個的確認先收起來（選到壞掉的檔案時不會還能換成上一個）
       $('#importCheck').hidden = true
       $('#importCheck').innerHTML = ''
@@ -172,8 +174,11 @@ export const recordsMethods = {
       let obj = null
       try {
         text = await f.text()
+        // 讀檔時又選了別份，就讓後選的那份決定要顯示什麼
+        if (seq !== importSeq) return
         obj = JSON.parse(text)
       } catch {
+        if (seq !== importSeq) return
         return this.toast({ icon: '！', title: '匯入失敗', sub: '檔案不是 JSON 格式' })
       }
       if (!obj || typeof obj !== 'object' || !Array.isArray(obj.tasks) || !obj.player || typeof obj.player !== 'object') return this.toast({ icon: '！', title: '匯入失敗', sub: '不是有效的ひより存檔' })

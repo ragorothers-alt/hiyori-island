@@ -2,8 +2,10 @@
 // 用一個「同一件事在每台都一樣」的代號，記下這一次實際加了哪些數字。
 //   兩台都做了同一件事（兩台都勾了同一件任務、同一輪計時兩台都記了），或同步時拿了太舊的那一份當基準：
 //   合在一起時照這本帳扣回一份（merge.js 的 dedupeGrants）——不用再從結果去猜哪些是重複的。
-//   收回一筆（提早結束的那幾分鐘按了「不算這段」）也照這本帳扣回去（revokeGrant）。
+//   收回一筆（提早結束的那幾分鐘按了「不算這段」）也照這本帳扣回去（revokeGrant）。收回的那一筆留著（off）：
+//   兩台都收回了同一筆，合在一起時看得出是同一次收回，不會扣兩次；也不會被同一件事再給一次
 // 一筆：{ at: 記下的時間, day: 那一天（「那天的紀錄」上的數字記在這一天）, d: { 數字的代號: 加了多少（減少是負的） } }
+// 收回了的：{ at: 收回的時間, day, d: {}, off: 1 }
 // 數字的代號：
 //   xp 經驗值、c 金平糖、ch お守り、b 好感、s:鍵 統計（player.stats）、d:鍵 那天的紀錄（history[day]）、x:花 圖鑑的朵數、
 //   ts:任務 id 實際做了幾分鐘、tp:任務 id 番茄的顆數、pf:專案 id 那天的專注分鐘
@@ -89,6 +91,10 @@ export function cleanGrants(v, now = Date.now()) {
   for (const [k, g] of Object.entries(v)) {
     if (!KEY_RE.test(k) || !isObj(g) || !isObj(g.d) || !Number.isFinite(g.at) || !DATE_RE.test(g.day)) continue
     if (now - g.at > GRANT_DAYS * 86400000) continue
+    if (g.off) {
+      keep(k, { at: g.at, day: g.day, d: {}, off: 1 })
+      continue
+    }
     const d = {}
     for (const [c, n] of Object.entries(g.d)) if (CODE_RE.test(c) && typeof n === 'number' && Number.isFinite(n) && n) d[c] = Math.max(-1e7, Math.min(1e7, n))
     if (Object.keys(d).length) keep(k, { at: g.at, day: g.day, d })
@@ -105,7 +111,7 @@ export const grantMethods = {
     if (!key || !KEY_RE.test(key)) return fn()
     const d0 = DATE_RE.test(day) ? day : this.today
     const before = this._counters(d0, extra)
-    const frame = { inner: new Map() }
+    const frame = { inner: new Map(), day: d0 }
     const stack = (this._grantStack ||= [])
     stack.push(frame)
     try {
@@ -124,8 +130,9 @@ export const grantMethods = {
         if (n) own[k] = n
       }
       if (Object.keys(own).length) this._keepGrant(key, d0, own)
+      // 外面那一筆不重複算裡面這一筆加的。「那天的紀錄」是記在哪一天的：不同天的話不是同一個數字，只扣不分日子的那些
       const parent = stack.at(-1)
-      if (parent) for (const [k, v] of all) parent.inner.set(k, (parent.inner.get(k) || 0) + v)
+      if (parent) for (const [k, v] of all) if (parent.day === d0 || !(k.startsWith('d:') || k.startsWith('pf:'))) parent.inner.set(k, (parent.inner.get(k) || 0) + v)
     }
   },
   _counters(day, extra = []) {
@@ -146,24 +153,26 @@ export const grantMethods = {
   _keepGrant(key, day, d) {
     const all = (this.state.grants ||= {})
     const old = all[key]
-    // 同一筆又給了一次（同一天的同一件事）：加在一起
-    if (old && old.day === day) {
+    // 同一筆又給了一次（同一天的同一件事）：加在一起。收回過的再給是新的一筆
+    if (old && old.day === day && !old.off) {
       const sum = { ...old.d }
       for (const [k, v] of Object.entries(d)) sum[k] = (sum[k] || 0) + v
       all[key] = { at: Date.now(), day, d: sum }
     } else all[key] = { at: Date.now(), day, d }
     if (Object.keys(all).length > GRANT_MAX + 40) this.state.grants = cleanGrants(all)
   },
-  // 收回 key 那一筆：照帳上記的扣回去（不會扣到負的），帳上拿掉（不能收回兩次）。回傳有沒有收回
+  // 收回 key 那一筆：照帳上記的扣回去（不會扣到負的），帳上記成收回了（不能收回兩次）。回傳有沒有收回
   revokeGrant(key) {
     const g = this.state.grants?.[key]
-    if (!g) return false
+    if (!g || g.off) return false
     for (const [code, v] of Object.entries(g.d)) addCode(this.state, code, g.day, -v)
-    const rest = { ...this.state.grants }
-    delete rest[key]
-    this.state.grants = rest
+    this.state.grants = { ...this.state.grants, [key]: { at: Date.now(), day: g.day, d: {}, off: 1 } }
     this._finish()
     return true
+  },
+  // 這件事的帳上有沒有記過（給過、或給過又收回了）
+  granted(key) {
+    return !!key && !!this.state.grants?.[key]
   },
 }
 

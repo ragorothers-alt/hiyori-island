@@ -3,6 +3,7 @@ import {
   Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating, blankTask, DATA_VERSION, shiftEnd,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
+import { routineInstanceId, routineNextId } from '../src/store/util.js'
 import { migrate } from '../src/store/migrate.js'
 import { DAILY_QUESTS } from '../src/data/quests.js'
 import { SHOP_ITEMS } from '../src/data/shop.js'
@@ -1081,6 +1082,17 @@ describe('存檔讀不進來、存不進去', () => {
     spy.mockRestore()
     // 空間清出來以後照常
     expect(restoreBackup(store, 0)).toBe(true)
+  })
+
+  it('已經有三份備份時匯入、主存檔寫不進去：三份備份原樣留著（最舊的那份不會被剛留的那份擠掉）', () => {
+    store.saveNow()
+    for (const n of [1, 2, 3]) keepBackup({ ...JSON.parse(store.exportJSON()), tasks: [{ id: `b${n}`, title: `備份 ${n}` }] }, 'cloud', n)
+    const before = localStorage.getItem('hiyori-backup')
+    expect(readBackups()).toHaveLength(3)
+    const spy = failOn('hiyori-daily-v1')
+    expect(() => store.importJSON(JSON.stringify({ tasks: [{ id: 'imp', title: '匯入的' }], player: {} }))).toThrow('儲存空間不夠')
+    spy.mockRestore()
+    expect(localStorage.getItem('hiyori-backup')).toBe(before)
   })
 
   it('另一個分頁已經是新版 App：不匯入、不還原（換了也存不進去）', () => {
@@ -3003,6 +3015,25 @@ describe('跨過午夜的日程', () => {
   })
 })
 
+describe('跨過午夜的例行日程：前一天沒打開過', () => {
+  it('第三天凌晨才打開：昨晚那一次（還沒結束的後半段）照樣長出來，id 跟另一台一樣；刪掉過的那一次不再長', () => {
+    const r = store.addRoutine({ kind: 'event', title: '夜班', repeat: { type: 'daily' }, start: '22:00', end: '02:00', date: TODAY })
+    store.flushSave()
+    const d1 = addDays(TODAY, 1)
+    const d2 = addDays(TODAY, 2)
+    setDate(d2, 0)
+    const s = new Store()
+    const tonight = s.eventsOn(d2).filter((x) => x.routineId === r.id)
+    expect(tonight.map((x) => `${x.start}–${x.end}`).sort()).toEqual(['00:00–02:00', '22:00–23:59'])
+    expect(tonight.find((x) => x.start === '00:00').id).toBe(routineNextId(r, d1))
+    expect(s.eventSpan(tonight.find((x) => x.start === '00:00'))).toMatchObject({ date: d1, start: '22:00', end: '02:00' })
+    // 昨晚那一次刪掉了：之後再打開也不會再長出來
+    s.deleteEvent(routineInstanceId(r, d1))
+    s.flushSave()
+    expect(new Store().eventsOn(d2).filter((x) => x.routineId === r.id).map((x) => x.start)).toEqual(['22:00'])
+  })
+})
+
 describe('例行公事、日程的長標題和備註', () => {
   it('例行公事標題超過 80 字：標題留前面一段、完整的放進備註，每一次長出來的都帶著；讀存檔也還在', () => {
     const long = '每天早上整理前一天的會議紀錄，' + '把待辦拆成可以馬上做的小步驟、寄給負責的人並且約好下次確認的時間'.repeat(4)
@@ -3657,5 +3688,25 @@ describe('加時（倒數到點後接著做的那幾分鐘）', () => {
     // 同一段加時兩個分頁都記：只算一次
     expect(store.completePomodoro(8, t.id, null, 'round-a-ext', { extra: true })).toBe(false)
     expect(store.stats.focusMinutes).toBe(before.focus + 8)
+  })
+})
+
+describe('ふじ套用同名專案的時段', () => {
+  it('兩個同名專案各自收到選好的里程碑，同名自訂項目也留在專案外', () => {
+    const a = store.addProject({ name: '展覽', milestones: ['借場地'] })
+    const b = store.addProject({ name: '展覽', milestones: ['印海報'] })
+    const items = [
+      { focusKey: 'proj:' + a.id, title: '展覽・借場地', at: '19:30' },
+      { focusKey: 'proj:' + b.id, title: '展覽・印海報', at: '20:00' },
+      { focusKey: 'item:展覽', title: '展覽・參觀', at: '21:00' },
+    ].map((it) => ({ ...it, label: '展覽', dur: 25 }))
+    const projects = Object.fromEntries([a, b].map((p) => ['proj:' + p.id, { id: p.id, ms: p.milestones[0].id }]))
+    const { id } = store.applyCoachPlan({ days: [{ date: TODAY, items }] }, { projects })
+    const made = store.state.tasks.filter((t) => t.coach === id)
+    expect(made.map((t) => [t.at, t.project, t.ms])).toEqual([
+      ['19:30', a.id, a.milestones[0].id],
+      ['20:00', b.id, b.milestones[0].id],
+      ['21:00', null, null],
+    ])
   })
 })

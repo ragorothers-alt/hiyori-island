@@ -2,7 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import worker, { PushHub } from '../worker/src/index.js'
 import { MAX_AFTER, MOTTO_AFTER, MOTTO_MAX, checkEndpoint } from '../worker/src/push.js'
-import { LOG_FILE, PLAN_CACHE, PLAN_FILE, SHOWN_FILE, TimerPush, answerLooking, timerNotice, timerTag } from '../src/push.js'
+import { LOG_FILE, PLAN_CACHE, PLAN_FILE, SHOWN_FILE, MottoPush, TimerPush, answerLooking, timerNotice, timerTag } from '../src/push.js'
+import { FakeCaches } from './helpers/sw.js'
 import { FREE_MAX, focusStart, breakStart, nextEnd, pauseToggle } from '../src/focusClock.js'
 import { createD1 } from './helpers/d1.js'
 import { fakeEnv } from './helpers/push.js'
@@ -526,6 +527,38 @@ describe('前端什麼時候排、什麼時候取消', () => {
     down = false
     remote = null
     serverKey = key('server-key-1')
+  })
+
+  it('同一則提醒兩邊都記了：頁面留自己的那一筆，也讀得回新舊格式', async () => {
+    const storage = new FakeCaches()
+    const p = new MottoPush({ storage, now: () => NOW, registration: () => ({ scope: SCOPE, pushManager: {} }) })
+    const c = await storage.open(PLAN_CACHE)
+    const dir = '__remind-shown/'
+    const date = '2026-11-10'
+    const receipt = { key: '會/議', date, at: NOW }
+    const file = encodeURIComponent('會/議|2026-11-10')
+    await c.put(dir + 'sw/' + file, Response.json({ ...receipt, by: 'sw' }))
+    await c.put(dir + 'sw/sw-only%7C2026-11-10', Response.json({ ...receipt, key: 'sw-only', by: 'sw' }))
+    await c.put(dir + encodeURIComponent('old|2026-11-10'), Response.json({ ...receipt, key: 'old' }))
+    await c.put('__remind-shown', Response.json([{ ...receipt, key: 'list' }]))
+    await p.markRemindShown([receipt])
+    expect(await (await c.match(dir + 'page/' + file))?.json()).toEqual(receipt)
+    expect((await p.remindShown()).map((x) => x.key).sort()).toEqual(['list', 'old', 'sw-only', '會/議'])
+  })
+
+  it('頁面寫提醒時，三天前的單筆和整包都清掉；整包還有一筆沒過期就留著', async () => {
+    const storage = new FakeCaches()
+    const p = new MottoPush({ storage, now: () => NOW, registration: () => ({ scope: SCOPE, pushManager: {} }) })
+    const c = await storage.open(PLAN_CACHE)
+    const old = { key: 'old', date: '2026-11-07', at: NOW - 3 * 86400000 }
+    const fresh = { key: 'new', date: '2026-11-10', at: NOW }
+    for (const dir of ['', 'page/', 'sw/']) await c.put('__remind-shown/' + dir + 'old%7C2026-11-07', Response.json(old))
+    await c.put('__remind-shown', Response.json([old, fresh]))
+    await p.markRemindShown([fresh])
+    expect(await (await c.match('__remind-shown')).json()).toEqual([old, fresh])
+    await c.put('__remind-shown', Response.json([old]))
+    await p.markRemindShown([fresh])
+    expect((await c.keys()).map((r) => r.url)).toEqual([SCOPE + '__remind-shown/page/new%7C2026-11-10'])
   })
 
   it('沒開通知：什麼都不排，也不會連到伺服器', async () => {

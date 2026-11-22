@@ -522,11 +522,40 @@ describe('壞掉的資料、store 順便動到的、同一批的先後', () => {
     expect(p.completedAt).toBe(null)
     expect(p.paid).toBe(false)
     expect([store.player.xp, store.player.coins, store.stats.projectsDone]).toEqual([before.xp, before.coins, before.done])
-    expect(store.state.grants[`p:${p.id}`]).toBeUndefined()
+    expect(store.state.grants[`p:${p.id}`]).toMatchObject({ off: 1 })
     store.toggleMilestone(p.id, p.milestones[1].id)
     expect(p.completedAt).toBeTruthy()
     expect(store.stats.projectsDone).toBe(before.done + 1)
     expect(store.player.xp).toBeGreaterThan(before.xp)
+  })
+
+  it('落成過又重開的專案：刪掉最後一個沒做完的里程碑（再落成、不再給獎勵）再撤銷，以前領的落成獎勵不會被收走', () => {
+    const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    expect([p.completedAt, p.paid]).toEqual([null, true])
+    const before = { xp: store.player.xp, coins: store.player.coins, done: store.stats.projectsDone }
+    const { entry } = chat((o, w) => o.drop.push(w.projects[0].milestones[1].id))
+    expect(p.completedAt).toBeTruthy()
+    expect(undo(entry)).toBe(1)
+    expect([p.completedAt, p.paid]).toEqual([null, true])
+    expect([store.player.xp, store.player.coins, store.stats.projectsDone]).toEqual([before.xp, before.coins, before.done])
+    expect(store.state.grants[`p:${p.id}`].off).toBeUndefined()
+  })
+
+  it('落成的帳已經清掉了（很多天前）才撤銷：跟重開一樣，獎勵留著、之後再落成不再給一次', () => {
+    const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    const { entry } = chat((o, w) => o.drop.push(w.projects[0].milestones[1].id))
+    delete store.state.grants[`p:${p.id}`]
+    const after = { xp: store.player.xp, done: store.stats.projectsDone }
+    expect(undo(entry)).toBe(1)
+    expect([p.completedAt, p.paid]).toEqual([null, true])
+    expect([store.player.xp, store.stats.projectsDone]).toEqual([after.xp, after.done])
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    expect(p.completedAt).toBeTruthy()
+    expect(store.stats.projectsDone).toBe(after.done)
   })
 
   it('新增的訂閱之後改過備註：撤銷「新增」不刪', () => {

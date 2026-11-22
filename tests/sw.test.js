@@ -1,10 +1,11 @@
 // Service Worker（public/sw.js）：用假的 caches 跑它的事件，檢查更新時的快取搬移和離線首頁
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { MottoPush } from '../src/push.js'
 import { FakeCaches, SCOPE, loadSW, run } from './helpers/sw.js'
 
 const html = (h) => new Response(h, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
 
-// 顯示過的提醒（一則一個檔案：__remind-shown/key|date），照 key 排
+// 頁面、Service Worker 和舊版記下的單筆提醒，照 key 排
 async function remindFiles(s) {
   const c = await s.caches.open('hiyoripush')
   const out = []
@@ -223,7 +224,6 @@ function setup({ plans, mottos, done, windows = () => [], before = [], broken = 
   const registration = {
     getNotifications: async ({ tag } = {}) => list.filter((n) => !tag || n.tag === tag).map((n) => ({ ...n, close: () => (list = list.filter((x) => x !== n)) })),
     showNotification: async (title, opts) => {
-      await ctl.beforeShow?.(title, opts)
       if (ctl.broken) throw new Error('boom')
       list = [...list.filter((n) => n.tag !== opts.tag), { title, ...opts }]
       if (opts.renotify) alerts.push(title)
@@ -500,6 +500,7 @@ describe('Service Worker：警語的推播', () => {
         { key: 'e1@12:10', date: '2026-11-10', at: NOW, by: 'sw' },
         { key: 't1@12:10', date: '2026-11-10', at: NOW, by: 'sw' },
       ])
+      expect(await s.caches.match('__remind-shown/sw/e1%4012%3A10%7C2026-11-10')).toBeDefined()
       expect(s.messages).toContainEqual({ type: 'hiyori-remind-shown', list: [{ key: 'e1@12:10', date: '2026-11-10' }, { key: 't1@12:10', date: '2026-11-10' }] })
       // 警語念到哪不受提醒影響；提醒不記進警語的紀錄
       expect(await s.done()).toEqual({ at: NOW })
@@ -540,17 +541,29 @@ describe('Service Worker：警語的推播', () => {
       expect(s.shown().map((n) => n.tag)).toEqual(['bedtime'])
     }))
 
-  it('顯示失敗時只拿掉自己記的：頁面剛好也記了那一則（by 不是 sw）就留著', () =>
+  it('顯示失敗時只拿掉自己記的：頁面剛好也記了那一則，下一次推播就不再響', () =>
     withClock(async () => {
       const r = { at: NOW, key: 'e1@12:10', date: '2026-11-10', title: 'ひより · 會', body: '現在開始', tag: 'e1', remind: true }
       const s = setup({ mottos: [r], windows: () => [] })
       await s.ready
       s.ctl.broken = true
-      // 顯示之前頁面記了同一則（蓋掉 Service Worker 剛寫的）
       const c = await s.caches.open('hiyoripush')
-      s.ctl.beforeShow = () => c.put(SCOPE + '__remind-shown/' + encodeURIComponent('e1@12:10|2026-11-10'), new Response(JSON.stringify({ key: 'e1@12:10', date: '2026-11-10', at: NOW })))
-      await run(s.on.push, { data: null }).catch(() => {})
-      expect((await remindFiles(s)).map((x) => x.key)).toEqual(['e1@12:10'])
+      vi.stubGlobal('navigator', { serviceWorker: {} })
+      vi.stubGlobal('Notification', class {})
+      vi.stubGlobal('PushManager', class {})
+      onTestFinished(() => vi.unstubAllGlobals())
+      const page = new MottoPush({ storage: s.caches, registration: () => ({ scope: SCOPE, pushManager: {} }) })
+      // 瀏覽器回報顯示失敗，正要刪記號的那一刻，頁面也記了同一則
+      const remove = c.delete.bind(c)
+      vi.spyOn(c, 'delete').mockImplementationOnce(async (url) => {
+        await page.markRemindShown([r])
+        return remove(url)
+      })
+      await expect(run(s.on.push, { data: null })).rejects.toThrow('boom')
+      s.ctl.broken = false
+      await run(s.on.push, { data: null })
+      expect(s.alerts).toEqual([])
+      expect(await page.remindShown()).toEqual([{ key: r.key, date: r.date }])
     }))
 
   it('提醒沒顯示出來（瀏覽器出錯）：「顯示過了」拿掉，下一則推播來時照樣顯示', () =>

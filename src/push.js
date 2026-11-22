@@ -27,9 +27,9 @@ export const MOTTO_LOG = '__motto-log'
 export const MOTTO_LOG_KEEP = 150
 // 推播送到時 Service Worker 顯示過的日程、任務、就寢提醒 [{ key, date, at }]（public/sw.js 也寫了一份，要一起改）
 export const REMIND_SHOWN = '__remind-shown'
-// 一則一個檔案（頁面和 Service Worker 同時記也不會互相蓋掉；public/sw.js 也寫了一份，要一起改）
+// 同一則提醒，頁面記在 page/、Service Worker 記在 sw/（public/sw.js 也寫了一份，要一起改）
 export const REMIND_DIR = '__remind-shown/'
-const remindFile = (x) => REMIND_DIR + encodeURIComponent(`${x.key}|${x.date}`)
+const remindFile = (x) => REMIND_DIR + 'page/' + encodeURIComponent(`${x.key}|${x.date}`)
 // 念到的那一則比現在晚這麼久以上：時鐘被往回調過了（推播會早幾秒到，一點點不算）
 const MOTTO_REWIND = 10 * 60000
 // 警語一次最多交給伺服器幾則（伺服器的上限也是 200）
@@ -756,11 +756,15 @@ export class MottoPush extends PushBase {
       const cache = await this.storage.open(PLAN_CACHE)
       for (const x of list) await cache.put(new URL(remindFile(x), reg.scope).href, jsonRes({ key: x.key, date: x.date, at: x.at }))
       // 三天以前的清掉（推播一直沒來、Service Worker 沒機會清的時候）
+      const cutoff = this.now() - 3 * 86400000
+      const oldUrl = new URL(REMIND_SHOWN, reg.scope).href
+      const old = await (await cache.match(oldUrl))?.json().catch(() => null)
+      if (Array.isArray(old) && old.every((x) => !(Number(x?.at) > cutoff))) await cache.delete(oldUrl)
       const dir = new URL(REMIND_DIR, reg.scope).href
       for (const req of await cache.keys()) {
         if (!String(req.url).startsWith(dir)) continue
         const v = await (await cache.match(req.url))?.json().catch(() => null)
-        if (!(Number(v?.at) > this.now() - 3 * 86400000)) await cache.delete(req.url)
+        if (!(Number(v?.at) > cutoff)) await cache.delete(req.url)
       }
     } catch {}
   }
@@ -780,7 +784,12 @@ export class MottoPush extends PushBase {
         }
       }
     } catch {}
-    return all.filter((x) => x && typeof x.key === 'string' && typeof x.date === 'string').map(({ key, date }) => ({ key, date }))
+    // 兩邊都記過的同一則，回到頁面只要補記一次
+    const shown = new Map()
+    for (const x of all) {
+      if (typeof x?.key === 'string' && typeof x.date === 'string') shown.set(`${x.key}|${x.date}`, { key: x.key, date: x.date })
+    }
+    return [...shown.values()]
   }
 
   // 上一則警語的推播 { got, at }（沒有是 null）：警語卡上寫「上一則推播幾點送到」

@@ -77,6 +77,20 @@ export function readBackups() {
   }
 }
 export const readBackup = (i = 0) => readBackups()[i] || null
+// 備份清單現在的樣子（原文）：留了一份新的備份、接著要做的事失敗時整份放回去（留新的那一份時擠掉的最舊那份也回來）
+export function snapBackups() {
+  try {
+    return localStorage.getItem(BACKUP_KEY)
+  } catch {
+    return null
+  }
+}
+export function putBackups(raw) {
+  try {
+    if (raw === null) localStorage.removeItem(BACKUP_KEY)
+    else localStorage.setItem(BACKUP_KEY, raw)
+  } catch {}
+}
 // from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）、'import'（匯入前）、'reset'（重置前）、'restore'（還原前）。
 // 空間不夠時先少留幾份舊的；連這一份都存不進去才回傳 false
 export function keepBackup(state, from, at) {
@@ -383,14 +397,20 @@ export class Store {
     if (!disk || disk === this._diskRev || (this.state.rev || '') !== this._diskRev) return false
     return this._adoptDisk()
   }
-  // 兩台都改過、合在一起之後：合起來才湊齊的（兩台各勾了最後幾個里程碑）補算落成
-  settleMerged() {
+  // 兩台都改過、合在一起之後：合起來才湊齊的（兩台各勾了最後幾個里程碑、各打了一次卡才到習慣的目標、
+  // 各做了一部分的本命）補算落成、習慣當天的獎勵、全清。同步合併時在 replaceState 裡（settle）跟合好的那一份一起寫進存檔
+  _settleFx() {
     const fx = []
     for (const p of this.state.projects) this._completeProject(p, fx)
-    this._refreshToday()
+    for (const h of this.state.habits) this._payHabit(h, fx)
     this._starAll(fx)
     this._perfect(fx)
     this._habitAll(fx)
+    return fx
+  }
+  settleMerged() {
+    this._refreshToday()
+    const fx = this._settleFx()
     if (fx.length) this._finish(fx)
   }
   // 版本號一定比上一版大：就算這台電腦的時鐘比別台慢，新的變更也不會被當成舊的
@@ -767,6 +787,18 @@ export class Store {
     p.stats.bestStreak = Math.max(p.stats.bestStreak, p.streak)
   }
   _finish(fx = []) {
+    this._collect(fx)
+    this.save()
+    this.emit('change')
+    if (this._dayChanged) {
+      this._dayChanged = false
+      this.emit('dateChanged', this.selectedDate)
+    }
+    for (const [type, payload] of fx) this.emit(type, payload)
+    this.flushPending()
+  }
+  // 動作做完、存檔之前：小鎮、成就、每日任務、每週任務達成了的事件一起收進 fx
+  _collect(fx) {
     this._townCheck(fx)
     this._projectTownCheck(fx)
     const got = this.state.player.achievements
@@ -784,14 +816,6 @@ export class Store {
     const wq = this.weekly()
     if (wq.ready && !wq.claimed && !this._weeklyReady) fx.push(['weeklyReady', wq])
     this._weeklyReady = wq.ready
-    this.save()
-    this.emit('change')
-    if (this._dayChanged) {
-      this._dayChanged = false
-      this.emit('dateChanged', this.selectedDate)
-    }
-    for (const [type, payload] of fx) this.emit(type, payload)
-    this.flushPending()
   }
   // 小鎮：建築長到比上次慶祝時更高的階段就發事件（一次長好幾階也只發一次），2 階起店長搬進來
   _townCheck(fx) {
@@ -1009,7 +1033,11 @@ export class Store {
     const created = []
     if (date < this.today) return created
     let have = null
-    for (const r of this.state.routines) {
+    // 跨過午夜的例行日程：前一天那一次的後半段在這一天。前一天沒打開過（還沒長出來）的話，那一次也補長出來
+    // （前半段已經過去了，跟後半段一起留著，是同一個日程），不然今天看不到、也不會提醒還沒結束的夜班
+    const yesterday = addDays(this.today, -1)
+    const days = (r) => (r.kind === 'event' && overnight(r.start, r.end) && addDays(date, -1) >= yesterday ? [addDays(date, -1), date] : [date])
+    for (const r of this.state.routines) for (const date of days(r)) {
       if (r.startDate > date || r.made[date] || !repeatMatches(r.repeat, date)) continue
       r.made[date] = true
       // 那一天的實例已經在了（日期倒退：搭飛機往西飛、改了時區）：不再生一份同 id 的
@@ -1146,7 +1174,8 @@ export class Store {
     if (done) {
       fx.push(['eventDone', e])
       if (!paid) {
-        this._grant(grantKey('e', e.link || e.id), () => {
+        // 帳上用整個日程第一段的 id：一台改成跨過午夜（多了一段、有了 link）再勾、另一台直接勾，還是同一筆
+        this._grant(grantKey('e', this.eventGroup(e)[0]?.id || e.id), () => {
           for (const x of all) x.rewarded = true
           this.stats.eventsDone++
           this.day().events++
@@ -1245,7 +1274,8 @@ export class Store {
   // 另一邊已經記過了（換成了那一版）就回傳 false，不再加一次
   // extra：加時（倒數到點後接著做的那幾分鐘）。只加專注的分鐘，不多算一顆番茄，經驗值照分鐘給
   completePomodoro(minutes, taskId = null, projectId = null, sid = null, { extra = false } = {}) {
-    if (sid && this.state.pomoSids.includes(sid)) return false
+    // 同一輪記過了（另一台、另一個分頁先記了；收回過的也不再記）：帳上的比最近 20 輪記得久
+    if (sid && (this.state.pomoSids.includes(sid) || (ID_RE.test(sid) && this.granted(grantKey('f', sid))))) return false
     // 分鐘數壞掉（NaN、負的）就當 0：一個 NaN 會讓經驗值、金平糖和統計整個變成 NaN，存檔後歸零
     minutes = Number.isFinite(+minutes) ? Math.min(600, Math.max(0, +minutes)) : 0
     if (ID_RE.test(sid)) this.state.pomoSids = [...this.state.pomoSids, sid].slice(-POMO_SIDS)
@@ -1388,6 +1418,7 @@ export class Store {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     if (newerData(obj)) throw new Error(NEWER_MSG)
     if (this.newerApp) throw new Error(NEWER_TAB_MSG)
+    const backups = snapBackups()
     if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error('瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份')
     // 存匯入的那一份時，剛留的備份不能被擠掉（擠不下就是存不進去：換回原本那一份、拿掉剛留的備份）
     this.keepBackups = 1
@@ -1398,7 +1429,8 @@ export class Store {
       this.keepBackups = 0
     }
     if (!ok) {
-      dropBackup(0)
+      // 沒換成：備份清單整份放回去（剛留的那一份拿掉，被它擠掉的最舊那一份放回來）
+      putBackups(backups)
       throw new Error(NO_SAVE_MSG)
     }
   }
@@ -1418,7 +1450,8 @@ export class Store {
   // soft：同步拉回的新資料（畫面就地更新，不重蓋小鎮、不移動鏡頭）
   // peer：另一個分頁剛存的那一版。它已經在存檔裡了：不寫回去，也不算這邊改了資料（不觸發同步）
   // 回傳有沒有寫進存檔（peer 本來就在存檔裡，算有）
-  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false } = {}) {
+  // settle：兩台合在一起的那一份（同步自動合併）：合起來才湊齊的落成、全清在寫進存檔之前補好，跟它一起寫一次（不會寫了一半）
+  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false, settle = false } = {}) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     if (newerData(obj)) throw new Error(NEWER_MSG)
     const next = migrate(obj)
@@ -1457,6 +1490,13 @@ export class Store {
     if (!peer) {
       this._applyCharms()
       this._quitMilestones(this._pending)
+    }
+    if (settle && !peer) {
+      const fx = this._settleFx()
+      if (fx.length) {
+        this._collect(fx)
+        this._pending.push(...fx)
+      }
     }
     let saved = true
     if (peer) {

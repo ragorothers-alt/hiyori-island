@@ -219,7 +219,7 @@ export const projectsMethods = {
     if (done) {
       fx.push(['milestoneDone', { project: p, milestone: m }])
       if (!m.rewarded) {
-        this._grant(grantKey('m', m.id), () => {
+        this._grant(grantKey('m', p.id, m.id), () => {
           m.rewarded = true
           this.stats.milestonesDone++
           this.day().milestones++

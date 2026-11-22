@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { recordsMethods } from '../src/ui/recordsPage.js'
+import { planCoachWeek } from '../src/ui/coach.js'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, planRules, askCoach, coachInput, fitAI, splitTotal } from '../src/coach.js'
 
@@ -175,6 +177,43 @@ describe('排程規則', () => {
   })
 })
 
+describe('排一週選到同名的主攻項目', () => {
+  const focus = [
+    { key: 'proj:a', project: 'a', ms: 'ma', label: '展覽', tag: 'work', milestone: '借場地' },
+    { key: 'proj:b', project: 'b', ms: 'mb', label: '展覽', tag: 'work', milestone: '印海報' },
+    { key: 'item:展覽（1）', label: '展覽（1）', tag: 'life' },
+  ]
+
+  it('本機排程的時段保留原名和各自的專案、里程碑', async () => {
+    const result = await planCoachWeek(req({ focus }))
+    expect(result.projects).toEqual({ 'proj:a': { id: 'a', ms: 'ma' }, 'proj:b': { id: 'b', ms: 'mb' } })
+    const items = all(result)
+    for (const f of focus) {
+      expect(items).toContainEqual(expect.objectContaining({
+        focusKey: f.key, label: f.label, title: expect.stringContaining(f.milestone || f.label),
+      }))
+    }
+    expect(items.filter((it) => it.label === '展覽').every((it) => it.title.startsWith('展覽・'))).toBe(true)
+  })
+
+  it('Claude 收到的截止日只指向選定專案，排回來的時段和說明顯示原名', async () => {
+    const ai = vi.fn(async (_, input) => {
+      const [a, b, custom] = input.focus.map((f) => f.label)
+      expect(new Set([a, b, custom]).size).toBe(3)
+      return {
+        days: [{ date: MON, items: [{ label: b, title: b + '・校對海報', at: '20:00', dur: 25 }] }],
+        notes: [`先把${b}的海報排好`],
+      }
+    })
+    const result = await planCoachWeek(req({ focus, exam: { title: '印刷截止', date: THU } }), ai, 'b')
+    const input = ai.mock.calls[0][1]
+    expect(input.exam.only).toBe(input.focus[1].label)
+    expect(result.ai).toBe(true)
+    expect(all(result)).toMatchObject([{ focusKey: 'proj:b', label: '展覽', title: '展覽・校對海報' }])
+    expect(result.notes).toContain('先把展覽的海報排好')
+  })
+})
+
 describe('交給 Claude 排', () => {
   const events = [{ id: 'e', date: '2026-10-27', start: '20:00', end: '21:00', title: '社團會議', done: false }]
   const tasks = [{ id: 't', date: '2026-10-28', at: '19:30', dur: 60, priority: 2, title: '寫週報', done: false }]
@@ -294,5 +333,32 @@ describe('總時數切段', () => {
       expect(sum(parts)).toBe(total)
     }
     expect(parseCoachText('數學 0.25小時', '2026-11-02').total).toBe(20)
+  })
+})
+
+describe('紀錄頁選備份檔', () => {
+  it.each(['成功', '失敗'])('先選的 A 晚讀完（%s），確認卡仍是 B，也不跳錯誤', async (result) => {
+    const input = {}
+    const card = { querySelector: () => ({ focus() {} }) }
+    const elements = { '#importInput': input, '#importCheck': card }
+    vi.stubGlobal('document', { querySelector: (s) => elements[s] ?? { addEventListener() {} } })
+    try {
+      const ui = { ...recordsMethods, _bindDex() {}, _bindReview() {}, store: { state: {} }, toast: vi.fn() }
+      ui._bindRecords()
+      const select = (name, text) => input.onchange({ target: { files: [{ name, text }] } })
+      const backup = JSON.stringify({ tasks: [], player: {} })
+      const slow = Promise.withResolvers()
+      const first = select('A.json', () => slow.promise)
+      await select('B.json', async () => backup)
+      if (result === '成功') slow.resolve(backup)
+      else slow.reject(new Error('讀不到檔案'))
+      await first
+
+      expect(card.hidden).toBe(false)
+      expect(card.innerHTML).toContain('要換成「B.json」嗎？')
+      expect(ui.toast).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
