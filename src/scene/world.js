@@ -4,9 +4,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
-import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js'
 import { FinalPass } from './postfx.js'
-import { tween, updateTweens, tweensActive, ease, reducedMotion, yieldToPage } from './util.js'
+import { tween, updateTweens, tweensActive, ease, reducedMotion } from './util.js'
 
 // 預設視角看的中心：島中心稍微上方
 const HOME_TARGET = new THREE.Vector3(0, 0.5, 0)
@@ -57,7 +56,6 @@ export class World {
     canvas.addEventListener('webglcontextlost', waitRestore)
     canvas.addEventListener('webglcontextrestored', () => {
       clearTimeout(lostTimer)
-      this._frameFence = null
       this.redraw()
     })
 
@@ -131,12 +129,6 @@ export class World {
     this._redraw = false
     this.renders = 0
     this._lastRender = 0
-    this._frameFence = null
-    this._cost = 0
-    this._gap = 16
-    this._prevT = 0
-    this._uiUntil = 0
-    this._uiFrames = 0
     this.busyUntil = 0
     this.shift = { x: 0, y: 0 }
     this.shiftTarget = { x: 0, y: 0 }
@@ -147,16 +139,6 @@ export class World {
     this.homeTarget = HOME_TARGET.clone()
 
     this._bindPointer(canvas)
-    // 畫不太動的機器（軟體 WebGL、很慢的顯示卡：畫格之間常常隔很久，或畫一幀就要很久）才讓；
-    // 一般的電腦一格十幾毫秒，讓了反而打字時小島一頓一頓的
-    const letPanelPaint = (e) => {
-      if (e.target === canvas || (this._gap < 28 && this._cost < 12)) return
-      this._uiUntil = performance.now() + 120
-      this._uiFrames = 2
-    }
-    for (const type of ['pointerdown', 'pointerup', 'click', 'keydown', 'input', 'wheel']) {
-      document.addEventListener(type, letPanelPaint, { capture: true, passive: true })
-    }
     addEventListener('resize', () => this.resize())
     this.resize()
     this.compose()
@@ -349,39 +331,29 @@ export class World {
     this.busyUntil = Math.max(this.busyUntil, performance.now() + ms)
   }
 
-  // 編譯跟第一次讀 shader 資料分開做。軟體 WebGL 即使有平行編譯，第一次讀也可能卡住。
-  // light：藏著的時候（App 模式）只編譯、趁瀏覽器有空檔傳貼圖，不逐支等、不試畫（不跟正在用的面板搶 CPU）
-  async precompile({ light = false } = {}) {
+  // 藏起來時先在背景把著色器編好、貼圖傳上 GPU：回到小島的第一幀才不會卡一下（回傳編好的時候）
+  precompile() {
+    if (this._compiled) return this._compiled
     const r = this.renderer
     // 場景是畫進 composer 的 render target（線性、不做色調映射），編譯時也要對著它，快取才對得上
     const prev = r.getRenderTarget()
     r.setRenderTarget(this.composer.readBuffer)
-    let done
-    try {
-      done = r.compileAsync(this.scene, this.camera)
-    } finally {
-      r.setRenderTarget(prev)
-    }
-    await done
-    if (light) return this._idleTextures()
-    const start = performance.now()
-    let work = 0
-    for (const program of [...(r.info.programs ?? [])]) {
-      if (this._started) return
-      const t = performance.now()
-      // three 的編譯完成不包含第一次查 uniforms / attributes；逐支做，別全塞進第一幀
-      program.getUniforms?.()
-      program.getAttributes?.()
-      work += performance.now() - t
-      await yieldToPage()
-    }
-    await this._uploadTextures()
-    if (!this._started && (work > 100 || performance.now() - start > 800)) await this._warmDraws()
+    const done = r.compileAsync(this.scene, this.camera)
+    r.setRenderTarget(prev)
+    this._compiled = done.then(() => this._uploadTextures()).catch(() => {})
+    return this._compiled
   }
-
   // 貼圖一次傳一張，等瀏覽器有空檔再傳下一張；已經回到小島就不用了（第一幀會一起傳）
-  _idleTextures() {
-    const left = [...this._textures()]
+  _uploadTextures() {
+    const list = new Set()
+    this.scene.traverse((o) => {
+      for (const m of [o.material].flat()) {
+        if (!m) continue
+        for (const v of Object.values(m)) if (v?.isTexture) list.add(v)
+        for (const u of Object.values(m.uniforms || {})) if (u?.value?.isTexture) list.add(u.value)
+      }
+    })
+    const left = [...list]
     const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 200))
     const next = (deadline) => {
       do {
@@ -392,98 +364,8 @@ export class World {
     }
     idle(next)
   }
-  _textures() {
-    const list = new Set()
-    this.scene.traverseVisible((o) => {
-      for (const m of [o.material].flat()) {
-        if (!m) continue
-        for (const v of Object.values(m)) if (v?.isTexture && v.image) list.add(v)
-        const uniforms = m.uniforms ?? this.renderer.properties.get(m).uniforms
-        for (const u of Object.values(uniforms || {})) if (u?.value?.isTexture && u.value.image) list.add(u.value)
-      }
-    })
-    return list
-  }
-
-  async _uploadTextures() {
-    for (const texture of this._textures()) {
-      if (this._started) return
-      this.renderer.initTexture(texture)
-      await yieldToPage()
-    }
-  }
-
-  // 在慢的 WebGL 上把陰影、後製和後來載到的貼圖也先分開畫過。暫用一張小貼圖，
-  // 每次只畫場景的一部分，但照用整座島的燈光；正式第一幀照原畫質一次畫完整座島。
-  async _warmDraws() {
-    const r = this.renderer
-    const scene = this.scene
-    const camera = this.camera
-    const target = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType })
-    const layer = 31
-    const draw = (fn) => {
-      const prev = r.getRenderTarget()
-      r.setRenderTarget(target)
-      try {
-        fn()
-      } finally {
-        r.setRenderTarget(prev)
-      }
-    }
-    try {
-      for (const root of [...scene.children]) {
-        if (this._started) return
-        if (!root.parent || !root.visible || root.isLight) continue
-        const objects = []
-        root.traverseVisible((o) => {
-          if (o.material && o.layers.test(camera.layers)) objects.push(o)
-        })
-        if (!objects.length) continue
-        const lights = []
-        scene.traverseVisible((o) => {
-          if (o.isLight && o.layers.test(camera.layers)) lights.push(o)
-        })
-        const enabled = [...objects, ...lights]
-        const masks = enabled.map((o) => o.layers.mask)
-        const mask = camera.layers.mask
-        for (const o of enabled) o.layers.enable(layer)
-        camera.layers.set(layer)
-        try {
-          draw(() => r.render(scene, camera))
-        } finally {
-          camera.layers.mask = mask
-          enabled.forEach((o, i) => (o.layers.mask = masks[i]))
-        }
-        await yieldToPage()
-      }
-      const b = this.bloom
-      const quad = new FullScreenQuad(b.materialHighPassFilter)
-      for (const m of [b.materialHighPassFilter, ...b.separableBlurMaterials, b.compositeMaterial, b.blendMaterial, this.final.material]) {
-        if (this._started) return
-        quad.material = m
-        draw(() => quad.render(r))
-        await yieldToPage()
-      }
-    } finally {
-      target.dispose()
-    }
-  }
-
-  // 前一幀還在算就別再塞一幀。軟體 WebGL 特別容易塞滿佇列，連面板的合成都會一起排隊
-  _gpuReady(gl) {
-    if (!this._frameFence) return !gl.isContextLost()
-    const status = gl.clientWaitSync(this._frameFence, 0, 0)
-    if (status === gl.TIMEOUT_EXPIRED) return false
-    gl.deleteSync(this._frameFence)
-    this._frameFence = null
-    return !gl.isContextLost()
-  }
 
   _frame(t) {
-    // 畫格之間隔了多久（平滑過）：切到背景再回來那一下不算
-    const gap = t - (this._prevT || t)
-    this._prevT = t
-    if (gap > 0 && gap < 1000) this._gap += (gap - this._gap) * 0.2
     if (this._covered && (this._hidden || !this._redraw)) {
       // dt 用實際經過的秒數：切換外觀時的天色快轉才會照真實時間跑完
       if (t - this._lastTick >= 500) {
@@ -492,17 +374,9 @@ export class World {
       }
       return
     }
-    // 讓面板先走完兩個畫格；光看毫秒的話，切到資料多的分頁可能還沒畫就遇到下一幀 3D
-    if (this._uiFrames) {
-      this._uiFrames--
-      return
-    }
     const level = this.idleLevel()
     const interval = [0, 1000 / 30, 1000 / 15][level]
     if (interval && t - this._lastRender < interval - 1) return
-    if (performance.now() < this._uiUntil) return
-    const gl = this.renderer.getContext()
-    if (!this._gpuReady(gl)) return
     this._redraw = false
     this._lastRender = t
     this.renders++
@@ -525,10 +399,7 @@ export class World {
     if (this.stage) this.stage.frame(dt, el)
     else this.controls.update(dt)
     this._applyLook()
-    const t0 = performance.now()
     this.composer.render()
-    this._cost = performance.now() - t0
-    this._frameFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
   }
 
   // 閒置時鏡頭在正面左右 ±SWAY 之間慢慢擺動：遠景、太陽都在島的後方，整圈轉到背面會只看到空蕩的一側。

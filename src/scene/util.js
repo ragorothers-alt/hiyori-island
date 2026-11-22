@@ -42,9 +42,6 @@ export function updateTweens(dt) {
 }
 export const wait = (sec) => new Promise((r) => tween(sec, () => {}, { onDone: r }))
 
-// 建小島的各段之間留空檔，讓瀏覽器先處理面板的輸入和畫面
-export const yieldToPage = () => globalThis.scheduler?.yield?.() ?? new Promise((resolve) => setTimeout(resolve, 0))
-
 // ── 雜湊 / 偽隨機 ──
 export function hash(str) {
   let h = 2166136261

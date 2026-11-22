@@ -481,12 +481,6 @@ export class Town {
     for (const b of BUILDINGS) this.set(b.key, stages[b.key] || 0, animate)
   }
 
-  async buildInitial(stages, pause) {
-    for (const b of BUILDINGS) {
-      if (this.set(b.key, stages[b.key] || 0)) await pause()
-    }
-  }
-
   // 把一座街區長到 stage 階；animate 時浮島從雲海升起、橋一路鋪過去、建築彈出來
   // 回傳 { found, at }（at 是建築頂端，放粒子用）；沒變化回傳 null
   set(key, stage, animate = false) {
