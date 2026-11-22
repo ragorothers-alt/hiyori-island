@@ -4,6 +4,9 @@
 import { asset, swVersion } from './builds.js'
 import { bootReady, cacheNames, checkUpdate, entryScript, expect, goOffline, swReady, test, useAppMode, viewsCached } from './fixtures.js'
 
+// 頁面用的是新版（b）的入口檔嗎：跟 b 版建置裡的檔名比（舊版的雜湊也可能剛好以 -b 結尾，不能只看結尾）
+const isNew = async (page) => (await entryScript(page)).endsWith(asset('b', /^index-[^.]*\.js$/))
+
 // 用 App 模式開舊版（a），等 Service Worker 接手、延後載入的畫面也收好
 async function openOld(page, context, site) {
   await useAppMode(context)
@@ -11,7 +14,7 @@ async function openOld(page, context, site) {
   await bootReady(page)
   await swReady(page)
   await viewsCached(page)
-  expect(await entryScript(page)).not.toContain('-b.js')
+  expect(await isNew(page)).toBe(false)
   // 重新整理過就會不見：用來分辨「還是同一個舊頁面」
   await page.evaluate(() => (window.__oldPage = true))
 }
@@ -42,7 +45,7 @@ test('部署了新版：舊頁面要載入新畫面時，自動重新整理換�
   await bootReady(page)
   expect(await page.evaluate(() => sessionStorage.getItem('e2e-saw-update-toast'))).toBe('1')
   expect(await page.evaluate(() => window.__oldPage)).toBeUndefined()
-  expect(await entryScript(page)).toContain('-b.js')
+  expect(await isNew(page)).toBe(true)
   // 換到新版後切回小島照常載得起來（軟體算圖建小島比較慢，給久一點）
   expect(await page.evaluate(() => window.hiyori.ui.setAppMode(false))).toBe(true)
   expect(await page.evaluate(() => window.hiyori.ui.appMode)).toBe(false)
@@ -67,7 +70,7 @@ test('部署了新版、手上有打到一半的字：不自動重新整理，�
   await act.click()
   await reloaded
   await bootReady(page)
-  expect(await entryScript(page)).toContain('-b.js')
+  expect(await isNew(page)).toBe(true)
 })
 
 test('新版有檔案下載不到：不裝新版，舊版和舊快取都留著，離線照樣打得開', async ({ page, context, site }) => {
@@ -82,7 +85,7 @@ test('新版有檔案下載不到：不裝新版，舊版和舊快取都留著�
   await goOffline(site, context)
   await page.reload()
   await bootReady(page)
-  expect(await entryScript(page)).not.toContain('-b.js')
+  expect(await isNew(page)).toBe(false)
   await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
   await expect(page.locator('#taskTitle')).toBeVisible()
   await page.locator('body').press('c')

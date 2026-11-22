@@ -921,66 +921,81 @@ export class UI {
 
   // ── 返回鍵（瀏覽器的上一頁、Android 的返回鍵、滑鼠的上一頁鍵）：先關最上面那一層（對話框、找找看、快速記錄、
   // 編輯面板、今日摘要、專注頁、商店、日曆），再從專案的任務頁回到專案、從專案回到列表；都沒有了才真的離開 App。
-  // 每打開一層記一筆瀏覽紀錄；自己按 × 或 Esc 關掉的那一層，把它那一筆收回來（收的時候發的 popstate 不再關一次）
+  // 開著幾層（_backDepth）就記著幾筆瀏覽紀錄，每一筆的 state 寫著它是第幾層（{ hiyori: n }），現在退到第幾層直接讀 history.state，
+  // 不靠自己數（連續開關好幾層、退的那一下還在路上時數會錯，退過頭就離開 App 了）。
+  // 開了一層：補到一樣多；自己按 × 或 Esc 關掉的：退回一樣多（一次退完，收到 popstate 之前不再補）；
+  // 按了返回鍵（popstate、不是自己退的）：多出來的那幾層一層一層關，關不掉的（擋著）把紀錄補回去
   _bindBack() {
-    this._hist = 0 // 現在記著幾筆
-    this._skip = 0 // 自己收回去的，等一下會收到的 popstate
-    this._popClose = 0 // 返回鍵關掉的那幾層：關的時候不用再收一筆
+    this._going = false
+    const stateDepth = () => (Number.isInteger(history.state?.hiyori) && history.state.hiyori > 0 ? history.state.hiyori : 0)
+    this._stateDepth = stateDepth
     addEventListener('popstate', () => {
-      if (this._skip > 0) return void this._skip--
-      if (this._hist <= 0) return
-      this._hist--
-      this._goBack()
-    })
-    const layers = [...$$('.modal'), $('#focusFull'), $('#shop'), $('#focusPick'), $('#focusSet'), $('#brief'), $('#calendar'), $('#placeBar')].filter(Boolean)
-    const open = new Set(layers.filter((el) => !el.hidden))
-    for (const el of open) this._pushBack()
-    new MutationObserver(() => {
-      for (const el of layers) {
-        if (!el.hidden && !open.has(el)) {
-          open.add(el)
-          this._pushBack()
-        } else if (el.hidden && open.has(el)) {
-          open.delete(el)
-          if (this._popClose > 0) this._popClose--
-          else this._dropBack()
+      if (this._going) {
+        this._going = false
+        clearTimeout(this._goingT)
+      } else {
+        const have = stateDepth()
+        for (let n = this._backDepth(); n > have; ) {
+          this._backOne()
+          const m = this._backDepth()
+          if (m >= n) break
+          n = m
         }
       }
-    }).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true })
+      this._syncBack()
+    })
+    // 重新整理之前開著的那幾層已經不在了：這一筆當成最底下那一層
+    if (stateDepth() > this._backDepth()) {
+      try {
+        history.replaceState({ hiyori: 0 }, '')
+      } catch {}
+    }
+    this._syncBack()
+    // 哪一層打開、關掉（hidden 換了）、按了什麼（專案、任務頁開關）之後：對一下紀錄跟開著的層數
+    new MutationObserver(() => this._syncBackSoon()).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true })
+    // （點了、按了之後：等這一下的處理都跑完再對，不然對到的是打開之前的樣子）
+    for (const ev of ['click', 'keyup']) document.addEventListener(ev, () => setTimeout(() => this._syncBack()), true)
   }
-  _pushBack() {
+  // 現在開著幾層（跟 _topLayer 看的一樣），加上專案（看著專案頁時：專案 1 層、任務頁再 1 層）
+  _backDepth() {
+    const layers = [...$$('.modal').filter((m) => !m.hidden), ...[$('#placeBar'), $('#focusSet'), $('#focusPick'), $('#focusFull'), $('#shop')].filter((el) => el && !el.hidden)]
+    let n = layers.length + (this.brief?.open ? 1 : 0) + (this._calendar?.view?.isOpen ? 1 : 0)
+    const pv = this._project?.view
+    if (this.tab === 'projects' && pv?.id) n += pv.taskId ? 2 : 1
+    return n
+  }
+  _syncBackSoon() {
+    if (this._backQueued) return
+    this._backQueued = true
+    queueMicrotask(() => {
+      this._backQueued = false
+      this._syncBack()
+    })
+  }
+  _syncBack() {
+    if (this._going || !this._stateDepth) return
+    const want = this._backDepth()
+    const have = this._stateDepth()
     try {
-      history.pushState({ hiyori: Date.now() }, '')
-      this._hist++
-    } catch {}
-  }
-  _dropBack() {
-    if (this._hist <= 0) return
-    this._hist--
-    this._skip++
-    history.back()
-  }
-  // 按了返回鍵：關一層（那一層關掉時不再收一筆，紀錄已經退掉了）
-  _goBack() {
-    const top = this._topLayer()
-    if (top) {
-      this._popClose++
-      this._closeTop()
-      // 關不掉（例如正在做的動作擋著）：補回那一筆，下次再按
-      if (!top.hidden) {
-        this._popClose--
-        this._pushBack()
+      if (want > have) for (let n = have + 1; n <= want; n++) history.pushState({ hiyori: n }, '')
+      else if (want < have) {
+        this._going = true
+        // 一直沒收到 popstate（瀏覽器擋了）：不要卡住，之後照現在的再對一次
+        this._goingT = setTimeout(() => {
+          this._going = false
+          this._syncBack()
+        }, 1500)
+        history.go(want - have)
       }
-      return
+    } catch {
+      this._going = false
     }
+  }
+  // 按了返回鍵：關最上面那一層；都沒有的話，專案的任務頁回到專案、專案回到列表
+  _backOne() {
+    if (this._topLayer()) return void this._closeTop()
     const pv = this._project.view
-    if (this.tab === 'projects' && pv?.id) {
-      this._projPop = true
-      // 在任務頁：回到專案（專案還開著，那一筆補回去）；在專案：回到列表
-      if (pv.closeTask()) this._pushBack()
-      else this.closeProject()
-      this._projPop = false
-    }
+    if (this.tab === 'projects' && pv?.id && !pv.closeTask()) this.closeProject()
   }
   // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）。
   // 浮在最上面的提示卡（例如限時去的「我回來了」）也轉得到：排在這一層的後面（在第一顆按 Shift+Tab 就到）
@@ -2917,12 +2932,9 @@ export class UI {
   // taskId：直接打開那件任務的頁面；write：游標放在「寫紀錄」的框裡
   openProject(id, sec, taskId = null, write = false) {
     if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId, write))
-    // 從列表打開（不是從一個專案換到另一個）：記一筆，返回鍵回到列表
-    if (!this._project.view.id && !this._projEntry) {
-      this._projEntry = true
-      this._pushBack()
-    }
+    // 返回鍵回到列表（記一筆瀏覽紀錄：_syncBack）
     this._project.view.open(id, sec, taskId)
+    this._syncBackSoon()
     this._stale?.add('projects')
     if (this.tab === 'projects') this._renderPage('projects')
     else this.setTab('projects')
@@ -2940,11 +2952,8 @@ export class UI {
     const pv = this._project.view
     if (!pv) return
     const id = pv.id
-    if (this._projEntry) {
-      this._projEntry = false
-      if (!this._projPop) this._dropBack()
-    }
     pv.close()
+    this._syncBackSoon()
     // 回到列表：剛剛動過的專案排到前面
     this._projRank = null
     this._stale?.add('projects')

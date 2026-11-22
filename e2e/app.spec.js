@@ -5410,6 +5410,24 @@ test('返回鍵：先關最上面那一層（找找看、快速記錄打到一�
   await expect(page.locator('#projectDetail')).toBeHidden()
   await expect(page.locator('#projectList')).toContainText('返回測試')
   expect(page.url()).toBe(url)
+  // 一口氣開關好幾層（打開專注頁、縮小、打開計時設定再關掉；退的那一下還在路上又開了一層）：紀錄跟著對好，不會退過頭離開 App
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.toggle()
+    f.toggleBig(false)
+    f.toggleSet(true)
+    f.toggleSet(false)
+  })
+  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(0)
+  await page.waitForTimeout(300)
+  expect(await page.evaluate(() => !!window.hiyori?.ui)).toBe(true)
+  expect(page.url()).toBe(url)
+  // 再開一層、按返回：關掉的是那一層，還在 App 裡
+  await page.evaluate(() => window.hiyori.ui.openSearch())
+  await expect(page.locator('#search')).toBeVisible()
+  await back()
+  await expect(page.locator('#search')).toBeHidden()
+  expect(await page.evaluate(() => !!window.hiyori?.ui)).toBe(true)
 })
 
 test('沒接 Claude 的ふじ：除了設定通行碼，也有現在就能用的「排一週的主攻時段」「把今天的任務排進空檔」', async ({ page, context, site }) => {
