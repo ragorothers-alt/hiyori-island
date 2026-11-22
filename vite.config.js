@@ -25,7 +25,9 @@ const swVersion = () => {
       entry = Object.values(bundle).find((c) => c.type === 'chunk' && c.isEntry && c.facadeModuleId?.endsWith('/index.html'))?.fileName || Object.values(bundle).find((c) => c.type === 'chunk' && c.isEntry)?.fileName || ''
       dir = options.dir || dir
     },
-    closeBundle() {
+    closeBundle(err) {
+      // 建置失敗（沒有產出）：不填，讓真正的錯誤顯示出來
+      if (err || !files.length) return
       const file = join(dir, 'sw.js')
       const hash = createHash('sha256')
       for (const f of walk(dir)) hash.update(`${f}\n`).update(readFileSync(join(dir, f))).update('\n')
