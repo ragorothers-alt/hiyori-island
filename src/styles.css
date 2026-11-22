@@ -113,7 +113,7 @@ body.night {
   transition: opacity .9s var(--ease), visibility .9s;
   font-family: var(--font-display); color: var(--ink-soft); letter-spacing: .2em;
 }
-#loader.done { opacity: 0; visibility: hidden; pointer-events: none; }
+#loader.done { opacity: 0; visibility: hidden; }
 body.night #loader { background: linear-gradient(180deg, #192147, #283667 70%, #3a3f72); }
 .loader-mochi {
   width: 74px; height: 58px; border-radius: 50% 50% 46% 46% / 60% 60% 40% 40%;
