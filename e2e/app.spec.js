@@ -1030,8 +1030,8 @@ test('番茄鐘：到點了還沒做完可以延長（從到點那時接著正�
   await expect(page.locator('#ffRounds i.done')).toHaveCount(1)
   await expect(page.locator('#ffSub')).toHaveText(/^\d\d:\d\d 接著第 2 輪$/)
   await skip(6 * 60000)
-  // 自動接下一輪時說一聲（這張提示卡不會被「開始了」收掉）：先看提示卡，機器很忙時下面幾步就超過它留著的時間
-  await expect(page.locator('#toasts .toast', { hasText: '第 2/2 輪開始了' })).toBeVisible()
+  // 自動接下一輪時說一聲（這張提示卡不會被「開始了」收掉）：看出現過的提示卡（只留幾秒，機器很忙時輪詢可能剛好錯過）
+  await toastSeen(page, '第 2/2 輪開始了')
   await expect.poll(async () => (await state()).mode).toBe('focus')
   expect(await state()).toMatchObject({ round: 2, rounds: 2, ext: false, up: false })
   await skip(26 * 60000)
