@@ -3003,6 +3003,39 @@ describe('跨過午夜的日程', () => {
   })
 })
 
+describe('例行公事、日程的長標題和備註', () => {
+  it('例行公事標題超過 80 字：標題留前面一段、完整的放進備註，每一次長出來的都帶著；讀存檔也還在', () => {
+    const long = '每天早上整理前一天的會議紀錄，' + '把待辦拆成可以馬上做的小步驟、寄給負責的人並且約好下次確認的時間'.repeat(4)
+    expect(long.length).toBeGreaterThan(120)
+    const r = store.addRoutine({ kind: 'task', title: long, repeat: { type: 'daily' }, date: TODAY })
+    expect(r.title.length).toBeLessThanOrEqual(80)
+    expect(r.title.endsWith('…')).toBe(true)
+    expect(r.note).toBe(long)
+    const inst = store.state.tasks.find((t) => t.routineId === r.id && t.date === TODAY)
+    expect(inst).toMatchObject({ title: r.title, note: long })
+    const ev = store.addRoutine({ kind: 'event', title: long, repeat: { type: 'daily' }, start: '08:00', end: '08:30', date: TODAY })
+    expect(store.state.events.find((e) => e.routineId === ev.id && e.date === TODAY)).toMatchObject({ title: ev.title, note: long })
+    store.flushSave()
+    const again = new Store()
+    expect(again.state.routines.find((x) => x.id === r.id)).toMatchObject({ title: r.title, note: long })
+    again._ensureRoutines(addDays(TODAY, 1))
+    expect(again.state.tasks.find((t) => t.routineId === r.id && t.date === addDays(TODAY, 1))?.note).toBe(long)
+    // 短的照舊沒有備註
+    const short = store.addRoutine({ kind: 'task', title: '背單字', repeat: { type: 'daily' }, date: TODAY })
+    expect(short.note).toBeUndefined()
+    expect(store.state.tasks.find((t) => t.routineId === short.id).note).toBe('')
+  })
+
+  it('日程的備註跟任務一樣可以寫 500 字（以前只留 200 字）', () => {
+    const note = '帶的東西：'.padEnd(300, '筆')
+    const e = store.addEvent({ title: '說明會', date: TODAY, start: '14:00', end: '15:00', note })
+    expect(e.note).toBe(note)
+    store.updateEvent(e.id, { note: note + '還有水壺' })
+    store.flushSave()
+    expect(new Store().state.events.find((x) => x.id === e.id).note).toBe(note + '還有水壺')
+  })
+})
+
 describe('改開始時結束跟著挪（shiftEnd：store、日程面板、輸入列共用）', () => {
   it('長度不變；23:59 結束的算到午夜；挪過午夜接到隔天，超過 16 小時的截到 23:59；沒有長度的補一小時', () => {
     expect(shiftEnd('09:00', '10:30', '13:00')).toBe('14:30')

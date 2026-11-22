@@ -9,7 +9,7 @@ import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM, CAT_MOTTOS } from './theme.js'
 import { MOTTO_EVERY } from './mottos.js'
 import { isEvent, CHEERS } from './events.js'
 import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE, LINEAGE_MAX } from './store/migrate.js'
-import { projectProgress, progressAll } from './projects.js'
+import { projectProgress, progressAll, PROJECT_LIMITS as PL } from './projects.js'
 import { bondLevel, BOND_POINTS, actLevel, outfitOf, outfitLevel, giftCoins } from './data/bond.js'
 import { townOf, townChanges } from './data/town.js'
 import { flowerOf, COMMON_BY_TAG } from './data/flowers.js'
@@ -1016,13 +1016,13 @@ export class Store {
       have ??= new Set([...this.state.tasks, ...this.state.events].map((x) => x.id))
       if (have.has(instanceId(r, date))) continue
       if (r.kind === 'task') {
-        const t = blankTask({ id: instanceId(r, date), title: r.title, date, priority: r.priority, tag: r.tag, routineId: r.id })
+        const t = blankTask({ id: instanceId(r, date), title: r.title, date, priority: r.priority, tag: r.tag, routineId: r.id, ...(r.note ? { note: r.note } : {}) })
         this.state.tasks.push(t)
         created.push(t)
       } else {
         // 跨過午夜的：那天到 23:59、隔天 00:00 起兩段（link 一樣，跟單次的日程一樣是同一個日程）
         const [a, b] = routineSpan(r, date)
-        const e = { id: instanceId(r, date), title: r.title, date, start: a.start, end: a.end, color: r.color, done: false, rewarded: false, routineId: r.id }
+        const e = { id: instanceId(r, date), title: r.title, date, start: a.start, end: a.end, color: r.color, done: false, rewarded: false, routineId: r.id, ...(r.note ? { note: r.note } : {}) }
         if (b) e.link = e.id
         this.state.events.push(e)
         created.push(e)
@@ -1037,9 +1037,12 @@ export class Store {
   routineOf(item) {
     return item?.routineId ? this.state.routines.find((r) => r.id === item.routineId) : null
   }
-  addRoutine({ kind = 'task', title, repeat, priority = 2, tag = 'life', start = '09:00', end = '10:00', color = 0, date = this.selectedDate }) {
-    title = title.trim()
-    if (!title || !REPEAT_TYPES.includes(repeat?.type)) return null
+  // 標題太長（超過 80 字）跟單次的一樣：標題留前面一段，完整的放進備註；每一次長出來的都帶著這份備註
+  addRoutine({ kind = 'task', title, repeat, priority = 2, tag = 'life', start = '09:00', end = '10:00', color = 0, date = this.selectedDate, note = '' }) {
+    if (!String(title || '').trim() || !REPEAT_TYPES.includes(repeat?.type)) return null
+    const name = longTitle(title)
+    title = name.title
+    note = [name.note, String(note || '').trim()].filter(Boolean).join('\n').slice(0, PL.taskNote)
     const days = repeat.type === 'weekly' ? (repeat.days?.length ? repeat.days : [parseDate(date).getDay()]) : []
     // 每月幾號：沒給就是開始那天的日期
     const day = repeat.type === 'monthly' ? Math.min(31, Math.max(1, Math.round(repeat.day) || parseDate(date).getDate())) : 0
@@ -1047,7 +1050,7 @@ export class Store {
     if (!(kind === 'event' && overnight(start, end)) && toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const r = {
       id: uid(), kind, title, repeat: day ? { type: repeat.type, days, day } : { type: repeat.type, days }, priority, tag, start, end, color,
-      startDate: date < this.today ? this.today : date, made: {}, createdAt: Date.now(),
+      startDate: date < this.today ? this.today : date, made: {}, createdAt: Date.now(), ...(note ? { note } : {}),
     }
     this.state.routines.push(r)
     const fx = [['routineAdded', r]]
@@ -1077,7 +1080,7 @@ export class Store {
     if (allDay) [start, end] = ['00:00', '23:59']
     else if (!over && toMin(end) <= toMin(start)) end = start === '23:30' ? '23:59' : minToHHMM(Math.min(toMin(start) + 60, 1439))
     const e = {
-      id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false, note: String(note || '').trim().slice(0, 200),
+      id: uid(), title: title.trim(), date, start, end, color, done: false, rewarded: false, note: String(note || '').trim().slice(0, PL.taskNote),
       allDay: !!allDay, endDate: allDay ? allDayEnd(endDate, date) : '',
     }
     this.state.events.push(e)

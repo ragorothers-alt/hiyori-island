@@ -234,9 +234,9 @@ const emptied = (kind, ent, p) =>
 // 例行公事長出來的那幾天：自己動過的有幾件（做完、改名、寫備註、排了時間、拆子任務、專注過、挪到別天、改了時段…）
 const born = (r, x) => r.id.length > 29 || x.id === `${r.id}-${x.date}`
 const usedTask = (r, t) =>
-  t.done || t.title !== r.title || !!t.note || !!t.subs?.length || !!t.at || !!t.dur || !!t.star || !!t.first || !!t.pomos || !!t.project ||
+  t.done || t.title !== r.title || (t.note || '') !== (r.note || '') || !!t.subs?.length || !!t.at || !!t.dur || !!t.star || !!t.first || !!t.pomos || !!t.project ||
   !!t.tempo || !!t.touched || !!t.moved || t.priority !== r.priority || t.tag !== r.tag || !born(r, t)
-const usedEvent = (r, e) => e.done || e.title !== r.title || !!e.note || e.start !== r.start || e.end !== r.end || e.color !== r.color || !born(r, e)
+const usedEvent = (r, e) => e.done || e.title !== r.title || (e.note || '') !== (r.note || '') || e.start !== r.start || e.end !== r.end || e.color !== r.color || !born(r, e)
 const usedDays = (s, r) => s.state.tasks.filter((t) => t.routineId === r.id && usedTask(r, t)).length + s.state.events.filter((e) => e.routineId === r.id && usedEvent(r, e)).length
 // 新增的那一筆現在的樣子（撤銷時還是這個樣子才刪：之後改過、用過的留著）。能改的欄位全部算進去
 const SIG = {
@@ -303,7 +303,7 @@ const CREATE = {
     const start = c.start || '09:00'
     // 結束比開始早（跨過午夜）交給 addRoutine（每一次都是兩段，快速記錄、日程頁也是）；沒給的補一小時
     const end = c.end || minToHHMM(Math.min(toMin(start) + 60, 1439))
-    const r = s.addRoutine({ kind: ev ? 'event' : 'task', title: c.title.slice(0, 120), repeat, tag: c.fields.tag || 'life', priority: c.fields.priority || 2, start, end, date: c.date && c.date >= s.today ? c.date : s.today })
+    const r = s.addRoutine({ kind: ev ? 'event' : 'task', title: c.title, repeat, tag: c.fields.tag || 'life', priority: c.fields.priority || 2, start, end, date: c.date && c.date >= s.today ? c.date : s.today })
     if (!r) return null
     return { ref: { kind: 'routine', id: r.id }, ent: r, text: `新增例行${ev ? '日程' : '任務'}「${short(r.title)}」（${repeatWord(r.repeat)}${ev ? ` ${r.start}` : ''}）` }
   },

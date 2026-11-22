@@ -228,7 +228,7 @@ const EVENT_PATCH = {
   start: (v, e) => (TIME_RE.test(v) ? v : e.start),
   end: (v, e) => (TIME_RE.test(v) ? v : e.end),
   color: (v, e) => num(v, 0, 99, e.color),
-  note: (v) => str(v, 200),
+  note: (v) => str(v, PL.taskNote),
   allDay: (v) => !!v,
   endDate: (v) => (DATE_RE.test(v) ? v : ''),
 }
@@ -694,7 +694,7 @@ function migrate(s) {
     const allDay = !!e.allDay && !ID_RE.test(e.routineId)
     return {
       id: str(e.id), title, date, start: allDay ? '00:00' : start, end: allDay ? '23:59' : end, color: num(e.color, 0, 99, 0), done, rewarded: !!e.rewarded || done,
-      routineId: ID_RE.test(e.routineId) ? e.routineId : null, note: str(e.note, 200),
+      routineId: ID_RE.test(e.routineId) ? e.routineId : null, note: str(e.note, PL.taskNote),
       allDay, endDate: allDay ? allDayEnd(e.endDate, date) : '',
       // 跨過午夜存成的幾段（store.js 的 _pieces）：一樣的 link
       ...(!allDay && ID_RE.test(e.link) ? { link: e.link } : {}),
@@ -719,6 +719,7 @@ function migrate(s) {
       id: str(r.id), kind: r.kind === 'event' ? 'event' : 'task', title, repeat: day ? { type, days, day } : { type, days },
       priority: num(r.priority, 1, 3, 2), tag: tags.has(r.tag) ? r.tag : 'life', start, end, color: num(r.color, 0, 99, 0),
       startDate: ymd(r.startDate, today), made, createdAt: ts(r.createdAt) || Date.now(),
+      ...(typeof r.note === 'string' && r.note.trim() ? { note: str(r.note, PL.taskNote) } : {}),
     }
   })
   const projects = cleanList(s.projects, (p) => {

@@ -3,7 +3,7 @@ import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn, keepFocus } from './
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
 import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey, floating, overnight, shiftEnd } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes, SPLIT_MIN } from '../planner.js'
-import { taskMilestone } from '../projects.js'
+import { taskMilestone, PROJECT_LIMITS as PL } from '../projects.js'
 import { haptic } from './haptics.js'
 import { isExternal } from '../calendars.js'
 
@@ -415,7 +415,7 @@ export class ScheduleView {
         <small class="hint ec-over" aria-live="polite" hidden></small>
         ${routine ? '' : `<div class="form-row"><button type="button" class="chip-toggle${ad ? ' on' : ''}" data-allday aria-pressed="${ad}" title="沒有時段的日程，例如朋友來玩、旅行（可以好幾天）">整天</button></div>`}
         <div class="swatches ec-colors">${swatches}</div>
-        <textarea name="note" maxlength="200" rows="2" placeholder="備註：地點、要帶的東西…" aria-label="備註">${esc(item.note || '')}</textarea>`
+        <textarea name="note" maxlength="${PL.taskNote}" rows="2" placeholder="備註：地點、要帶的東西…" aria-label="備註">${esc(item.note || '')}</textarea>`
       : `<div class="form-row ec-long"${item.project ? '' : ' hidden'}><button type="button" class="chip-toggle${ed.ongoing ? ' on' : ''}" data-long aria-pressed="${ed.ongoing}" title="不排在哪一天：不會逾期、不出現在每天的任務裡，只待在專案；完成那天才開花">長期</button><small class="ec-long-tip">不排日期，只待在專案裡（例如一首練習曲）</small></div>
         <div class="ec-grid"${ed.ongoing ? ' hidden' : ''}>
           <label>日期<input type="date" name="date" value="${item.date}" required></label>
