@@ -137,6 +137,13 @@ const fnv = (str, seed) => {
   return h.toString(36)
 }
 export const routineInstanceId = (r, date) => (r.id.length <= 29 ? `${r.id}-${date}` : `r${fnv(r.id, 2166136261)}${fnv(r.id, 5381)}-${date}`)
+// 跨過午夜的例行日程那一天的第二段（隔天 00:00 起）：每台算出來都一樣的 id（兩台各自長出來的會是同一筆）
+export const routineNextId = (r, date) => routineInstanceId({ id: `${r.id}-n` }, date)
+// 例行日程在 date 那一次的幾段：跨過午夜的是那天到 23:59、隔天 00:00 起兩段（跟單次的日程一樣），其他是一段
+export function routineSpan(r, date) {
+  if (r.kind !== 'event' || !overnight(r.start, r.end)) return [{ date, start: r.start, end: r.end }]
+  return [{ date, start: r.start, end: '23:59' }, ...(toMin(r.end) > 0 ? [{ date: addDays(date, 1), start: '00:00', end: r.end }] : [])]
+}
 
 // ── 日程的時段（store、日程面板、日程頁的輸入列共用同一套規則）──
 // 跨過午夜最長幾分鐘：結束比開始早、加起來不超過 16 小時（23:30–00:30、22:00–06:00）才當成隔天結束；

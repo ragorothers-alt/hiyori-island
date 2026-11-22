@@ -3,6 +3,7 @@ import { uid, addDays, daysBetween, dateStr } from './util.js'
 import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS, XP, pullOf } from '../theme.js'
+import { grantKey } from './grants.js'
 
 // 回神紀錄：這台算過哪幾則提醒（那一則的時間 → 'n' 算了提醒、'a' 也算了回應），照記下的先後只留最近的 TALLY_KEEP 則
 // （不照提醒的時間排：時鐘被往回調過的話，剛記的那一則會被當成最舊的丟掉）。
@@ -334,10 +335,13 @@ export const extrasMethods = {
   focusHold(pull = null) {
     this._refreshToday()
     const d = this.day()
-    d.holds = (d.holds || 0) + 1
-    this.stats.urgesResisted++
-    const fx = [['focusHeld', { count: d.holds, pull: this._notePull(d, pull) ? pull : null }]]
-    if (d.holds <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
+    const fx = []
+    this._grant(grantKey('fh', uid()), () => {
+      d.holds = (d.holds || 0) + 1
+      this.stats.urgesResisted++
+      fx.push(['focusHeld', { count: d.holds, pull: this._notePull(d, pull) ? pull : null }])
+      if (d.holds <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
+    })
     this._finish(fx)
     return d.holds
   },
@@ -356,9 +360,12 @@ export const extrasMethods = {
   focusReturned({ late = false, auto = false } = {}) {
     this._refreshToday()
     const d = this.day()
-    d.returns = (d.returns || 0) + 1
-    const fx = [['focusReturned', { count: d.returns, late: !!late, auto: !!auto }]]
-    if (d.returns <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
+    const fx = []
+    this._grant(grantKey('fr', uid()), () => {
+      d.returns = (d.returns || 0) + 1
+      fx.push(['focusReturned', { count: d.returns, late: !!late, auto: !!auto }])
+      if (d.returns <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: null })
+    })
     this._finish(fx)
     return d.returns
   },

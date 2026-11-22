@@ -955,9 +955,19 @@ async function boot() {
       // 還想繼續：照剛才的長度和目標直接再來一輪
       ui.toast({ icon: '風', title: '休息結束', sub: '準備好了就再開始一輪吧', ms: 12000, tag: 'focus', actions: [{ label: '再來一輪', run: () => ui.focus.again() }] })
     },
-    focusStopped: () => {
+    // part：倒數到一半提早結束時已經做了的 { minutes, taskId, projectId, sid }：記下（只記分鐘、不算一顆番茄），可以「不算這段」
+    focusStopped: (part = null) => {
       ui.dropToasts('focus')
       scene?.focusStopped()
+      if (part?.minutes >= 1 && part.sid && store.completePomodoro(part.minutes, part.taskId, part.projectId, part.sid, { extra: true }) !== false) {
+        const t = part.taskId && store.state.tasks.find((x) => x.id === part.taskId)
+        ui.toast({
+          icon: '灯', title: `提早結束，做了的 ${part.minutes} 分鐘記下了`, sub: `${t ? `「${short(t.title, 10)}」・` : ''}算進今天的專注時間（不算一顆番茄）`, ms: 9000, tag: 'focus',
+          actions: [{ label: '不算這段', soft: true, run: () => store.undoPomodoro(part.sid) && ui.toast({ icon: '灯', title: `那 ${part.minutes} 分鐘不算了`, tag: 'focus' }) }],
+        })
+        say('fuji', '先停在這裡也好，做了的都算數。')
+        return
+      }
       say('fuji', '沒關係，下次再一起專注。')
     },
     // 計時結束很久以後才回來（關掉頁面、手機鎖著）：不照全長記進今天

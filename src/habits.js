@@ -38,7 +38,12 @@ export const HABIT_TEMPLATES = [
 export const startOf = (h) => h.start || ds(new Date(h.createdAt || Date.now()))
 export const applies = (h, date) => date >= startOf(h) && (!h.days?.length || h.days.includes(pd(date).getDay()))
 export const countOn = (h, date) => h.log?.[date] || 0
-export const doneOn = (h, date) => countOn(h, date) >= (h.target || 1)
+// 那一天的每日目標：改過目標的話，改之前的日子照當時的目標（targets：[{ to: 改的那天, target: 之前的目標 }]，舊的在前）
+export function targetOn(h, date) {
+  for (const x of Array.isArray(h.targets) ? h.targets : []) if (date < x.to) return x.target || 1
+  return h.target || 1
+}
+export const doneOn = (h, date) => countOn(h, date) >= targetOn(h, date)
 
 // 養成：連續天數。今天還沒打卡不算中斷（從昨天往回數）；不用做的星期跳過
 export function streak(h, today) {
@@ -110,7 +115,7 @@ export function heat(h, today, weeks = 12) {
     let v = null
     if (date > today || date < startOf(h)) v = null
     else if (h.kind === 'quit') v = slippedOn(h, date) ? 'slip' : h.urges?.[date] ? 'urge' : 1
-    else if (applies(h, date)) v = Math.min(1, countOn(h, date) / (h.target || 1))
+    else if (applies(h, date)) v = Math.min(1, countOn(h, date) / targetOn(h, date))
     cells.push({ date, v })
   }
   return cells

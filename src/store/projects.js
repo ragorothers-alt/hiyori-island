@@ -4,6 +4,7 @@ import { MAX_PROJECTS, XP } from '../theme.js'
 import { uid } from './util.js'
 import { DATE_RE, ms, projectDetails, cleanPatch, PROJECT_PATCH } from './migrate.js'
 import { PROJECT_LIMITS as PL, taskMilestone } from '../projects.js'
+import { grantKey } from './grants.js'
 export const projectsMethods = {
   // ── 專案町 ──
   // 努力和需求取大的：沒收藏的專案每個都有一塊地，小鎮長到放得下為止，而且不會縮回去
@@ -176,16 +177,30 @@ export const projectsMethods = {
     if (!p.milestones.length || p.completedAt || !p.milestones.every((m) => m.done)) return
     p.completedAt = Date.now()
     p.pausedAt = null
-    this.stats.projectsDone++
-    this._gain(XP.project, fx, { kind: 'project', id: p.id })
+    // 落成的獎勵每個專案只給一次（重開之後再落成不再給）
+    const paid = !!p.paid
+    p.paid = true
+    if (paid) return
+    this._grant(grantKey('p', p.id), () => {
+      this.stats.projectsDone++
+      this._gain(XP.project, fx, { kind: 'project', id: p.id })
+    })
     fx.push(['projectDone', p])
     // 在期限當天或之前落成：額外獎勵
     if (p.deadline && this.today <= p.deadline) {
       p.onTime = true
-      this.stats.projectsOnTime++
-      this._gain(XP.onTime, fx, { kind: 'onTime', id: p.id })
+      this._grant(grantKey('po', p.id), () => {
+        this.stats.projectsOnTime++
+        this._gain(XP.onTime, fx, { kind: 'onTime', id: p.id })
+      })
       fx.push(['projectOnTime', p])
     }
+  },
+  // 里程碑又取消了（全勾了又取消一個）：專案回到進行中（落成的獎勵不收回、之後再落成也不再給、不再慶祝一次；
+  // 「準時落成」留著第一次落成時的樣子）
+  _reopenProject(p) {
+    if (!p.completedAt || p.milestones.every((m) => m.done)) return
+    p.completedAt = null
   },
   toggleMilestone(pid, mid) {
     const p = this._find('projects', pid)
@@ -204,14 +219,17 @@ export const projectsMethods = {
     if (done) {
       fx.push(['milestoneDone', { project: p, milestone: m }])
       if (!m.rewarded) {
-        m.rewarded = true
-        this.stats.milestonesDone++
-        this.day().milestones++
-        this._gain(XP.milestone, fx, { kind: 'milestone', id: p.id })
+        this._grant(grantKey('m', m.id), () => {
+          m.rewarded = true
+          this.stats.milestonesDone++
+          this.day().milestones++
+          this._gain(XP.milestone, fx, { kind: 'milestone', id: p.id })
+        })
       }
       this._completeProject(p, fx)
     } else {
       fx.push(['milestoneUndone', { project: p, milestone: m }])
+      this._reopenProject(p)
     }
   },
   _milestone(pid, mid) {
@@ -320,10 +338,12 @@ export const projectsMethods = {
     const fx = []
     const first = p.logDay !== this.today
     if (first) {
-      p.logDay = this.today
-      const d = this.day()
-      d.plogs++
-      if (d.plogs <= 3) this._gain(XP.projectLog, fx, { kind: 'projectLog', id: p.id })
+      this._grant(grantKey('lg', p.id, this.today), () => {
+        p.logDay = this.today
+        const d = this.day()
+        d.plogs++
+        if (d.plogs <= 3) this._gain(XP.projectLog, fx, { kind: 'projectLog', id: p.id })
+      })
     }
     fx.push(['projectLogged', { project: p, log, first }])
     this._finish(fx)

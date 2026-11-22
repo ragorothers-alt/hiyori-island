@@ -1405,13 +1405,16 @@ export class FocusTimer {
     const done = clock.stopMinutes(this, Date.now())
     if (done != null) return this._finishFocus(done)
     const wasFocus = this.mode === 'focus'
+    // 倒數到一半提早結束：已經做了的分鐘交給 focusStopped 記下（只記分鐘、不算一顆番茄，可以「不算這段」）
+    const part = clock.partialMinutes(this, Date.now())
+    const info = part >= 1 ? { minutes: part, taskId: this.task?.id || null, projectId: this.info.projectId, sid: this.sid ? `${this.sid}-p`.slice(-40) : null } : null
     this.toggleSet(false)
     this.mode = 'idle'
     this.paused = null
     this._loadLengths()
     this._save()
     this.render()
-    if (wasFocus) this.hooks.focusStopped()
+    if (wasFocus) this.hooks.focusStopped(info)
   }
 
   tick() {

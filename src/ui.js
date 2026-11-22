@@ -131,6 +131,7 @@ export class UI {
     // 時段安排、習慣、生活記錄、日曆：各自是一個模組，透過 viewHooks 和外面溝通
     const viewHooks = {
       toast: (o) => this.toast(o),
+      dropToasts: (tag) => this.dropToasts(tag),
       selectDate: (date) => this.store.selectDate(date),
       setTab: (tab) => this.setTab(tab),
       openEdit: (type, id) => this.schedule.openEdit(type, id),
@@ -572,6 +573,7 @@ export class UI {
     })
     // 轉向、拉寬視窗時版面會換（手機的底部面板 ↔ 桌面的側邊面板）：收起的面板要不要 inert 跟著重算
     addEventListener('resize', () => this._syncPanelInert())
+    this._bindDockFit()
     $('#fullBtn').onclick = () => (this.appMode ? this.setAppMode(false) : this.toggleFull())
     $('#appBtn').onclick = () => this.setAppMode(true)
     $('#sideBtn').onclick = () => this.toggleSide()
@@ -832,6 +834,8 @@ export class UI {
     const body = $('.panel-body')
     const from = this.tab
     if (from !== tab) (this._tabScroll ||= {})[from] = body.scrollTop
+    // 離開日程頁：排好時段的那張提示卡收起來（撤銷留在日程頁的排程列上），不會蓋住別頁上的東西
+    if (from === 'schedule' && tab !== 'schedule') this.dropToasts('scheduled')
     this.tab = tab
     // 今日總覽自己有日期和標題：App 模式藏起上方的頁名和日期列（styles.css）
     document.body.dataset.tab = tab
@@ -866,6 +870,48 @@ export class UI {
     if (!$$('#taskList .item, #overdueBox .item').length) return
     writeLocal(SWIPE_TIP_KEY, true)
     setTimeout(() => this.toast({ icon: '指', title: '任務可以左右滑', sub: '往右滑完成、往左滑明天再做（逾期的是移到今天）', ms: 6000 }), 700)
+  }
+
+  // 小島模式（電腦寬度）：Dock 放在左下的每日任務和右邊面板中間那一塊的中間，不壓到面板下面的任務（點勾勾不會點到 Dock）；
+  // 放不下的話收成「⋯」（商店、視角、日夜、音效收進去，跟窄螢幕一樣）
+  _bindDockFit() {
+    let raf = 0
+    const fit = () => {
+      raf = 0
+      const body = document.body
+      const dock = $('.dock')
+      if (!dock || this.appMode || innerWidth <= 860) {
+        body.classList.remove('dock-tight')
+        body.style.removeProperty('--dock-l')
+        body.style.removeProperty('--dock-r')
+        return
+      }
+      const panel = $('#panel')
+      const quests = $('#quests')
+      const shown = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).opacity !== '0'
+      const r = panel && !panel.classList.contains('collapsed') && !panel.classList.contains('full') ? innerWidth - panel.offsetLeft : 0
+      const l = shown(quests) ? quests.offsetLeft + quests.offsetWidth : 0
+      body.style.setProperty('--dock-l', `${l}px`)
+      body.style.setProperty('--dock-r', `${r}px`)
+      // 先照完整的樣子量寬度，放不下才收
+      const tight = body.classList.contains('dock-tight')
+      if (tight) body.classList.remove('dock-tight')
+      const need = dock.offsetWidth
+      body.classList.toggle('dock-tight', need > innerWidth - l - r - 24)
+    }
+    const soon = () => (raf ||= requestAnimationFrame(fit))
+    addEventListener('resize', soon)
+    // 只是自己換了 dock-tight 的那幾次不算（不然會一直重量）
+    const strip = (v) => (v || '').split(/\s+/).filter((c) => c && c !== 'dock-tight').sort().join(' ')
+    const mo = new MutationObserver((list) => {
+      if (list.some((m) => !(m.target === document.body && m.attributeName === 'class' && strip(m.oldValue) === strip(m.target.getAttribute('class'))))) soon()
+    })
+    mo.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-tab'], attributeOldValue: true })
+    const panel = $('#panel')
+    if (panel) mo.observe(panel, { attributes: true, attributeFilter: ['class'] })
+    const quests = $('#quests')
+    if (quests) mo.observe(quests, { attributes: true, attributeFilter: ['class', 'hidden', 'style'] })
+    soon()
   }
 
   togglePanel(force) {
@@ -1199,8 +1245,7 @@ export class UI {
       // 整天的日程不會重複（例行公事只有有時段的）
       const allDay = !!p.allDay
       const routine = !allDay && !!repeat
-      // 例行日程每天都在同一天裡：跨過午夜的那一段截到 23:59
-      const end = routine && p.end < p.start ? '23:59' : p.end
+      const end = p.end
       const ev = allDay ? { title: p.title, color: this.eventColor, date, allDay: true, endDate: p.endDate } : { title: p.title, start: p.start, end, color: this.eventColor, date }
       const made = routine ? s.addRoutine({ kind: 'event', ...ev, repeat }) : s.addEvent(ev)
       this.eventColor = (this.eventColor + 1) % EVENT_COLORS.length

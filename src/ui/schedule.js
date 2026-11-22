@@ -173,14 +173,19 @@ export class ScheduleView {
       const byId = new Map(s.state.tasks.map((t) => [t.id, t]))
       const rows = [...p.plan].sort((a, b) => toMin(a.at) - toMin(b.at))
       const SHOW = 8
+      // 逾期的會從原本那天移過來：標出原本是哪一天
+      const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+      const from = (t) => (t && t.date < date ? `<em class="pb-from">原本 ${md(t.date)}</em>` : '')
+      const moved = rows.filter((x) => byId.get(x.id)?.date < date).length
       const list = rows.length
         ? `<ol class="pb-list">${rows
             .slice(0, SHOW)
-            .map((x) => `<li><time>${x.at}–${hm(toMin(x.at) + x.dur)}</time><span>${esc(clipTitle(byId.get(x.id)?.title || ''))}</span></li>`)
+            .map((x) => `<li><time>${x.at}–${hm(toMin(x.at) + x.dur)}</time><span>${esc(clipTitle(byId.get(x.id)?.title || ''))}</span>${from(byId.get(x.id))}</li>`)
             .join('')}${rows.length > SHOW ? `<li class="more">還有 ${rows.length - SHOW} 件，見時間軸的虛線</li>` : ''}</ol>`
         : ''
       html = `<div class="pb-preview">
         <div class="pb-msg">${ICON.spark}<div><b>${p.plan.length ? `預覽：排入 ${p.plan.length} 件` : '暫時沒有可排入的任務'}</b>${p.endAt ? `<small>預計 ${p.endAt} 任務結束・虛線是預覽</small>` : ''}
+          ${moved ? `<small class="warn">其中 ${moved} 件是逾期的，會從原本那天移到這天（套用後可以撤銷）</small>` : ''}
           ${p.left.length ? `<small class="warn">還有 ${p.left.length} 件未排入${p.full?.length ? `（其中 ${p.full.length} 件是為了留白、不排太滿）` : ''}${p.unslot?.length ? `，${p.unslot.length} 件原本的時段會空出來` : ''}，改天安排也可以</small>` : ''}
           ${p.big?.length ? `<small class="warn">${p.big.map((id) => `「${esc(clipTitle(s.state.tasks.find((t) => t.id === id)?.title || ''))}」`).join('')}比這天哪一段空檔都長 <button type="button" class="cm-link" data-plan="split">分成幾段、分到幾天做</button></small>` : ''}${list}</div></div>
         <div class="pb-btns"><button class="btn-ghost" data-plan="cancel">取消</button>
@@ -196,6 +201,7 @@ export class ScheduleView {
           ${sl ? `<span title="${sl.bed} → ${sl.wake}"><b>${fmtDur(sleepMinutes(sl))}</b>睡眠</span>` : ''}
         </div>
         <div class="pb-btns">
+          ${this._lastPlan?.date === date ? '<button class="btn-ghost" data-plan="undo-last">撤銷剛才的排程</button>' : ''}
           ${placed.length ? '<button class="btn-ghost" data-plan="clear">清除任務時段</button>' : ''}
           ${!past && !tasks.some((t) => !t.done) ? `<button class="btn-ghost" data-plan="coach" title="${COACH_TIP}">${COACH_LABEL}</button>` : ''}
           <button class="btn-primary pb-opt" data-plan="optimize" ${past || (!unplaced.length && !placed.length) ? 'disabled' : ''} title="${past ? '只能替今天和之後的日子排時段' :'把還沒排的任務放進空檔'}">${ICON.spark}最佳化時程</button>
@@ -203,6 +209,19 @@ export class ScheduleView {
     }
     $('#planBar').innerHTML = html
     $('#planBar').classList.toggle('previewing', !!p)
+  }
+
+  // 撤銷剛才的排程（提示卡上、排程列上的按鈕都是這個）：之後又改過的那幾件留著現在的樣子
+  _undoLastPlan() {
+    const last = this._lastPlan
+    if (!last) return
+    this._lastPlan = null
+    const r = this.store.undoPlan(last.u, { skip: [this.hooks.timing?.()].filter(Boolean) })
+    this.render(false)
+    this.hooks.dropToasts?.('scheduled')
+    if (!r.back) return this.hooks.toast({ icon: '時', title: '排好之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
+    if (r.kept) this.hooks.toast({ icon: '時', title: `放回 ${r.back} 件`, sub: `${r.kept} 件排好之後又改過，留著現在的樣子`, ms: 4200 })
+    else this.hooks.toast({ icon: '時', title: `放回 ${r.back} 件`, sub: '回到排之前的樣子（逾期的回到原本那天）', ms: 4200 })
   }
 
   _tray() {
@@ -459,19 +478,17 @@ export class ScheduleView {
     return { title, start, end, color: ed.color, date, note, allDay: false }
   }
   // 日程面板的時段：改開始時結束跟著挪（長度不變，像一般的行事曆；規則跟 store 一樣，見 shiftEnd）；
-  // 結束比開始早時說一聲會接到隔天（例行公事的那一天截到 23:59）
+  // 結束比開始早時說一聲會接到隔天
   _overHint(item = {}) {
     const form = $('#editSheet form')
     const hint = form.querySelector('.ec-over')
     const { start, end } = form.elements
-    const routine = !!item.routineId
     let prev = start.value
     const show = () => {
       const over = !this.editing?.allDay && overnight(start.value, end.value)
       hint.hidden = !over
       if (!over) return
-      if (routine) hint.textContent = '例行日程的這一天在同一天裡：存到 23:59'
-      else if (toMin(end.value) === 0) hint.textContent = '剛好在午夜結束：存到 23:59'
+      if (toMin(end.value) === 0) hint.textContent = '剛好在午夜結束：存到 23:59'
       else hint.textContent = `到隔天 ${end.value} 才結束：存成這天到 23:59、隔天 00:00 起兩段（改時間、名稱、刪除都是一整個）`
     }
     start.addEventListener('change', () => {
@@ -658,20 +675,16 @@ export class ScheduleView {
         this.preview = null
         const u = s.applyPlan(p.date, p.result.plan, p.result.left.length, p.result.unslot)
         if (!u) return this.render(false)
-        // 排好了：說排了幾件、到幾點，可以整批撤銷（之後又改過的那幾件留著現在的樣子）
+        // 排好了：說排了幾件、到幾點，可以整批撤銷（之後又改過的那幾件留著現在的樣子）。
+        // 提示卡收起來之後，這天的排程列上也留著「撤銷剛才的排程」（換一天、再排一次、撤銷了就拿掉）
         const left = p.result.left.length
         const end = this._current(p.date).endAt
+        this._lastPlan = { date: p.date, u }
+        this.render(false)
         this.hooks.toast({
           icon: '時', title: `排好 ${u.count} 件${left ? `，還有 ${left} 件沒排入` : ''}`,
-          sub: left ? '這天的空檔有點滿，改天安排也沒關係' : end ? `任務排到 ${end}` : '', ms: 6000, tag: 'scheduled',
-          actions: [{
-            label: '撤銷', soft: true,
-            run: () => {
-              const r = s.undoPlan(u, { skip: [this.hooks.timing?.()].filter(Boolean) })
-              if (!r.back) return this.hooks.toast({ icon: '時', title: '排好之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
-              if (r.kept) this.hooks.toast({ icon: '時', title: `放回 ${r.back} 件`, sub: `${r.kept} 件排好之後又改過，留著現在的樣子`, ms: 4200 })
-            },
-          }],
+          sub: left ? '這天的空檔有點滿，改天安排也沒關係' : end ? `任務排到 ${end}` : '', ms: 12000, tag: 'scheduled',
+          actions: [{ label: '撤銷', soft: true, run: () => this._undoLastPlan() }],
         })
       } else if (act === 'split') {
         // 放不下的大任務分段，再照新的樣子預覽一次
@@ -691,7 +704,8 @@ export class ScheduleView {
       } else if (act === 'cancel') {
         this.preview = null
         this.render(false)
-      } else if (act === 'clear') armConfirm(e.target.closest('button'), '清除未完成任務的時段？', () => s.clearPlan(date))
+      } else if (act === 'undo-last') this._undoLastPlan()
+      else if (act === 'clear') armConfirm(e.target.closest('button'), '清除未完成任務的時段？', () => s.clearPlan(date))
     })
 
     const tray = $('#planTray')

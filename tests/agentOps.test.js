@@ -389,9 +389,9 @@ describe('改了、新增、刪掉，都能撤銷', () => {
     expect(night()).toEqual([])
   })
 
-  it('ふじ新增跨過午夜的例行日程：截到 23:59（跟快速記錄、日程頁一樣），不是一小時', () => {
+  it('ふじ新增跨過午夜的例行日程：照實存（每一次都是兩段，跟快速記錄、日程頁一樣），不是一小時', () => {
     chat((o) => o.create.push({ kind: 'routine', ref: '', parent: '', title: '夜班', date: TODAY, start: '20:00', end: '02:00', fields: [{ field: 'days', value: '每月 5 日' }] }))
-    expect(store.state.routines.find((r) => r.title === '夜班')).toMatchObject({ start: '20:00', end: '23:59', repeat: { type: 'monthly', day: 5 } })
+    expect(store.state.routines.find((r) => r.title === '夜班')).toMatchObject({ start: '20:00', end: '02:00', repeat: { type: 'monthly', day: 5 } })
   })
 
   it('例行公事每月幾號：「每月 31 日」就是每月（沒有 31 號的月份在月底）；認不得的頻率不建（不會變成每天）', () => {
@@ -509,6 +509,24 @@ describe('壞掉的資料、store 順便動到的、同一批的先後', () => {
     again.changes[0].u.item = JSON.stringify({ ...JSON.parse(again.changes[0].u.item), id: 'other' })
     expect(undo(again)).toBe(0)
     expect(p.milestones).toHaveLength(1)
+  })
+
+  it('刪掉最後一個沒做完的里程碑讓專案落成，撤銷時落成的獎勵照帳收回；之後真的做完再給一次', () => {
+    const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    const before = { xp: store.player.xp, coins: store.player.coins, done: store.stats.projectsDone }
+    const { entry } = chat((o, w) => o.drop.push(w.projects[0].milestones[1].id))
+    expect(p.completedAt).toBeTruthy()
+    expect(store.stats.projectsDone).toBe(before.done + 1)
+    expect(undo(entry)).toBe(1)
+    expect(p.completedAt).toBe(null)
+    expect(p.paid).toBe(false)
+    expect([store.player.xp, store.player.coins, store.stats.projectsDone]).toEqual([before.xp, before.coins, before.done])
+    expect(store.state.grants[`p:${p.id}`]).toBeUndefined()
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    expect(p.completedAt).toBeTruthy()
+    expect(store.stats.projectsDone).toBe(before.done + 1)
+    expect(store.player.xp).toBeGreaterThan(before.xp)
   })
 
   it('新增的訂閱之後改過備註：撤銷「新增」不刪', () => {

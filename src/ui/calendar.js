@@ -2,7 +2,7 @@ import './calendar.css'
 import { $, $$, esc, ICON } from './dom.js'
 import { DATE_KINDS, DUE_KINDS, EVENT_COLORS, moodOf, tagOf, WEEK_JP } from '../theme.js'
 import { addDays, dateStr, daysBetween, minToHHMM, parseDate, repeatMatches, toMin, weekKey } from '../store.js'
-import { applies, countOn, doneOn } from '../habits.js'
+import { applies, countOn, doneOn, targetOn } from '../habits.js'
 import { awake, DEFAULT_RHYTHM, fmtDur, sleepMinutes, taskDur } from '../planner.js'
 import { ENERGY, lifeKindOf } from '../data/life.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from '../subs.js'
@@ -751,7 +751,7 @@ export class CalendarView {
         const rows = [
           ...build.map((h) => {
             const ok = doneOn(h, date)
-            return `<li class="cd-row hb${ok ? ' ok' : ''}" style="--c:${colorOf(h.color)}"><i class="cd-k">${esc(h.icon)}</i><span class="cd-t">${esc(h.name)}</span><small class="cd-n">${countOn(h, date)}/${h.target || 1} ${esc(h.unit || '次')}</small></li>`
+            return `<li class="cd-row hb${ok ? ' ok' : ''}" style="--c:${colorOf(h.color)}"><i class="cd-k">${esc(h.icon)}</i><span class="cd-t">${esc(h.name)}</span><small class="cd-n">${countOn(h, date)}/${targetOn(h, date)} ${esc(h.unit || '次')}</small></li>`
           }),
           ...urges.map(
             (h) => `<li class="cd-row hb quit" style="--c:${colorOf(h.color)}"><i class="cd-k">${esc(h.icon)}</i><span class="cd-t">${esc(h.name)}<small>忍住了 ${h.urges[date]} 次</small></span></li>`,

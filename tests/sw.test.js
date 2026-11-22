@@ -223,6 +223,7 @@ function setup({ plans, mottos, done, windows = () => [], before = [], broken = 
   const registration = {
     getNotifications: async ({ tag } = {}) => list.filter((n) => !tag || n.tag === tag).map((n) => ({ ...n, close: () => (list = list.filter((x) => x !== n)) })),
     showNotification: async (title, opts) => {
+      await ctl.beforeShow?.(title, opts)
       if (ctl.broken) throw new Error('boom')
       list = [...list.filter((n) => n.tag !== opts.tag), { title, ...opts }]
       if (opts.renotify) alerts.push(title)
@@ -496,8 +497,8 @@ describe('Service Worker：警語的推播', () => {
       expect(s.shown().find((n) => n.tag === 'e1')).toMatchObject({ title: 'ひより · e1@12:10', body: '10 分鐘後開始', renotify: true, silent: false })
       expect(s.shown().find((n) => n.tag === 'e1').actions).toBeUndefined()
       expect(await remindFiles(s)).toEqual([
-        { key: 'e1@12:10', date: '2026-11-10', at: NOW },
-        { key: 't1@12:10', date: '2026-11-10', at: NOW },
+        { key: 'e1@12:10', date: '2026-11-10', at: NOW, by: 'sw' },
+        { key: 't1@12:10', date: '2026-11-10', at: NOW, by: 'sw' },
       ])
       expect(s.messages).toContainEqual({ type: 'hiyori-remind-shown', list: [{ key: 'e1@12:10', date: '2026-11-10' }, { key: 't1@12:10', date: '2026-11-10' }] })
       // 警語念到哪不受提醒影響；提醒不記進警語的紀錄
@@ -537,6 +538,19 @@ describe('Service Worker：警語的推播', () => {
       ]))) // prettier-ignore
       await run(s.on.push, { data: null })
       expect(s.shown().map((n) => n.tag)).toEqual(['bedtime'])
+    }))
+
+  it('顯示失敗時只拿掉自己記的：頁面剛好也記了那一則（by 不是 sw）就留著', () =>
+    withClock(async () => {
+      const r = { at: NOW, key: 'e1@12:10', date: '2026-11-10', title: 'ひより · 會', body: '現在開始', tag: 'e1', remind: true }
+      const s = setup({ mottos: [r], windows: () => [] })
+      await s.ready
+      s.ctl.broken = true
+      // 顯示之前頁面記了同一則（蓋掉 Service Worker 剛寫的）
+      const c = await s.caches.open('hiyoripush')
+      s.ctl.beforeShow = () => c.put(SCOPE + '__remind-shown/' + encodeURIComponent('e1@12:10|2026-11-10'), new Response(JSON.stringify({ key: 'e1@12:10', date: '2026-11-10', at: NOW })))
+      await run(s.on.push, { data: null }).catch(() => {})
+      expect((await remindFiles(s)).map((x) => x.key)).toEqual(['e1@12:10'])
     }))
 
   it('提醒沒顯示出來（瀏覽器出錯）：「顯示過了」拿掉，下一則推播來時照樣顯示', () =>

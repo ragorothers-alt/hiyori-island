@@ -1,4 +1,4 @@
-import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE } from './util.js'
+import { addDays, ALLDAY_MAX, uid, dateStr, DATA_VERSION, DEFAULT_SETTINGS, parseDate, toMin, minToHHMM, REPEAT_TYPES, REVIEW_TEXT, LEGACY_QUESTS, FONT_SCALES, QUALITIES, NOISES, HABIT_PAID_DAYS, townStages, newerData, POMO_SIDS, REV_RE, overnight } from './util.js'
 import { TAGS, DATE_KINDS, TOWER_SLOTS, MAX_PROJECTS, CHARM, MOODS, FOCUS_MIN, BREAK_MIN, PULLS, FOCUS_GOALS, FLOW_MAXES, CAT_MOTTOS, AGENT_MODES } from '../theme.js'
 import { PROJECT_LIMITS as PL, unitOf, bpmOf, lastTouched, taskMilestone } from '../projects.js'
 import { CURRENCIES, SUB_UNITS, SUB_CATS, REMIND_DAYS, looksLikeCardNumber } from '../subs.js'
@@ -13,6 +13,7 @@ import { LIFE_KINDS } from '../data/life.js'
 import { okVal, UNDO_GROUPS } from '../agentOps.js'
 import { BUILDINGS, MAX_STAGE } from '../data/town.js'
 import { DEFAULT_RHYTHM, PEAKS } from '../planner.js'
+import { cleanGrants } from './grants.js'
 
 const allDayEnd = (end, date) => {
   const e = DATE_RE.test(end) && end > date ? end : date
@@ -135,8 +136,8 @@ function seed(samples = true) {
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
     pomoSids: [],
-    // 那幾輪各記了什麼（{ id: { m 分鐘, xp, x 加時 0/1, d 日子, t 任務, p 專案, s 時段 } }）：兩台都記了同一輪、合在一起時扣回一份用
-    pomoGot: {},
+    // 給獎勵的帳（store/grants.js）：每一次給獎勵加了哪些數字，兩台做了同一件事、合在一起時照它扣回一份
+    grants: {},
     // 跨裝置的計時（最後按計時按鈕、到點時接手的那一台送的樣子）：沒開過同步是 null
     timer: null,
     lotsPlan: 1,
@@ -444,26 +445,6 @@ function cleanDates(list) {
 }
 // 重要日子的上限：只防異常大的匯入；新增時到了就不再加，讀檔不會刪掉合法的紀錄
 export const DATES_MAX = 1000
-const POMO_SLOTS = ['focusLate', 'focusAm', 'focusPm', 'focusEve']
-// 只留還記著的那幾輪（pomoSids 裡有的）
-function cleanPomoGot(v, sids) {
-  const out = {}
-  if (!isObj(v) || !Array.isArray(sids)) return out
-  for (const id of sids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS)) {
-    const g = v[id]
-    if (!isObj(g)) continue
-    out[id] = {
-      m: num(g.m, 0, 600, 0),
-      xp: num(g.xp, 0, 10000, 0),
-      x: g.x ? 1 : 0,
-      d: DATE_RE.test(g.d) ? g.d : '',
-      t: ID_RE.test(g.t) ? g.t : null,
-      p: ID_RE.test(g.p) ? g.p : null,
-      s: POMO_SLOTS.includes(g.s) ? g.s : null,
-    }
-  }
-  return out
-}
 export const LINEAGE_MAX = 64
 
 // ── 匯入的行事曆（Google 日曆的私密網址、學校課表的 .ics）：只存訂閱的設定，抓回來的日程放在這台裝置（src/calendars.js）──
@@ -617,7 +598,7 @@ const newTempo = (unit = '') => ({ unit: unitOf(unit), goal: null, log: [], met:
 export const blankTask = (o = {}) => ({
   id: uid(), title: '', date: dateStr(), priority: 2, tag: 'life', done: false, rewarded: false, createdAt: Date.now(), doneAt: null,
   routineId: null, pomos: 0, star: false, first: false, flower: null, dur: null, at: null, coach: null, moved: 0,
-  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null, due: null, spent: 0, xpGot: null,
+  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null, due: null, spent: 0,
   ...o,
 })
 
@@ -692,8 +673,6 @@ export function cleanTask(t, today = dateStr()) {
     due: DATE_RE.test(t.due) ? t.due : null,
     // spent：用專注計時實際做了幾分鐘（加總）。跟預估（dur）比，看得出平常估得準不準
     spent: num(t.spent, 0, 99999, 0),
-    // xpGot：完成時拿了幾點經驗（兩台都打勾了這一件、合在一起時扣回一份用；舊存檔沒有是 null）
-    xpGot: t.xpGot == null ? null : num(t.xpGot, 0, 10000, 0),
   }
 }
 
@@ -732,7 +711,8 @@ function migrate(s) {
     const day = type === 'monthly' ? num(rep.day, 1, 31, 1) : 0
     const start = TIME_RE.test(r.start) ? r.start : '09:00'
     let end = TIME_RE.test(r.end) ? r.end : '10:00'
-    if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
+    // 例行日程可以跨過午夜（結束比開始早、16 小時以內）
+    if (!(r.kind === 'event' && overnight(start, end)) && toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const made = {}
     if (isObj(r.made)) for (const d of Object.keys(r.made)) if (DATE_RE.test(d)) made[d] = true
     return {
@@ -780,6 +760,8 @@ function migrate(s) {
     const out = {
       id: str(p.id), name, color: num(p.color, 0, 99, 0), deadline: ymd(p.deadline, ''), createdAt: ts(p.createdAt) || Date.now(),
       milestones, completedAt: ts(p.completedAt), archived: !!p.archived, onTime: !!p.onTime,
+      // 落成的獎勵給過了（重開之後再落成不再給）；舊存檔照有沒有落成
+      paid: !!p.paid || !!ts(p.completedAt),
       // 暫停的時間；null = 進行中（已落成的不會暫停）
       pausedAt: ts(p.completedAt) ? null : ts(p.pausedAt),
       // slot：專案町的第幾塊地，-1 = 還沒分到地（讀進來後馬上會補上）
@@ -1000,6 +982,14 @@ function migrate(s) {
     return {
       id: str(h.id), name, kind, icon: str(h.icon, 2) || (kind === 'quit' ? '禁' : '習'), color: num(h.color, 0, 99, 0),
       target: num(h.target, 1, 99, 1), unit: str(h.unit, 6).trim() || '次', days: weekdays(h.days),
+      // 改過每日目標：改之前的日子照當時的目標（habits.js 的 targetOn）
+      ...(Array.isArray(h.targets) && h.targets.length
+        ? {
+            targets: [...new Map(h.targets.filter((x) => isObj(x) && DATE_RE.test(x.to)).map((x) => [x.to, { to: x.to, target: num(x.target, 1, 99, 1) }])).values()]
+              .sort((a, b) => a.to.localeCompare(b.to))
+              .slice(-50),
+          }
+        : {}),
       start: ymd(h.start, today), createdAt: ts(h.createdAt) || Date.now(), archived: !!h.archived,
       // 補打卡把開始日往前移之前，原本的開始日（補的那幾格又取消時移回去）；沒移過是空字串
       ...(DATE_RE.test(h.start0) && h.start0 > ymd(h.start, today) ? { start0: h.start0 } : {}),
@@ -1055,7 +1045,7 @@ function migrate(s) {
     tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
-    pomoGot: cleanPomoGot(s.pomoGot, s.pomoSids),
+    grants: cleanGrants(s.grants),
     timer: cleanTimer(s.timer),
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',

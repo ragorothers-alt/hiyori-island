@@ -171,7 +171,9 @@ export class SyncEngine {
       this._again = true
       return this._running
     }
-    this._running = this.locks?.request ? this.locks.request(`hiyori-sync:${this.baseKey}`, () => this._loop(step)) : this._loop(step)
+    // 等鎖的時候（另一個分頁正在同步）換了同步碼、解除連結、重新連結：輪到時就不做了（step 是照那時候的樣子要做的）
+    const epoch = this.epoch
+    this._running = this.locks?.request ? this.locks.request(`hiyori-sync:${this.baseKey}`, () => (epoch === this.epoch && this._canSync() ? this._loop(step) : undefined)) : this._loop(step)
     return this._running
   }
   async _loop(step) {
@@ -274,20 +276,28 @@ export class SyncEngine {
     if (!out) return false
     // 這一輪第一次合併：合併前這台的那一份留成備份（存不進去就不合）
     const first = !this._runMerge
-    if (first && !keepBackup(st, 'merge', st.updatedAt)) {
+    // 上一輪合好了卻存不進去、換回了原本那一份：備份裡已經是這一版，不再留一份（連試幾次也不會把更早的備份擠掉）
+    const last = first ? readBackups()[0] : null
+    const had = !!last && last.from === 'merge' && last.state?.rev === st.rev
+    if (first && !had && !keepBackup(st, 'merge', st.updatedAt)) {
       this._set('error', NO_ROOM)
       return true
     }
     if (first) this._runMerge = { rev: st.rev }
-    // 存合好的那一份時，剛留的備份不能被擠掉（擠不下就是存不進去，換回原本那一份）
+    // 存合好的那一份時，剛留的備份不能被擠掉（擠不下就是存不進去，換回原本那一份）。
+    // 合起來才湊齊的（兩台各勾了最後幾個里程碑、本命）補算落成、全清，也在這裡一起存好
     this.store.keepBackups = 1
     try {
       this.store.replaceState(out.state, Math.max(Date.now(), (st.updatedAt || 0) + 1, (remote.savedAt || 0) + 1), { soft: true })
+      if (this.store.saved) {
+        this.store.settleMerged?.()
+        this.store.flushSave()
+      }
     } catch (e) {
       console.warn('[hiyori] 合併出來的資料讀不進去', e)
       this.store.keepBackups = 0
       if (first) {
-        dropBackup(0)
+        if (!had) dropBackup(0)
         this._runMerge = null
       }
       return false
@@ -304,8 +314,6 @@ export class SyncEngine {
     }
     // 合好的這一份已經包含雲端那一版：之後再跟雲端比，從那一版開始算（推上去之前又被別台寫過，再合一次也不會把那一版的數字加兩次）
     this._setBase(remote.rev, theirs)
-    // 合起來才湊齊的（兩台各勾了最後幾個里程碑）補算落成
-    this.store.settleMerged?.()
     this.onMerged({ clashes: out.clashes, rev: this._runMerge.rev })
     await this._write(remote.rev)
     return true

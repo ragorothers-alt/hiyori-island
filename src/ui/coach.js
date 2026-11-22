@@ -1,5 +1,5 @@
 import './coach.css'
-import { $, esc, ICON, scrollMode } from './dom.js'
+import { $, esc, ICON, scrollMode, keepFocus as keepDomFocus } from './dom.js'
 import { TAGS, tagOf, PROJECT_COLORS, DUE_KINDS, moodOf, pullOf } from '../theme.js'
 import { FUJI_LINES } from '../data/lines.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, askCoach, dayLabel, addDays } from '../coach.js'
@@ -150,7 +150,10 @@ export class CoachView {
       if (kind === 'tag') out.push({ label: tagOf(v).label, tag: v })
       else if (kind === 'proj') {
         const p = this._projects().find((x) => x.id === v)
-        if (p) out.push({ label: p.name, tag: 'work', milestone: p.milestones.find((m) => !m.done)?.title || null })
+        if (p) {
+          const ms = p.milestones.find((m) => !m.done)
+          out.push({ label: p.name, tag: 'work', milestone: ms?.title || null, project: p.id, ms: ms?.id || null })
+        }
       } else {
         const it = this._items().find((x) => x.label === v)
         if (it) out.push({ label: it.label, tag: it.tag })
@@ -246,6 +249,8 @@ export class CoachView {
       title: focus.map((f) => f.label).join('、'),
       answers: { focus: focus.map((f) => f.label), slots: [...a.slots], days: a.days, len: a.len },
       custom: a.custom.filter((c) => a.focus.has('item:' + c.label)),
+      // 主攻的是專案：排出來的那幾段歸到那個專案（和下一個還沒完成的里程碑），回專案就找得到
+      projects: Object.fromEntries(focus.filter((f) => f.project).map((f) => [f.label, { id: f.project, ms: f.ms }])),
     })
     // 預覽之後時間過了、又加了行程：照實說建了幾段、哪些沒放
     const late = skipped ? `有 ${skipped} 段的時間已經過了、或撞到後來加的行程，沒有放進去。` : ''
@@ -499,7 +504,8 @@ export class CoachView {
         <button class="btn-primary" type="submit">送出</button>
       </form>`,
     )
-    this.root.innerHTML = `<div class="coach">${parts.join('')}</div>`
+    // 選了問卷的一項就整頁重畫：焦點留在剛按的那一顆（不會掉回頁面最上面，鍵盤要從頭再走一次）
+    keepDomFocus(this.root, () => (this.root.innerHTML = `<div class="coach">${parts.join('')}</div>`))
     // 問卷那一步沒有新的話時，念開場的招呼
     this._announce(this.step === 'done' ? this.doneText : this.step === 'think' ? this.thinking : this.step === 'ask' ? this.flash || this.hello : this.reply?.join(' '))
   }

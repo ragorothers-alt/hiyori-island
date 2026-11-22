@@ -26,12 +26,16 @@ describe('專案的快捷搜尋', () => {
       return r[0]
     }
     expect(one('搬家')).toMatchObject({ p: { name: '搬家' }, hit: null })
-    expect(one('紙箱').hit).toEqual({ kind: '里程碑', text: '打包紙箱' })
-    expect(one('膠帶').hit).toEqual({ kind: '細項', text: '買膠帶' })
+    expect(one('紙箱').hit).toMatchObject({ kind: '里程碑', text: '打包紙箱' })
+    expect(one('膠帶').hit).toMatchObject({ kind: '細項', text: '買膠帶' })
     expect(one('週六').hit.kind).toBe('里程碑備註')
-    expect(one('十二月').hit).toEqual({ kind: '目標', text: '十二月考過' })
-    expect(one('期刊').hit).toEqual({ kind: '筆記', text: '圖書館的期刊 還有老師給的 PDF' })
-    expect(one('初稿').hit).toEqual({ kind: '進度', text: '寫完第一章的初稿' })
+    expect(one('十二月').hit).toMatchObject({ kind: '目標', text: '十二月考過' })
+    expect(one('期刊').hit).toMatchObject({ kind: '筆記', text: '圖書館的期刊 還有老師給的 PDF' })
+    expect(one('初稿').hit).toMatchObject({ kind: '進度', text: '寫完第一章的初稿' })
+    // 打開時直接到那裡：筆記是哪一篇、里程碑、進度那一塊
+    expect(one('期刊').hit.ref).toMatchObject({ sec: 'notes', note: expect.any(String) })
+    expect(one('紙箱').hit.ref).toEqual({ sec: 'ms' })
+    expect(one('初稿').hit.ref).toEqual({ sec: 'log' })
   })
 
   it('不分大小寫和全形半形；幾個字都要在同一個專案裡找得到（可以分在不同地方）', () => {
@@ -42,7 +46,7 @@ describe('專案的快捷搜尋', () => {
     const r = searchProjects(list, '日文 模擬')
     expect(names(r)).toEqual(['日文檢定 N2'])
     // 名稱沒有的那個字在哪裡找到
-    expect(r[0].hit).toEqual({ kind: '里程碑', text: '模擬考' })
+    expect(r[0].hit).toMatchObject({ kind: '里程碑', text: '模擬考' })
     expect(searchProjects(list, '日文 紙箱')).toEqual([])
   })
 

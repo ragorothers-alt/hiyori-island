@@ -68,7 +68,7 @@ export const projectListMethods = {
       const act = e.target.closest('[data-act]')?.dataset.act
       const mid = e.target.closest('.ms')?.dataset.mid
       // 點標題或摘要也是打開（輸入框、按鈕除外）
-      if (act === 'open' || (!act && e.target.closest('.proj-head, .proj-sum') && !e.target.closest('input'))) this.openProject(id)
+      if (act === 'open' || (!act && e.target.closest('.proj-head, .proj-sum') && !e.target.closest('input'))) this._openProjHit(id)
       else if (act === 'ms-toggle') s.toggleMilestone(id, mid)
       else if (act === 'ms-delete') armConfirm(e.target.closest('button'), ICON.check, () => s.deleteMilestone(id, mid))
       else if (act === 'view') this._onIsland(() => this.hooks.focusProject(id))
@@ -142,7 +142,7 @@ export const projectListMethods = {
       } else if (e.key === 'Enter') {
         e.preventDefault()
         const id = ids[this._projSel || 0]
-        if (id) this.openProject(id)
+        if (id) this._openProjHit(id)
       } else if (e.key === 'Escape' && q.value) {
         e.preventDefault()
         q.value = ''
@@ -242,10 +242,15 @@ export const projectListMethods = {
   // ── 專案詳情 ──
   // taskId：直接打開那件任務在專案裡的頁面
   // taskId：直接打開那件任務的頁面；write：游標放在「寫紀錄」的框裡
-  openProject(id, sec, taskId = null, write = false) {
-    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId, write))
+  // 搜尋結果裡的專案：找到的是筆記就打開那一篇，是里程碑、進度就到那一塊（沒在搜尋就照平常打開）
+  _openProjHit(id) {
+    const ref = this._projHits?.includes(id) ? this._projRefs?.get(id) : null
+    this.openProject(id, ref?.sec, null, false, ref?.note || null)
+  },
+  openProject(id, sec, taskId = null, write = false, noteId = null) {
+    if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId, write, noteId))
     // 返回鍵回到列表（記一筆瀏覽紀錄：_syncBack）
-    this._project.view.open(id, sec, taskId)
+    this._project.view.open(id, sec, taskId, noteId)
     this._syncBackSoon()
     this._stale?.add('projects')
     if (this.tab === 'projects') this._renderPage('projects')
@@ -367,6 +372,8 @@ export const projectListMethods = {
           const on = found.filter((r) => !r.p.archived)
           const off = found.filter((r) => r.p.archived)
           this._projHits = [...on, ...off].map((r) => r.p.id)
+          // 找到的是筆記、里程碑、進度：打開時直接到那裡
+          this._projRefs = new Map([...on, ...off].map((r) => [r.p.id, r.hit?.ref || null]))
           const card = (r) => this._projectCard(r.p, r.p.archived, { terms, hit: r.hit })
           const q = esc(query.trim())
           $('#projectList').innerHTML = found.length

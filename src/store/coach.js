@@ -1,8 +1,9 @@
-import { floating, TIME_RE, cleanRhythm, num, DATE_RE, str, blankTask } from './migrate.js'
+import { floating, TIME_RE, cleanRhythm, num, DATE_RE, str, blankTask, isObj } from './migrate.js'
 import { optimizeDay, sleepMinutes, busyOf, estimateRatio, taskDur } from '../planner.js'
-import { toMin, repeatMatches, uid } from './util.js'
+import { toMin, repeatMatches, uid, addDays, routineSpan } from './util.js'
 import { XP, TAGS } from '../theme.js'
 import { ACHIEVEMENTS } from '../data/achievements.js'
+import { grantKey } from './grants.js'
 // 排進時段之前、之後的樣子（撤銷時用來放回去、認出之後又改過）
 const snapSlot = (t) => ({ date: t.date, at: t.at ?? null, dur: t.dur ?? null, moved: t.moved || 0, star: !!t.star, first: !!t.first })
 // 看「累計套用幾次」的成就（撤銷時次數不夠了要收回）
@@ -71,8 +72,10 @@ export const coachMethods = {
     }
     this.stats.plansApplied++
     if (date === this.today && !this.day().timebox) {
-      this.day().timebox = 1
-      this._gain(XP.plan, fx, { kind: 'plan' })
+      this._grant(grantKey('tb', this.today), () => {
+        this.day().timebox = 1
+        this._gain(XP.plan, fx, { kind: 'plan' })
+      })
     }
     fx.push(['planApplied', { date, count: n, left }])
     this._finish(fx)
@@ -146,9 +149,15 @@ export const coachMethods = {
     // 獎勵記在那天的紀錄上：刪掉再記一次不會再給
     const d = this.day(date)
     if (first && !d.sleep) {
-      d.sleep = true
-      this.stats.sleepLogs++
-      if (date === this.today) this._gain(XP.sleep, fx, { kind: 'sleep' })
+      this._grant(
+        grantKey('sl', date),
+        () => {
+          d.sleep = true
+          this.stats.sleepLogs++
+          if (date === this.today) this._gain(XP.sleep, fx, { kind: 'sleep' })
+        },
+        { day: date },
+      )
     }
     this._finish(fx)
     return true
@@ -163,9 +172,16 @@ export const coachMethods = {
   // 未來那天會由例行公事生成、但還沒生成的日程：排程要先避開
   _routineEventsOn(date) {
     if (date <= this.today) return []
-    return this.state.routines
-      .filter((r) => r.kind === 'event' && r.startDate <= date && !r.made?.[date] && repeatMatches(r.repeat, date))
-      .map((r) => ({ id: 'r-' + r.id, date, title: r.title, start: r.start, end: r.end, done: false }))
+    const out = []
+    for (const r of this.state.routines) {
+      if (r.kind !== 'event') continue
+      // 那天開始的那一次，和前一天開始、跨過午夜接到這天的那一段
+      for (const d of [date, addDays(date, -1)]) {
+        if (d < this.today || r.startDate > d || r.made?.[d] || !repeatMatches(r.repeat, d)) continue
+        for (const p of routineSpan(r, d)) if (p.date === date) out.push({ id: `r-${r.id}${d === date ? '' : '-n'}`, date, title: r.title, start: p.start, end: p.end, done: false })
+      }
+    }
+    return out
   },
   // 排程要避開的日程：有時段的日程，加上還沒生成的例行日程
   _busyEvents(date) {
@@ -187,7 +203,8 @@ export const coachMethods = {
   },
   // 套用ふじ排的計畫：一次建好所有任務（有時段、有預估時間）。meta：{ title, answers（下次的預設）, custom（自己加的主攻項目） }
   // 回傳 { id, count：建了幾件, skipped：已經過去或撞到行程、沒建的段數 }；一件都沒建時 id 是 null
-  applyCoachPlan(res, { title = '', answers = null, custom = [] } = {}) {
+  // projects：{ 主攻項目的名字: { id: 專案, ms: 里程碑 } }（主攻的是專案時，那幾段歸到那個專案）
+  applyCoachPlan(res, { title = '', answers = null, custom = [], projects = {} } = {}) {
     this._refreshToday()
     const id = uid()
     const tags = new Set(TAGS.map((t) => t.id))
@@ -219,7 +236,11 @@ export const coachMethods = {
             continue
           }
         }
-        const t = blankTask({ title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', dur, at, coach: id })
+        const pj = isObj(projects) && typeof it.label === 'string' ? projects[it.label] : null
+        const p = pj && this._find('projects', pj.id)
+        const own = p && !p.archived && !p.completedAt ? { project: p.id, ms: p.milestones.some((m) => m.id === pj.ms && !m.done) ? pj.ms : null } : {}
+        const t = blankTask({ title: name, date: d.date, priority: num(it.priority, 1, 3, 2), tag: tags.has(it.tag) ? it.tag : 'study', dur, at, coach: id, ...own })
+        if (p && own.project) this._edited(p)
         this.state.tasks.push(t)
         fx.push(['taskAdded', t])
         if (!dates.includes(d.date)) dates.push(d.date)
@@ -236,8 +257,10 @@ export const coachMethods = {
     }
     this.stats.plansApplied++
     if (dates.includes(this.today) && !this.day().timebox) {
-      this.day().timebox = 1
-      this._gain(XP.plan, fx, { kind: 'plan' })
+      this._grant(grantKey('tb', this.today), () => {
+        this.day().timebox = 1
+        this._gain(XP.plan, fx, { kind: 'plan' })
+      })
     }
     const count = fx.filter(([k]) => k === 'taskAdded').length
     fx.push(['coachApplied', { id, count, days: dates.length, skipped }])

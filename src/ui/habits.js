@@ -3,7 +3,7 @@ import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, patch, setOn, pickOne
 import { EVENT_COLORS } from '../theme.js'
 import {
   HABIT_ICONS, HABIT_TEMPLATES, QUIT_MILESTONES, startOf, applies, countOn, doneOn, streak, bestStreak, rate,
-  cleanDays, bestClean, slippedOn, nextMilestone, heat, todayProgress,
+  cleanDays, bestClean, slippedOn, nextMilestone, heat, todayProgress, targetOn,
 } from '../habits.js'
 import { addDays, parseDate, daysBetween, dateStr } from '../store.js'
 
@@ -280,7 +280,6 @@ export class HabitsView {
     const cells = heat(h, today, 12)
     const start = startOf(h)
     const build = h.kind === 'build'
-    const t = h.target || 1
     const out = ['<i class="hb-hm"></i>', ...['一', '', '三', '', '五', '', '日'].map((d) => `<i class="hb-wl">${d}</i>`)]
     // 月份標在每月 1 號那一欄；第一欄若附近沒有標籤也標一下
     const near = cells.slice(7, 21).some((c) => c.date.endsWith('-01'))
@@ -305,7 +304,7 @@ export class HabitsView {
         else {
           const n = countOn(h, date)
           const cls = v >= 1 ? 'full' : v > 0 ? 'part' : 'miss'
-          const tip = `${when}・${n} / ${t} ${h.unit}，${v >= 1 ? '點一下清除' : '點一下補到目標'}`
+          const tip = `${when}・${n} / ${targetOn(h, date)} ${h.unit}，${v >= 1 ? '點一下清除' : '點一下補到目標'}`
           out.push(`<button type="button" class="hb-cell ${cls}${tod}" data-act="cell" data-id="${h.id}" data-date="${date}" tabindex="-1" style="--p:${Math.round(v * 100)}%" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`)
         }
       }
@@ -411,7 +410,7 @@ export class HabitsView {
         // 補打卡：沒做到就補到目標，做到了就清掉
         const date = b.dataset.date
         const c = countOn(h, date)
-        s.checkHabit(id, date, doneOn(h, date) ? -c : (h.target || 1) - c)
+        s.checkHabit(id, date, doneOn(h, date) ? -c : targetOn(h, date) - c)
         break
       }
       case 'resist':

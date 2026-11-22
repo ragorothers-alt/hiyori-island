@@ -4,7 +4,7 @@
 // store/tasks.js、projects.js、habits.js、extras.js、coach.js：各領域的方法。
 // 這裡保留 Store 核心與其餘區段，並轉出原本的公開名稱。
 
-import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS, overnight, spanLen, OVERNIGHT_MAX, routineInstanceId, longTitle } from './store/util.js'
+import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS, overnight, spanLen, OVERNIGHT_MAX, routineInstanceId, routineNextId, routineSpan, longTitle } from './store/util.js'
 import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM, CAT_MOTTOS } from './theme.js'
 import { MOTTO_EVERY } from './mottos.js'
 import { isEvent, CHEERS } from './events.js'
@@ -24,6 +24,7 @@ import { extrasMethods } from './store/extras.js'
 import { coachMethods } from './store/coach.js'
 import { agentMethods } from './store/agent.js'
 import { agentOpsMethods } from './store/agentOps.js'
+import { grantMethods, grantKey } from './store/grants.js'
 
 
 const KEY = 'hiyori-daily-v1'
@@ -386,6 +387,10 @@ export class Store {
   settleMerged() {
     const fx = []
     for (const p of this.state.projects) this._completeProject(p, fx)
+    this._refreshToday()
+    this._starAll(fx)
+    this._perfect(fx)
+    this._habitAll(fx)
     if (fx.length) this._finish(fx)
   }
   // 版本號一定比上一版大：就算這台電腦的時鐘比別台慢，新的變更也不會被當成舊的
@@ -728,15 +733,17 @@ export class Store {
     const q = this.weekly()
     if (!q.ready || q.claimed) return
     this.state.weekly[q.week].claimed = true
-    this.stats.weeklyClaimed++
     const item = this.nextExclusive()
     const p = this.state.player
     const fx = [['weeklyClaimed', { quest: q, item }]]
-    if (item) {
-      p.unlocked[item.key] = true
-      p.freebies[item.key] = (p.freebies[item.key] || 0) + 1
-    } else p.coins += 40 // 限定品都拿過了：改送金平糖
-    this._gain(XP.weekly, fx, { kind: 'weekly' })
+    this._grant(grantKey('w', q.week), () => {
+      this.stats.weeklyClaimed++
+      if (item) {
+        p.unlocked[item.key] = true
+        p.freebies[item.key] = (p.freebies[item.key] || 0) + 1
+      } else p.coins += 40 // 限定品都拿過了：改送金平糖
+      this._gain(XP.weekly, fx, { kind: 'weekly' })
+    })
     this._finish(fx)
   }
 
@@ -868,9 +875,11 @@ export class Store {
     if (date === this.today) this.day().review = 1
     const fx = [['reviewSaved', { date, mood, first }]]
     if (first) {
-      this.stats.reviews++
-      this._gain(XP.review, fx, { kind: 'review' })
-      this._bondGain(BOND_POINTS.review, fx)
+      this._grant(grantKey('r', date), () => {
+        this.stats.reviews++
+        this._gain(XP.review, fx, { kind: 'review' })
+        this._bondGain(BOND_POINTS.review, fx)
+      })
     }
     this._finish(fx)
   }
@@ -893,14 +902,16 @@ export class Store {
     const b = this.state.player.bond
     // 今天來過了；日期倒退（記的是比今天晚的日子）也不再給一次
     if (b.visit >= this.today) return
-    b.visit = this.today
-    this._bondGain(BOND_POINTS.visit, this._pending)
-    if (this.bond.level >= actLevel('gift') && b.gift !== this.today) {
-      b.gift = this.today
-      const coins = giftCoins(this.today)
-      this.state.player.coins += coins
-      this._pending.push(['gift', { coins }])
-    }
+    this._grant(grantKey('v', this.today), () => {
+      b.visit = this.today
+      this._bondGain(BOND_POINTS.visit, this._pending)
+      if (this.bond.level >= actLevel('gift') && b.gift !== this.today) {
+        b.gift = this.today
+        const coins = giftCoins(this.today)
+        this.state.player.coins += coins
+        this._pending.push(['gift', { coins }])
+      }
+    })
     this.save(false)
   }
   outfitUnlocked(key) {
@@ -921,8 +932,11 @@ export class Store {
     if (!p.lastActive || !p.streak || !p.charms) return
     const missed = daysBetween(p.lastActive, this.today) - 1
     if (missed < 1 || missed > p.charms) return
-    p.charms -= missed
-    p.stats.charmsUsed += missed
+    // 跨日時兩台各自用掉同一個（同一天、同樣的那幾天）：合在一起時只算一次
+    this._grant(grantKey('ch', this.today), () => {
+      p.charms -= missed
+      p.stats.charmsUsed += missed
+    })
     p.lastActive = addDays(this.today, -1)
     this._pending.push(['charmUsed', { used: missed, streak: p.streak, left: p.charms }])
     this.save(false)
@@ -1006,9 +1020,13 @@ export class Store {
         this.state.tasks.push(t)
         created.push(t)
       } else {
-        const e = { id: instanceId(r, date), title: r.title, date, start: r.start, end: r.end, color: r.color, done: false, rewarded: false, routineId: r.id }
+        // 跨過午夜的：那天到 23:59、隔天 00:00 起兩段（link 一樣，跟單次的日程一樣是同一個日程）
+        const [a, b] = routineSpan(r, date)
+        const e = { id: instanceId(r, date), title: r.title, date, start: a.start, end: a.end, color: r.color, done: false, rewarded: false, routineId: r.id }
+        if (b) e.link = e.id
         this.state.events.push(e)
         created.push(e)
+        if (b && !have.has(routineNextId(r, date))) this.state.events.push({ ...e, id: routineNextId(r, date), date: b.date, start: b.start, end: b.end })
       }
     }
     // 生成過的紀錄留最近幾天：日期倒退回前一兩天時，使用者刪掉的那天的實例也不會再冒出來
@@ -1025,9 +1043,8 @@ export class Store {
     const days = repeat.type === 'weekly' ? (repeat.days?.length ? repeat.days : [parseDate(date).getDay()]) : []
     // 每月幾號：沒給就是開始那天的日期
     const day = repeat.type === 'monthly' ? Math.min(31, Math.max(1, Math.round(repeat.day) || parseDate(date).getDate())) : 0
-    // 例行日程每天都在同一天裡：跨過午夜的截到 23:59（快速記錄、日程頁的輸入列都一樣）
-    if (kind === 'event' && overnight(start, end)) end = '23:59'
-    else if (toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
+    // 例行日程跨過午夜（夜班 23:30–00:30）：每一次都是那天到 23:59、隔天 00:00 起兩段（見 _ensureRoutines）
+    if (!(kind === 'event' && overnight(start, end)) && toMin(end) <= toMin(start)) end = minToHHMM(Math.min(toMin(start) + 60, 1439))
     const r = {
       id: uid(), kind, title, repeat: day ? { type: repeat.type, days, day } : { type: repeat.type, days }, priority, tag, start, end, color,
       startDate: date < this.today ? this.today : date, made: {}, createdAt: Date.now(),
@@ -1126,10 +1143,12 @@ export class Store {
     if (done) {
       fx.push(['eventDone', e])
       if (!paid) {
-        for (const x of all) x.rewarded = true
-        this.stats.eventsDone++
-        this.day().events++
-        this._gain(XP.event, fx, { kind: 'event', id: e.id })
+        this._grant(grantKey('e', e.link || e.id), () => {
+          for (const x of all) x.rewarded = true
+          this.stats.eventsDone++
+          this.day().events++
+          this._gain(XP.event, fx, { kind: 'event', id: e.id })
+        })
       }
     }
     this._finish(fx)
@@ -1159,8 +1178,6 @@ export class Store {
         end = minToHHMM(Math.min(toMin(start) + ('end' in clean ? 60 : spanLen(span.start, span.end) || 60), 1439))
         over = overnight(start, end)
       }
-      // 例行公事的那一天也在同一天裡：跨過午夜的截到 23:59
-      if (over && e.routineId) end = '23:59'
       this._place(e, v.date, start, end)
     }
     this._finish([['eventChanged', e]])
@@ -1231,56 +1248,62 @@ export class Store {
     if (ID_RE.test(sid)) this.state.pomoSids = [...this.state.pomoSids, sid].slice(-POMO_SIDS)
     this._refreshToday()
     const task = taskId ? this._find('tasks', taskId) : null
-    if (task) {
-      if (!extra) task.pomos = (task.pomos || 0) + 1
-      // 實際做了幾分鐘（跟預估比，看得出平常估得準不準）
-      task.spent = Math.min(99999, (task.spent || 0) + Math.round(minutes))
-      task.touched = Date.now()
-    }
     // 任務歸在某個專案、或目標就是專案：專注的分鐘記到專案上（專案的時間軸和統計用）
     const proj = this._find('projects', task ? task.project : projectId) || null
-    if (proj && minutes) {
-      proj.focus[this.today] = Math.min(1440, (proj.focus[this.today] || 0) + Math.round(minutes))
-      this._edited(proj)
-    }
     const fx = [['pomodoro', { minutes, task, project: proj, extra }]]
-    if (!extra) this.stats.pomodoros++
-    this.stats.focusMinutes += minutes
-    const d = this.day()
-    if (!extra) d.pomodoros++
-    d.focus += minutes
-    // 這次專注落在哪個時段：用中間的時間點算
-    const mid = new Date(Date.now() - minutes * 30000).getHours()
-    const slot = mid < 5 ? 'focusLate' : mid < 12 ? 'focusAm' : mid < 18 ? 'focusPm' : 'focusEve'
-    d[slot] += minutes
-    // XP 依長度：25 分＝原本的份量，短的少一點、長的最多兩倍
-    const xp = Math.round(XP.pomodoro * (extra ? Math.min(2, minutes / 25) : Math.min(2, Math.max(0.4, minutes / 25))))
-    this._gain(xp, fx, { kind: 'focus' })
-    if (!extra) this._bondGain(BOND_POINTS.pomodoro, fx)
-    // 這一輪記了什麼（兩台都記了同一輪、合在一起時照這個扣回一份）
-    if (ID_RE.test(sid)) {
-      const keep = {}
-      for (const id of this.state.pomoSids) if (this.state.pomoGot?.[id]) keep[id] = this.state.pomoGot[id]
-      keep[sid] = { m: minutes, xp, x: extra ? 1 : 0, d: this.today, t: task?.id || null, p: proj?.id || null, s: slot }
-      this.state.pomoGot = keep
-    }
+    // 這一輪記了什麼記在帳上（兩台都記了同一輪、合在一起時扣回一份；提早結束的「不算這段」照它收回）
+    const extraCodes = [...(task ? [`ts:${task.id}`, `tp:${task.id}`] : []), ...(proj ? [`pf:${proj.id}`] : [])]
+    this._grant(
+      grantKey('f', ID_RE.test(sid) ? sid : uid()),
+      () => {
+        if (task) {
+          if (!extra) task.pomos = (task.pomos || 0) + 1
+          // 實際做了幾分鐘（跟預估比，看得出平常估得準不準）
+          task.spent = Math.min(99999, (task.spent || 0) + Math.round(minutes))
+          task.touched = Date.now()
+        }
+        if (proj && minutes) {
+          proj.focus[this.today] = Math.min(1440, (proj.focus[this.today] || 0) + Math.round(minutes))
+          this._edited(proj)
+        }
+        if (!extra) this.stats.pomodoros++
+        this.stats.focusMinutes += minutes
+        const d = this.day()
+        if (!extra) d.pomodoros++
+        d.focus += minutes
+        // 這次專注落在哪個時段：用中間的時間點算
+        const mid = new Date(Date.now() - minutes * 30000).getHours()
+        d[mid < 5 ? 'focusLate' : mid < 12 ? 'focusAm' : mid < 18 ? 'focusPm' : 'focusEve'] += minutes
+        // XP 依長度：25 分＝原本的份量，短的少一點、長的最多兩倍
+        const xp = Math.round(XP.pomodoro * (extra ? Math.min(2, minutes / 25) : Math.min(2, Math.max(0.4, minutes / 25))))
+        this._gain(xp, fx, { kind: 'focus' })
+        if (!extra) this._bondGain(BOND_POINTS.pomodoro, fx)
+      },
+      { extra: extraCodes },
+    )
     this._finish(fx)
     return true
   }
+  // 收回一筆專注（提早結束的那幾分鐘按了「不算這段」）：照帳上記的扣回去。回傳有沒有收回
+  undoPomodoro(sid) {
+    return ID_RE.test(sid) ? this.revokeGrant(grantKey('f', sid)) : false
+  }
   pet() {
     this._refreshToday()
-    this.stats.pets++
-    this.day().pets++
     const b = this.state.player.bond
     if (b.petDay !== this.today) {
       b.petDay = this.today
       b.petN = 0
     }
     const fx = []
-    if (b.petN < BOND_POINTS.petDailyMax) {
-      b.petN++
-      this._bondGain(BOND_POINTS.pet, fx)
-    }
+    this._grant(grantKey('pt', uid()), () => {
+      this.stats.pets++
+      this.day().pets++
+      if (b.petN < BOND_POINTS.petDailyMax) {
+        b.petN++
+        this._bondGain(BOND_POINTS.pet, fx)
+      }
+    })
     if (fx.length) return this._finish(fx)
     // 摸摸不需要重繪面板（避免打斷正在輸入的欄位），除非剛好解鎖成就或達成每日任務
     const snap = this.statsSnapshot()
@@ -1297,9 +1320,11 @@ export class Store {
     const q = this.quests().find((x) => x.id === qid)
     if (!q || !q.ready || q.claimed) return
     this.state.quests[this.today].claimed[qid] = true
-    this.stats.questsClaimed++
     const fx = [['questClaimed', q]]
-    this._gain(XP.quest, fx, { kind: 'quest', id: qid })
+    this._grant(grantKey('qc', this.today, qid), () => {
+      this.stats.questsClaimed++
+      this._gain(XP.quest, fx, { kind: 'quest', id: qid })
+    })
     this._finish(fx)
   }
   setSetting(key, value) {
@@ -1361,7 +1386,18 @@ export class Store {
     if (newerData(obj)) throw new Error(NEWER_MSG)
     if (this.newerApp) throw new Error(NEWER_TAB_MSG)
     if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error('瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份')
-    if (!this.replaceOrUndo(obj)) throw new Error(NO_SAVE_MSG)
+    // 存匯入的那一份時，剛留的備份不能被擠掉（擠不下就是存不進去：換回原本那一份、拿掉剛留的備份）
+    this.keepBackups = 1
+    let ok = false
+    try {
+      ok = this.replaceOrUndo(obj)
+    } finally {
+      this.keepBackups = 0
+    }
+    if (!ok) {
+      dropBackup(0)
+      throw new Error(NO_SAVE_MSG)
+    }
   }
   // 整份換掉（匯入、還原備份）並存好；存不進去就換回原本那一份（存檔裡還是原本的），回傳有沒有換成。
   // 不然畫面上是新的那份、重新整理就不見了，還原備份時連那份備份都會先被刪掉
@@ -1391,7 +1427,11 @@ export class Store {
     // 這台還沒同步出去的提醒次數不會被蓋掉。匯入、還原備份是整份換掉：換一個 gen，之後誰拿到這一份都照它的數字
     let raised = false
     if (soft && sameGen(this.state, next)) raised = keepTallies(this.state?.history, next.history)
-    else if (!soft && !peer) next.tallyGen = uid()
+    else if (!soft && !peer) {
+      next.tallyGen = uid()
+      // 整份換掉的：不再「包含」檔案裡記的那幾版（不然同步時會當成已經包含雲端那一版，直接蓋過去、沒問也沒備份）
+      next.lineage = []
+    }
     // 同步拉回的那一版數字比這台少：算成這台改過一次（換 rev），下一輪同步推上去，別台才拿得到這台多記的
     if (raised && !peer) {
       next.lineage = [...(next.lineage || []).filter((x) => x !== next.rev), next.rev].slice(-LINEAGE_MAX)
@@ -1557,7 +1597,7 @@ export { DATA_VERSION, newerData, REVIEW_TEXT, ALLDAY_MAX, dateStr, parseDate, a
 export { floating, DATES_MAX, SUBS_MAX, httpUrl, blankTask, cleanRhythm } from './store/migrate.js'
 
 // 各領域的方法掛回 Store：跟直接寫在 class 裡一樣（getter 照原樣、不可列舉）
-for (const obj of [tasksMethods, projectsMethods, habitsMethods, extrasMethods, coachMethods, agentMethods, agentOpsMethods]) {
+for (const obj of [tasksMethods, projectsMethods, habitsMethods, extrasMethods, coachMethods, agentMethods, agentOpsMethods, grantMethods]) {
   const ds = Object.getOwnPropertyDescriptors(obj)
   for (const d of Object.values(ds)) d.enumerable = false
   Object.defineProperties(Store.prototype, ds)

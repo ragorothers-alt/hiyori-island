@@ -219,6 +219,10 @@ describe('引號、書名號裡的字照原文', () => {
     expect(parseQuick('明天 練「下午3點的咖啡」這首 #工作', { today })).toMatchObject({ title: '練「下午3點的咖啡」這首', date: '2026-11-23', kind: 'task', tag: 'work' })
     expect(parseQuick('買“週五”牌牛奶 週五前', { today })).toMatchObject({ title: '買“週五”牌牛奶', due: '2026-11-27', date: null })
     expect(parseQuick('讀『三天後』 15:00', { today })).toMatchObject({ title: '讀『三天後』', kind: 'event', start: '15:00' })
+    expect(parseQuick('看﹃明天過後﹄', { today })).toMatchObject({ title: '看﹃明天過後﹄', date: null })
+    expect(parseQuick('讀‘明天’這篇', { today })).toMatchObject({ title: '讀‘明天’這篇', date: null })
+    // 輸入裡本來就有的私用字元不會被當成記號
+    expect(parseQuick('a 明天', { today })).toMatchObject({ title: 'a', date: '2026-11-23' })
     // 沒有成對的：照常解析
     expect(parseQuick('「明天開會', { today })).toMatchObject({ date: '2026-11-23' })
     // 英文的單引號不算

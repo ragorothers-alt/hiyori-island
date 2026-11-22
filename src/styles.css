@@ -547,6 +547,19 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .dock-more { display: none; }
 .dock-more svg circle { fill: currentColor; stroke: none; }
 .dock-pop { display: contents; }
+/* 小島模式（電腦寬度）：Dock 放在左下的每日任務和右邊面板中間那一塊的中間（ui.js 的 _bindDockFit 量好 --dock-l、--dock-r），
+   放不下時（dock-tight）跟窄螢幕一樣收成「⋯」 */
+@media (min-width: 861px) {
+  body:not(.app-mode) .dock { left: calc(var(--dock-l, 0px) + (100vw - var(--dock-l, 0px) - var(--dock-r, 0px)) / 2); transition: left .5s var(--ease); }
+  body.dock-tight:not(.app-mode) .dock-sep { display: none; }
+  body.dock-tight:not(.app-mode) .dock-more { display: grid; }
+  body.dock-tight:not(.app-mode) .dock-more[aria-expanded="true"] { background: var(--glass-hover); color: var(--ink); }
+  body.dock-tight:not(.app-mode) .dock-pop {
+    display: none; position: absolute; right: 6px; bottom: calc(100% + 8px); gap: 2px; padding: 5px 6px;
+    border-radius: 18px; background: var(--lg-bg-strong, var(--lg-bg)); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
+  }
+  body.dock-tight:not(.app-mode) .dock-pop.open { display: flex; animation: fadeUp .22s var(--ease) both; }
+}
 @media (max-width: 440px) {
   /* 分隔線也拿掉：專注時多了「結束」和「看看小木屋裡」，360px 寬才放得下 */
   body:not(.app-mode) .dock-sep { display: none; }

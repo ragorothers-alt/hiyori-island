@@ -179,13 +179,18 @@ export class ProjectView {
   }
 
   // taskId：直接打開那件任務的頁面
-  open(id, sec = 'log', taskId = null) {
+  // noteId：直接打開那一篇筆記（搜尋找到的是筆記時）
+  open(id, sec = 'log', taskId = null, noteId = null) {
     this._flushAll()
     this.id = id
     this._reset()
     if (SECS.some(([k]) => k === sec)) this.sec = sec
     this.side = sec === 'ms' || sec === 'tasks' ? sec : this._sideOf(id)
     this.taskId = taskId
+    if (noteId && this.store.state.projects.find((p) => p.id === id)?.notes.some((n) => n.id === noteId)) {
+      this.noteId = noteId
+      this.sec = 'notes'
+    }
     this.root.replaceChildren()
   }
 

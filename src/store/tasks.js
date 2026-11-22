@@ -1,6 +1,7 @@
 import { blankTask, TIME_RE, newTempo, isObj, floating, cleanPatch, TASK_PATCH, DATE_RE, str, TEMPLATES_MAX, blank, taskSig } from './migrate.js'
 import { PROJECT_LIMITS as PL, taskMilestone, unitOf, bpmOf } from '../projects.js'
 import { uid, seasonKey, daysBetween, dateStr, addDays, isSampleId, longTitle } from './util.js'
+import { grantKey } from './grants.js'
 import { taskDur, sessionLen, SPLIT_MAX } from '../planner.js'
 import { MAX_STARS, TAGS, PRIORITIES, SOFT_CAP, XP } from '../theme.js'
 import { BOND_POINTS } from '../data/bond.js'
@@ -126,7 +127,7 @@ export const tasksMethods = {
     if (t.done) {
       fx.push(['taskDone', t])
       if (t.date < this.today) fx.push(['revive', t])
-      if (!t.rewarded) {
+      if (!t.rewarded) this._grant(grantKey('t', t.id), () => {
         t.rewarded = true
         const s = this.stats
         s.tasksDone++
@@ -152,37 +153,45 @@ export const tasksMethods = {
         const tired = d.tasks > SOFT_CAP
         if (tired) xp = Math.ceil(xp / 2)
         if (d.tasks === SOFT_CAP + 1) fx.push(['tired', { count: d.tasks }])
-        t.xpGot = xp
         this._gain(xp, fx, { kind: t.star ? 'star' : 'task', id: t.id, tired })
         this._bloom(t, d, fx)
         if (t.star) fx.push(['starDone', t])
-      }
+      })
       // 本命全清：放在第一次完成的獎勵外面。完成過又取消、之後才選成本命的那件，再完成時也要算得到（每天只給一次）
-      if (t.star && t.date === this.today) {
-        const d = this.day()
-        const stars = this.starsOn(this.today)
-        if (!d.starAll && stars.length >= MAX_STARS && stars.every((x) => x.done)) {
-          d.starAll = true
-          this.stats.starDays++
-          this._gain(XP.starAll, fx, { kind: 'starAll' })
-          this._bondGain(BOND_POINTS.starAll, fx)
-          fx.push(['starAll', stars])
-        }
-      }
+      if (t.star && t.date === this.today) this._starAll(fx)
       const list = this.tasksOn(t.date)
       if (t.date === this.today && list.every((x) => x.done)) {
         fx.push(['allDone', { count: list.length }])
-        const d = this.day()
-        if (list.length >= 3 && !d.perfect) {
-          d.perfect = true
-          this.stats.perfectDays++
-          this._gain(XP.perfectDay, fx, { kind: 'perfect' })
-        }
+        this._perfect(fx)
       }
     } else {
       fx.push(['taskUndone', t])
     }
     this._finish(fx)
+  },
+  // 今天的本命都做完了：本命全清（每天只給一次）
+  _starAll(fx) {
+    const d = this.day()
+    const stars = this.starsOn(this.today)
+    if (d.starAll || stars.length < MAX_STARS || !stars.every((x) => x.done)) return
+    this._grant(grantKey('sa', this.today), () => {
+      d.starAll = true
+      this.stats.starDays++
+      this._gain(XP.starAll, fx, { kind: 'starAll' })
+      this._bondGain(BOND_POINTS.starAll, fx)
+    })
+    fx.push(['starAll', stars])
+  },
+  // 今天的任務（3 件以上）都做完了：完美的一天（每天只給一次）
+  _perfect(fx) {
+    const d = this.day()
+    const list = this.tasksOn(this.today)
+    if (d.perfect || list.length < 3 || !list.every((x) => x.done)) return
+    this._grant(grantKey('pf', this.today), () => {
+      d.perfect = true
+      this.stats.perfectDays++
+      this._gain(XP.perfectDay, fx, { kind: 'perfect' })
+    })
   },
   // 決定這個任務開出的花，記進圖鑑
   _bloom(t, d, fx) {

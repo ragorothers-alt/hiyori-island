@@ -4,6 +4,7 @@ import { doneOn, countOn, applies, streak as habitStreak, todayProgress, cleanDa
 import { XP } from '../theme.js'
 import { BOND_POINTS } from '../data/bond.js'
 import { LIFE_KINDS } from '../data/life.js'
+import { grantKey } from './grants.js'
 export const habitsMethods = {
   // ── 習慣 ──
   habit(id) {
@@ -30,7 +31,16 @@ export const habitsMethods = {
     if (patch.name !== undefined) h.name = String(patch.name).trim().slice(0, 30) || h.name
     if (patch.icon !== undefined) h.icon = String(patch.icon).slice(0, 2) || h.icon
     if (patch.color !== undefined) h.color = num(patch.color, 0, 99, h.color)
-    if (patch.target !== undefined) h.target = num(patch.target, 1, 99, h.target)
+    if (patch.target !== undefined) {
+      const next = num(patch.target, 1, 99, h.target)
+      // 改之前的日子照當時的目標算（達成率、連續天數、熱度圖不會因為提高目標整個歸零）；同一天改好幾次只記最早的那個
+      if (next !== h.target) {
+        this._refreshToday()
+        const list = Array.isArray(h.targets) ? h.targets : []
+        if (!list.some((x) => x.to === this.today)) h.targets = [...list, { to: this.today, target: h.target }].slice(-50)
+        h.target = next
+      }
+    }
     if (patch.unit !== undefined) h.unit = String(patch.unit).trim().slice(0, 6) || h.unit
     if (patch.days !== undefined) h.days = weekdays(patch.days)
     if (patch.archived !== undefined) h.archived = !!patch.archived
@@ -67,23 +77,30 @@ export const habitsMethods = {
     const fx = [['habitCheck', { habit: h, date, count: n, delta }]]
     // 獎勵只給今天該做的習慣；休息日多做也能記，但不算進完成與連續天數
     if (!before && doneOn(h, date) && date === this.today && h.paid !== this.today && !h.paidDays?.includes(this.today) && applies(h, date)) {
-      h.paid = this.today
-      h.paidDays = [...(h.paidDays || []), this.today].sort().slice(-HABIT_PAID_DAYS)
-      const d = this.day()
-      d.habits++
-      this.stats.habitChecks++
-      this._touchStreak()
-      this._gain(XP.habit, fx, { kind: 'habit', id: h.id })
+      this._grant(grantKey('h', h.id, this.today), () => {
+        h.paid = this.today
+        h.paidDays = [...(h.paidDays || []), this.today].sort().slice(-HABIT_PAID_DAYS)
+        this.day().habits++
+        this.stats.habitChecks++
+        this._touchStreak()
+        this._gain(XP.habit, fx, { kind: 'habit', id: h.id })
+      })
       fx.push(['habitDone', { habit: h, streak: habitStreak(h, this.today) }])
-      const prog = todayProgress(this.state.habits, this.today)
-      if (prog.total >= 2 && prog.done === prog.total && !d.habitAll) {
-        d.habitAll = true
-        this._gain(XP.habitAll, fx, { kind: 'habitAll' })
-        this._bondGain(BOND_POINTS.habitAll, fx)
-        fx.push(['habitAll', prog])
-      }
+      this._habitAll(fx)
     }
     this._finish(fx)
+  },
+  // 今天該做的養成習慣（2 個以上）都做完了（每天只給一次）
+  _habitAll(fx) {
+    const d = this.day()
+    const prog = todayProgress(this.state.habits, this.today)
+    if (prog.total < 2 || prog.done !== prog.total || d.habitAll) return
+    this._grant(grantKey('ha', this.today), () => {
+      d.habitAll = true
+      this._gain(XP.habitAll, fx, { kind: 'habitAll' })
+      this._bondGain(BOND_POINTS.habitAll, fx)
+    })
+    fx.push(['habitAll', prog])
   },
   // 戒除：忍住了一次（每個習慣每天前 3 次有獎勵）
   resistUrge(id) {
@@ -91,11 +108,13 @@ export const habitsMethods = {
     if (!h || h.kind !== 'quit' || h.archived) return
     this._refreshToday()
     const n = (h.urges[this.today] || 0) + 1
-    h.urges[this.today] = n
-    this.stats.urgesResisted++
-    this.day().urges++
     const fx = [['urgeResisted', { habit: h, count: n, days: cleanDays(h, this.today) }]]
-    if (n <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: h.id })
+    this._grant(grantKey('u', uid()), () => {
+      h.urges[this.today] = n
+      this.stats.urgesResisted++
+      this.day().urges++
+      if (n <= 3) this._gain(XP.urge, fx, { kind: 'urge', id: h.id })
+    })
     this._finish(fx)
   },
   // 戒除：破戒了。沒有懲罰，只是重新起算
@@ -131,7 +150,7 @@ export const habitsMethods = {
         const xp = m > (h.msPaid || 0)
         if (xp) {
           h.msPaid = m
-          this._gain(XP.quitMilestone, fx, { kind: 'quit', id: h.id })
+          this._grant(grantKey('q', h.id, m), () => this._gain(XP.quitMilestone, fx, { kind: 'quit', id: h.id }))
         }
         fx.push(['quitMilestone', { habit: h, days: m, xp }])
       }
@@ -159,13 +178,15 @@ export const habitsMethods = {
     const day = (this.state.life[date] ||= { items: [], energy: 0 })
     day.items.push(item)
     day.items.sort((a, b) => toMin(a.t) - toMin(b.t))
-    this.stats.lifeEntries++
     const fx = [['lifeLogged', { date, item, count: day.items.length }]]
-    if (date === this.today) {
-      const d = this.day()
-      d.life++
-      if (d.life <= 3) this._gain(XP.life, fx, { kind: 'life' })
-    }
+    this._grant(grantKey('l', item.id), () => {
+      this.stats.lifeEntries++
+      if (date === this.today) {
+        const d = this.day()
+        d.life++
+        if (d.life <= 3) this._gain(XP.life, fx, { kind: 'life' })
+      }
+    })
     this._finish(fx)
     return item
   },

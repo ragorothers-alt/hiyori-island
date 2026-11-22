@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store, addDays } from '../src/store.js'
 import { XP } from '../src/theme.js'
+import { doneOn } from '../src/habits.js'
 
 const TODAY = '2026-10-29'
 let store
@@ -156,6 +157,21 @@ describe('養成習慣', () => {
     expect(h.log[TODAY]).toBe(1)
     expect(store.player.xp).toBe(0)
     expect(events.some(([t]) => t === 'habitDone')).toBe(false)
+  })
+  it('提高每日目標：改之前的日子照當時的目標算（達成、熱度圖不會歸零），今天起照新的', () => {
+    const h = store.addHabit({ name: '喝水', target: 3 })
+    store.checkHabit(h.id, addDays(TODAY, -1), 3)
+    store.checkHabit(h.id, TODAY, 3)
+    expect(doneOn(h, addDays(TODAY, -1))).toBe(true)
+    store.updateHabit(h.id, { target: 4 })
+    expect(doneOn(h, addDays(TODAY, -1))).toBe(true)
+    expect(doneOn(h, TODAY)).toBe(false)
+    // 同一天又改一次：只記最早的那個；存檔讀回來也記得
+    store.updateHabit(h.id, { target: 5 })
+    expect(h.targets).toEqual([{ to: TODAY, target: 3 }])
+    store.flushSave()
+    const again = new Store()
+    expect(doneOn(again.habit(h.id), addDays(TODAY, -1))).toBe(true)
   })
   it('不能替未來打卡；開始前的日子補卡會把開始日往前移（最多 12 週）；封存後不能打卡', () => {
     const h = store.addHabit({ name: '閱讀' })

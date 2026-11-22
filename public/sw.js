@@ -258,7 +258,11 @@ async function readReminds(cache) {
 }
 // 記下這幾則顯示過了（一則一個檔案），順便清掉三天以前的
 async function addReminds(cache, list, now) {
-  for (const x of list) await putJSON(cache, remindFile(x), { key: x.key, date: x.date, at: x.at })
+  // by：是誰記的（顯示失敗時只拿掉自己記的那一則，頁面剛好也記了的留著）
+  for (const x of list) await putJSON(cache, remindFile(x), { key: x.key, date: x.date, at: x.at, by: 'sw' })
+  // 舊版記的整份：裡面的都過了三天就整個拿掉
+  const old = await readJSON(cache, REMIND_SHOWN)
+  if (Array.isArray(old) && old.every((x) => !(Number(x?.at) > now - REMIND_KEEP))) await cache.delete(fileUrl(REMIND_SHOWN))
   const dir = fileUrl(REMIND_DIR)
   for (const req of await cache.keys()) {
     if (!String(req.url).startsWith(dir)) continue
@@ -398,7 +402,7 @@ async function showPush() {
       try {
         if (s.kind === 'timer' && (await readJSON(cache, SHOWN_FILE))?.at === s.at) await putJSON(cache, SHOWN_FILE, shownBefore || {})
         if (s.kind === 'motto' && Number((await readJSON(cache, MOTTO_DONE))?.at) === s.at) await putJSON(cache, MOTTO_DONE, doneBefore || { at: 0 })
-        if (s.kind === 'remind') await cache.delete(fileUrl(remindFile(s)))
+        if (s.kind === 'remind' && (await readJSON(cache, remindFile(s)))?.by === 'sw') await cache.delete(fileUrl(remindFile(s)))
       } catch {}
     }
   }

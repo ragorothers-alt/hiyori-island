@@ -49,6 +49,7 @@ body.night .ws-day.today b { color: #9fd0f3; }
 .pb-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; font-size: max(var(--fmin), 12px); }
 .pb-list li { display: flex; gap: 8px; min-width: 0; color: var(--ink); }
 .pb-list time { flex: none; font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+.pb-list .pb-from { flex: none; font-style: normal; font-size: .9em; color: #b2475d; background: rgba(232, 120, 120, .14); border-radius: 6px; padding: 0 5px; }
 .pb-list span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-list li.more { color: var(--ink-faint); }
 .tray-more { display: block; margin: 6px auto 0; padding: 4px 12px; border-radius: 10px; font-size: max(var(--fmin), 12px); color: var(--ink-soft); background: var(--field); }

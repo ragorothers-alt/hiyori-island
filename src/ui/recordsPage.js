@@ -165,6 +165,9 @@ export const recordsMethods = {
       const f = e.target.files[0]
       e.target.value = ''
       if (!f) return
+      // 又選了一個檔案：上一個的確認先收起來（選到壞掉的檔案時不會還能換成上一個）
+      $('#importCheck').hidden = true
+      $('#importCheck').innerHTML = ''
       let text = ''
       let obj = null
       try {

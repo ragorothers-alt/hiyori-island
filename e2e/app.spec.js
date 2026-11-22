@@ -5845,3 +5845,89 @@ test('總覽的今日前三要務：點名稱打開那一件（看得到完整�
   if (ex) await expect(page.locator('.td-sched .td-evc .ex-tag').first()).toBeVisible()
   expect(id).toBeTruthy()
 })
+
+test('倒數提早結束：做了的分鐘記下（不算一顆番茄），提示卡上「不算這段」收回', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const before = await page.evaluate(() => ({ min: window.hiyori.store.stats.focusMinutes, pomos: window.hiyori.store.stats.pomodoros, xp: window.hiyori.store.player.xp }))
+  // 開始一輪、假裝已經做了 9 分鐘
+  await page.evaluate(() => {
+    const f = window.hiyori.ui.focus
+    f.toggle()
+    f.endAt = Date.now() + (f.focusMin - 9) * 60000 - 2000
+    f._save()
+  })
+  await page.evaluate(() => window.hiyori.ui.focus.stop())
+  const toast = page.locator('#toasts .toast', { hasText: '提早結束，做了的 9 分鐘記下了' })
+  await expect(toast).toBeVisible()
+  expect(await page.evaluate(() => [window.hiyori.store.stats.focusMinutes, window.hiyori.store.stats.pomodoros])).toEqual([before.min + 9, before.pomos])
+  await toast.getByRole('button', { name: '不算這段' }).click()
+  await expect.poll(() => page.evaluate(() => [window.hiyori.store.stats.focusMinutes, window.hiyori.store.player.xp])).toEqual([before.min, before.xp])
+})
+
+test('最佳化時程：逾期的會從原本那天移過來，預覽上寫原本是哪一天；提示卡收起來後排程列上也能撤銷', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const { id, was } = await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.clearSamples()
+    const d = new Date(s.today)
+    d.setDate(d.getDate() - 3)
+    const was = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const t = s.addTask({ title: '拖了三天的報告', date: was, dur: 30 })
+    s.selectDate(s.today)
+    window.hiyori.ui.setTab('schedule')
+    return { id: t.id, was }
+  })
+  const bar = page.locator('#planBar')
+  await bar.locator('[data-plan="optimize"]').click()
+  // 現在太晚、今天排不下的話這個測試不適用
+  const listed = await bar.locator('.pb-list li', { hasText: '拖了三天的報告' }).count()
+  test.skip(!listed, '今天剩下的時間排不下')
+  await expect(bar.locator('.pb-list li', { hasText: '拖了三天的報告' }).locator('.pb-from')).toHaveText(`原本 ${+was.slice(5, 7)}/${+was.slice(8)}`)
+  await expect(bar).toContainText('其中 1 件是逾期的')
+  await bar.locator('[data-plan="apply"]').click()
+  await expect.poll(() => page.evaluate((id) => !!window.hiyori.store.state.tasks.find((t) => t.id === id)?.at, id)).toBe(true)
+  await page.evaluate(() => window.hiyori.ui.dropToasts('scheduled'))
+  await bar.locator('[data-plan="undo-last"]').click()
+  await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id)?.date, id)).toBe(was)
+  await expect(bar.locator('[data-plan="undo-last"]')).toHaveCount(0)
+})
+
+test('專案搜尋找到的是筆記：Enter 直接打開那一篇', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const p = s.addProject({ name: '春季策展', milestones: ['確認企劃'] })
+    s.addProjectNote(p.id, { title: '展場平面圖', body: '潮聲七號的動線要再確認' })
+    window.hiyori.ui.setTab('projects')
+  })
+  const q = page.locator('#projectQuery')
+  await page.keyboard.press('/')
+  await q.fill('潮聲七號')
+  await expect(page.locator('#projectList .proj')).toHaveCount(1)
+  await q.press('Enter')
+  await expect(page.locator('#projectDetail .pd-note')).toBeVisible()
+  await expect(page.locator('#projectDetail .pd-note')).toContainText('展場平面圖')
+})
+
+test('小島模式（電腦寬度）：面板開著時 Dock 放在每日任務和面板中間，不壓到面板；放不下的收成「⋯」', async ({ page, site }) => {
+  await page.setViewportSize({ width: 1280, height: 820 })
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => window.hiyori.ui.togglePanel(false))
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const d = document.querySelector('.dock').getBoundingClientRect()
+        return d.right <= document.getElementById('panel').getBoundingClientRect().left
+      }),
+    )
+    .toBe(true)
+  await page.evaluate(() => window.hiyori.ui.togglePanel(true))
+  await expect.poll(() => page.evaluate(() => document.body.classList.contains('dock-tight'))).toBe(false)
+})

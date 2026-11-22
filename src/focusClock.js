@@ -79,6 +79,13 @@ export function stopMinutes(s, now) {
   return ms >= FREE_MIN * 60000 ? Math.floor(ms / 60000) : null
 }
 
+// 倒數的專注提早按 ■（結束）：已經做了幾分鐘（整分鐘；加時、往上數、休息中是 0）
+export function partialMinutes(s, now) {
+  if (s.mode !== 'focus' || counting(s) || s.ext) return 0
+  const done = s.focusMin * 60000 - leftMs(s, now)
+  return Math.max(0, Math.min(Math.floor(s.focusMin), Math.floor(done / 60000)))
+}
+
 // 開始一輪專注：回傳新的 { mode, endAt, paused }
 export const focusStart = (s, now) => ({ mode: 'focus', paused: null, endAt: s.up ? now : now + s.focusMin * 60000 })
 // 專注結束、開始休息。doneAt：那一段專注是幾點結束的（倒數的是本來排好到點的時間，自己按「做完了」的是現在）。

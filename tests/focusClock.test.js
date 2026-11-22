@@ -1,6 +1,6 @@
 // 番茄鐘的計時規則：倒數、往上數、暫停、多輪、放太久
 import { describe, expect, it } from 'vitest'
-import { FLOW_MAX, FREE_MAX, LATE, MAX_ROUNDS, breakStart, canAddRound, canExtend, counting, due, elapsedMs, extMax, extendStart, finalEnd, flowStart, flowing, focusStart, isStale, leftMs, nextEnd, pauseToggle, restoreState, stopMinutes } from '../src/focusClock.js'
+import { FLOW_MAX, FREE_MAX, LATE, MAX_ROUNDS, breakStart, canAddRound, canExtend, counting, due, elapsedMs, extMax, extendStart, finalEnd, flowStart, flowing, focusStart, isStale, leftMs, nextEnd, pauseToggle, restoreState, stopMinutes, partialMinutes } from '../src/focusClock.js'
 
 const MIN = 60000
 const T0 = 1_800_000_000_000
@@ -259,5 +259,19 @@ describe('重新整理後接回計時', () => {
     // 5 分鐘到點：照一般的倒數記 5 分鐘、接著休息（休息中可以接著做下去）
     expect(due({ ...saved, endAt: 1_000_000 }, 1_000_000)).toEqual({ do: 'finishFocus', minutes: 5 })
     expect(canExtend({ ...saved, ...breakStart(saved, 1_000_000) })).toBe(true)
+  })
+})
+
+describe('倒數提早結束：已經做了幾分鐘', () => {
+  const now = 1_000_000_000
+  it('倒數 10 分鐘剩 1 分鐘按結束是 9 分鐘；暫停中照暫停時剩的算；往上數、加時、休息、待機是 0', () => {
+    const s = { mode: 'focus', focusMin: 10, endAt: now + 60000, paused: null, up: false, ext: false }
+    expect(partialMinutes(s, now)).toBe(9)
+    expect(partialMinutes({ ...s, paused: 4.5 * 60000 }, now)).toBe(5)
+    expect(partialMinutes({ ...s, endAt: now + 10 * 60000 - 30000 }, now)).toBe(0)
+    expect(partialMinutes({ ...s, up: true }, now)).toBe(0)
+    expect(partialMinutes({ ...s, ext: true }, now)).toBe(0)
+    expect(partialMinutes({ ...s, mode: 'break' }, now)).toBe(0)
+    expect(partialMinutes({ ...s, mode: 'idle' }, now)).toBe(0)
   })
 })

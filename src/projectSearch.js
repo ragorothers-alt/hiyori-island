@@ -33,20 +33,21 @@ export function queryTerms(q) {
   return [...new Set(fold(q).split(/\s+/).filter(Boolean))].slice(0, MAX_TERMS)
 }
 
+// ref：在專案頁的哪裡（打開搜尋結果時直接到那裡：哪一塊、哪一篇筆記）
 function fieldsOf(p) {
   const out = [['name', p.name]]
   for (const m of p.milestones || []) {
-    out.push(['ms', m.title])
-    for (const s of m.steps || []) out.push(['step', s.title])
-    if (m.note) out.push(['msNote', m.note])
+    out.push(['ms', m.title, { sec: 'ms' }])
+    for (const s of m.steps || []) out.push(['step', s.title, { sec: 'ms' }])
+    if (m.note) out.push(['msNote', m.note, { sec: 'ms' }])
   }
   if (p.goal) out.push(['goal', p.goal])
   for (const n of p.notes || []) {
-    if (n.title) out.push(['noteTitle', n.title])
-    if (n.body) out.push(['note', n.body])
+    if (n.title) out.push(['noteTitle', n.title, { sec: 'notes', note: n.id }])
+    if (n.body) out.push(['note', n.body, { sec: 'notes', note: n.id }])
   }
-  for (const l of p.logs || []) if (l.text) out.push(['log', l.text])
-  return out.map(([kind, text]) => ({ kind, text, f: fold(text), w: KIND[kind][1] }))
+  for (const l of p.logs || []) if (l.text) out.push(['log', l.text, { sec: 'log' }])
+  return out.map(([kind, text, ref = null]) => ({ kind, text, ref, f: fold(text), w: KIND[kind][1] }))
 }
 
 // 找專案：回傳 [{ p, score, hit }]，分數高的在前，同分照原本的順序；沒打字回傳 null。
@@ -79,7 +80,7 @@ export function searchProjects(projects, query) {
     if (rest.length) {
       const has = (f) => rest.filter((t) => f.f.includes(t)).length
       const f = fields.slice(1).reduce((a, b) => (has(b) > has(a) || (has(b) === has(a) && b.w > a.w) ? b : a))
-      hit = { kind: KIND[f.kind][0], text: snippet(f.text, rest) }
+      hit = { kind: KIND[f.kind][0], text: snippet(f.text, rest), ref: f.ref }
     }
     out.push({ p, score, hit })
   }

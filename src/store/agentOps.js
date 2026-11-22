@@ -12,6 +12,7 @@ import { countOn } from '../habits.js'
 import { DATE_KINDS } from '../theme.js'
 import { fieldText, okVal, UNDO_GROUPS } from '../agentOps.js'
 import { dayWord } from '../agent.js'
+import { grantKey } from './grants.js'
 
 const short = (s, n = 22) => {
   const t = String(s ?? '')
@@ -300,7 +301,7 @@ const CREATE = {
     const d = c.fields.days
     const repeat = isObj(d) && REPEAT_TYPES.includes(d.type) ? d : repeatOf(Array.isArray(d) ? d : [])
     const start = c.start || '09:00'
-    // 結束比開始早（跨過午夜）交給 addRoutine 截到 23:59（快速記錄、日程頁也是）；沒給的補一小時
+    // 結束比開始早（跨過午夜）交給 addRoutine（每一次都是兩段，快速記錄、日程頁也是）；沒給的補一小時
     const end = c.end || minToHHMM(Math.min(toMin(start) + 60, 1439))
     const r = s.addRoutine({ kind: ev ? 'event' : 'task', title: c.title.slice(0, 120), repeat, tag: c.fields.tag || 'life', priority: c.fields.priority || 2, start, end, date: c.date && c.date >= s.today ? c.date : s.today })
     if (!r) return null
@@ -667,10 +668,12 @@ export const agentOpsMethods = {
       if (p && p.completedAt === u.pat) {
         p.completedAt = null
         p.pausedAt = u.ppause || null
-        this.stats.projectsDone = Math.max(0, this.stats.projectsDone - 1)
+        // 落成的獎勵照帳收回（之後真的再落成時照常給）；舊的、帳上沒有的只扣次數
+        p.paid = false
+        if (!this.revokeGrant(grantKey('p', p.id))) this.stats.projectsDone = Math.max(0, this.stats.projectsDone - 1)
         if (u.ponTime) {
           p.onTime = false
-          this.stats.projectsOnTime = Math.max(0, this.stats.projectsOnTime - 1)
+          if (!this.revokeGrant(grantKey('po', p.id))) this.stats.projectsOnTime = Math.max(0, this.stats.projectsOnTime - 1)
         }
         this._edited(p)
       }

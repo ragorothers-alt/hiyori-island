@@ -90,6 +90,40 @@ describe('日期、時間與重複規則', () => {
   })
 })
 
+describe('整份換掉（匯入、還原備份）', () => {
+  it('不再「包含」檔案裡記的那幾版（lineage 清掉），換一個 tallyGen', () => {
+    const file = JSON.parse(JSON.stringify(store.state))
+    file.lineage = ['aaaaaaaaaaaa', 'bbbbbbbbbbbb']
+    const gen = store.state.tallyGen
+    store.importJSON(JSON.stringify(file))
+    expect(store.state.lineage).toEqual([])
+    expect(store.state.tallyGen).not.toBe(gen)
+  })
+})
+
+describe('收回一筆專注（提早結束的那幾分鐘按了「不算這段」）', () => {
+  it('照那一輪記下的扣回去：經驗值、金平糖、專注分鐘、那天的紀錄、任務的實際分鐘、專案的專注；不能收回兩次', () => {
+    const p = store.addProject({ name: '收回測試', milestones: ['一'] })
+    const t = store.addTask({ title: '寫稿', project: p.id })
+    const before = JSON.parse(JSON.stringify({ xp: store.player.xp, coins: store.coins, stats: store.stats, day: store.day(), focus: p.focus }))
+    expect(store.completePomodoro(9, t.id, null, 'r-p', { extra: true })).toBe(true)
+    expect(t.spent).toBe(9)
+    expect(store.undoPomodoro('r-p')).toBe(true)
+    expect(store.player.xp).toBe(before.xp)
+    expect(store.coins).toBe(before.coins)
+    expect(store.stats.focusMinutes).toBe(before.stats.focusMinutes)
+    expect(store.stats.pomodoros).toBe(before.stats.pomodoros)
+    expect(store.day().focus).toBe(before.day.focus)
+    expect(store.day().xp).toBe(before.day.xp)
+    expect(t.spent).toBe(0)
+    expect(t.pomos).toBe(0)
+    expect(p.focus).toEqual(before.focus)
+    expect(store.undoPomodoro('r-p')).toBe(false)
+    // 同一個 id 不會再記一次
+    expect(store.completePomodoro(9, t.id, null, 'r-p', { extra: true })).toBe(false)
+  })
+})
+
 describe('太長的標題', () => {
   it('超過 80 字的任務、日程：標題留前面那一段（加 …），完整的字放進備註；不到的照原樣', () => {
     const long = '下週的活動要準備的東西很多：'.repeat(6) + '最後要通知場地方'
@@ -650,8 +684,13 @@ describe('專案里程碑與落成獎勵', () => {
     expect(store.player.xp).toBe(145)
     expect(store.stats.milestonesDone).toBe(1)
     expect(store.stats.projectsDone).toBe(1)
-    expect(project.completedAt).toBe(completedAt)
+    expect(completedAt).toBeTruthy()
+    // 取消一個里程碑時回到進行中；再勾回去又落成，不再慶祝一次
+    expect(project.completedAt).toBeTruthy()
     expect(onDone).toHaveBeenCalledTimes(1)
+    store.toggleMilestone(project.id, milestone.id)
+    expect(project.completedAt).toBeNull()
+    expect(store.activeProjects().includes(project)).toBe(true)
   })
 
   it('刪掉未完成的里程碑使剩下的都完成時，也會落成', () => {
@@ -2116,6 +2155,16 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(store.state.tasks.some((t) => t.date < TODAY && t.coach)).toBe(false)
   })
 
+  it('主攻的是專案：排出來的那幾段歸到那個專案和下一個還沒完成的里程碑（回專案就找得到）', () => {
+    const p = store.addProject({ name: '春季策展', milestones: ['確認企劃', '佈展'] })
+    const ms = p.milestones[0].id
+    const plan = { days: [{ date: TODAY, items: [{ title: '春季策展・確認企劃', label: '春季策展', tag: 'work', dur: 50, at: '19:30', priority: 2 }, { title: '數學・預習', label: '數學', tag: 'study', dur: 25, at: '21:00', priority: 2 }] }] }
+    const { id } = store.applyCoachPlan(plan, { projects: { 春季策展: { id: p.id, ms } } })
+    const made = store.state.tasks.filter((t) => t.coach === id)
+    expect(made.find((t) => t.title.startsWith('春季策展'))).toMatchObject({ project: p.id, ms })
+    expect(made.find((t) => t.title.startsWith('數學')).project).toBeNull()
+  })
+
   it('套用時照現在再檢查一次：已經過去的、撞到後來加的日程的不建，照實回報', () => {
     vi.setSystemTime(new Date(2026, 9, 25, 20))
     store.addEvent({ title: '後來加的聚餐', date: addDays(TODAY, 2), start: '19:00', end: '21:00' })
@@ -2932,12 +2981,25 @@ describe('跨過午夜的日程', () => {
     expect(store.state.events.filter((x) => x.title === '長').map((x) => `${x.start}–${x.end}`)).toEqual(['08:00–23:59'])
   })
 
-  it('例行公事不跨過午夜：新增、那一天改時段都截到 23:59', () => {
+  it('例行日程跨過午夜（夜班 20:00–02:00）：每一次都是那天到 23:59、隔天 00:00 起兩段（同一個日程，兩台長出來的 id 一樣）；那一天改時段也照實存', () => {
     const r = store.addRoutine({ kind: 'event', title: '夜班', repeat: { type: 'daily' }, start: '20:00', end: '02:00', date: TODAY })
-    expect([r.start, r.end]).toEqual(['20:00', '23:59'])
-    const inst = store.eventsOn(TODAY).find((x) => x.routineId === r.id)
+    expect([r.start, r.end]).toEqual(['20:00', '02:00'])
+    const inst = store.eventsOn(TODAY).find((x) => x.routineId === r.id && x.start === '20:00')
+    const span = store.eventSpan(inst)
+    expect([span.date, span.start, span.end, span.all.length]).toEqual([TODAY, '20:00', '02:00', 2])
+    expect(store.eventsOn(tomorrow).find((x) => x.link === inst.link)).toMatchObject({ start: '00:00', end: '02:00', routineId: r.id })
+    // 明天那一次也長出來：明天 20:00–23:59、後天 00:00–02:00
+    store._ensureRoutines(tomorrow)
+    expect(store.eventsOn(tomorrow).filter((x) => x.routineId === r.id).map((x) => `${x.start}–${x.end}`).sort()).toEqual(['00:00–02:00', '20:00–23:59'])
+    // 另一台各自長出來的是同一個 id
+    const ids = store.state.events.filter((x) => x.routineId === r.id).map((x) => x.id).sort()
+    expect(new Set(ids).size).toBe(4)
+    // 那一天改結束：照實存（還是兩段）
     store.updateEvent(inst.id, { end: '01:00' })
-    expect([inst.end, inst.link, store.eventsOn(tomorrow).filter((x) => x.title === '夜班' && !x.routineId)]).toEqual(['23:59', undefined, []])
+    expect(store.eventSpan(inst)).toMatchObject({ start: '20:00', end: '01:00' })
+    // 讀存檔也留著跨過午夜的例行日程
+    store.flushSave()
+    expect(new Store().state.routines.find((x) => x.id === r.id).end).toBe('02:00')
   })
 })
 

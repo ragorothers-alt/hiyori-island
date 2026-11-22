@@ -7,9 +7,7 @@
 // 一邊刪掉、另一邊改過的留著（不丟資料，也算一處兩邊都改了）。沒有 id 的清單（星期幾、紀錄過的日子）當成集合：兩邊加的都留、刪的刪掉。
 // 一起變的幾個欄位（日程的日期和時段、任務的日期和時段）一起看：兩邊都動了就整組用比較晚改的那一邊，不會拼出 14:00 開始、12:00 結束。
 // 合不了的回傳 null（交給使用者選邊）：沒有 base、其中一邊整份換過（匯入、還原備份、重置：tallyGen 不一樣）
-import { BOND_POINTS, giftCoins } from './data/bond.js'
-import { XP } from './theme.js'
-import { dateStr } from './store/util.js'
+import { addCode, codePath } from './store/grants.js'
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -74,15 +72,15 @@ function collapseLinks(events) {
 }
 const expandLinks = (events) => (Array.isArray(events) ? events.flatMap((e) => (isObj(e) && Array.isArray(e.__pieces) ? e.__pieces : [e])) : events)
 
-// 這個位置的數字兩邊都改了要怎麼合：'sum'（兩邊加的都算）、'max'、'or'（位元）、'once'（兩邊變得一樣就只算一次）；null 是一般的
+// 這個位置的數字兩邊都改了要怎麼合：'sum'（兩邊加的都算）、'max'、'or'（位元）；null 是一般的
 function numRule(p) {
   const n = p.length
   const [a, b, c] = p
   if (a === 'player') {
     if (n === 2 && (b === 'xp' || b === 'coins')) return 'sum'
     if (n === 2 && b === 'streak') return 'max'
-    // お守り：跨日時兩台都會各自用掉同一個（兩邊變得一樣就是同一件事）
-    if (n === 2 && b === 'charms') return 'once'
+    // お守り：兩邊用掉、買的都算（跨日時兩台各自用掉同一個的，照給獎勵的帳只算一次）
+    if (n === 2 && b === 'charms') return 'sum'
     // 最高紀錄、用掉幾個お守り（跨日時兩台各自算的）：取比較大的
     if (n === 3 && b === 'stats') return /^best/.test(c) || c === 'charmsUsed' ? 'max' : 'sum'
     if (n === 3 && b === 'bond' && c === 'pts') return 'sum'
@@ -111,8 +109,6 @@ function mergeNum(rule, b, m, t) {
   if (rule === 'sum') return m + t - base
   if (rule === 'max') return Math.max(m, t)
   if (rule === 'or') return m | t
-  // お守り：兩邊都少了一樣多是跨日時各自用掉同一個（只算一次）；其他（一邊買、兩邊都買）照加減
-  if (rule === 'once') return m === t && m < base ? m : m + t - base
   return undefined
 }
 
@@ -161,6 +157,8 @@ class Merger {
     if (b !== undefined && same(b, m)) return t
     if (b !== undefined && same(b, t)) return m
     // 兩邊都改了
+    // 給獎勵的帳的同一筆：用其中一邊（不算兩邊都改了；重複的那一份 dedupeGrants 會扣回）
+    if (path.length === 2 && path[0] === 'grants') return this.pick(m, t)
     // 跨午夜的那一組（collapseLinks 包起來的）：整組用比較晚改的那一邊（不拆開來合，不會只剩半段、多一段）
     if ((isObj(m) && m.__pieces) || (isObj(t) && t.__pieces)) {
       this.clash(path)
@@ -262,114 +260,40 @@ class Merger {
   }
 }
 
-// 兩台各自做了同一件事、各給了一次獎勵（經驗值、金平糖、統計、每天的紀錄都加了兩次）：扣回一份。認得出來的：
-//   跨日時各自做的：每天第一次打開的好感度、もち送的金平糖、戒除里程碑（見 store.js 的 _visit、_quitMilestones）
-//   一天只給一次的：習慣打卡的獎勵（paidDays 同一天）、本命全清、全部做完、習慣全做完（那天的記號兩邊都從沒有變成有）
-//   同一件任務兩台都打勾了（兩邊都給過獎勵；完成時記下的 xpGot 是拿了多少）
-function dedupeDaily(base, mine, theirs, out) {
-  const both = (f) => {
-    const m = f(mine)
-    return m !== undefined && m !== false && m === f(theirs) && m !== f(base)
-  }
-  const p = out.player
-  if (!isObj(p)) return
-  const stats = isObj(p.stats) ? p.stats : {}
-  const less = (o, k, n) => isObj(o) && typeof o[k] === 'number' && (o[k] = Math.max(0, o[k] - n))
-  const day = (d) => (isObj(out.history) && isObj(out.history[d]) ? out.history[d] : null)
-  // 扣回一份經驗值（和跟著給的金平糖、那一天記的經驗值）
-  const gain = (xp, d = null) => {
-    less(p, 'xp', xp)
-    less(p, 'coins', Math.max(1, Math.round(xp / 5)))
-    if (d) less(day(d), 'xp', xp)
-  }
-  const find = (s, list, id) => (Array.isArray(s?.[list]) ? s[list].find((x) => x?.id === id) : undefined)
-  if (both((s) => s.player?.bond?.visit)) less(p.bond, 'pts', BOND_POINTS.visit)
-  if (both((s) => s.player?.bond?.gift)) less(p, 'coins', giftCoins(mine.player.bond.gift))
-  for (const h of Array.isArray(out.habits) ? out.habits : []) {
-    if (both((s) => find(s, 'habits', h?.id)?.msPaid)) gain(XP.quitMilestone)
-    const paid = (s) => new Set(find(s, 'habits', h?.id)?.paidDays || [])
-    const [pb, pm, pt] = [paid(base), paid(mine), paid(theirs)]
-    for (const d of pm) {
-      if (!pt.has(d) || pb.has(d)) continue
-      gain(XP.habit, d)
-      less(stats, 'habitChecks', 1)
-      less(day(d), 'habits', 1)
+// 兩台各自做了同一件事、各給了一次獎勵（經驗值、金平糖、統計、每天的紀錄都加了兩次），或同步時拿了太舊的那一份當基準
+// （別台已經有的那一筆又被當成新加的）：照給獎勵的帳（store/grants.js）扣回一份。
+// 兩邊的帳上都有、base 沒有的那一筆，每個數字扣回兩邊加的比較少的那一份（一邊順便拿了本命全清、另一邊沒有，就不扣那一份）。
+// 只扣「兩邊加的都算」的數字（最高紀錄、連續天數這種取比較大的不用扣）。在 out 上改（out 是合好、複製過的那一份）
+function dedupeGrants(base, mine, theirs, out) {
+  const gb = isObj(base.grants) ? base.grants : {}
+  const gm = isObj(mine.grants) ? mine.grants : {}
+  const gt = isObj(theirs.grants) ? theirs.grants : {}
+  for (const k of Object.keys(gm)) {
+    const a = gm[k]
+    const b = gt[k]
+    if (k in gb || !isObj(a?.d) || !isObj(b?.d)) continue
+    for (const code of Object.keys(a.d)) {
+      const x = a.d[code]
+      const y = b.d[code]
+      if (typeof x !== 'number' || typeof y !== 'number' || !x || Math.sign(x) !== Math.sign(y)) continue
+      // 那天的紀錄：兩邊是不同天做的，扣在那一邊的那一天（留這邊的那一天）
+      const day = a.day === b.day ? a.day : b.day
+      if (numRule(codePath(code, day)) !== 'sum') continue
+      addCode(out, code, day, -Math.sign(x) * Math.min(Math.abs(x), Math.abs(y)))
     }
-  }
-  for (const d of Object.keys(isObj(out.history) ? out.history : {})) {
-    const flag = (k) => both((s) => s.history?.[d]?.[k] === true || undefined)
-    if (flag('starAll')) {
-      gain(XP.starAll, d)
-      less(stats, 'starDays', 1)
-      less(p.bond, 'pts', BOND_POINTS.starAll)
-    }
-    if (flag('perfect')) {
-      gain(XP.perfectDay, d)
-      less(stats, 'perfectDays', 1)
-    }
-    if (flag('habitAll')) {
-      gain(XP.habitAll, d)
-      less(p.bond, 'pts', BOND_POINTS.habitAll)
-    }
-  }
-  for (const t of Array.isArray(out.tasks) ? out.tasks : []) {
-    const [tb, tm, tt] = [find(base, 'tasks', t?.id), find(mine, 'tasks', t?.id), find(theirs, 'tasks', t?.id)]
-    if (!tm?.rewarded || !tt?.rewarded || tb?.rewarded || !Number.isFinite(tm.xpGot) || !Number.isFinite(tm.doneAt)) continue
-    const xp = tm.xpGot
-    const h = new Date(tm.doneAt).getHours()
-    const d = day(dateStr(new Date(tm.doneAt)))
-    gain(xp)
-    less(d, 'xp', xp)
-    less(stats, 'tasksDone', 1)
-    if (tm.priority === 3) less(stats, 'highTasksDone', 1)
-    if (tm.star) less(stats, 'starsDone', 1)
-    if (h < 9) less(stats, 'earlyTasks', 1)
-    if (h >= 22) less(stats, 'nightTasks', 1)
-    less(d, 'tasks', 1)
-    if (tm.priority === 3) less(d, 'high', 1)
-    if (h < 12) less(d, 'early', 1)
-    if (tm.star) less(d, 'stars', 1)
-    if (tm.routineId) less(d, 'routines', 1)
-    // 花の図鑑：同一朵花記了兩次（各自開的花不一樣的話，兩朵都留著）
-    if (tm.flower && tm.flower === tt.flower && isObj(out.dex?.[tm.flower]) && out.dex[tm.flower].n > 1) out.dex[tm.flower].n--
-  }
-  // 同一輪番茄鐘兩台都記了（跨裝置的計時同時到點、兩台都開著）：照那一輪記下的（pomoGot）扣回一份
-  const sids = (s) => new Set(Array.isArray(s?.pomoSids) ? s.pomoSids : [])
-  const [sb, st] = [sids(base), sids(theirs)]
-  for (const id of sids(mine)) {
-    const g = mine.pomoGot?.[id]
-    if (!st.has(id) || sb.has(id) || !isObj(g) || !isObj(theirs.pomoGot?.[id])) continue
-    const m = Number(g.m) || 0
-    const d = g.d ? day(g.d) : null
-    gain(Number(g.xp) || 0, g.d || null)
-    less(stats, 'focusMinutes', m)
-    less(d, 'focus', m)
-    if (g.s) less(d, g.s, m)
-    if (!g.x) {
-      less(stats, 'pomodoros', 1)
-      less(d, 'pomodoros', 1)
-      less(p.bond, 'pts', BOND_POINTS.pomodoro)
-    }
-    const task = g.t && Array.isArray(out.tasks) ? out.tasks.find((x) => x?.id === g.t) : null
-    if (task) {
-      if (!g.x) less(task, 'pomos', 1)
-      less(task, 'spent', Math.round(m))
-    }
-    const proj = g.p && Array.isArray(out.projects) ? out.projects.find((x) => x?.id === g.p) : null
-    if (proj && m && g.d) less(proj.focus, g.d, Math.round(m))
   }
 }
 
-// 回傳 { state, clashes }（clashes：兩邊都改了、用了比較晚改的那一邊的位置，最多 50 個）；合不了的回傳 null
 export function merge3(base, mine, theirs) {
   if (!isObj(base) || !isObj(mine) || !isObj(theirs)) return null
   const gen = (s) => s.tallyGen || ''
   if (gen(mine) !== gen(base) || gen(theirs) !== gen(base)) return null
   const m = new Merger((mine.updatedAt || 0) >= (theirs.updatedAt || 0))
   const wrap = (x) => (Array.isArray(x.events) ? { ...x, events: collapseLinks(x.events) } : x)
-  const state = m.obj(wrap(base), wrap(mine), wrap(theirs), [])
+  // 合出來的裡面有些是直接拿兩邊原本的那一份（沒改過的那幾筆）：複製一份再扣，不會改到這台現在的資料（存不進去時要換回它）
+  const state = JSON.parse(JSON.stringify(m.obj(wrap(base), wrap(mine), wrap(theirs), [])))
   state.events = expandLinks(state.events)
-  dedupeDaily(base, mine, theirs, state)
+  dedupeGrants(base, mine, theirs, state)
   state.updatedAt = Math.max(mine.updatedAt || 0, theirs.updatedAt || 0)
   // 合好的這一份包含兩邊的這一版（和它們之前的）：之後同步看得出來，不會再合一次
   const lin = (x) => (Array.isArray(x.lineage) ? x.lineage : [])

@@ -1,7 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { merge3 } from '../src/merge.js'
-import { giftCoins } from '../src/data/bond.js'
 import { XP } from '../src/theme.js'
+import { grantKey } from '../src/store/grants.js'
+import { dateStr } from '../src/store/util.js'
 import { Store } from '../src/store.js'
 import { FileSync, readBackups } from '../src/sync.js'
 
@@ -64,30 +65,6 @@ describe('三方合併（merge3）', () => {
     expect(r.history['2026-11-23'].tasks).toBe(2)
   })
 
-  it('お守り：跨日時兩台各自用掉同一個（兩邊變得一樣）只算一次；一邊買、一邊用照加減', () => {
-    const base = S({ player: { ...S().player, charms: 2 } })
-    const used = S({ player: { ...S().player, charms: 1 } })
-    expect(merge3(base, used, used).state.player.charms).toBe(1)
-    const bought = S({ player: { ...S().player, charms: 3 } })
-    expect(merge3(base, bought, used).state.player.charms).toBe(2)
-    // 兩台各買了一個：兩個都在
-    expect(merge3(base, bought, bought).state.player.charms).toBe(4)
-  })
-
-  it('跨日時兩台各自做的只算一次：每天第一次打開的好感度、もち送的金平糖、戒除里程碑的經驗值', () => {
-    const P = (o = {}) => ({ ...S().player, ...o, bond: { pts: 10, visit: '2026-11-21', gift: '2026-11-20', ...o.bond } })
-    const H = (msPaid) => ({ id: 'h', name: '戒菸', kind: 'quit', ms: msPaid, msPaid })
-    const base = S({ player: P(), habits: [H(3)] })
-    // 兩台都在 11/22 打開（好感度 +2、收到金平糖、走到 7 天的里程碑 +20 經驗）；A 另外做完一件 +10
-    const gift = giftCoins('2026-11-22')
-    const day = (extra) => P({ xp: 100 + 20 + extra, coins: 10 + gift + 4 + Math.round(extra / 5), bond: { pts: 12, visit: '2026-11-22', gift: '2026-11-22' } })
-    const r = merge3(base, S({ player: day(10), habits: [H(7)] }), S({ player: day(0), habits: [H(7)] })).state
-    expect(r.player.bond.pts).toBe(12)
-    expect(r.player.xp).toBe(130)
-    expect(r.player.coins).toBe(10 + gift + 4 + 2)
-    expect(r.habits[0].msPaid).toBe(7)
-  })
-
   it('日程的日期和時段一起看：兩邊都挪了，整組用比較晚改的那一邊，不會拼出結束比開始早的', () => {
     const E = (o) => ({ id: 'e', title: '會', date: '2026-11-22', start: '10:00', end: '11:00', ...o })
     const base = S({ events: [E()] })
@@ -114,65 +91,6 @@ describe('三方合併（merge3）', () => {
     const a = S({ events: [P('e1', '2026-11-22', '22:00', '23:59', { link: 'LA' }), P('ea', '2026-11-23', '00:00', '01:00', { link: 'LA' })], updatedAt: 2 })
     const b = S({ events: [P('e1', '2026-11-22', '22:00', '23:59', { link: 'LB' }), P('eb', '2026-11-23', '00:00', '02:00', { link: 'LB' })], updatedAt: 3 })
     expect(merge3(one, a, b).state.events.map((e) => e.id)).toEqual(['e1', 'eb'])
-  })
-
-  it('同一件任務兩台都打勾了：經驗值、金平糖、統計、那天的紀錄只算一次（完成時記下的 xpGot）', () => {
-    const doneAt = new Date(2026, 10, 22, 14).getTime()
-    const day = (tasks, xp) => ({ '2026-11-22': { tasks, xp, high: 0, early: 0, stars: 0, routines: 0 } })
-    const base = S({ tasks: [T('a')], history: day(0, 0) })
-    const done = (o = {}) => T('a', { done: true, rewarded: true, xpGot: 15, doneAt, priority: 2, ...o })
-    const mine = S({ tasks: [done()], player: { ...S().player, xp: 115, coins: 13, stats: { tasksDone: 6, bestStreak: 4 } }, history: day(1, 15), updatedAt: 3 })
-    const theirs = S({ tasks: [done({ doneAt: doneAt + 60000 })], player: { ...S().player, xp: 115, coins: 13, stats: { tasksDone: 6, bestStreak: 4 } }, history: day(1, 15), updatedAt: 2 })
-    const r = merge3(base, mine, theirs).state
-    expect(r.player.xp).toBe(115)
-    expect(r.player.coins).toBe(13)
-    expect(r.player.stats.tasksDone).toBe(6)
-    expect(r.history['2026-11-22']).toMatchObject({ tasks: 1, xp: 15 })
-  })
-
-  it('一天只給一次的：習慣打卡的獎勵同一天兩台都領了只算一次；本命全清、全部做完的獎勵也是', () => {
-    const H = (paidDays, log) => ({ id: 'h', name: '喝水', kind: 'build', paidDays, log })
-    const day = (o) => ({ '2026-11-22': { habits: 0, perfect: false, ...o } })
-    const P = (xp, coins, habitChecks, perfectDays) => ({ ...S().player, xp, coins, stats: { tasksDone: 5, bestStreak: 4, habitChecks, perfectDays } })
-    const base = S({ habits: [H([], {})], history: day({}), player: P(100, 10, 3, 1) })
-    // 兩台都打了卡、也都拿到全部做完（經驗值、金平糖各加了一份）
-    const coin = (xp) => Math.max(1, Math.round(xp / 5))
-    const xp = 100 + XP.habit + XP.perfectDay
-    const coins = 10 + coin(XP.habit) + coin(XP.perfectDay)
-    const side = (u) => S({ habits: [H(['2026-11-22'], { '2026-11-22': 1 })], history: day({ habits: 1, perfect: true }), player: P(xp, coins, 4, 2), updatedAt: u })
-    const r = merge3(base, side(2), side(3)).state
-    expect(r.player.xp).toBe(xp)
-    expect(r.player.coins).toBe(coins)
-    expect(r.player.stats).toMatchObject({ habitChecks: 4, perfectDays: 2 })
-    expect(r.history['2026-11-22'].habits).toBe(1)
-  })
-
-  it('同一輪番茄鐘兩台都記了：只算一次（分鐘、顆數、經驗值、那一天、任務、專案）；兩台各做了一輪：任務上兩輪都算', () => {
-    const day = (o) => ({ '2026-11-22': { pomodoros: 0, focus: 0, focusPm: 0, xp: 0, ...o } })
-    const P = (xp, coins, pomodoros, focusMinutes, pts) => ({ ...S().player, xp, coins, bond: { pts }, stats: { tasksDone: 5, bestStreak: 4, pomodoros, focusMinutes } })
-    const task = (pomos, spent) => T('a', { pomos, spent, project: 'p1' })
-    const proj = (focus) => ({ id: 'p1', name: '專案', focus })
-    const base = S({ tasks: [task(0, 0)], projects: [proj({})], history: day({}), player: P(100, 10, 2, 50, 20), pomoSids: [], pomoGot: {} })
-    const coin = Math.max(1, Math.round(XP.pomodoro / 5))
-    const one = (sid, u) =>
-      S({
-        tasks: [task(1, 25)], projects: [proj({ '2026-11-22': 25 })],
-        history: day({ pomodoros: 1, focus: 25, focusPm: 25, xp: XP.pomodoro }),
-        player: P(100 + XP.pomodoro, 10 + coin, 3, 75, 23),
-        pomoSids: [sid], pomoGot: { [sid]: { m: 25, xp: XP.pomodoro, x: 0, d: '2026-11-22', t: 'a', p: 'p1', s: 'focusPm' } },
-        updatedAt: u,
-      })
-    const r = merge3(base, one('r1', 2), one('r1', 3)).state
-    expect(r.player).toMatchObject({ xp: 100 + XP.pomodoro, coins: 10 + coin, bond: { pts: 23 } })
-    expect(r.player.stats).toMatchObject({ pomodoros: 3, focusMinutes: 75 })
-    expect(r.history['2026-11-22']).toMatchObject({ pomodoros: 1, focus: 25, focusPm: 25, xp: XP.pomodoro })
-    expect(r.tasks[0]).toMatchObject({ pomos: 1, spent: 25 })
-    expect(r.projects[0].focus).toEqual({ '2026-11-22': 25 })
-    // 各做了一輪（不同的 id）：兩輪都算
-    const two = merge3(base, one('r1', 2), one('r2', 3)).state
-    expect(two.tasks[0]).toMatchObject({ pomos: 2, spent: 50 })
-    expect(two.player.stats).toMatchObject({ pomodoros: 4, focusMinutes: 100 })
-    expect(two.projects[0].focus).toEqual({ '2026-11-22': 50 })
   })
 
   it('那一天整個不見了（刪掉最後一則生活記錄）、另一台新增了：逐筆比，刪掉的不會復活；計數撤到 0（鍵不見了）當成 0 照加減', () => {
@@ -216,6 +134,158 @@ describe('三方合併（merge3）', () => {
     const base = S()
     expect(merge3(base, S({ tallyGen: 'g2' }), S())).toBeNull()
     expect(merge3(null, S(), S())).toBeNull()
+  })
+})
+
+// ── 給獎勵的帳：用真的 Store 從同一份各自做事（兩台裝置），合起來看重複的獎勵是不是只算一次 ──
+describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
+  beforeAll(() => {
+    globalThis.window ??= globalThis
+    globalThis.addEventListener ??= () => {}
+    globalThis.document ??= { hidden: true, addEventListener() {} }
+  })
+  // 從 state 開一台、做 fn、拿回存檔（存過、讀得回來的樣子）
+  const fork = (state, fn = () => {}) => {
+    const mem = new Mem()
+    if (state) mem.setItem('hiyori-daily-v1', JSON.stringify(state))
+    const prev = globalThis.localStorage
+    globalThis.localStorage = mem
+    try {
+      const s = new Store()
+      fn(s)
+      s.flushSave()
+      return JSON.parse(JSON.stringify(s.state))
+    } finally {
+      globalThis.localStorage = prev
+    }
+  }
+  const merge = (b, m, t) => merge3(b, m, t).state
+  const seedWith = (fn) =>
+    fork(
+      fork(null, (s) => s.clearSamples()),
+      (s) => fn?.(s),
+    )
+  const xp = (x) => x.player.xp
+  const today = (x) => x.history[dateStr()]
+
+  it('同一件任務兩台都打勾：經驗值、金平糖、統計、那天的紀錄、圖鑑只算一次；一台勾了又取消、另一台勾了：算一次', () => {
+    let id
+    const base = seedWith((s) => (id = s.addTask({ title: '寫報告', priority: 3 }).id))
+    const a = fork(base, (s) => s.toggleTask(id))
+    const b = fork(base, (s) => s.toggleTask(id))
+    const r = merge(base, a, b)
+    expect(xp(r)).toBe(xp(a))
+    expect(r.player.coins).toBe(a.player.coins)
+    expect(r.player.stats.tasksDone).toBe(a.player.stats.tasksDone)
+    expect(r.player.stats.highTasksDone).toBe(1)
+    expect(today(r).tasks).toBe(1)
+    const flowers = (x) => Object.values(x.dex).reduce((n, e) => n + e.n, 0)
+    expect(flowers(r)).toBe(flowers(a))
+    // 完成之後改成低優先：扣回的是完成那一刻記的
+    const a2 = fork(a, (s) => s.updateTask(id, { priority: 1 }))
+    expect(merge(base, a2, b).player.stats.highTasksDone).toBe(1)
+    // 一台勾了又取消（獎勵不收回、帳上還在）、另一台勾了：還是一次
+    const undo = fork(a, (s) => s.toggleTask(id))
+    expect(xp(merge(base, undo, b))).toBe(xp(a))
+  })
+
+  it('同一個里程碑兩台都勾了（專案跟著落成、準時）、跨午夜的同一個日程兩台都勾了：只算一次', () => {
+    let pid, mid, eid
+    const base = seedWith((s) => {
+      const p = s.addProject({ name: '兩台一起', milestones: ['唯一'], deadline: '2099-01-01' })
+      pid = p.id
+      mid = p.milestones[0].id
+      eid = s.addEvent({ title: '夜班', date: s.today, start: '23:30', end: '00:30' }).id
+    })
+    const both = (s) => {
+      s.toggleMilestone(pid, mid)
+      s.toggleEvent(eid)
+    }
+    const a = fork(base, both)
+    const b = fork(base, both)
+    const r = merge(base, a, b)
+    expect(xp(r)).toBe(xp(a))
+    expect(r.player.stats).toMatchObject({ milestonesDone: a.player.stats.milestonesDone, projectsDone: 1, projectsOnTime: 1, eventsDone: 1 })
+  })
+
+  it('同一輪番茄鐘兩台都記了只算一次（任務的實際分鐘、專案那天的專注也是）；各做了一輪的兩輪都算', () => {
+    let tid
+    const base = seedWith((s) => (tid = s.addTask({ title: '練琴', project: s.addProject({ name: '琴', milestones: ['一'] }).id }).id))
+    const one = (sid) => fork(base, (s) => s.completePomodoro(25, tid, null, sid))
+    const a = one('r1')
+    const r = merge(base, a, one('r1'))
+    expect(xp(r)).toBe(xp(a))
+    expect(r.player.stats).toMatchObject({ pomodoros: a.player.stats.pomodoros, focusMinutes: a.player.stats.focusMinutes })
+    expect(r.tasks.find((t) => t.id === tid)).toMatchObject({ pomos: 1, spent: 25 })
+    expect(Object.values(r.projects.find((p) => p.name === '琴').focus)).toEqual([25])
+    const two = merge(base, a, one('r2'))
+    expect(two.tasks.find((t) => t.id === tid)).toMatchObject({ pomos: 2, spent: 50 })
+    expect(two.player.stats.pomodoros).toBe(a.player.stats.pomodoros + 1)
+  })
+
+  it('習慣當天的獎勵兩台都領了只算一次；兩台各做一部分的本命，合起來全清了補給本命全清和全部做完', () => {
+    let hid
+    const ids = []
+    const base = seedWith((s) => {
+      hid = s.addHabit({ name: '喝水' }).id
+      for (const t of ['一', '二', '三']) {
+        const x = s.addTask({ title: t })
+        s.toggleStar(x.id)
+        ids.push(x.id)
+      }
+    })
+    const a = fork(base, (s) => {
+      s.checkHabit(hid)
+      s.toggleTask(ids[0])
+      s.toggleTask(ids[1])
+    })
+    const b = fork(base, (s) => {
+      s.checkHabit(hid)
+      s.toggleTask(ids[2])
+    })
+    const r = merge(base, a, b)
+    expect(r.player.stats.habitChecks).toBe(a.player.stats.habitChecks)
+    expect(today(r).habits).toBe(1)
+    expect(today(r).starAll).toBeFalsy()
+    // 合起來三件本命都做完了：存進去、補算本命全清和全部做完
+    const settled = fork(r, (s) => s.settleMerged())
+    expect(today(settled)).toMatchObject({ starAll: true, perfect: true })
+    expect(xp(settled)).toBe(xp(r) + XP.starAll + XP.perfectDay)
+  })
+
+  it('同一天跨日各自用掉お守り只算一次；一台另外買了一個照算', () => {
+    const base = seedWith((s) => (s.state.player.charms = 2))
+    const use = (s) => s._grant(grantKey('ch', s.today), () => (s.state.player.charms -= 1))
+    const a = fork(base, (s) => {
+      use(s)
+      s.state.player.coins = 999
+      s.buyCharm()
+    })
+    const b = fork(base, use)
+    expect(merge(base, a, b).player.charms).toBe(2)
+    expect(merge(base, fork(base, use), b).player.charms).toBe(1)
+  })
+
+  it('同步時拿了太舊的那一份當基準（別台已經有的那一筆又被當成新加的）：照帳扣回，不會重複算', () => {
+    let id
+    const old = seedWith((s) => (id = s.addTask({ title: '同步過的' }).id))
+    const a = fork(old, (s) => s.toggleTask(id))
+    // B 拿到了 A 做完的那一版（同步過），之後又記了一則生活記錄；A 也記了一則
+    const b = fork(a, (s) => s.addLife(s.today, { kind: 'note', text: 'B 的' }))
+    const a2 = fork(a, (s) => s.addLife(s.today, { kind: 'note', text: 'A 的' }))
+    const r = merge(old, a2, b)
+    expect(r.player.stats.tasksDone).toBe(a.player.stats.tasksDone)
+    expect(r.player.stats.lifeEntries).toBe(old.player.stats.lifeEntries + 2)
+  })
+
+  it('合併不會改到傳進去的那兩份（存不進去時要換回原本那一份）', () => {
+    let id
+    const base = seedWith((s) => (id = s.addTask({ title: '一件' }).id))
+    const a = fork(base, (s) => s.toggleTask(id))
+    const b = fork(base, (s) => s.toggleTask(id))
+    const before = JSON.stringify([a, b])
+    merge3(base, a, b)
+    expect(JSON.stringify([a, b])).toBe(before)
   })
 })
 
