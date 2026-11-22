@@ -169,10 +169,20 @@ export class ScheduleView {
     const p = this.preview?.result
     let html
     if (p) {
+      // 排進去的那幾件直接列在這裡（幾點到幾點）：任務一多，時間軸在很下面，不用捲下去也核對得到
+      const byId = new Map(s.state.tasks.map((t) => [t.id, t]))
+      const rows = [...p.plan].sort((a, b) => toMin(a.at) - toMin(b.at))
+      const SHOW = 8
+      const list = rows.length
+        ? `<ol class="pb-list">${rows
+            .slice(0, SHOW)
+            .map((x) => `<li><time>${x.at}–${hm(toMin(x.at) + x.dur)}</time><span>${esc(clipTitle(byId.get(x.id)?.title || ''))}</span></li>`)
+            .join('')}${rows.length > SHOW ? `<li class="more">還有 ${rows.length - SHOW} 件，見時間軸的虛線</li>` : ''}</ol>`
+        : ''
       html = `<div class="pb-preview">
         <div class="pb-msg">${ICON.spark}<div><b>${p.plan.length ? `預覽：排入 ${p.plan.length} 件` : '暫時沒有可排入的任務'}</b>${p.endAt ? `<small>預計 ${p.endAt} 任務結束・虛線是預覽</small>` : ''}
           ${p.left.length ? `<small class="warn">還有 ${p.left.length} 件未排入${p.full?.length ? `（其中 ${p.full.length} 件是為了留白、不排太滿）` : ''}${p.unslot?.length ? `，${p.unslot.length} 件原本的時段會空出來` : ''}，改天安排也可以</small>` : ''}
-          ${p.big?.length ? `<small class="warn">${p.big.map((id) => `「${esc(clipTitle(s.state.tasks.find((t) => t.id === id)?.title || ''))}」`).join('')}比這天哪一段空檔都長 <button type="button" class="cm-link" data-plan="split">分成幾段、分到幾天做</button></small>` : ''}</div></div>
+          ${p.big?.length ? `<small class="warn">${p.big.map((id) => `「${esc(clipTitle(s.state.tasks.find((t) => t.id === id)?.title || ''))}」`).join('')}比這天哪一段空檔都長 <button type="button" class="cm-link" data-plan="split">分成幾段、分到幾天做</button></small>` : ''}${list}</div></div>
         <div class="pb-btns"><button class="btn-ghost" data-plan="cancel">取消</button>
           ${placed.length && !this.preview.replan ? '<button class="btn-ghost" data-plan="replan">重排未開始的任務</button>' : ''}
           <button class="btn-primary" data-plan="apply" ${p.plan.length ? '' : 'disabled'}>套用</button></div></div>`
@@ -198,17 +208,23 @@ export class ScheduleView {
   _tray() {
     const s = this.store
     const date = s.selectedDate
-    const list = s.planTasks(date).filter((t) => !t.at && !t.done)
+    const all = s.planTasks(date).filter((t) => !t.at && !t.done)
     const planned = new Set(this.preview?.result.plan.map((p) => p.id) || [])
-    $('#planTray').innerHTML = list.length
-      ? `<div class="tray-head">還沒排時段<small>點一下排進最近的空檔，或拖到時間軸上</small></div>
+    // 很多件的時候先收起來（預覽排進去的那幾件排前面、一定看得到）：不然時間軸被擠到好幾頁之後
+    const SHOW = 12
+    const sorted = planned.size ? [...all.filter((t) => planned.has(t.id)), ...all.filter((t) => !planned.has(t.id))] : all
+    const open = this._trayOpen || all.length <= SHOW + 2
+    const list = open ? sorted : sorted.slice(0, SHOW)
+    const more = all.length > SHOW + 2 ? `<button type="button" class="tray-more" data-tray-more aria-expanded="${open}">${open ? '收起來 ▴' : `還有 ${all.length - SHOW} 件 ▾`}</button>` : ''
+    $('#planTray').innerHTML = all.length
+      ? `<div class="tray-head">還沒排時段 · ${all.length}<small>點一下排進最近的空檔，或拖到時間軸上</small></div>
         <div class="tray-list">${list
           .map(
             // 放進空檔的按鈕和調整時間的按鈕並排（不包在一起：讀螢幕軟體才分得出是兩個按鈕）
             (t) => `<div class="chip-task ${planned.has(t.id) ? 'planned' : ''} ${t.date < date ? 'late' : ''}" data-id="${esc(t.id)}" style="--c:${tagOf(t.tag).color}">
               <button type="button" class="chip-slot" data-slot title="排進最近的空檔"><i class="pri p${t.priority}" title="${PRIORITIES[t.priority].label}優先"></i>${t.star ? '<em class="star" title="本命">★</em>' : ''}${t.date < date ? '<em class="late-tag">逾期</em>' : ''}<span>${esc(t.title)}</span></button><button type="button" class="dur" data-dur title="預估時間（點一下調整）" aria-label="預估 ${fmtDur(taskDur(t))}，點一下調整">${fmtDur(taskDur(t))}</button></div>`,
           )
-          .join('')}</div>`
+          .join('')}</div>${more}`
       : ''
   }
 
@@ -678,6 +694,10 @@ export class ScheduleView {
 
     const tray = $('#planTray')
     tray.addEventListener('click', (e) => {
+      if (e.target.closest('[data-tray-more]')) {
+        this._trayOpen = !this._trayOpen
+        return this._tray()
+      }
       // 用鍵盤（Enter／空白鍵）按任務名稱：放進最近的空檔。滑鼠和手指的點擊交給拖曳那邊分辨是點還是拖
       const slot = e.target.closest('[data-slot]')
       if (slot && e.detail === 0) return this._slot(slot.closest('.chip-task').dataset.id)

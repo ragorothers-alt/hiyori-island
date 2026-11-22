@@ -115,6 +115,8 @@ function act(view, b) {
     case 'now': return agent.now(b.dataset.v || 'morning')
     case 'chat': return hooks.openChat?.()
     case 'setup': return hooks.openSetup?.()
+    case 'plan': return hooks.openPlan?.()
+    case 'optimize': return hooks.openOptimize?.()
     case 'stop': return agent.stop()
   }
 }
@@ -251,7 +253,10 @@ export class AgentView extends Base {
       $('.ag-panel').hidden = true
       $('.ag-feed').innerHTML = `<div class="ag-intro"><span class="stamp-k coach-k">藤</span><div><b>讓ふじ自己幫你排</b>
         <p>接上 Claude 之後，ふじ不用你按按鈕：早上打開就把今天排好、挑出先做的那一件；加了新任務會自己估時間、排進空檔、太大的拆成小步驟；進度落後時重排；晚上替明天做準備。每一次都可以整批撤銷。也可以直接用一句話請她做事。</p>
-        <button type="button" class="btn-primary" data-ag="setup">去設定 Claude 通行碼</button></div></div>`
+        <button type="button" class="btn-primary" data-ag="setup">去設定 Claude 通行碼</button></div></div>
+        <div class="ag-intro ag-local"><span class="stamp-k coach-k">今</span><div><b>不用 Claude 現在就能用</b>
+        <p>ふじ照你想主攻的事和有空的時段，排出一週一段一段的時間；已經有的任務也能一鍵排進今天的空檔。都可以撤銷。</p>
+        <div class="ag-acts"><button type="button" class="btn-primary" data-ag="plan">排一週的主攻時段</button><button type="button" class="btn-ghost" data-ag="optimize">把今天的任務排進空檔</button></div></div></div>`
       return
     }
     const mode = store.state.settings.agentMode

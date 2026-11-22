@@ -304,6 +304,22 @@ export class UI {
           this.fuji?.close()
           this.openAgent()
         },
+        // 還沒接上 Claude 也能用的：教練的「計畫」（照主攻的事排一週）、日程頁的最佳化時程（今天的任務排進空檔）
+        openPlan: () => {
+          this.fuji?.close()
+          this.setTab('coach')
+          this._use(this._coach, (c) => c.show('plan'))
+        },
+        openOptimize: () => {
+          this.fuji?.close()
+          this.store.selectDate(this.store.today)
+          this.setTab('schedule')
+          // 有可以排的任務就直接出預覽（按鈕停用時就只是到日程頁）
+          requestAnimationFrame(() => {
+            const b = $('#planBar [data-plan="optimize"]')
+            if (b && !b.disabled) b.click()
+          })
+        },
         // 還沒接上 Claude：到設定裡填通行碼
         openSetup: () => {
           this.fuji?.close()
@@ -712,6 +728,7 @@ export class UI {
     this.store.on('dateChanged', (d) => this._slideDay(d))
 
     this._bindLayers()
+    this._bindBack()
     addEventListener('keydown', (e) => {
       if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return
       const typing = !!document.activeElement?.closest?.('input, textarea, select, [contenteditable]')
@@ -862,6 +879,14 @@ export class UI {
   }
   // Esc 一次只關最上面那一層；什麼都沒開時才放開打字的欄位、離開全螢幕
   _escape(typing) {
+    if (this._closeTop()) return
+    if (this._shopWait) this.toggleShop(false)
+    else if (typing) document.activeElement.blur()
+    else if (this.tab === 'projects' && this._project.view?.id) this._project.view.closeTask() || this.closeProject()
+    else this.toggleFull(false)
+  }
+  // 關掉最上面那一層（Esc、返回鍵）：回傳有沒有一層可以關
+  _closeTop() {
     const top = this._topLayer()
     if (top) {
       const close = {
@@ -882,12 +907,74 @@ export class UI {
         placeBar: () => $('#placeCancel').click(),
         calendar: () => this._calendar.view?.close(),
       }[top.id]
-      return close?.()
+      close?.()
+      return true
     }
-    if (this._shopWait) this.toggleShop(false)
-    else if (typing) document.activeElement.blur()
-    else if (this.tab === 'projects' && this._project.view?.id) this._project.view.closeTask() || this.closeProject()
-    else this.toggleFull(false)
+    return false
+  }
+
+  // ── 返回鍵（瀏覽器的上一頁、Android 的返回鍵、滑鼠的上一頁鍵）：先關最上面那一層（對話框、找找看、快速記錄、
+  // 編輯面板、今日摘要、專注頁、商店、日曆），再從專案的任務頁回到專案、從專案回到列表；都沒有了才真的離開 App。
+  // 每打開一層記一筆瀏覽紀錄；自己按 × 或 Esc 關掉的那一層，把它那一筆收回來（收的時候發的 popstate 不再關一次）
+  _bindBack() {
+    this._hist = 0 // 現在記著幾筆
+    this._skip = 0 // 自己收回去的，等一下會收到的 popstate
+    this._popClose = 0 // 返回鍵關掉的那幾層：關的時候不用再收一筆
+    addEventListener('popstate', () => {
+      if (this._skip > 0) return void this._skip--
+      if (this._hist <= 0) return
+      this._hist--
+      this._goBack()
+    })
+    const layers = [...$$('.modal'), $('#focusFull'), $('#shop'), $('#focusPick'), $('#focusSet'), $('#brief'), $('#calendar'), $('#placeBar')].filter(Boolean)
+    const open = new Set(layers.filter((el) => !el.hidden))
+    for (const el of open) this._pushBack()
+    new MutationObserver(() => {
+      for (const el of layers) {
+        if (!el.hidden && !open.has(el)) {
+          open.add(el)
+          this._pushBack()
+        } else if (el.hidden && open.has(el)) {
+          open.delete(el)
+          if (this._popClose > 0) this._popClose--
+          else this._dropBack()
+        }
+      }
+    }).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true })
+  }
+  _pushBack() {
+    try {
+      history.pushState({ hiyori: Date.now() }, '')
+      this._hist++
+    } catch {}
+  }
+  _dropBack() {
+    if (this._hist <= 0) return
+    this._hist--
+    this._skip++
+    history.back()
+  }
+  // 按了返回鍵：關一層（那一層關掉時不再收一筆，紀錄已經退掉了）
+  _goBack() {
+    const top = this._topLayer()
+    if (top) {
+      this._popClose++
+      this._closeTop()
+      // 關不掉（例如正在做的動作擋著）：補回那一筆，下次再按
+      if (!top.hidden) {
+        this._popClose--
+        this._pushBack()
+      }
+      return
+    }
+    const pv = this._project.view
+    if (this.tab === 'projects' && pv?.id) {
+      this._projPop = true
+      // 在任務頁：回到專案（專案還開著，那一筆補回去）；在專案：回到列表
+      if (pv.closeTask()) this._pushBack()
+      else this.closeProject()
+      this._projPop = false
+    }
   }
   // Tab 只在最上面那一層裡轉，不會跑到後面看不到的按鈕上（capture：編輯表單自己會擋掉往外傳的按鍵）。
   // 浮在最上面的提示卡（例如限時去的「我回來了」）也轉得到：排在這一層的後面（在第一顆按 Shift+Tab 就到）
@@ -2809,6 +2896,11 @@ export class UI {
   // taskId：直接打開那件任務的頁面；write：游標放在「寫紀錄」的框裡
   openProject(id, sec, taskId = null, write = false) {
     if (!this._project.view) return this._use(this._project, () => this.openProject(id, sec, taskId, write))
+    // 從列表打開（不是從一個專案換到另一個）：記一筆，返回鍵回到列表
+    if (!this._project.view.id && !this._projEntry) {
+      this._projEntry = true
+      this._pushBack()
+    }
     this._project.view.open(id, sec, taskId)
     this._stale?.add('projects')
     if (this.tab === 'projects') this._renderPage('projects')
@@ -2827,6 +2919,10 @@ export class UI {
     const pv = this._project.view
     if (!pv) return
     const id = pv.id
+    if (this._projEntry) {
+      this._projEntry = false
+      if (!this._projPop) this._dropBack()
+    }
     pv.close()
     // 回到列表：剛剛動過的專案排到前面
     this._projRank = null
