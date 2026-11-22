@@ -559,6 +559,27 @@ describe('壞掉的資料、store 順便動到的、同一批的先後', () => {
     expect([store.player.xp, store.stats.projectsDone]).toEqual([before.xp, before.done])
   })
 
+  it('舊的撤銷紀錄沒記「這次才給」（ppaid）：看帳上那一筆是不是這次落成時給的，以前落成時領的不收', () => {
+    const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    vi.advanceTimersByTime(5 * 60000)
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    const before = { xp: store.player.xp, done: store.stats.projectsDone }
+    const { entry } = chat((o, w) => o.drop.push(w.projects[0].milestones[1].id))
+    for (const c of entry.changes) delete c.u.ppaid
+    expect(undo(entry)).toBe(1)
+    expect([store.player.xp, store.stats.projectsDone, p.paid]).toEqual([before.xp, before.done, true])
+    // 這次才第一次落成的舊紀錄：照樣收回
+    const q = store.addProject({ name: '另一個', milestones: ['一', '二'] })
+    store.toggleMilestone(q.id, q.milestones[0].id)
+    const xp0 = store.player.xp
+    const second = chat((o, w) => o.drop.push(w.projects.find((x) => x.name === '另一個').milestones[1].id)).entry
+    for (const c of second.changes) delete c.u.ppaid
+    expect(undo(second)).toBe(1)
+    expect([store.player.xp, q.paid]).toEqual([xp0, false])
+  })
+
   it('落成的帳已經清掉了（很多天前）才撤銷：跟重開一樣，獎勵留著、之後再落成不再給一次', () => {
     const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
     store.toggleMilestone(p.id, p.milestones[0].id)

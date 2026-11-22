@@ -262,13 +262,17 @@ class Merger {
 }
 
 // 給獎勵的帳：同一件事（同一個 key）兩台各自給了、或各自收回了，「兩邊加的都算」的那些數字就多算了一份。
-// 每一筆分兩部分比（grantEffect：收回了的只算扣不到的那一份）：
-//   base 那一次給的（同一個 at）：兩台都收回了（或都又加了），扣回比較少的那一份——收回只算一次
-//   base 之後才給的（base 沒有、或收回之後又給了新的一次）：兩台都給了是同一件事，扣回比較少的那一份
-// 合出來的那一筆帳記著合好之後實際還算在數字裡的（之後收回時扣得剛好）；base 那一次有人收回、又沒有新給的，就是收回了。
-// 「那天的紀錄」、專案那天的專注是記在哪一天的：兩邊新給的是不同天，留用的那一筆那一天的照算，另一天的扣回去
+// 每一筆分兩部分（grantEffect：收回了的只算扣不到的那一份；batch：第幾次給的）：
+//   base 那一次（同一個 batch）：兩台都收回了（或都又加了），算一次——收回只算一次。
+//     base 太舊、沒有這一筆，但兩邊是同一次（同一個 batch：同一件事各自給的都是第 1 次）：當成兩邊原本都有它（base 少了它）
+//   base 之後新給的（收回之後又給的下一次）：兩台都給了是同一件事，算一次
+// 照「合好之後每個數字、每一天應該算多少」減掉「合出來的數字裡現在算了多少」補扣（只動「兩邊加的都算」的數字）。
+// 「那天的紀錄」、專案那天的專注是記在哪一天的：兩邊是不同天記的，照合出來挑的那一筆那一天算。
+// 合出來的那一筆帳記著合好之後實際還算在數字裡的（之後收回時扣得剛好）；base 那一次有人收回、又沒有新給的，就是收回了
 const sameJSON = (x, y) => x !== undefined && y !== undefined && JSON.stringify(x) === JSON.stringify(y)
 const DAILY = /^(d|pf):/
+const num = (v, c) => (typeof v?.[c] === 'number' ? v[c] : 0)
+const cutOf = (x, y) => (x && y && Math.sign(x) === Math.sign(y) ? Math.sign(y) * Math.min(Math.abs(x), Math.abs(y)) : 0)
 function dedupeGrants(base, mine, theirs, out) {
   const gb = isObj(base.grants) ? base.grants : {}
   const gm = isObj(mine.grants) ? mine.grants : {}
@@ -277,89 +281,95 @@ function dedupeGrants(base, mine, theirs, out) {
   for (const k of Object.keys(gm)) {
     const a = gm[k]
     const b = gt[k]
-    const o = gb[k]
+    const o = isObj(gb[k]) && DATE_RE.test(gb[k].day) ? gb[k] : undefined
     // 只有一邊動過這一筆（另一邊跟 base 一樣）：合出來的就是動過的那一邊，數字也只算了一次
     if (!isObj(a) || !isObj(b) || !DATE_RE.test(a.day) || !DATE_RE.test(b.day) || sameJSON(o, a) || sameJSON(o, b)) continue
     const ea = grantEffect(a)
     const eb = grantEffect(b)
-    let eo = grantEffect(o)
-    let oday = o?.day
-    // base 太舊、沒有這一筆，但兩邊帳上是同一次給的（同一個 at：是同步過來的那一筆）：當成兩邊原本都有它，
-    // 只是 base 少了它（合出來的數字裡兩邊各算了一次）。一邊收回了、另一邊沒動，就是收回了
-    const virtual = !eo && ea.batch != null && ea.batch === eb.batch
+    const eo = o ? grantEffect(o) : null
+    const virtual = !eo && ea.batch === eb.batch
+    const t0 = eo ? eo.batch : virtual ? ea.batch : null
+    // 合出來挑的那一邊（kp）的日子留用
+    const [kp, dp, ek, ed] = sameJSON(out.grants[k], b) ? [b, a, eb, ea] : [a, b, ea, eb]
+    const part = (e) => (t0 != null && e.batch === t0 ? [e.d, {}] : [{}, e.d])
+    const [ko, kn] = part(ek)
+    const [dO, dn] = part(ed)
+    const orig = (g) => (g.off ? (isObj(g.was) ? g.was : {}) : g.d)
+    let d0 = eo ? eo.d : {}
     if (virtual) {
-      const orig = (g) => (g.off ? (isObj(g.was) ? g.was : {}) : g.d)
-      const d0 = {}
+      d0 = {}
       for (const c of new Set([...Object.keys(orig(a)), ...Object.keys(orig(b))])) {
-        const x = typeof orig(a)[c] === 'number' ? orig(a)[c] : 0
-        const y = typeof orig(b)[c] === 'number' ? orig(b)[c] : 0
+        const x = num(orig(a), c)
+        const y = num(orig(b), c)
         const v = Math.abs(x) <= Math.abs(y) ? x : y
         if (v) d0[c] = v
       }
-      eo = { batch: ea.batch, d: d0 }
-      oday = a.day
     }
-    const t0 = eo ? eo.batch : undefined
-    const old = (e) => (e.batch === t0 ? e.d : {})
-    const neu = (e) => (eo && e.batch === t0 ? {} : e.d)
-    // 新給的那一次：留用合出來挑的那一邊的日子（另一邊那天的扣回去）
-    const [kp, dp, nk, nd] = sameJSON(out.grants[k], b) ? [b, a, neu(eb), neu(ea)] : [a, b, neu(ea), neu(eb)]
-    const apart = kp.day !== dp.day
-    const oa = eo ? old(ea) : {}
-    const ob = eo ? old(eb) : {}
-    const oldNet = {}
-    const newNet = {}
-    const cut = (x, y) => (x && y && Math.sign(x) === Math.sign(y) ? Math.sign(y) * Math.min(Math.abs(x), Math.abs(y)) : 0)
-    const n = (v, c) => (typeof v?.[c] === 'number' ? v[c] : 0)
-    for (const c of new Set([...Object.keys(eo?.d || {}), ...Object.keys(oa), ...Object.keys(ob), ...Object.keys(nk), ...Object.keys(nd)])) {
-      // base 那一次
-      if (eo) {
-        const o0 = n(eo.d, c)
-        const x = n(oa, c) - o0
-        const y = n(ob, c) - o0
-        let v = o0 + x + y
-        const sum = numRule(codePath(c, oday)) === 'sum'
-        const z = sum ? cut(x, y) : 0
-        // base 少了它的話，合出來的數字是 base（沒有它）＋兩邊各自的：還要再扣一份它原本的
-        const fix = z + (virtual && sum ? o0 : 0)
-        if (fix) addCode(out, c, oday, -fix)
-        v -= z
-        if (v) oldNet[c] = v
+    const oday = o ? o.day : kp.day
+    const nday = Object.keys(kn).length ? kp.day : dp.day
+    // 每個數字（「那天的紀錄」、專案那天的專注再分哪一天）：合出來的數字裡現在算了多少（have）、應該算多少（want）
+    const have = new Map()
+    const want = new Map()
+    const put = (m, c, day, v) => {
+      if (!v) return
+      const at = `${c}|${DAILY.test(c) ? day : ''}`
+      m.set(at, (m.get(at) || 0) + v)
+    }
+    const To = {}
+    const Tn = {}
+    const codes = new Set([...Object.keys(d0), ...Object.keys(ko), ...Object.keys(dO), ...Object.keys(kn), ...Object.keys(dn)])
+    for (const c of codes) {
+      if (t0 != null) {
+        const o0 = num(d0, c)
+        const x = num(ko, c) - o0
+        const y = num(dO, c) - o0
+        const v = o0 + x + y - cutOf(x, y)
+        if (v) To[c] = v
+        put(want, c, oday, v)
+        if (eo) put(have, c, oday, o0 + x + y)
+        else {
+          // base 少了它：合出來的是兩邊各自的那一份，各在各的那一天
+          put(have, c, kp.day, num(ko, c))
+          put(have, c, dp.day, num(dO, c))
+        }
       }
-      // base 之後新給的
-      const x = n(nk, c)
-      const y = n(nd, c)
-      const daily = DAILY.test(c) && apart
-      let v = x + (daily ? 0 : y)
-      const z = numRule(codePath(c, dp.day)) === 'sum' ? cut(x, y) : 0
-      if (z) {
-        addCode(out, c, dp.day, -z)
-        if (!daily) v -= z
-      }
-      if (v) newNet[c] = v
+      const x = num(kn, c)
+      const y = num(dn, c)
+      const v = x + y - cutOf(x, y)
+      if (v) Tn[c] = v
+      put(want, c, nday, v)
+      put(have, c, kp.day, x)
+      put(have, c, dp.day, y)
+    }
+    for (const at of new Set([...have.keys(), ...want.keys()])) {
+      const fix = (want.get(at) || 0) - (have.get(at) || 0)
+      if (!fix) continue
+      const [c, day] = [at.slice(0, at.lastIndexOf('|')), at.slice(at.lastIndexOf('|') + 1) || kp.day]
+      if (numRule(codePath(c, day)) === 'sum') addCode(out, c, day, fix)
     }
     const at = Math.max(Number(a.at) || 0, Number(b.at) || 0)
-    const fresh = Object.keys(newNet).length > 0
-    if (!fresh && eo && (a.off || b.off)) {
+    const fresh = Object.keys(Tn).length > 0
+    const gone = (g, e) => t0 != null && (g.off || e.batch !== t0)
+    if (!fresh && (gone(a, ea) || gone(b, eb) || (t0 == null && (a.off || b.off)))) {
       // base 那一次有人收回了、也沒有新給的：收回了（扣不到的那一份照實記著）
-      const was = { ...eo.d }
       const r = {}
-      for (const c of Object.keys(was)) r[c] = was[c] - (oldNet[c] || 0)
-      out.grants[k] = { at, day: oday, d: {}, off: 1, of: t0, was, r }
+      for (const c of Object.keys(d0)) r[c] = num(d0, c) - num(To, c)
+      out.grants[k] = { at, day: oday, d: {}, off: 1, of: t0 ?? Math.max(ea.batch, eb.batch), was: { ...d0 }, r }
       continue
     }
-    const d = { ...oldNet }
-    for (const [c, v] of Object.entries(newNet)) d[c] = (d[c] || 0) + v
-    const batch = fresh ? (Object.keys(nk).length ? (kp.off ? kp.of : kp.at) : dp.off ? dp.of : dp.at) : t0
-    const day = fresh ? (Object.keys(nk).length ? kp.day : dp.day) : oday || kp.day
-    out.grants[k] = Object.keys(d).length ? { at: Number.isFinite(batch) ? batch : at, day, d } : { at, day, d: {}, off: 1 }
+    const d = fresh ? { ...Tn } : { ...To }
+    if (fresh) for (const [c, v] of Object.entries(To)) if (!DAILY.test(c) || oday === nday) d[c] = (d[c] || 0) + v
+    const n = fresh ? (Object.keys(kn).length ? ek.batch : ed.batch) : t0
+    out.grants[k] = Object.keys(d).length ? { at, day: fresh ? nday : oday, d, ...(n > 1 ? { n } : {}) } : { at, day: kp.day, d: {}, off: 1, of: n || 1 }
   }
 }
-// 還沒有這本帳的舊版寫的那一份照它記的補一本（legacyGrants）；上一版的代號換成現在的（normGrants）
-const withLedger = (s) => ({ ...s, grants: normGrants(isObj(s.grants) ? s.grants : legacyGrants(s), s) })
+// 還沒有這本帳的舊版寫的那一份照它記的補一本（legacyGrants）；上一版的代號換成現在的（normGrants）。合併之前三份先統一好
+const withLedger = (s) => (isObj(s) ? { ...s, grants: normGrants(isObj(s.grants) ? s.grants : legacyGrants(s), s) } : s)
 
 export function merge3(base, mine, theirs) {
   if (!isObj(base) || !isObj(mine) || !isObj(theirs)) return null
+  // 三份的帳先統一（舊版沒有帳的補一本、上一版的代號換成現在的），合出來的帳上才不會兩種代號都留著
+  ;[base, mine, theirs] = [withLedger(base), withLedger(mine), withLedger(theirs)]
   const gen = (s) => s.tallyGen || ''
   if (gen(mine) !== gen(base) || gen(theirs) !== gen(base)) return null
   const m = new Merger((mine.updatedAt || 0) >= (theirs.updatedAt || 0))
@@ -367,7 +377,12 @@ export function merge3(base, mine, theirs) {
   // 合出來的裡面有些是直接拿兩邊原本的那一份（沒改過的那幾筆）：複製一份再扣，不會改到這台現在的資料（存不進去時要換回它）
   const state = JSON.parse(JSON.stringify(m.obj(wrap(base), wrap(mine), wrap(theirs), [])))
   state.events = expandLinks(state.events)
-  dedupeGrants(withLedger(base), withLedger(mine), withLedger(theirs), state)
+  dedupeGrants(base, mine, theirs, state)
+  // 專案「落成的獎勵給過了沒」（paid）照帳：一台收回、另一台又落成時，專案的欄位用了比較晚改的那一邊，跟實際算的對不上的話之後會再給一次
+  for (const p of Array.isArray(state.projects) ? state.projects : []) {
+    const g = isObj(p) && isObj(state.grants) ? state.grants[`p:${p.id}`] : null
+    if (isObj(g)) p.paid = !g.off
+  }
   // お守り兩台各買了最後一個：只留得下上限那幾個，多扣的金平糖還回去（お守り只有買的會多）
   const p = state.player
   if (isObj(p) && typeof p.charms === 'number' && p.charms > CHARM.max) {

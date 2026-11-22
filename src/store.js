@@ -1442,29 +1442,44 @@ export class Store {
   // 整份換掉（匯入、還原備份）並存好；存不進去就換回原本那一份（存檔裡還是原本的），回傳有沒有換成。
   // 不然畫面上是新的那份、重新整理就不見了，還原備份時連那份備份都會先被刪掉
   replaceOrUndo(obj) {
-    const cur = this.state
-    const failed = this.loadFailed
+    const snap = this.snapshot()
     let ok = false
     try {
       ok = this.replaceState(obj)
     } catch (e) {
+      // 已經寫進存檔了、之後（畫面那邊接著重畫時）才出錯：算換成了，不換回去（存檔裡已經是新的那一份）
+      if (this.committed(snap)) {
+        console.warn('[hiyori] 換好之後出了錯', e)
+        return true
+      }
       // 換的途中出錯（讀不懂、算不下去）：一樣換回原本那一份再說
-      if (this.state !== cur) this.revertTo(cur, failed, { soft: false })
+      if (this.state !== snap.state) this.restore(snap, { soft: false })
       throw e
     }
     if (ok) return true
-    this.revertTo(cur, failed, { soft: false })
+    this.restore(snap, { soft: false })
     return false
   }
-  // 換回原本那一份（剛換上的那一份存不進去、或換到一半出錯）：存檔裡也還是它，不寫、不算改了資料。
-  // 原本是「存檔讀不進來」的範例島的話，換回去後也一樣不能拿去蓋掉雲端、那份讀不懂的存檔（loadFailed 照舊）
-  revertTo(st, failed = this.loadFailed, { soft = true } = {}) {
+  // 整份換掉之前的樣子（換不成、存不進去時換回去用）：資料、「存檔讀不進來」的狀態、存檔裡是哪一版、還有沒寫出去的
+  snapshot() {
+    return { state: this.state, failed: this.loadFailed, disk: this._diskRev, queued: !!this._saveQueued }
+  }
+  // 換成了、也寫進存檔了（之後才出的錯不用換回去）
+  committed(snap) {
+    return this.state !== snap.state && this.saved
+  }
+  // 換回 snapshot 的那一份：存檔裡也還是它，不寫、不算改了資料、不併剛才那一份的回神紀錄。
+  // 原本是「存檔讀不進來」的範例島的話，換回去後也一樣不能拿去蓋掉雲端、那份讀不懂的存檔（loadFailed 照舊）；
+  // 原本還有沒寫出去的，照樣排著寫
+  restore(snap, { soft = true } = {}) {
     try {
-      this.replaceState(st, st.updatedAt, { soft, rev: st.rev, peer: true })
+      this.replaceState(snap.state, snap.state.updatedAt, { soft, rev: snap.state.rev, peer: true, exact: true })
     } catch {
-      this.state = st
+      this.state = snap.state
     }
-    this.loadFailed = failed
+    this.loadFailed = snap.failed
+    this._diskRev = snap.disk
+    if (snap.queued) this.save(false)
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
   // 同步拉回時帶著雲端那一版的 updatedAt 和 rev；匯入、還原備份則算一次新的變更
@@ -1472,7 +1487,8 @@ export class Store {
   // peer：另一個分頁剛存的那一版。它已經在存檔裡了：不寫回去，也不算這邊改了資料（不觸發同步）
   // 回傳有沒有寫進存檔（peer 本來就在存檔裡，算有）
   // settle：兩台合在一起的那一份（同步自動合併）：合起來才湊齊的落成、全清在寫進存檔之前補好，跟它一起寫一次（不會寫了一半）
-  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false, settle = false } = {}) {
+  // exact：換回原本那一份（restore）：回神紀錄照它原本的，不跟剛才那一份取比較大的
+  replaceState(obj, updatedAt = this._nextVersion(), { soft = false, rev = newRev(), peer = false, settle = false, exact = false } = {}) {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     if (newerData(obj)) throw new Error(NEWER_MSG)
     const next = migrate(obj)
@@ -1483,7 +1499,7 @@ export class Store {
     // 同步拉回別台的、換成別的分頁的那一版：回神紀錄（自動記的、只會往上加）每天取比較大的那個，
     // 這台還沒同步出去的提醒次數不會被蓋掉。匯入、還原備份是整份換掉：換一個 gen，之後誰拿到這一份都照它的數字
     let raised = false
-    if (soft && sameGen(this.state, next)) raised = keepTallies(this.state?.history, next.history)
+    if (soft && !exact && sameGen(this.state, next)) raised = keepTallies(this.state?.history, next.history)
     else if (!soft && !peer) {
       next.tallyGen = uid()
       // 整份換掉的：不再「包含」檔案裡記的那幾版（不然同步時會當成已經包含雲端那一版，直接蓋過去、沒問也沒備份）

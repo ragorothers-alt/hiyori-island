@@ -301,7 +301,7 @@ export class SyncEngine {
       return true
     }
     if (first) this._runMerge = { rev: st.rev }
-    const failed = this.store.loadFailed
+    const before = this.store.snapshot()
     const undo = () => {
       if (backups !== undefined) putBackups(backups)
       if (first) this._runMerge = null
@@ -313,17 +313,21 @@ export class SyncEngine {
       this.store.replaceState(out.state, Math.max(Date.now(), (st.updatedAt || 0) + 1, (remote.savedAt || 0) + 1), { soft: true, settle: true })
       if (this.store.saved) this.store.flushSave()
     } catch (e) {
-      console.warn('[hiyori] 合併出來的資料讀不進去', e)
       this.store.keepBackups = 0
-      if (this.store.state !== st) this.store.revertTo(st, failed)
-      undo()
-      return false
+      // 合好的那一份已經寫進存檔了、之後（畫面重畫時）才出錯：照合好了繼續
+      if (!this.store.committed(before)) {
+        console.warn('[hiyori] 合併出來的資料讀不進去', e)
+        if (this.store.state !== st) this.store.restore(before)
+        undo()
+        return false
+      }
+      console.warn('[hiyori] 合好之後出了錯', e)
     } finally {
       this.store.keepBackups = 0
     }
     if (!this.store.saved) {
       // 存不進去：記憶體裡換回原本那一份（存檔裡也還是它），base 不動——下次再合也不會把雲端那一版算兩次
-      this.store.revertTo(st, failed)
+      this.store.restore(before)
       undo()
       this._set('error', NO_SAVE)
       return true
@@ -403,7 +407,7 @@ export class SyncEngine {
     // 一般拉取時這台沒改過（雲端已經有比較新的那一版），備份只是保險；選邊時一定要備份成功。
     // 雲端那一版只換了計時（別台按了開始、暫停）：這台的這一份跟它只差在計時，不另外留（不然幾次就把真正有用的備份擠掉）
     const backups = snapBackups()
-    const failed = this.store.loadFailed
+    const snap = this.store.snapshot()
     const keep = st.rev && !ahead && (strict || !onlyTimer(st, remote.state))
     if (keep && !keepBackup(st, 'local', st.updatedAt) && strict) return this._set('error', NO_ROOM)
     // 選邊（用雲端的）：存雲端那一份時，這台這一份的備份不能被擠掉。兩份放不下就不換：記憶體換回這台的，
@@ -413,16 +417,22 @@ export class SyncEngine {
     try {
       saved = this.store.replaceState(remote.state, remote.savedAt, { soft: true, rev: remote.rev })
     } catch (e) {
-      if (this.store.state !== st) this.store.revertTo(st, failed)
-      putBackups(backups)
-      return this._fail(e)
+      this.store.keepBackups = 0
+      // 已經寫進存檔了、之後（畫面重畫時）才出錯：照拿回來了繼續
+      if (!this.store.committed(snap)) {
+        if (this.store.state !== st) this.store.restore(snap)
+        putBackups(backups)
+        return this._fail(e)
+      }
+      console.warn('[hiyori] 拿回來之後出了錯', e)
+      saved = true
     } finally {
       this.store.keepBackups = 0
     }
     if (!saved) {
       // 存不進去：換回這台的那一份（存檔裡也還是它；存檔讀不進來的範例島也還是不能推上去），備份清單放回原本的樣子，
       // base 不動，下次同步再拿一次
-      this.store.revertTo(st, failed)
+      this.store.restore(snap)
       putBackups(backups)
       return this._set('error', NO_SAVE)
     }

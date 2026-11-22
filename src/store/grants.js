@@ -5,9 +5,9 @@
 //   收回一筆（提早結束的那幾分鐘按了「不算這段」）也照這本帳扣回去（revokeGrant）。收回的那一筆留著（off）：
 //   兩台都收回了同一筆，合在一起時看得出是同一次收回，不會扣兩次；也不會被同一件事再給一次
 // 一筆：{ at: 記下的時間, day: 那一天（「那天的紀錄」上的數字記在這一天）, d: { 數字的代號: 加了多少（減少是負的） } }
-// 收回了的：{ at: 收回的時間, day, d: {}, off: 1, of: 收回的是哪一次給的（那一筆的 at）, was: 那一筆的 d, r: { 代號: 實際扣回了多少 } }
+//   n：這件事第幾次給的（收回之後又給才會是第 2 次；沒寫是第 1 次）。同一件事兩台各自給的都是第 1 次：合併時靠它認出是不是同一次
+// 收回了的：{ at: 收回的時間, day, d: {}, off: 1, of: 收回的是第幾次給的, was: 那一次的 d, r: { 代號: 實際扣回了多少 } }
 //   （金平糖已經花掉、扣不到的那一份照實記：兩台都收回時才不會把沒扣到的補回去）
-// 同一筆在同一天又給了一次（加在一起）的，at 留著第一次的：合併時靠 at 認出是不是同一次給的
 // 數字的代號：
 //   xp 經驗值、c 金平糖、ch お守り、b 好感、s:鍵 統計（player.stats）、d:鍵 那天的紀錄（history[day]）、x:花 圖鑑的朵數、
 //   ts:任務 id 實際做了幾分鐘、tp:任務 id 番茄的顆數、pf:專案 id 那天的專注分鐘
@@ -95,27 +95,33 @@ const codes = (v, zero = false) => {
   return d
 }
 // 這一筆實際還算在數字裡的是哪一次給的、多少：給著的是它自己（at、d）；收回了的是 of 那一次扣不到的那一份（舊的記號沒記，當成全扣了）
+// 第幾次給的（舊的收回記號 of 記的是時間：當成第 1 次）
+export const batchOf = (g) => (!isObj(g) ? 0 : g.off ? (Number.isInteger(g.of) && g.of > 0 && g.of < 1e6 ? g.of : 1) : Number.isInteger(g.n) && g.n > 0 ? g.n : 1)
 export function grantEffect(g) {
   if (!isObj(g)) return null
-  if (!g.off) return { batch: g.at, d: isObj(g.d) ? g.d : {} }
+  if (!g.off) return { batch: batchOf(g), d: isObj(g.d) ? g.d : {} }
   const d = {}
   if (isObj(g.was))
     for (const [c, v] of Object.entries(g.was)) {
       const left = v - (isObj(g.r) && typeof g.r[c] === 'number' ? g.r[c] : v)
       if (left) d[c] = left
     }
-  return { batch: Number.isFinite(g.of) ? g.of : null, d }
+  return { batch: batchOf(g), d }
 }
 // 還沒有這本帳的舊版寫的那一份（另一台還沒更新、或剛更新第一次讀進來）：照它記的（任務完成時拿了幾點經驗 xpGot、
 // 那一輪專注 pomoGot）補一本帳，跟新版記的同一件事對得起來。只記確定的數字（完成之後可能改過的優先度、本命不猜）
 export function legacyGrants(s) {
   const out = {}
   for (const t of Array.isArray(s?.tasks) ? s.tasks : []) {
-    if (!isObj(t) || !t.rewarded || typeof t.id !== 'string' || !Number.isFinite(t.xpGot) || !Number.isFinite(t.doneAt)) continue
+    if (!isObj(t) || !t.rewarded || typeof t.id !== 'string' || !Number.isFinite(t.xpGot)) continue
+    // 完成過又取消了的沒有完成時間（獎勵還是給過了）：照那件任務的日子記
+    const done = Number.isFinite(t.doneAt) ? t.doneAt : null
+    const day = done ? dateStr(new Date(done)) : DATE_RE.test(t.date) ? t.date : null
+    if (!day) continue
     const xp = t.xpGot
     const d = { xp, c: Math.max(1, Math.round(xp / 5)), 'd:xp': xp, 's:tasksDone': 1, 'd:tasks': 1 }
     if (typeof t.flower === 'string' && t.flower) d[`x:${t.flower}`] = 1
-    out[`t:${t.id}`] = { at: t.doneAt, day: dateStr(new Date(t.doneAt)), d }
+    out[`t:${t.id}`] = { at: done || Date.now(), day, d }
   }
   for (const [sid, g] of Object.entries(isObj(s?.pomoGot) ? s.pomoGot : {})) {
     if (!isObj(g) || !DATE_RE.test(g.d)) continue
@@ -131,7 +137,7 @@ export function legacyGrants(s) {
     }
     if (typeof g.p === 'string' && g.p && m) d[`pf:${g.p}`] = Math.round(m)
     for (const c of Object.keys(d)) if (!d[c]) delete d[c]
-    out[`f:${sid}`] = { at: Number(g.at) || Date.parse(`${g.d}T12:00:00`), day: g.d, d }
+    out[`f:${sid}`] = { at: Number(g.at) || Date.now(), day: g.d, d }
   }
   return out
 }
@@ -170,11 +176,11 @@ export function cleanGrants(v, now = Date.now()) {
     if (!KEY_RE.test(k) || !isObj(g) || !isObj(g.d) || !Number.isFinite(g.at) || !DATE_RE.test(g.day)) continue
     if (now - g.at > GRANT_DAYS * 86400000) continue
     if (g.off) {
-      keep(k, { at: g.at, day: g.day, d: {}, off: 1, ...(Number.isFinite(g.of) ? { of: g.of } : {}), ...(isObj(g.was) ? { was: codes(g.was), r: codes(g.r, true) } : {}) })
+      keep(k, { at: g.at, day: g.day, d: {}, off: 1, of: batchOf(g), ...(isObj(g.was) ? { was: codes(g.was), r: codes(g.r, true) } : {}) })
       continue
     }
     const d = codes(g.d)
-    if (Object.keys(d).length) keep(k, { at: g.at, day: g.day, d })
+    if (Object.keys(d).length) keep(k, { at: g.at, day: g.day, d, ...(batchOf(g) > 1 ? { n: batchOf(g) } : {}) })
   }
   list.sort((a, b) => a.g.at - b.g.at)
   return Object.fromEntries(list.slice(-GRANT_MAX).map((x) => [x.k, x.g]))
@@ -234,8 +240,12 @@ export const grantMethods = {
     if (old && old.day === day && !old.off) {
       const sum = { ...old.d }
       for (const [k, v] of Object.entries(d)) sum[k] = (sum[k] || 0) + v
-      all[key] = { at: old.at, day, d: sum }
-    } else all[key] = { at: Date.now(), day, d }
+      all[key] = { ...old, d: sum }
+    } else {
+      // 第一次給：第 1 次；收回之後（或另一天）又給：下一次
+      const n = old ? batchOf(old) + 1 : 1
+      all[key] = { at: Date.now(), day, d, ...(n > 1 ? { n } : {}) }
+    }
     if (Object.keys(all).length > GRANT_MAX + 40) this.state.grants = cleanGrants(all)
   },
   // 收回 key 那一筆：照帳上記的扣回去（不會扣到負的），帳上記成收回了（不能收回兩次）。回傳有沒有收回
@@ -244,7 +254,7 @@ export const grantMethods = {
     if (!g || g.off) return false
     const r = {}
     for (const [code, v] of Object.entries(g.d)) r[code] = -addCode(this.state, code, g.day, -v)
-    this.state.grants = { ...this.state.grants, [key]: { at: Date.now(), day: g.day, d: {}, off: 1, of: g.at, was: { ...g.d }, r } }
+    this.state.grants = { ...this.state.grants, [key]: { at: Date.now(), day: g.day, d: {}, off: 1, of: batchOf(g), was: { ...g.d }, r } }
     this._finish()
     return true
   },

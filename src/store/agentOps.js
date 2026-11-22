@@ -670,7 +670,10 @@ export const agentOpsMethods = {
         p.pausedAt = u.ppause || null
         // 這次刪掉才第一次落成、領了落成的獎勵：照帳收回（之後真的再落成時照常給）。
         // 本來就領過的（落成過、重開了）這次沒有給，什麼都不收；帳已經清掉了（很多天前）就跟重開一樣：獎勵留著、之後不再給
-        if (u.ppaid !== false && this.revokeGrant(grantKey('p', p.id))) {
+        // 舊的撤銷紀錄沒記 ppaid：看帳上那一筆是不是這次落成時給的（時間對得上），以前落成時給的不收
+        const g = this.state.grants?.[grantKey('p', p.id)]
+        const paidNow = typeof u.ppaid === 'boolean' ? u.ppaid : !!g && !g.off && Math.abs((Number(g.at) || 0) - u.pat) < 60000
+        if (paidNow && this.revokeGrant(grantKey('p', p.id))) {
           p.paid = false
           if (u.ponTime) {
             p.onTime = false

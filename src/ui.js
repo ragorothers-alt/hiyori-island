@@ -1386,8 +1386,9 @@ export class UI {
     let was = null
     let shown = false
     const go = () => {
+      // 焦點已經不在第一次看的那個地方：聚焦好了、或使用者自己點了別的，都不再動
       const a = document.activeElement
-      if (shown && a && a !== document.body && a !== was) return
+      if (was && a && a !== document.body && a !== was) return
       was ??= a
       const row = id ? [...document.querySelectorAll('#lifeRoot .life-item')].find((x) => x.dataset.id === id) : null
       const later = () => performance.now() < until && this.tab === 'records' && void setTimeout(go, 50)

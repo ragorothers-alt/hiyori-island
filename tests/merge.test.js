@@ -389,17 +389,18 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
   // 直接寫出三份存檔的帳（看合併的算法）
   const D = '2026-11-22'
   const withStats = (o, grants, updatedAt) => S({ updatedAt, grants, player: { ...S().player, ...o, stats: { tasksDone: 5, ...o.stats } } })
-  const live = (at, d) => ({ at, day: D, d })
+  // n：第幾次給的（收回之後又給是第 2 次）；of：收回的是第幾次
+  const live = (at, d, n = 1) => ({ at, day: D, d, ...(n > 1 ? { n } : {}) })
   const tomb = (at, of, was, r = was) => ({ at, day: D, d: {}, off: 1, of, was, r })
 
   it('兩台都收回了專案落成、其中一台後來又落成了一次：算一次（不會因為收回又重給的淨變化是 0 就當成沒動）', () => {
     const P = { xp: 120, 's:projectsDone': 1 }
     const base = withStats({ xp: 220, stats: { projectsDone: 1 } }, { 'p:x': live(100, P) }, 1)
-    const a = withStats({ xp: 100, stats: { projectsDone: 0 } }, { 'p:x': tomb(200, 100, P) }, 2)
-    const b = withStats({ xp: 220, stats: { projectsDone: 1 } }, { 'p:x': live(300, P) }, 3)
+    const a = withStats({ xp: 100, stats: { projectsDone: 0 } }, { 'p:x': tomb(200, 1, P) }, 2)
+    const b = withStats({ xp: 220, stats: { projectsDone: 1 } }, { 'p:x': live(300, P, 2) }, 3)
     const r = merge3(base, a, b).state
     expect([r.player.xp, r.player.stats.projectsDone]).toEqual([220, 1])
-    expect(r.grants['p:x']).toMatchObject({ at: 300, d: P })
+    expect(r.grants['p:x']).toMatchObject({ n: 2, d: P })
     // 反過來（這台是又落成的那一台）也一樣
     expect(merge3(base, b, a).state.player.xp).toBe(220)
   })
@@ -407,17 +408,17 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
   it('兩台都收回了、金平糖已經花掉扣不到：不會把沒扣到的補回去（多生出金平糖）', () => {
     const G = { xp: 5, c: 1 }
     const base = withStats({ xp: 105, coins: 0 }, { 'f:s': live(100, G) }, 1)
-    const a = withStats({ xp: 100, coins: 0 }, { 'f:s': tomb(200, 100, G, { xp: 5, c: 0 }) }, 2)
-    const b = withStats({ xp: 100, coins: 0 }, { 'f:s': tomb(210, 100, G, { xp: 5, c: 0 }) }, 3)
+    const a = withStats({ xp: 100, coins: 0 }, { 'f:s': tomb(200, 1, G, { xp: 5, c: 0 }) }, 2)
+    const b = withStats({ xp: 100, coins: 0 }, { 'f:s': tomb(210, 1, G, { xp: 5, c: 0 }) }, 3)
     const r = merge3(base, a, b).state
     expect([r.player.xp, r.player.coins]).toEqual([100, 0])
-    expect(r.grants['f:s']).toMatchObject({ off: 1, of: 100 })
+    expect(r.grants['f:s']).toMatchObject({ off: 1, of: 1 })
   })
 
   it('base 太舊（沒有那一筆）、兩邊都有同一次給的，一邊收回了：收回了（不會又活回來）', () => {
     const G = { 's:focusMinutes': 9, xp: 5 }
     const base = withStats({ xp: 100, stats: { focusMinutes: 50 } }, {}, 1)
-    const a = withStats({ xp: 100, stats: { focusMinutes: 50 } }, { 'f:s': tomb(200, 150, G) }, 2)
+    const a = withStats({ xp: 100, stats: { focusMinutes: 50 } }, { 'f:s': tomb(200, 1, G) }, 2)
     const b = withStats({ xp: 105, stats: { focusMinutes: 59 } }, { 'f:s': live(150, G) }, 3)
     for (const [m, t] of [[a, b], [b, a]]) {
       const r = merge3(base, m, t).state
@@ -443,6 +444,81 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
     const neu = at(135, { 'm:p1:m1': live(300, M), 'e:e1': live(301, E) }, 3)
     const r = merge3(base, old, neu).state
     expect([r.player.xp, r.player.stats.milestonesDone]).toEqual([135, 1])
+  })
+
+  it('三台在不同時間記了同一輪：兩台合好、收回了，再拿舊的 base 跟第三台合，還是收回了（各種順序）', () => {
+    const base = seedWith((s) => s.completePomodoro(50, null, null, 's0'))
+    const one = (ms) => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(Date.now() + ms)
+      try {
+        return fork(base, (s) => s.completePomodoro(9, null, null, 's1', { extra: true }))
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+    const [a, b, c] = [one(1000), one(2000), one(3000)]
+    const m = (x) => x.player.stats.focusMinutes
+    const ab = merge(base, a, b)
+    expect(m(ab)).toBe(m(base) + 9)
+    const undone = fork(ab, (s) => expect(s.undoPomodoro('s1')).toBe(true))
+    expect(m(undone)).toBe(m(base))
+    expect(m(merge(base, undone, c))).toBe(m(base))
+    expect(m(merge(base, c, undone))).toBe(m(base))
+    // 沒收回的：三台合起來還是只算一次
+    expect(m(merge(base, ab, c))).toBe(m(base) + 9)
+  })
+
+  it('同一輪兩台在不同天記了不同分鐘（18、9）：合起來只留一天；收回之後每一天、專案都歸零', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 10, 22, 12))
+      let pid
+      const base = seedWith((s) => (pid = s.addProject({ name: '琴', milestones: ['一'] }).id))
+      const a = fork(base, (s) => s.completePomodoro(18, null, pid, 's9', { extra: true }))
+      vi.setSystemTime(new Date(2026, 10, 23, 0, 5))
+      const b = fork(base, (s) => s.completePomodoro(9, null, pid, 's9', { extra: true }))
+      const focus = (x) => [x.history['2026-11-22']?.focus || 0, x.history['2026-11-23']?.focus || 0]
+      const pf = (x) => Object.values(x.projects.find((p) => p.id === pid).focus).reduce((n, v) => n + v, 0)
+      for (const [mm, tt] of [[a, b], [b, a]]) {
+        const r = merge(base, mm, tt)
+        const [d1, d2] = focus(r)
+        expect(d1 === 0 || d2 === 0).toBe(true)
+        expect(d1 + d2).toBe(r.player.stats.focusMinutes - base.player.stats.focusMinutes)
+        expect(pf(r)).toBe(d1 + d2)
+        const u = fork(r, (s) => expect(s.undoPomodoro('s9')).toBe(true))
+        expect([...focus(u), pf(u), u.player.stats.focusMinutes]).toEqual([0, 0, 0, base.player.stats.focusMinutes])
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('舊版那台完成過又取消（沒有完成時間、獎勵給過了）、新版那台也完成了同一件：只算一次', () => {
+    let id
+    const base = seedWith((s) => (id = s.addTask({ title: '寫報告' }).id))
+    const a = fork(base, (s) => s.toggleTask(id))
+    const got = a.grants[`t:${id}`].d.xp
+    const b = JSON.parse(JSON.stringify(base))
+    delete b.grants
+    Object.assign(b.tasks.find((t) => t.id === id), { rewarded: true, done: false, doneAt: null, xpGot: got })
+    Object.assign(b.player, { xp: base.player.xp + got, coins: base.player.coins + Math.max(1, Math.round(got / 5)) })
+    b.player.stats = { ...b.player.stats, tasksDone: base.player.stats.tasksDone + 1 }
+    b.updatedAt = (base.updatedAt || 0) + 5
+    const r = merge(base, a, b)
+    expect([xp(r), r.player.stats.tasksDone]).toEqual([xp(a), a.player.stats.tasksDone])
+  })
+
+  it('一台收回了專案落成（比較晚改）、另一台又落成了一次：合起來專案記著獎勵給過了（之後再勾不會又給）', () => {
+    const P = { xp: 120, 's:projectsDone': 1 }
+    const proj = (paid, completedAt) => [{ id: 'x', name: 'x', paid, completedAt, milestones: [{ id: 'm1', title: 'm', done: !!completedAt }] }]
+    const at = (o, projects, grants, updatedAt) => S({ updatedAt, projects, grants, player: { ...S().player, ...o, stats: { tasksDone: 5, ...o.stats } } })
+    const base = at({ xp: 220, stats: { projectsDone: 1 } }, proj(true, 5), { 'p:x': live(100, P) }, 1)
+    const again = at({ xp: 220, stats: { projectsDone: 1 } }, proj(true, 9), { 'p:x': live(300, P, 2) }, 2)
+    const undone = at({ xp: 100, stats: { projectsDone: 0 } }, proj(false, null), { 'p:x': tomb(200, 1, P) }, 3)
+    const r = merge3(base, again, undone).state
+    expect([r.player.xp, r.player.stats.projectsDone]).toEqual([220, 1])
+    expect(r.projects[0].paid).toBe(true)
   })
 
   it('上一版沒有這本帳的存檔第一次讀進來：照它記的 xpGot、pomoGot 補一本帳（之後跟還沒更新的那台合也對得起來）', () => {

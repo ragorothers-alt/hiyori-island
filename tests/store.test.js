@@ -1106,6 +1106,21 @@ describe('存檔讀不進來、存不進去', () => {
     expect(titlesOf(readBackup(0).state)).toContain('最新的')
   })
 
+  it('匯入、還原已經寫進存檔，之後畫面重畫時出錯：算換成了（不換回舊的、匯入前的備份留著）', () => {
+    store.addTask({ title: '原本的' })
+    store.saveNow()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const off = store.on('reload', () => {
+      throw new Error('畫面重畫壞掉')
+    })
+    expect(() => store.importJSON(JSON.stringify({ tasks: [{ id: 'imp', title: '匯入的' }], player: {} }))).not.toThrow()
+    off()
+    warn.mockRestore()
+    expect(titlesOf(store.state)).toContain('匯入的')
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('匯入的')
+    expect(titlesOf(readBackup(0).state)).toContain('原本的')
+  })
+
   it('已經有三份備份時匯入、主存檔寫不進去：三份備份原樣留著（最舊的那份不會被剛留的那份擠掉）', () => {
     store.saveNow()
     for (const n of [1, 2, 3]) keepBackup({ ...JSON.parse(store.exportJSON()), tasks: [{ id: `b${n}`, title: `備份 ${n}` }] }, 'cloud', n)
