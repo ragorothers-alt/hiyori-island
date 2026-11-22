@@ -57,6 +57,8 @@ self.addEventListener('install', (event) => {
         const res = await fetch('./', { cache: 'no-store' })
         if (!res.ok) throw new Error(`首頁抓不到（${res.status}）`)
         const html = await res.clone().text()
+        // 伺服器回的是維護頁、別的頁面（不是 HTML、沒有入口的 JS）：不是這一版的首頁，不裝
+        if (!/text\/html/i.test(res.headers.get('Content-Type') || '') || !entryAssets(html).some((a) => /\.js(?:$|\?)/.test(a))) throw new Error('首頁不是這一版的 App')
         await cache.put('./', res.clone())
         await cache.put('./index.html', res)
         // 打包後帶 hash 的入口 JS／CSS 一起快取，第一次安裝後就能離線

@@ -2823,10 +2823,12 @@ describe('跨過午夜的日程', () => {
   })
 
   it('讀存檔：不像兩段的 link（好幾筆共用、不是連著兩天、邊界不對、跨太久、例行公事）拿掉，刪一筆不會連帶刪掉別的', () => {
-    const ev = (id, date, start, end, link, more = {}) => ({ id, title: id, date, start, end, link, ...more })
+    const ev = (id, date, start, end, link, more = {}) => ({ id, title: link, date, start, end, link, ...more })
     const out = migrate({
       events: [
         ev('ok1', TODAY, '23:00', '23:59', 'good'), ev('ok2', tomorrow, '00:00', '01:00', 'good'),
+        // 名稱不一樣（晚班、服藥）：是兩筆各自的日程
+        ev('n1', TODAY, '23:00', '23:59', 'name', { title: '晚班' }), ev('n2', tomorrow, '00:00', '01:00', 'name', { title: '服藥' }),
         ev('s1', TODAY, '10:00', '11:00', 'same'), ev('s2', TODAY, '12:00', '13:00', 'same'), ev('s3', tomorrow, '09:00', '10:00', 'same'),
         ev('g1', TODAY, '23:00', '23:59', 'gap'), ev('g2', addDays(TODAY, 2), '00:00', '01:00', 'gap'),
         ev('b1', TODAY, '23:00', '23:30', 'edge'), ev('b2', tomorrow, '00:00', '01:00', 'edge'),
@@ -2839,6 +2841,20 @@ describe('跨過午夜的日程', () => {
     store.replaceState(out)
     store.deleteEvent('s1')
     expect(store.state.events.map((x) => x.id)).toContain('s2')
+    store.deleteEvent('n1')
+    expect(store.state.events.map((x) => x.id)).toContain('n2')
+  })
+
+  it('只把開始往前挪（拉上緣）：整段最長 16 小時，結束留著，不會變成那天就結束', () => {
+    const e = store.addEvent({ title: '長班', date: TODAY, start: '20:00', end: '12:00' })
+    expect(pieces(e)).toEqual([`${TODAY} 20:00–23:59`, `${tomorrow} 00:00–12:00`])
+    store.dragEvent(e.id, { start: '19:45', end: '23:59', edge: 'start' })
+    expect(pieces(e)).toEqual([`${TODAY} 20:00–23:59`, `${tomorrow} 00:00–12:00`])
+    store.updateEvent(e.id, { end: '06:00' })
+    store.dragEvent(e.id, { start: '18:00', end: '23:59', edge: 'start' })
+    expect(pieces(e)).toEqual([`${TODAY} 18:00–23:59`, `${tomorrow} 00:00–06:00`])
+    store.dragEvent(e.id, { start: '13:00', end: '23:59', edge: 'start' })
+    expect(pieces(e)).toEqual([`${TODAY} 14:00–23:59`, `${tomorrow} 00:00–06:00`])
   })
 
   it('兩段是一個日程：從哪一段改都照整個日程（日子、開始是第一段的，結束是隔天那段的）', () => {

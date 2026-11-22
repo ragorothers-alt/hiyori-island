@@ -212,10 +212,23 @@ public class MainActivity extends Activity {
         // 2：多了 mottos（警語的定時提醒）；3：多了 mottoSeen、takeAct（警語通知上的按鈕）；
         // 4：多了 awayLocked，mottos 收得下 back（專注中離開太久叫你回來的那一則，手機鎖著就不發）；
         // 5：多了 actAt（按鈕是哪一則警語通知上的）、shown（App 不在前面時發過的警語）；
-        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）、fujiNow（網頁到點要說其中一則：由手機現在發）
+        // 6：多了 fujiNotes（ふじ在 App 關著時的通知）、fujiNow（網頁到點要說其中一則：由手機現在發）；
+        // 7：多了 reminders（日程、排定的任務、就寢的提醒交給手機的鬧鐘）、remindPosted（App 不在前面時發過的）
         @JavascriptInterface
         public int version() {
-            return 6;
+            return 7;
+        }
+
+        // 日程、排定的任務、就寢的提醒：json 是接下來的每一則 { items: [{ at, key, date, title, body, tag }] }，空字串是都不提醒了
+        @JavascriptInterface
+        public void reminders(String json) {
+            if (trusted) RemindNotice.plan(getApplicationContext(), json);
+        }
+
+        // App 不在前面時手機發過的提醒 [{ key, date }]（拿走就清掉）：網頁記成提醒過了
+        @JavascriptInterface
+        public String remindPosted() {
+            return trusted ? RemindNotice.posted(getApplicationContext()) : "[]";
         }
 
         // ふじ在 App 關著時的通知：json 是接下來的每一則 { items: [{ at, title, body }] }，空字串是不送了

@@ -46,13 +46,11 @@ export function searchAll(state, query, { today, external = [] } = {}) {
     return b.score - a.score || (x.ongoing ? 1 : 0) - (y.ongoing ? 1 : 0) || String(x.date).localeCompare(String(y.date))
   })
 
-  // 跨過午夜存成兩段的日程只列第一段；匯入的行事曆（唯讀）也找
-  const seen = new Set()
+  // 跨過午夜存成兩段的日程只列第一段（日子最早的那段，存檔裡的順序不一定）；匯入的行事曆（唯讀）也找
+  const head = new Map()
+  for (const e of state.events || []) if (e.link && !(head.get(e.link)?.date <= e.date)) head.set(e.link, e)
   for (const e of [...(state.events || []), ...external]) {
-    if (e.link) {
-      if (seen.has(e.link)) continue
-      seen.add(e.link)
-    }
+    if (e.link && head.get(e.link) !== e) continue
     const m = match([['名稱', e.title, 100], ['備註', e.note, 20]], terms)
     if (m) out.event.push({ kind: 'event', item: e, ...m })
   }

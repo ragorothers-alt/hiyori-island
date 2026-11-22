@@ -74,10 +74,10 @@ describe('Service Worker', () => {
   })
 
   const HTML = '<script type="module" src="./assets/index-new.js"></script><link rel="stylesheet" href="./assets/index-new.css">'
-  const fetcher = (fail = null) => async (u) => {
+  const fetcher = (fail = null, home = null) => async (u) => {
     const url = String(u)
     if (fail && url.includes(fail)) return new Response('', { status: 404 })
-    return new Response(url === './' ? HTML : `file ${url}`)
+    return url === './' ? html(home ?? HTML) : new Response(`file ${url}`)
   }
 
   it('安裝：首頁和它用到的入口 JS／CSS 都存進新快取', async () => {
@@ -89,6 +89,17 @@ describe('Service Worker', () => {
     expect(await (await cur.match('./index.html')).text()).toBe(HTML)
     expect(await (await cur.match('./assets/index-new.js')).text()).toBe('file ./assets/index-new.js')
     expect(await cur.match('./assets/index-new.css')).toBeTruthy()
+  })
+
+  it('安裝：伺服器回的首頁是維護頁（沒有入口的 JS）、不是 HTML：不裝，舊版和舊快取留著', async () => {
+    for (const res of ['<h1>維護中</h1>', null]) {
+      const f = res ? fetcher(null, res) : async (u) => (String(u) === './' ? new Response(HTML, { headers: { 'Content-Type': 'text/plain' } }) : new Response('x'))
+      const caches = new FakeCaches(f)
+      await (await caches.open('hiyori-old')).put('./index.html', new Response('old'))
+      const on = loadSW({ caches, fetch: f })
+      await expect(run(on.install, {})).rejects.toThrow()
+      expect(await caches.keys()).toEqual(['hiyori-old'])
+    }
   })
 
   it('安裝：入口 JS 抓不到就讓安裝失敗，舊版和舊快取留著', async () => {

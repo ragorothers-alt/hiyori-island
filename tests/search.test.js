@@ -41,6 +41,8 @@ describe('找找看（searchAll）', () => {
     }
     expect(searchAll(state, '牙醫', { today: TODAY }).event.map((x) => x.item.date)).toEqual(['2026-11-25', '2026-12-20', '2026-11-15', '2026-11-01'])
     expect(searchAll(state, '夜班', { today: TODAY }).event.map((x) => x.item.date)).toEqual([TODAY])
+    // 存檔裡隔天那段排在前面（匯入、同步來的）：列的還是開始那天的那一段
+    expect(searchAll({ events: [...state.events].reverse() }, '夜班', { today: TODAY }).event.map((x) => x.item.date)).toEqual([TODAY])
     const ext = [{ id: 'x', title: '牙醫（匯入）', date: '2026-11-30', start: '09:00', end: '10:00' }]
     expect(searchAll(state, '牙醫 匯入', { today: TODAY, external: ext }).event.map((x) => x.item.id)).toEqual(['x'])
   })

@@ -300,7 +300,8 @@ const CREATE = {
     const d = c.fields.days
     const repeat = isObj(d) && REPEAT_TYPES.includes(d.type) ? d : repeatOf(Array.isArray(d) ? d : [])
     const start = c.start || '09:00'
-    const end = c.end && c.end > start ? c.end : minToHHMM(Math.min(toMin(start) + 60, 1439))
+    // 結束比開始早（跨過午夜）交給 addRoutine 截到 23:59（快速記錄、日程頁也是）；沒給的補一小時
+    const end = c.end || minToHHMM(Math.min(toMin(start) + 60, 1439))
     const r = s.addRoutine({ kind: ev ? 'event' : 'task', title: c.title.slice(0, 120), repeat, tag: c.fields.tag || 'life', priority: c.fields.priority || 2, start, end, date: c.date && c.date >= s.today ? c.date : s.today })
     if (!r) return null
     return { ref: { kind: 'routine', id: r.id }, ent: r, text: `新增例行${ev ? '日程' : '任務'}「${short(r.title)}」（${repeatWord(r.repeat)}${ev ? ` ${r.start}` : ''}）` }

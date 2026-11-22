@@ -698,7 +698,9 @@ export class ScheduleView {
     tray.addEventListener('click', (e) => {
       if (e.target.closest('[data-tray-more]')) {
         this._trayOpen = !this._trayOpen
-        return this._tray()
+        this._tray()
+        // 重畫換了新的按鈕：焦點留在「還有幾件／收起來」上
+        return $('#planTray [data-tray-more]')?.focus({ preventScroll: true })
       }
       // 用鍵盤（Enter／空白鍵）按任務名稱：放進最近的空檔。滑鼠和手指的點擊交給拖曳那邊分辨是點還是拖
       const slot = e.target.closest('[data-slot]')

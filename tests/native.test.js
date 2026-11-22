@@ -1,6 +1,6 @@
 // Android 殼的即時倒數通知：計時的狀態 → 通知上的樣子（src/native.js）
 import { describe, expect, it } from 'vitest'
-import { liveTimer, native, nativeFujiNotes, nativeFujiNow, sendFujiNotes } from '../src/native.js'
+import { liveTimer, native, nativeFujiNotes, nativeFujiNow, sendFujiNotes, nativeReminders, sendReminders, nativeRemindPosted } from '../src/native.js'
 
 const AT = new Date(2026, 10, 10, 17, 25).getTime()
 const done = { at: AT, title: 'ひより · 專注結束', body: '25 分鐘完成，休息一下吧' }
@@ -49,6 +49,30 @@ describe('Android 殼的即時倒數', () => {
     const p = liveTimer({ ...base, paused: true, at: null, leftMs: 12 * 60000 + 5000, target: '寫報告' }, null)
     expect(p).toEqual({ title: '暫停中 · 寫報告', text: '還剩 12:05，回到 App 繼續', chip: '暫停' })
     expect(liveTimer({ ...base, paused: true, counting: true, at: null, leftMs: 65000 }).text).toBe('已經 1:05，回到 App 繼續')
+  })
+})
+
+describe('日程、任務、就寢的提醒交給手機的鬧鐘（第 7 版的殼）', () => {
+  it('舊版的殼不送；內容沒變不重送，空的是都不提醒了', () => {
+    expect(nativeReminders({ reminders() {} })).toBe(false)
+    expect(sendReminders([{ at: AT }], {})).toBe(false)
+    const got = []
+    const bridge = { reminders: (j) => got.push(j), remindPosted: () => '[]' }
+    const items = [{ at: AT, key: 'e1@09:00', date: '2026-10-25', title: 'ひより · 會', body: '10 分鐘後開始（09:00）', tag: 'e1' }]
+    expect(sendReminders(items, bridge)).toBe(true)
+    expect(sendReminders([...items], bridge)).toBe(true)
+    expect(got).toEqual([JSON.stringify({ items })])
+    sendReminders([], bridge)
+    expect(got.at(-1)).toBe('')
+  })
+
+  it('手機發過的：只收認得的（key 是字、date 是日期）；壞掉的、出錯的、舊版的殼是空的', () => {
+    const b = (v) => ({ reminders() {}, remindPosted: () => v })
+    expect(nativeRemindPosted(b(JSON.stringify([{ key: 'e1@09:00', date: '2026-10-25' }, { key: 1, date: '2026-10-25' }, { key: 'x', date: 'nope' }, null])))).toEqual([{ key: 'e1@09:00', date: '2026-10-25' }])
+    expect(nativeRemindPosted(b('壞掉'))).toEqual([])
+    expect(nativeRemindPosted(b('{}'))).toEqual([])
+    expect(nativeRemindPosted({ reminders() {}, remindPosted: () => { throw new Error('x') } })).toEqual([]) // prettier-ignore
+    expect(nativeRemindPosted({})).toEqual([])
   })
 })
 

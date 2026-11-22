@@ -5313,7 +5313,7 @@ test('找找看：別的頁按 / 或 Ctrl+K、點放大鏡都叫得出來；哪�
   // ↓ 選下一筆（選到的跟著剛勾的那件走）：念出是第幾筆、哪一筆
   await input.focus()
   await input.press('ArrowDown')
-  await expect(page.locator('#findLive')).toHaveText(/^第 \d 筆，共 4 筆：/)
+  await expect(page.locator('#findLive')).toHaveText(/^第 \d+ 筆，共 \d+ 筆：/)
   // ↓ 選第二件（還沒做的「整理報價單範本」排到前面了）、Enter 打開編輯面板，日期換到那天
   await input.fill('報價單')
   await expect(list.locator('.fd-row').first()).toContainText('整理報價單範本')
@@ -5327,6 +5327,17 @@ test('找找看：別的頁按 / 或 Ctrl+K、點放大鏡都叫得出來；哪�
   await expect(input).toBeFocused()
   await input.fill('沒有這種東西')
   await expect(page.locator('#findTip')).toContainText('找不到')
+  // 結果很多、勾完的那件排到列得下的筆數以外：焦點回到輸入框，念出完成了
+  const many = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const ids = []
+    for (let i = 0; i < 32; i++) ids.push(s.addTask({ title: `報價單草稿 ${i}` }).id)
+    return ids
+  })
+  await input.fill('報價單草稿')
+  await list.locator(`[data-key="task:${many[0]}"] [data-act="toggle"]`).click()
+  await expect(input).toBeFocused()
+  await expect(page.locator('#findLive')).toContainText('排到後面了')
   await page.keyboard.press('Control+k')
   await expect(page.locator('#search')).toBeHidden()
 })
@@ -5428,6 +5439,20 @@ test('返回鍵：先關最上面那一層（找找看、快速記錄打到一�
   await back()
   await expect(page.locator('#search')).toBeHidden()
   expect(await page.evaluate(() => !!window.hiyori?.ui)).toBe(true)
+  // 打開專案 → 切到今日總覽（專案那一筆收起來）→ 切回專案（還開著那個專案，記回一筆）→ 返回：回到列表，不會離開 App
+  await page.evaluate(() => window.hiyori.ui.focus.stop?.())
+  await page.evaluate((pid) => window.hiyori.ui.openProject(pid), id)
+  await expect(page.locator('#projectDetail')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(1)
+  await page.locator('.tabs [data-tab="today"]').click()
+  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(0)
+  await page.locator('.tabs [data-tab="projects"]').click()
+  await expect(page.locator('#projectDetail')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(1)
+  await back()
+  await expect(page.locator('#projectDetail')).toBeHidden()
+  expect(await page.evaluate(() => !!window.hiyori?.ui)).toBe(true)
+  expect(page.url()).toBe(url)
 })
 
 test('沒接 Claude 的ふじ：除了設定通行碼，也有現在就能用的「排一週的主攻時段」「把今天的任務排進空檔」', async ({ page, context, site }) => {

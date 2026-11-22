@@ -187,6 +187,33 @@ export function nativeFujiNow(at, bridge = native) {
 }
 
 // 通知權限：殼裡沒有瀏覽器的 Notification，問原生
+// 日程、排定的任務、就寢的提醒交給手機的鬧鐘（第 7 版的殼才有；舊的殼只有 App 開著時的提醒）
+export const nativeReminders = (bridge = native) => typeof bridge?.reminders === 'function' && typeof bridge?.remindPosted === 'function'
+// items：remindPlan.js 排的 [{ at, key, date, title, body, tag }]，空的是都不提醒了。一樣的就不重送
+let lastReminds = null
+export function sendReminders(items, bridge = native) {
+  if (!nativeReminders(bridge)) return false
+  const json = items.length ? JSON.stringify({ items }) : ''
+  if (json === lastReminds) return true
+  try {
+    bridge.reminders(json)
+    lastReminds = json
+    return true
+  } catch {
+    return false
+  }
+}
+// App 不在前面時手機發過的提醒：[{ key, date }]（拿走就清掉了）
+export function nativeRemindPosted(bridge = native) {
+  if (!nativeReminders(bridge)) return []
+  try {
+    const v = JSON.parse(bridge.remindPosted() || '[]')
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x.date)) : []
+  } catch {
+    return []
+  }
+}
+
 export const nativeCanNotify = () => {
   try {
     return !!native?.canNotify()

@@ -1058,6 +1058,10 @@ export class Store {
     const head = all[0] || null
     return { head, all, date: head?.date, start: head?.start, end: all.length > 1 ? all.at(-1).end : head?.end }
   }
+  // 整個日程（每一段的日子、時段、名稱、備註、完成）的樣子：撤銷新增時比對「之後有沒有改過」
+  _eventSig(e) {
+    return JSON.stringify(this.eventGroup(e).map((x) => [x.id, x.date, x.start, x.end, x.title, x.note || '', !!x.done, !!x.allDay, x.endDate || '']))
+  }
   // 接在前一天後面的那一段（00:00 開始的）：提醒只在第一段開始前響
   isCont(e) {
     return !!e?.link && this.state.events.some((x) => x.link === e.link && x.date < e.date)
@@ -1121,8 +1125,9 @@ export class Store {
       this._place(e, v.date, '00:00', '23:59')
       Object.assign(e, { allDay: true, endDate: allDayEnd(v.endDate, v.date) })
     } else {
-      const { start } = v
-      let { end } = v
+      let { start, end } = v
+      // 本來就跨過午夜、只把開始往前挪：最早挪到整段 16 小時的地方（結束留著，不會因為長過頭變成那天就結束）
+      if (span.all.length > 1 && !('end' in clean) && toMin(start) > toMin(end) && !overnight(start, end)) start = minToHHMM(toMin(end) + 1440 - OVERNIGHT_MAX)
       let over = overnight(start, end) && ('end' in clean || span.all.length > 1)
       if (!over && toMin(end) <= toMin(start)) {
         end = minToHHMM(Math.min(toMin(start) + ('end' in clean ? 60 : spanLen(span.start, span.end) || 60), 1439))

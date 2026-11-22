@@ -45,7 +45,8 @@ export const agentMethods = {
       for (const x of act.events || []) {
         if (!okDate(x.date)) continue
         const e = this.addEvent({ title: x.title, date: x.date, start: x.start, end: x.end || x.start })
-        if (e) note(`日程「${short(e.title)}」（${day(e.date)} ${e.start}）`, { k: 'event', id: e.id })
+        // sig：新增時整組（跨過午夜的兩段）的樣子，撤銷時一樣才刪（之後自己改過的留著）
+        if (e) note(`日程「${short(e.title)}」（${day(e.date)} ${e.start}）`, { k: 'event', id: e.id, sig: this._eventSig(e) })
       }
       this._agentRest(act.ops, note, true)
     }
@@ -407,7 +408,8 @@ export const agentMethods = {
         }
         n++
       } else if (u.k === 'event') {
-        if (!this._find('events', u.id)) continue
+        const e = this._find('events', u.id)
+        if (!e || (u.sig && this._eventSig(e) !== u.sig)) continue
         this.deleteEvent(u.id)
         n++
       } else if (u.k === 'date') {

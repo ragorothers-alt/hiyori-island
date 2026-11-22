@@ -41,10 +41,11 @@ export class Reminders {
   //   （App 不在前面、頁面在背景時頁面的 JavaScript 可能還在跑）
   //   handled()：另一邊記著的「念到哪一則了」（通知過、或頁面念過的最後一則）；
   //   claim(at)：頁面要念這一則，先跟另一邊說（另一邊剛好搶先通知了的話回 false）
-  constructor(store, onRemind, { external = () => false, hidden = () => typeof document !== 'undefined' && !!document.hidden, handled = () => 0, claim = () => true } = {}) {
+  //   posted()：App 關著時手機發過的日程、任務、就寢提醒 [{ key, date }]（remindPlan.js 排的）：記成提醒過了，不再跳提示卡
+  constructor(store, onRemind, { external = () => false, hidden = () => typeof document !== 'undefined' && !!document.hidden, handled = () => 0, claim = () => true, posted = () => [] } = {}) {
     this.store = store
     this.onRemind = onRemind
-    Object.assign(this, { external, hidden, handled, claim })
+    Object.assign(this, { external, hidden, handled, claim, posted })
     this.sent = load()
     // 訂閱這次扣款提醒過了（存不進 localStorage 時也記得，不會每秒響一次）
     this.subSent = {}
@@ -217,8 +218,23 @@ export class Reminders {
     } catch {}
   }
 
+  // 別處（手機）已經提醒過的：記下來（寫進存著的那份，另一個分頁也看得到）
+  markSent(list) {
+    let changed = false
+    for (const x of Array.isArray(list) ? list : []) {
+      if (!x || typeof x.key !== 'string' || typeof x.date !== 'string') continue
+      const mine = (this.sent[x.date] ||= [])
+      if (mine.includes(x.key)) continue
+      mine.push(x.key)
+      changed = true
+    }
+    if (changed) this._save()
+    return changed
+  }
+
   check(now = new Date()) {
     this._merge()
+    this.markSent(this.posted())
     const lead = this.store.state.settings.remindLead
     const today = dateStr(now)
     const tomorrow = addDays(today, 1)

@@ -8,7 +8,8 @@ import { lotsAt } from './data/projectTown.js'
 import { sfx, noise } from './audio.js'
 import { Reminders, systemNotify, closeNotify, notifyPermission } from './reminders.js'
 import { TimerPush, MottoPush, MOTTO_PUSH_MAX, timerNotice, timerTag, answerLooking, takeNoticeAct, pushSupported } from './push.js'
-import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes, nativeFujiNow } from './native.js'
+import { native, deskWeb, showLiveTimer, nativeMottos, sendMottos, nativeMottoHandled, nativeMottoClaim, nativeMottoSeen, nativeTakeAct, nativeActAt, nativeShown, nativeAway, nativeBack, nativeAwayLocked, nativeFujiNotes, sendFujiNotes, nativeFujiNow, nativeReminders, sendReminders, nativeRemindPosted } from './native.js'
+import { remindPlan } from './remindPlan.js'
 import { planKey, pauseOf, pauseText, pauseUntil, pausedUntil, planUntil, MOTTO_LATE, eventQuiet, inQuiet, awakeAt, activeMottos, windowEnd } from './mottos.js'
 import { order as doFirst, nextStep } from './brief.js'
 import { SUB_CATS, cycleLabel, fmtMoney } from './subs.js'
@@ -441,6 +442,9 @@ async function boot() {
   // 把警語的那一串交給手機／伺服器（下面「警語交給別人排」那一段接上）：改了設定、開始專注時馬上叫一次，
   // 不等下一秒的檢查（剛改完就離開 App 的話頁面會睡著，手機上留著的還是舊的那一串）
   let syncMottos = () => {}
+  let syncReminds = () => {}
+  // 這一種提醒，頁面在背景時交給手機發嗎（Android 殼排著的那幾種：日程、排定的任務、就寢；就寢那則ふじ睡前會說的話不排）
+  const byPhone = (kind) => nativeReminders() && document.hidden && (['event', 'task', 'taskStart'].includes(kind) || (kind === 'bed' && !fujiOn()))
   // 這一輪到點時還在別的 App 裡（Android）：算一次中途離開，回傳有沒有算（下面「專注中離開 App」那一段接上）
   let awayAtEnd = () => false
   // 叫你回來的那一則（backItem）交給手機排在幾點（Android；沒排著是 0）：限時去到了、App 在背景時，排著的就讓手機叫
@@ -1216,6 +1220,8 @@ async function boot() {
     })
   store.on('newerApp', newerToast)
   addEventListener('beforeunload', (e) => {
+    // 存得慢時剛改的還排著：先寫（另一個分頁已經是新版的話，這時才知道沒存到）
+    store.flushSave()
     if (!store.saveError && !store.lostEdits) return
     e.preventDefault()
     e.returnValue = ''
@@ -1656,8 +1662,8 @@ async function boot() {
         icon: '眠', title: '就寢時間快到了', sub: first ? `預定 ${e.start} 就寢・${word}先做「${short(first.title, 10)}」` : `預定 ${e.start} 就寢・今天辛苦了`, ms: day && !first ? 12000 : 9000,
         ...(day && !first ? { actions: [{ label: `挑${word}的第一件`, soft: true, run: () => ui.openFirst() }] } : {}),
       })
-      // ふじ睡前那則是同一刻：只跳一則（bedNotice 決定誰說）
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) {
+      // ふじ睡前那則是同一刻：只跳一則（bedNotice 決定誰說）。手機排著就寢提醒的話由手機發
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !byPhone('bed')) {
         const out = bedNotice(Date.now(), { title: 'ひより · 就寢提醒', body: `預定 ${e.start} 就寢`, tag: 'bedtime' })
         if (out) systemNotify(out.title, out.body, out.tag)
       }
@@ -1697,7 +1703,7 @@ async function boot() {
           { label: '晚 15 分鐘', soft: true, run: later },
         ],
       })
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${t.title}`, `排在 ${e.start}，現在開始吧`, t.id)
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !byPhone('taskStart')) systemNotify(`ひより · ${t.title}`, `排在 ${e.start}，現在開始吧`, t.id)
       return
     }
     // 排定的任務排的時間到了還沒做完：問一聲做完了沒，寫著下一件是什麼（轉換最難：一不小心就做過頭）。
@@ -1758,13 +1764,15 @@ async function boot() {
     const early = kind === 'task' && ui.focus.mode !== 'focus' ? [{ label: '▶ 現在就開始', soft: true, run: startTask(e.id, (id) => ui.focus.startWith(id)) }] : []
     ui.toast({ icon: kind === 'task' ? '時' : '鐘', title: e.title, sub: kind === 'task' ? `排定的任務・${when}` : when, ms: early.length ? 12000 : 9000, ...(early.length ? { actions: early } : {}) })
     if (kind === 'event' && store.selectedDate === store.today) scene?.pulseEvent(e.id)
-    if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
+    if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !byPhone(kind)) systemNotify(`ひより · ${e.title}`, when, e.id)
   }, {
     // 警語交給手機、伺服器排時怎麼分工（見 reminders.js 的 _motto）
     external: () => mottoExternal(),
     hidden: (t) => (mottoPush ? mottoPush.defer(t, document.hidden) : document.hidden || nativeAway()),
     handled: () => (mottoPush ? mottoPush.done : nativeMottoHandled()),
     claim: (at) => (mottoPush ? mottoPush.claim(at) : nativeMottoClaim(at)),
+    // App 關著、在背景時手機發過的日程、任務、就寢提醒：記成提醒過了（回到 App 不再跳一次提示卡）
+    posted: () => nativeRemindPosted(),
   })
 
   // ── 專注中離開 App ──
@@ -2147,6 +2155,23 @@ async function boot() {
   document.addEventListener('visibilitychange', () => document.hidden && syncMottos())
   addEventListener('pagehide', () => syncMottos(true))
 
+  // ── 日程、排定的任務、就寢的提醒交給手機的鬧鐘（Android 殼，src/remindPlan.js）：App 關著、手機鎖著也照時間響 ──
+  // 排好接下來 47 小時的每一則；資料變了、每分鐘、離開 App 時重排（一樣的不重送）。App 在前面時手機不發，頁面自己提醒
+  let remindDirty = true
+  let remindAt = 0
+  const bedText = () => (fujiOn() ? null : { title: 'ひより · 就寢提醒', body: `預定 ${store.state.rhythm.sleep} 就寢` })
+  syncReminds = (force = false) => {
+    if (!nativeReminders()) return
+    const now = Date.now()
+    if (!force && !remindDirty && now - remindAt < 60000) return
+    remindDirty = false
+    remindAt = now
+    sendReminders(remindPlan(store, now, { sent: reminders.sent, bed: bedText() }))
+  }
+  store.on('dirty', () => (remindDirty = true))
+  document.addEventListener('visibilitychange', () => document.hidden && syncReminds(true))
+  addEventListener('pagehide', () => syncReminds(true))
+
   // ── 同步：線上同步（同步碼，手機也能用）＋資料夾同步（資料寫進 OneDrive／Dropbox 裡的檔案）。兩種可以同時開 ──
   const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「設定 → 資料與同步」選要保留哪一邊', ms: 7000 })
   // 剛說了別台的計時（那一張就夠了，「已同步別台裝置的變更」不再說）
@@ -2362,6 +2387,7 @@ async function boot() {
     askNotes()
     suggestRetry()
     syncMottos()
+    syncReminds()
     tabNudge()
     // 到點自動延長時留著的慶祝（升級、成就、任務達成）：延長做完了（休息、結束、另一個分頁結束了），
     // 等做完的那一句、提示卡先出來再放

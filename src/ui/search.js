@@ -68,10 +68,13 @@ export class SearchView {
         this.sel = +row.dataset.i
         this.hooks.toggleTask(r.item.id)
         this.render()
-        // 打勾之後焦點留在同一件的勾勾上（重畫換了新的按鈕，做完的那件也可能換了位置）
-        this._row$(key)?.querySelector('[data-act="toggle"]')?.focus({ preventScroll: true })
-        const now = this.flat.find((x) => keyOf(x) === key)
-        if (now) this._say(`「${now.item.title}」${now.item.done ? '完成了' : '改回未完成'}`)
+        // 打勾之後焦點留在同一件的勾勾上（重畫換了新的按鈕，做完的那件也可能換了位置）；
+        // 做完的那件排到後面、超出列得下的筆數了：焦點回到輸入框
+        const btn = this._row$(key)?.querySelector('[data-act="toggle"]')
+        if (btn) btn.focus({ preventScroll: true })
+        else this.el.input.focus({ preventScroll: true })
+        const t = this.hooks.state().tasks?.find((x) => x.id === r.item.id)
+        if (t) this._say(`「${t.title}」${t.done ? '完成了' : '改回未完成'}${btn ? '' : '（排到後面了）'}`)
       } else {
         this.render()
         const now = this.flat.find((x) => keyOf(x) === key)
@@ -105,7 +108,11 @@ export class SearchView {
     const key = this.el.list.contains(a) ? a.closest('[data-key]')?.dataset.key : null
     const act = a?.dataset?.act
     this.render()
-    if (key) this._row$(key)?.querySelector(`[data-act="${act}"]`)?.focus({ preventScroll: true })
+    if (!key) return
+    // 那一筆不在列表裡了（做完排到後面、被刪掉）：焦點回到輸入框，不掉到頁面最上面
+    const el = this._row$(key)?.querySelector(`[data-act="${act}"]`)
+    if (el) el.focus({ preventScroll: true })
+    else this.el.input.focus({ preventScroll: true })
   }
 
   // fresh：剛打了字（選第一筆、說找到幾筆）；不然照 id 留著選到的那一筆

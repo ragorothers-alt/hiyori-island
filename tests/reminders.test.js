@@ -37,6 +37,19 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('App 關著時手機發過的提醒', () => {
+  it('回到 App 時記成提醒過了：不再跳一次提示卡；別的分頁也看得到', () => {
+    const posted = [{ key: `${event.id}@09:00`, date: TODAY }]
+    let left = posted
+    reminders = new Reminders(store, callback, { posted: () => left.splice(0) })
+    vi.setSystemTime(at(8, 51))
+    reminders.check(at(8, 51))
+    expect(callback).not.toHaveBeenCalled()
+    expect(JSON.parse(localStorage.getItem('hiyori-reminded'))[TODAY]).toContain(`${event.id}@09:00`)
+    expect(reminders.markSent([{ key: `${event.id}@09:00`, date: TODAY }, null, { key: 3 }])).toBe(false)
+  })
+})
+
 describe('日程提醒', () => {
   it('以傳入的時間判斷，開始前十分鐘提醒一次並傳入剩餘分鐘', () => {
     // 系統鐘固定在八點，check 的傳入時間才是這次判斷的依據。

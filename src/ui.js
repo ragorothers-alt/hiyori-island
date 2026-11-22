@@ -1935,9 +1935,9 @@ export class UI {
         // 重畫換了新的按鈕：焦點留在「還有幾件／收起來」上
         return $('#overdueBox [data-act="odMore"]')?.focus({ preventScroll: true })
       }
-      // 挑幾件：勾起來，再一起移到今天或明天
+      // 挑幾件：勾起來，再一起移到今天或明天（記著勾的時候是哪一天：之後別處改過日子的不算）
       if (act === 'odPick') {
-        this._odPick = new Set()
+        this._odPick = new Map()
         this.renderTasks()
         return $('#overdueBox [data-pick]')?.focus({ preventScroll: true })
       }
@@ -1946,9 +1946,9 @@ export class UI {
         return this.renderTasks()
       }
       if (act === 'odToday' || act === 'odTomorrow') {
-        // 勾好之後別的分頁、別台已經改過的（不再逾期了）不算
-        const still = new Set(s.overdue().map((t) => t.id))
-        const ids = [...(this._odPick || [])].filter((id) => still.has(id))
+        // 勾好之後別的分頁、別台已經改過的（不再逾期了、改到另一天了）不算
+        const still = new Map(s.overdue().map((t) => [t.id, t.date]))
+        const ids = [...(this._odPick || [])].filter(([id, date]) => still.get(id) === date).map(([id]) => id)
         this._odPick = null
         if (!ids.length) return this.renderTasks()
         return this._moveOverdue(ids, act === 'odToday' ? s.today : addDays(s.today, 1))
@@ -1959,7 +1959,8 @@ export class UI {
     $('#overdueBox').addEventListener('change', (e) => {
       const c = e.target.closest('[data-pick]')
       if (!c || !this._odPick) return
-      if (c.checked) this._odPick.add(c.dataset.pick)
+      const t = this.store.state.tasks.find((x) => x.id === c.dataset.pick)
+      if (c.checked && t) this._odPick.set(t.id, t.date)
       else this._odPick.delete(c.dataset.pick)
       const n = this._odPick.size
       for (const btn of $$('#overdueBox .od-acts [data-n]')) {
@@ -2342,8 +2343,8 @@ export class UI {
       .map((i) => [i.closest('#overdueBox') ? '#overdueBox' : '#taskList', i.closest('.sub-add').dataset.id, i.value])
     const overdue = isToday ? this._overdueOrder(s.overdue()) : []
     if (!overdue.length) this._odPick = null
-    // 挑著的那幾件被別的分頁、別台改過（移到別天、做完了）：不再逾期的從勾選拿掉，按鈕上的件數才對
-    else if (this._odPick) for (const id of [...this._odPick]) if (!overdue.some((t) => t.id === id)) this._odPick.delete(id)
+    // 挑著的那幾件被別的分頁、別台改過（移到別天、做完了）：不再逾期、日子換了的從勾選拿掉，按鈕上的件數才對
+    else if (this._odPick) for (const [id, date] of [...this._odPick]) if (!overdue.some((t) => t.id === id && t.date === date)) this._odPick.delete(id)
     // 整串重畫：原本就在的那幾件不重播淡入，位置變了的滑過去（做完的排到後面、從逾期移到今天）
     flipItems([$('#overdueBox'), $('#taskList')], () => {
       $('#overdueBox').innerHTML = overdue.length ? this._overdueHTML(overdue) : ''

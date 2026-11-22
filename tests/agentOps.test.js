@@ -368,6 +368,32 @@ describe('改了、新增、刪掉，都能撤銷', () => {
     expect(store.eventsOn(TODAY).some((e) => e.routineId === r.id)).toBe(true)
   })
 
+  it('ふじ新增的跨過午夜的日程：之後自己改過（哪一段都算）撤銷時留著；沒改過的兩段一起拿掉', () => {
+    const tomorrow = addDays(TODAY, 1)
+    const add = () => {
+      const out = blank()
+      out.say = '好'
+      out.events = [{ title: '夜車', date: TODAY, start: '23:30', end: '00:30' }]
+      return store.agentApply(cleanOut(out, agentContext(store, 'chat', { message: 'x' }, new Date()).ids, 'chat'), { run: 'chat' })
+    }
+    const night = () => store.state.events.filter((x) => x.title === '夜車')
+    const a = add()
+    expect(night()).toHaveLength(2)
+    const next = night().find((x) => x.date === tomorrow)
+    store.updateEvent(next.id, { end: '04:30' })
+    expect(undo(a)).toBe(0)
+    expect(night()).toHaveLength(2)
+    store.deleteEvent(next.id)
+    const b = add()
+    expect(undo(b)).toBe(1)
+    expect(night()).toEqual([])
+  })
+
+  it('ふじ新增跨過午夜的例行日程：截到 23:59（跟快速記錄、日程頁一樣），不是一小時', () => {
+    chat((o) => o.create.push({ kind: 'routine', ref: '', parent: '', title: '夜班', date: TODAY, start: '20:00', end: '02:00', fields: [{ field: 'days', value: '每月 5 日' }] }))
+    expect(store.state.routines.find((r) => r.title === '夜班')).toMatchObject({ start: '20:00', end: '23:59', repeat: { type: 'monthly', day: 5 } })
+  })
+
   it('例行公事每月幾號：「每月 31 日」就是每月（沒有 31 號的月份在月底）；認不得的頻率不建（不會變成每天）', () => {
     const first = chat((o) =>
       o.create.push(

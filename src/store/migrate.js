@@ -314,7 +314,9 @@ function cleanUndo(u) {
       const made = (Array.isArray(u.made) ? u.made : []).slice(0, SPLIT_UNDO_MAX).filter((x) => isObj(x) && ID_RE.test(x.id) && typeof x.sig === 'string').map((x) => ({ id: x.id, sig: x.sig.slice(0, 4000) }))
       return id && before && after && made.length ? { k: 'split', id, before, after, made } : null
     }
-    case 'done': case 'event': case 'date': return id ? { k: u.k, id } : null
+    case 'done': case 'date': return id ? { k: u.k, id } : null
+    // 日程：sig 是新增時整組的樣子（撤銷時一樣才刪）
+    case 'event': return id ? { k: u.k, id, ...(typeof u.sig === 'string' && u.sig.length <= 4000 ? { sig: u.sig } : {}) } : null
     case 'star': return id && typeof u.on === 'boolean' ? { k: 'star', id, on: u.on } : null
     case 'first': return id ? { k: 'first', id, was: oid(u.was) } : null
     case 'subs': {
@@ -556,7 +558,8 @@ function cleanList(list, fn, keep = true) {
   return out
 }
 
-// 跨過午夜存成兩段的日程（store.js 的 _place）：要是「連著兩天、第一段到 23:59、第二段從 00:00 起、加起來不超過 16 小時」的兩段。
+// 跨過午夜存成兩段的日程（store.js 的 _place）：要是「連著兩天、第一段到 23:59、第二段從 00:00 起、加起來不超過 16 小時、
+// 名稱顏色備註都一樣（這幾個兩段一起改）」的兩段。
 // 不是的（匯入、手改壞的、好幾筆共用同一個 link）把 link 拿掉，各自當成獨立的日程：刪掉一筆才不會連帶刪掉別的
 function fixLinks(events) {
   const by = new Map()
@@ -564,6 +567,7 @@ function fixLinks(events) {
   for (const list of by.values()) {
     const [a, b] = [...list].sort((x, y) => x.date.localeCompare(y.date))
     const ok = list.length === 2 && b.date === addDays(a.date, 1) && a.end === '23:59' && b.start === '00:00' && !a.routineId && !b.routineId &&
+      a.title === b.title && a.color === b.color && a.note === b.note &&
       toMin(b.end) < toMin(a.start) && toMin(b.end) + 1440 - toMin(a.start) <= 16 * 60
     if (!ok) for (const e of list) delete e.link
   }
