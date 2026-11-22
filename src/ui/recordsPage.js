@@ -8,10 +8,15 @@ import { ACHIEVEMENTS } from '../data/achievements.js'
 import { $, $$, esc, armConfirm, setHTML, scrollMode } from './dom.js'
 import { readBackup } from '../sync.js'
 
+const JOURNAL_PAGE = 14
+
 export const recordsMethods = {
   _bindRecords() {
     this._bindReview()
     this._bindDex()
+    $('#journalList').addEventListener('click', (e) => {
+      if (e.target.closest('[data-more-journal]')) this._moreJournal()
+    })
     $('#weekBtn').onclick = () => this.openWeekCard()
     $('#reportBtn').onclick = () => this.openReport()
     $('#weekClose').onclick = () => this.closeWeekCard()
@@ -380,21 +385,7 @@ export const recordsMethods = {
     this.renderBond()
     this.renderTown()
     this.renderDex()
-    const entries = s.journalList(14)
-    $('#journalTitle').hidden = !entries.length
-    setHTML($('#journalList'), entries
-      .map(([d, j]) => {
-        const m = moodOf(j.mood)
-        const dd = parseDate(d)
-        // 那天在生活記錄記下的精神和心情（「心」）：跟回顧放在一起看
-        const f = feelOf(s.lifeOn(d))
-        // 一天記了很多則時只列最後三則、每則截短（不讓小日記一天就佔掉一大塊）；完整的在紀錄頁上面的生活記錄
-        const moods = f.moods.slice(-3).map((x) => `${x.t} ${clipText(x.text, 16)}`)
-        const feel = [f.energy ? `精神 ${ENERGY[f.energy]}` : '', ...(f.moods.length > 3 ? [`還有 ${f.moods.length - 3} 則`] : []), ...moods].filter(Boolean)
-        const feelLine = feel.length ? `<small class="jr-feel">${esc(feel.join('・'))}</small>` : ''
-        return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p>${feelLine}</div></li>`
-      })
-      .join(''))
+    this._renderJournal()
     $('#reviewBtn').textContent = s.state.journal[s.today] ? '修改今天的回顧' : '寫下今天的回顧'
 
     const lv = s.level.level
@@ -413,6 +404,39 @@ export const recordsMethods = {
         <div class="tip"><b>${esc(a.name)}・${esc(a.title)}</b>${esc(a.desc)}${ok ? `<br><small>${new Date(got[a.id]).toLocaleDateString('zh-TW')} 取得</small>` : ''}</div>
       </div>`
     }).join(''))
+  },
+
+  _moreJournal() {
+    const shown = this._journalLimit ?? JOURNAL_PAGE
+    this._journalLimit = shown + JOURNAL_PAGE
+    this._renderJournal()
+    const first = $('#journalList').children[shown]
+    if (first) {
+      first.tabIndex = -1
+      first.focus({ preventScroll: true })
+      first.scrollIntoView({ block: 'nearest', behavior: 'instant' })
+    }
+  },
+
+  _renderJournal() {
+    const s = this.store
+    const limit = this._journalLimit ?? JOURNAL_PAGE
+    const entries = s.journalList(limit + 1)
+    const more = entries.length > limit ? '<li class="journal-more"><button type="button" class="btn-ghost" data-more-journal>看更早的</button></li>' : ''
+    $('#journalTitle').hidden = !entries.length
+    setHTML($('#journalList'), entries.slice(0, limit)
+      .map(([d, j]) => {
+        const m = moodOf(j.mood)
+        const dd = parseDate(d)
+        // 那天在生活記錄記下的精神和心情（「心」）：跟回顧放在一起看
+        const f = feelOf(s.lifeOn(d))
+        // 一天記了很多則時只列最後三則、每則截短（不讓小日記一天就佔掉一大塊）；完整的在紀錄頁上面的生活記錄
+        const moods = f.moods.slice(-3).map((x) => `${x.t} ${clipText(x.text, 16)}`)
+        const feel = [f.energy ? `精神 ${ENERGY[f.energy]}` : '', ...(f.moods.length > 3 ? [`還有 ${f.moods.length - 3} 則`] : []), ...moods].filter(Boolean)
+        const feelLine = feel.length ? `<small class="jr-feel">${esc(feel.join('・'))}</small>` : ''
+        return `<li><div class="stamp-k" style="--mc:${m.color}">${m.kanji}</div><div><small>${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）・${m.name}</small><p>${esc(j.text) || '<span style="color:var(--ink-faint)">（沒有寫字，只留下天氣）</span>'}</p>${feelLine}</div></li>`
+      })
+      .join('') + more)
   },
 
 }

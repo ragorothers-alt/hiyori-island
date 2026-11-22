@@ -16,8 +16,21 @@ const GROUPS = [
   ['event', '日程'],
   ['project', '專案'],
   ['life', '生活記錄'],
+  ['setting', '設定'],
 ]
 const WEEK = '日一二三四五六'
+
+// 從設定頁拿現在用的列名。「更多」裡面也找，這台裝置用不到、已經藏起來的項目就略過。
+function settingsEntries() {
+  const entries = []
+  for (const row of document.querySelectorAll('#page-settings .settings .set-row, #page-settings .data-tools button, #backupList')) {
+    if (row.closest('[hidden]') || row.parentElement.closest('#backupList')) continue
+    const id = row.id || row.querySelector('[id]')?.id
+    const title = row.id === 'backupList' ? '備份還原' : (row.querySelector('b') || row).textContent.trim()
+    if (id && title) entries.push({ id, title })
+  }
+  return entries
+}
 
 export class SearchView {
   // hooks：
@@ -30,9 +43,32 @@ export class SearchView {
     this.q = ''
     this.sel = 0
     this.flat = []
+    this.page = 1
     this.el = { input: $('#findInput', root), list: $('#findList', root), tip: $('#findTip', root), live: $('#findLive', root) }
+    this.el.input.placeholder = '找任務、日程、專案、生活記錄、設定'
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'chip-toggle fd-more'
+    more.textContent = '再多看一些'
+    more.hidden = true
+    this.el.list.after(more)
+    this.el.more = more
+    more.addEventListener('click', () => {
+      const seen = new Set(this.flat.map(keyOf))
+      this.page++
+      this.render()
+      const next = this.flat.findIndex((x) => !seen.has(keyOf(x)))
+      if (next >= 0) {
+        this.sel = next
+        this._mark(true)
+        // 焦點回到輸入框（選到新列出來的第一筆）：↑↓ 接著選、Enter 打開，跟平常一樣
+        this.el.input.focus({ preventScroll: true })
+        this._say(this._label(this.flat[next], next))
+      }
+    })
     this.el.input.addEventListener('input', () => {
       this.q = this.el.input.value
+      this.page = 1
       this.sel = 0
       this.render({ fresh: true })
     })
@@ -49,7 +85,7 @@ export class SearchView {
         // 照現在的資料再找一次（別台剛同步過來、改了日子）：打開的是現在的那一筆
         this.render()
         const r = this.flat[this.sel]
-        if (r) this.hooks.open(r)
+        if (r) this._open(r)
       }
     })
     $('#findClose', root).addEventListener('click', () => this.close())
@@ -78,9 +114,23 @@ export class SearchView {
       } else {
         this.render()
         const now = this.flat.find((x) => keyOf(x) === key)
-        if (now) this.hooks.open(now)
+        if (now) this._open(now)
       }
     })
+  }
+
+  _open(result) {
+    if (result.kind !== 'setting') return this.hooks.open(result)
+    this.close()
+    window.hiyori.ui.openSettings()
+    const anchor = document.getElementById(result.item.id)
+    const row = anchor?.closest('.set-row') || anchor
+    if (!row) return
+    const more = row.closest('details')
+    if (more) more.open = true
+    if (!row.matches('button')) row.tabIndex = -1
+    row.focus({ preventScroll: true })
+    row.scrollIntoView({ block: 'center' })
   }
 
   get isOpen() {
@@ -92,6 +142,7 @@ export class SearchView {
       this.root.hidden = false
       if (text != null) this.el.input.value = text
       this.q = this.el.input.value
+      this.page = 1
       this.sel = 0
     }
     this.render()
@@ -117,14 +168,15 @@ export class SearchView {
 
   // fresh：剛打了字（選第一筆、說找到幾筆）；不然照 id 留著選到的那一筆
   render({ fresh = false } = {}) {
-    const { list, tip } = this.el
+    const { list, tip, more } = this.el
     const today = this.hooks.today()
     const was = fresh ? null : this.flat[this.sel] && keyOf(this.flat[this.sel])
-    const r = searchAll(this.hooks.state(), this.q, { today, external: this.hooks.external() })
+    const r = searchAll(this.hooks.state(), this.q, { today, external: this.hooks.external(), settings: settingsEntries(), page: this.page })
     this.flat = []
     if (!r) {
       list.innerHTML = ''
-      tip.textContent = '任務（哪一天的都找）、日程、專案、生活記錄。空白隔開幾個字可以縮小範圍；↑↓ 選、Enter 打開'
+      more.hidden = true
+      tip.textContent = '空白隔開幾個字，或加日期縮小範圍（像「書店 9/23」）。↑↓ 選、Enter 打開'
       if (fresh) this._say('')
       return
     }
@@ -139,10 +191,12 @@ export class SearchView {
       }
     }
     list.innerHTML = html
+    if (fresh) list.scrollTop = 0
     const shown = this.flat.length
     if (was) this.sel = Math.max(0, this.flat.findIndex((x) => keyOf(x) === was))
     if (this.sel >= shown) this.sel = 0
-    tip.textContent = !shown ? `找不到「${this.q.trim()}」。換個說法，或少打幾個字試試` : r.total > shown ? `找到 ${r.total} 筆，先列最相關的 ${shown} 筆：多打幾個字縮小範圍` : ''
+    more.hidden = shown >= r.total
+    tip.textContent = !shown ? `找不到「${this.q.trim()}」。換個說法，或少打幾個字試試` : !more.hidden ? `找到 ${r.total} 筆，已列出 ${shown} 筆。加日期可以縮小範圍（像 9/23）` : ''
     this._mark(false)
     if (fresh) this._say(shown ? `找到 ${r.total} 筆。${this._label(this.flat[0], 0)}` : tip.textContent)
   }
@@ -154,7 +208,7 @@ export class SearchView {
   }
   _label(x, i) {
     const row = this.el.list.querySelector(`[data-i="${i}"]`)
-    const what = { task: '任務', event: '日程', project: '專案', life: '生活記錄' }[x.kind]
+    const what = { task: '任務', event: '日程', project: '專案', life: '生活記錄', setting: '設定' }[x.kind]
     const main = row?.querySelector('.fd-main')
     const text = [main?.querySelector('.fd-t')?.textContent, main?.querySelector('.fd-m')?.textContent].filter(Boolean).join('，')
     return `第 ${i + 1} 筆，共 ${this.flat.length} 筆：${what}，${text}${x.item.done ? '，已完成' : ''}`
@@ -166,6 +220,10 @@ export class SearchView {
   _row(x, i, terms, today) {
     const mk = (t) => markHTML(t, terms)
     const hit = x.hit ? `<small class="fd-hit"><b>${esc(x.hit.kind)}</b>${mk(x.hit.text)}</small>` : ''
+    if (x.kind === 'setting') {
+      return `<div class="fd-row" data-i="${i}" data-key="${esc(keyOf(x))}"><span class="fd-dot" aria-hidden="true">設</span>
+        <button type="button" class="fd-main" data-act="open"><span class="fd-t">${mk(x.item.title)}</span><small class="fd-m">前往設定</small></button></div>`
+    }
     if (x.kind === 'task') {
       const t = x.item
       const c = tagOf(t.tag).color

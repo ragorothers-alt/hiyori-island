@@ -398,32 +398,4 @@ export function sleepMinutes(e) {
   const w = toM(e.wake)
   return w > b ? w - b : w + 1440 - b
 }
-// 就寢時間以午夜為中心換算（22:00 → -120、01:00 → 60），平均才不會被午夜切開
-const aroundMidnight = (m) => (m >= 720 ? m - 1440 : m)
-
-export function sleepStats(log, today, days = 7) {
-  const list = []
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(today + 'T00:00:00')
-    d.setDate(d.getDate() - i)
-    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const e = log[date]
-    list.push(e ? { date, ...e, dur: sleepMinutes(e) } : { date, dur: 0 })
-  }
-  const got = list.filter((x) => x.dur)
-  if (!got.length) return { n: 0, list, avg: 0, bed: null, wake: null, spread: 0, q: 0 }
-  const avg = got.reduce((a, x) => a + x.dur, 0) / got.length
-  const beds = got.map((x) => aroundMidnight(toM(x.bed)))
-  const bed = beds.reduce((a, b) => a + b, 0) / got.length
-  const wake = got.reduce((a, x) => a + toM(x.wake), 0) / got.length
-  return {
-    n: got.length,
-    list,
-    avg: Math.round(avg),
-    bed: toHHMM((bed + 1440) % 1440),
-    wake: toHHMM(wake),
-    // 就寢時間最早與最晚差幾分鐘（越小越規律）
-    spread: Math.round(Math.max(...beds) - Math.min(...beds)),
-    q: got.some((x) => x.q) ? +(got.reduce((a, x) => a + (x.q || 0), 0) / got.filter((x) => x.q).length).toFixed(1) : 0,
-  }
-}
+// 一週的睡眠統計（平均、規律度）在 src/sleepStats.js：照 24 小時的時鐘算，夜班、跨正午的作息也不會被切開

@@ -1,6 +1,6 @@
 import './subs.css'
 import { $, $$, esc, armConfirm, pickOne, setHTML, WEEK_ZH } from './dom.js'
-import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, cycleLabel, fmtMoney, fmtTWD, looksLikeCardNumber, monthlyOf, nextCharge, paidCount, paidSoFar, toTWD } from '../subs.js'
+import { CURRENCIES, REMIND_DAYS, SUB_CATS, SUB_UNITS, cycleLabel, fmtMoney, fmtTWD, looksLikeCardNumber, monthlyOf, nextCharge, paidCount, paidSoFar, priceChangeDate, subAtCharge, toTWD } from '../subs.js'
 import { KNOWN_SUBS, guessCat } from '../data/subs.js'
 import { daysBetween, parseDate, httpUrl } from '../store.js'
 
@@ -157,15 +157,16 @@ export class SubsView {
     const next = nextCharge(sub, today)
     const days = next ? daysBetween(today, next) : null
     const trial = !cancelled && sub.trial && next === sub.start
+    const charge = next ? subAtCharge(sub, next) : sub
     const open = this.open.has(sub.id)
     let line
     if (cancelled) line = sub.end > today ? `已取消・用到 ${md(sub.end)}` : sub.end ? `已取消・${ymd(sub.end)} 起不再扣款` : '已取消'
     else line = `${cycleLabel(sub)}・${trial ? '試用到' : '下次'} ${md(next)}・${when(days)}`
-    const per = sub.unit === 'month' && sub.every === 1 ? '' : `<small>每月約 ${fmtTWD(toTWD(monthlyOf(sub), sub.cur, rates))}</small>`
-    const twd = sub.cur !== 'TWD' && !per ? `<small>約 ${fmtTWD(toTWD(sub.price, sub.cur, rates))}</small>` : ''
+    const per = sub.unit === 'month' && sub.every === 1 ? '' : `<small>每月約 ${fmtTWD(toTWD(monthlyOf(charge), sub.cur, rates))}</small>`
+    const twd = sub.cur !== 'TWD' && !per ? `<small>約 ${fmtTWD(toTWD(charge.price, sub.cur, rates))}</small>` : ''
     const badge = trial ? '<em class="sb-badge">試用中</em>' : ''
     const n = paidCount(sub, today)
-    const paid = paidSoFar(sub, today)
+    const paid = paidSoFar(sub, today, rates)
     const facts = [
       n || sub.paid0 ? `從 ${ymd(sub.start)} 開始${n ? `・扣過 ${n} 次` : ''}・大約付了 ${fmtMoney(paid, sub.cur)}${sub.cur === 'TWD' ? '' : `（約 ${fmtTWD(toTWD(paid, sub.cur, rates))}）`}` : `${trial ? '試用結束後' : ''}第一次扣款 ${md(sub.start)}`,
       cancelled ? '' : remindText(sub.remind),
@@ -178,14 +179,27 @@ export class SubsView {
       : `<button type="button" class="btn-ghost" data-act="edit">編輯</button><button type="button" class="btn-ghost" data-act="cancel">取消訂閱</button>`
     const more = open
       ? `<div class="sb-more" id="sbm-${esc(sub.id)}"><ul class="sb-facts">${facts.map((f) => `<li>${f}</li>`).join('')}</ul>
+          ${this._priceHistoryHTML(sub)}
           <div class="sb-acts">${link}${acts}<button type="button" class="btn-ghost danger" data-act="del">刪除</button></div></div>`
       : ''
     return `<li class="sb-card${open ? ' open' : ''}${cancelled ? ' off' : ''}${!cancelled && days <= 3 ? ' soon' : ''}" data-id="${esc(sub.id)}" style="--c:${c.color}">
       <button type="button" class="sb-main" data-act="toggle" aria-expanded="${open}"${open ? ` aria-controls="sbm-${esc(sub.id)}"` : ''}>
         <span class="sb-k" title="${c.label}">${c.kanji}</span>
         <span class="sb-t"><b>${esc(sub.name)}${badge}</b><small>${line}</small></span>
-        <span class="sb-p"><b>${fmtMoney(sub.price, sub.cur)}</b>${per || twd}</span>
+        <span class="sb-p"><b>${fmtMoney(charge.price, sub.cur)}</b>${per || twd}</span>
       </button>${more}</li>`
+  }
+
+  _priceHistoryHTML(sub) {
+    const history = sub.priceHistory || []
+    if (!history.length) return ''
+    const rows = history.map(({ until, price, cur }, i) => {
+      const after = history[i + 1]
+      const amount = fmtMoney(after ? after.price : sub.price, after ? after.cur || sub.cur : sub.cur)
+      return `<li>${ymd(until)} 起・${fmtMoney(price, cur || sub.cur)} → <b>${amount}</b></li>`
+    }).reverse()
+    return `<div class="sb-history"><strong>調價紀錄</strong><ul>${rows[0]}</ul>${rows.length > 1
+      ? `<details><summary>更早的 ${rows.length - 1} 次調價</summary><ul>${rows.slice(1).join('')}</ul></details>` : ''}</div>`
   }
 
   // ── 已取消 ──
@@ -214,6 +228,7 @@ export class SubsView {
   _openForm(sub = null) {
     this.form = { id: sub?.id || null, cat: sub?.cat || 'video', unit: sub?.unit || 'month', trial: !!sub?.trial, catTouched: !!sub }
     this.el.form.innerHTML = this._formHTML(sub)
+    if (sub) this._priceOptions()
     this.addBtn.setAttribute('aria-expanded', 'true')
     this.render()
     $('input[name="name"]', this.el.form)?.focus()
@@ -253,6 +268,9 @@ export class SubsView {
         <select name="cur" class="repeat-pick" aria-label="幣別">${curs}</select>
         <input name="price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="每次扣多少" aria-label="每次扣多少" value="${sub ? sub.price : ''}" />
       </div>
+      ${sub ? `<label class="sb-price-from" hidden><span>從哪一期開始</span>
+        <select name="priceFrom" class="repeat-pick"><option value="next">下一期</option><option value="current">這一期就是新價格</option></select>
+      </label>` : ''}
       <div class="form-row sb-f-cycle">
         <span class="sb-f-k">每</span>
         <input name="every" type="number" min="1" max="36" step="1" inputmode="numeric" value="${sub?.every || 1}" aria-label="隔多久扣一次" />
@@ -280,6 +298,7 @@ export class SubsView {
   }
 
   _input(e) {
+    if (this.form?.id && ['price', 'start', 'every'].includes(e.target.name)) this._priceOptions()
     // 打服務名稱時順便猜分類（還沒自己選過的話）。猜不到就回到預設的影音：
     // 不然打「Apple TV+」打到一半猜成音樂，打完了還停在音樂
     if (e.target.name !== 'name' || !this.form || this.form.catTouched) return
@@ -287,6 +306,24 @@ export class SubsView {
     if (cat === this.form.cat) return
     this.form.cat = cat
     pickOne($$('[data-act="cat"]', this.el.form), (b) => b.dataset.v === cat)
+  }
+
+  _priceOptions() {
+    const sub = this.store.subscription(this.form.id)
+    if (!sub) return
+    const { price, priceFrom, start, every } = $('form', this.el.form).elements
+    const schedule = { ...sub, start: start.value, every: every.valueAsNumber, unit: this.form.unit }
+    const valid = /^\d{4}-\d{2}-\d{2}$/.test(schedule.start) && every.validity.valid && schedule.every >= 1
+    const label = priceFrom.closest('label')
+    label.hidden = !valid || !price.validity.valid || !Number.isFinite(price.valueAsNumber)
+    if (label.hidden) return
+    const current = priceChangeDate(schedule, this.store.today, 'current')
+    const next = priceChangeDate(schedule, this.store.today)
+    label.hidden = price.valueAsNumber === sub.price && subAtCharge(sub, current).price === sub.price
+    priceFrom.options[0].textContent = `${next === current ? '第一次扣款' : '下一期'}（${ymd(next)}）`
+    priceFrom.options[1].textContent = `這一期就是新價格（${ymd(current)}）`
+    priceFrom.options[1].disabled = next === current
+    if (next === current || label.hidden) priceFrom.value = 'next'
   }
 
   _submit(form) {
@@ -310,7 +347,7 @@ export class SubsView {
     }
     const s = this.store
     const id = this.form.id
-    const ok = id ? s.updateSubscription(id, data) : s.addSubscription(data)
+    const ok = id ? s.updateSubscription(id, { ...data, priceFrom: v('priceFrom') }) : s.addSubscription(data)
     if (!ok) return this._err(id ? '沒有存成功，看看日期和金額' : '沒有加成功：訂閱數量可能到上限了')
     const sub = id ? s.subscription(id) : ok
     const next = nextCharge(sub, s.today)
@@ -320,7 +357,7 @@ export class SubsView {
     this.open.add(sub.id)
     this.render()
     $(`.sb-card[data-id="${CSS.escape(sub.id)}"] .sb-main`, this.root)?.focus({ preventScroll: true })
-    this.hooks.toast?.({ icon: SUB_CATS[sub.cat].kanji, title: id ? `改好了「${sub.name}」` : `記下「${sub.name}」`, sub: next ? `${sub.trial && next === sub.start ? '試用到' : '下次扣款'} ${md(next)}・${fmtMoney(sub.price, sub.cur)}` : '' })
+    this.hooks.toast?.({ icon: SUB_CATS[sub.cat].kanji, title: id ? `改好了「${sub.name}」` : `記下「${sub.name}」`, sub: next ? `${sub.trial && next === sub.start ? '試用到' : '下次扣款'} ${md(next)}・${fmtMoney(subAtCharge(sub, next).price, sub.cur)}` : '' })
   }
 
   _click(e) {
@@ -336,6 +373,7 @@ export class SubsView {
     } else if (act === 'close') this._closeForm()
     else if (act === 'unit') {
       this.form.unit = b.dataset.v
+      if (this.form.id) this._priceOptions()
       pickOne($$('[data-act="unit"]', this.el.form), (x) => x === b)
     } else if (act === 'cat') {
       this.form.cat = b.dataset.v

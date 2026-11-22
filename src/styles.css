@@ -359,6 +359,7 @@ body.night .overdue .item { background: rgba(255, 255, 255, .05); }
 body.night .proj-pct { filter: none; }
 .proj-meta { font-size: max(var(--fmin), 11.5px); color: var(--ink-soft); margin: 3px 0 8px; display: flex; gap: 10px; flex-wrap: wrap; }
 .proj-meta .warn { color: var(--warn-ink); }
+.set-row small.warn { color: var(--warn-ink); }
 .proj-meta .paused { color: var(--ink-soft); font-weight: 500; }
 .proj.is-paused { opacity: .78; }
 .proj.is-paused .proj-pct { filter: grayscale(.8); }
@@ -636,6 +637,7 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .lz-fail b { font-size: 14px; color: var(--ink); }
 .lz-fail small { font-size: 12px; color: var(--ink-soft); }
 .lz-fail .btn-ghost { margin-top: 6px; }
+.lz-acts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 @keyframes busyPulse { 50% { opacity: .45; transform: scale(.9); } }
 @keyframes toastIn { from { opacity: 0; transform: translateY(-14px) scale(.96); } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(-10px) scale(.97); } }
@@ -882,6 +884,11 @@ body:not(.app-mode) .gear-btn { display: none; }
 .review-card :is(input, textarea) { width: 100%; border: 0; outline: 0; border-radius: 12px; padding: 10px 12px; font-size: 14px; background: var(--field); box-shadow: inset 0 0 0 1px var(--glass-border); margin-bottom: 14px; }
 .review-card textarea { display: block; resize: none; line-height: 1.6; min-height: 66px; max-height: 40vh; text-align: left; }
 .review-actions { display: flex; justify-content: center; gap: 10px; }
+/* 上次改到一半、還沒記下來的草稿：說一聲，可以捨棄 */
+.review-draft { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: -4px 0 10px; font-size: 12.5px; color: var(--ink-soft); }
+.review-draft[hidden] { display: none; }
+.review-draft button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--glass-border); background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+.review-draft button:hover { background: var(--glass-hover); }
 .review-actions .btn-primary { margin: 0; }
 .journal { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .journal li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 14px; background: var(--field); font-size: 13px; line-height: 1.5; }
@@ -925,6 +932,21 @@ body.night .pomo { color: #ffd38f; }
 .news-list h4 b { font-family: var(--font-body); font-size: 14px; color: var(--ink); }
 .news-list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
 .news-list li::before { content: '✿'; color: var(--sakura); margin-right: 6px; }
+.news-list { grid-template-columns: minmax(0, 1fr); }
+.news-list details > summary { cursor: pointer; list-style: none; border-radius: 10px; }
+.news-list details > summary::-webkit-details-marker { display: none; }
+.news-list details > summary:focus-visible { outline: 2px solid var(--sakura); outline-offset: 2px; }
+.news-more { margin-top: 6px; }
+.news-fresh { margin: 0 0 4px; font-size: 12px; color: #b4456a; }
+body.night .news-fresh { color: #ffb0c4; }
+.news-more > summary { display: inline-block; padding: 4px 10px; font-size: 12.5px; color: var(--ink-soft); background: var(--glass-strong); border: 1px solid var(--glass-border); }
+.news-more[open] > summary { margin-bottom: 6px; }
+.news-old > summary h4 { margin: 0; }
+.news-old > summary h4 b { font-size: 13px; font-weight: 500; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.news-old > summary h4::after { content: '▸'; margin-left: auto; color: var(--ink-faint); }
+.news-old[open] > summary h4::after { content: '▾'; }
+.news-old[open] > summary h4 b { white-space: normal; color: var(--ink); }
+.news-old[open] > summary { margin-bottom: 6px; }
 #newsClose { margin: 0 auto; }
 
 /* ── 卡關小卡 ── */
@@ -1007,7 +1029,7 @@ body.night .coins b { color: #ffb8cb; }
 .charm-badge { background: linear-gradient(135deg, #ef8e93, #f3b37f) !important; }
 .shop-item.locked img { filter: grayscale(.85) opacity(.55); }
 .shop-badge { position: absolute; top: 6px; left: 6px; font-style: normal; font-size: max(var(--fmin), 10px); padding: 0 6px; border-radius: 7px; color: #fff; background: #b5c4d6; z-index: 1; }
-.shop-badge.wk { background: linear-gradient(135deg, #f3b37f, #ee9ab5); }
+.shop-badge.shop-wk { background: linear-gradient(135deg, #f3b37f, #ee9ab5); }
 .shop-badge.s-spring { background: #f2a3bd; }
 .shop-badge.s-summer { background: #7fc3e3; }
 .shop-badge.s-autumn { background: #e9a06c; }

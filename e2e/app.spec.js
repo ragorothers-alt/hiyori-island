@@ -3748,6 +3748,49 @@ test.describe('還沒下載好的畫面', () => {
     await expect(page.locator('#coachRoot .coach')).toBeVisible({ timeout: 20000 })
     await expect(box).toHaveCount(0)
   })
+  test('連著網路、換了新版後舊的更新紀錄檔案不見了：手上有打到一半的字時只問一次「有新版本了」，不叫人連網路；剛自動換過一次的話給「重新載入」', async ({ page, context, site }) => {
+    await useAppMode(context)
+    await page.route(/\/assets\/changelog-[^/]*\.js$/, (route) => route.fulfill({ status: 404, body: 'gone' }))
+    await page.goto(site.url)
+    await bootReady(page)
+    await expect(page.locator('#toasts .toast')).toHaveCount(0, { timeout: 15000 })
+    // 快速記錄裡留著字：不自動重新整理，留一顆按鈕
+    await page.evaluate(() => {
+      document.querySelector('#capInput').value = '帶備用燈'
+      window.hiyori.ui.openNews()
+    })
+    const toasts = page.locator('#toasts')
+    await expect(toasts).toContainText('有新版本了')
+    await expect(toasts).toContainText('收好再按')
+    await expect(toasts).not.toContainText('連上網路')
+    await expect(toasts).not.toContainText('更新紀錄還沒下載')
+    // 剛自動換過一次（30 秒內不再自動換）：說可能換了新版、給「重新載入」，一樣不叫人連網路
+    await page.evaluate(() => {
+      sessionStorage.setItem('hiyori-reloaded', String(Date.now()))
+      document.querySelector('#capInput').value = ''
+      for (const t of document.querySelectorAll('#toasts .toast')) t.remove()
+    })
+    await page.evaluate(() => window.hiyori.ui.openNews())
+    await expect(toasts).toContainText('更新紀錄還沒下載')
+    await expect(toasts.getByRole('button', { name: '重新載入' })).toBeVisible()
+    await expect(toasts).not.toContainText('連上網路')
+  })
+})
+test('同步連結貼回已經開著的這一頁（只差 # 後面）：一樣到設定裡展開「輸入同步碼」、填好同步碼，網址列拿掉同步碼', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const code = '0123-4567-89AB-CDEF-GHJK-MNPQ-RSTV'
+  await page.evaluate((c) => (location.hash = `#sync=${c}`), code)
+  const input = page.getByRole('textbox', { name: '同步碼', exact: true })
+  await expect(input).toBeVisible()
+  await expect(input).toHaveValue(code)
+  await expect(page.getByRole('button', { name: '連線' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('')
+  // 輸入框還開著時又貼了另一組：框框裡換成新的那一組（看到的就是按「連線」送出的）
+  const other = '2222-3333-4444-5555-6666-7777-8888'
+  await page.evaluate((c) => (location.hash = `#sync=${c}`), other)
+  await expect(input).toHaveValue(other)
 })
 test('提示卡：先用鍵盤移到按鈕上、再用滑鼠按另一顆拖出去放開，照樣接著倒數；停過的倒數細線從停住的地方接著縮', async ({ page, context, site }) => {
   await useAppMode(context)

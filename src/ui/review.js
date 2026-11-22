@@ -9,6 +9,55 @@ import { MAX_TOWN_LEVEL, TOWN_POINTS, lotsAt, islandRadius } from '../data/proje
 import { $, $$, esc, setHTML, pickOne, scrollMode } from './dom.js'
 import { BLANK } from './shared.js'
 
+// 回顧改到一半的草稿（沒記下來就關掉了）：{ 日子: { mood, text, at, ds } }，留最近 7 份。跟記下來的那一份一樣就不留。
+// ds：是哪一份小島的（store.state.tallyGen；重置、匯入、還原備份就換一個）：別的小島寫到一半的不會跑到這一份來
+const DRAFT_KEY = 'hiyori-review-draft'
+export const reviewDraft = {
+  all() {
+    try {
+      const v = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}')
+      return v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+    } catch {
+      return {}
+    }
+  },
+  // 存不進去（瀏覽器空間滿了、不讓存）回傳 false
+  save(all) {
+    try {
+      const keep = Object.entries(all).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 7)
+      if (keep.length) localStorage.setItem(DRAFT_KEY, JSON.stringify(Object.fromEntries(keep)))
+      else localStorage.removeItem(DRAFT_KEY)
+      return true
+    } catch {
+      return false
+    }
+  },
+  same(a, b) {
+    return (a?.mood || null) === (b?.mood || null) && String(a?.text || '').trim() === String(b?.text || '').trim()
+  },
+  // 那一天的草稿（跟記下來的一樣、或沒寫什麼就沒有）
+  get(date, saved, ds = '') {
+    const d = this.all()[date]
+    if (!d || typeof d !== 'object' || (d.ds || '') !== ds || this.same(d, saved) || (!d.mood && !String(d.text || '').trim())) return null
+    return { mood: typeof d.mood === 'string' ? d.mood : null, text: String(d.text || '').slice(0, 500) }
+  },
+  // 回傳有沒有存好（沒東西要留、拿掉了也算存好）
+  put(date, v, saved, ds = '') {
+    const all = this.all()
+    if (this.same(v, saved) || (!v.mood && !String(v.text || '').trim())) {
+      if (!(date in all)) return true
+      delete all[date]
+    } else all[date] = { mood: v.mood || null, text: String(v.text || '').slice(0, 500), at: Date.now(), ds }
+    return this.save(all)
+  },
+  drop(date) {
+    const all = this.all()
+    if (!(date in all)) return
+    delete all[date]
+    this.save(all)
+  },
+}
+
 export const reviewMethods = {
   // ── もち和ふじ共同的好感度 ──
   renderBond() {
@@ -87,7 +136,11 @@ export const reviewMethods = {
     if (!thumbs) this._watchDex()
     const found = list.filter((f) => dex[f.key]).length
     $('#dexCount').textContent = `${found} / ${FLOWERS.length}`
-    setHTML($('#dexGrid'), list
+    // 故事那一塊先搬回圖鑑下面（格子整個重畫時不會跟著被清掉），畫完再接回選的那一格下面
+    const grid = $('#dexGrid')
+    const detail = $('#dexDetail')
+    if (detail.parentElement === grid) grid.after(detail)
+    setHTML(grid, list
       .map((f) => {
         const got = dex[f.key]
         return `<button class="dex-cell ${got ? '' : 'unknown'} ${this.dexSel === f.key ? 'on' : ''}" aria-pressed="${this.dexSel === f.key}" data-k="${f.key}" style="--rc:${RARITIES[f.rarity].color}">
@@ -116,8 +169,21 @@ export const reviewMethods = {
     watch.observe($('#dexGrid'))
   },
 
+  // 選了一朵花：故事接在那一格所在那一列的下面（獨佔一列，後面的花補滿那一列，見 life.css），
+  // 不用捲到整個圖鑑的最下面才看得到
+  _placeDexDetail() {
+    const grid = $('#dexGrid')
+    const detail = $('#dexDetail')
+    const cell = this.dexSel && grid.querySelector(`.dex-cell[data-k="${CSS.escape(this.dexSel)}"]`)
+    if (cell) {
+      if (cell.nextElementSibling !== detail) cell.after(detail)
+    } else if (detail.parentElement === grid) grid.after(detail)
+    return cell ? detail : null
+  },
+
   _renderDexDetail() {
     const f = flowerOf(this.dexSel)
+    this._placeDexDetail()
     if (!f) return
     const got = this.store.state.dex[f.key]
     const r = RARITIES[f.rarity]
@@ -137,6 +203,7 @@ export const reviewMethods = {
       this.dexSel = b.dataset.k
       pickOne($$('#dexGrid .dex-cell'), (x) => x === b)
       this._renderDexDetail()
+      $('#dexDetail').scrollIntoView({ block: 'nearest', behavior: scrollMode() })
     })
   },
 
@@ -229,7 +296,8 @@ export const reviewMethods = {
       e.preventDefault()
       if (!this.mood) return
       this.store.saveReview(this.reviewDate, this.mood, $('#reviewText').value)
-      this.closeReview()
+      reviewDraft.drop(this.reviewDate)
+      this.closeReview({ keep: false })
       // 今天的回顧記下了：接著問明天先做哪一件（補記別天的不問）
       if (this.reviewDate === this.store.today) this.askFirst()
     })
@@ -248,6 +316,13 @@ export const reviewMethods = {
     $('#reviewModal').addEventListener('click', (e) => {
       if (e.target.id === 'reviewModal') $('#reviewLater').click()
     })
+    // 改到一半的：捨棄，換回記下來的那一份
+    $('#reviewDiscard').onclick = () => {
+      reviewDraft.drop(this.reviewDate)
+      this._fillReview(this.store.state.journal[this.reviewDate] || null)
+      this._reviewWas = this._reviewNow()
+      $('#reviewText').focus()
+    }
     $('#reviewBtn').onclick = () => this.openReview()
   },
 
@@ -255,23 +330,46 @@ export const reviewMethods = {
     const s = this.store
     this.reviewDate = date
     const prev = s.state.journal[date]
-    this.mood = prev?.mood || null
     const d = parseDate(date)
     $('#reviewDate').textContent = `${d.getMonth() + 1} 月 ${d.getDate()} 日・${WEEK_JP[d.getDay()]}`
     const day = s.peekDay(date)
     const tasks = s.tasksOn(date)
     const ev = s.eventsOn(date)
     $('#reviewSum').innerHTML = `<span><b>${tasks.filter((t) => t.done).length}</b>/ ${tasks.length} 朵花綻放</span><span><b>${day.focus}</b>分鐘專注</span><span><b>${ev.filter((e) => e.done).length}</b>個日程完成</span>`
-    pickOne($$('#moodPick .mood'), (x) => x.dataset.mood === this.mood)
-    $('#reviewText').value = prev?.text || ''
-    $('#reviewSave').disabled = !this.mood
     $('#reviewSave').textContent = prev ? '更新' : '記下來'
+    // 上次改到一半、沒記下來就關掉了（點外面、之後再說、Esc）：放回去，可以捨棄
+    this._fillReview(prev || null, reviewDraft.get(date, prev, s.state.tallyGen))
+    // 打開時的樣子：關掉時沒動過就不碰草稿（另一個分頁剛留的草稿不會被這邊的空白蓋掉）
+    this._reviewWas = this._reviewNow()
     $('#reviewModal').hidden = false
     this.hooks.reviewOpened?.()
   },
+  // 回顧的天氣和那幾句話：draft 是改到一半的（有的話蓋過記下來的那一份）
+  _fillReview(prev, draft = null) {
+    const v = draft || prev
+    this.mood = v?.mood || null
+    pickOne($$('#moodPick .mood'), (x) => x.dataset.mood === this.mood)
+    $('#reviewText').value = v?.text || ''
+    $('#reviewSave').disabled = !this.mood
+    $('#reviewDraft').hidden = !draft
+  },
 
-  closeReview() {
+  // keep：沒記下來就關掉的，改到一半的留成草稿（照日期分開；記下來、捨棄了才拿掉）
+  // 存不下草稿（瀏覽器空間滿了）就先不關，說一聲（關掉了寫的字就不見了）
+  closeReview({ keep = true } = {}) {
+    if (keep && !$('#reviewModal').hidden && this.reviewDate) {
+      const now = this._reviewNow()
+      const s = this.store
+      if (!reviewDraft.same(now, this._reviewWas) && !reviewDraft.put(this.reviewDate, now, s.state.journal[this.reviewDate], s.state.tallyGen)) {
+        this.toast({ icon: '記', title: '改到一半的字存不下來', sub: '瀏覽器的空間可能滿了：先按「記下來」，或把字複製起來再關', ms: 9000 })
+        return false
+      }
+    }
     $('#reviewModal').hidden = true
+    return true
+  },
+  _reviewNow() {
+    return { mood: this.mood, text: $('#reviewText').value }
   },
 
   // 總覽上的「收起來」：這週不再放，提示卡一起收

@@ -3,7 +3,7 @@ import worker from '../worker/src/index.js'
 import { icsUrl, fetchICS, ICS_MAX } from '../worker/src/ics.js'
 import { Store, addDays } from '../src/store.js'
 import { migrate } from '../src/store/migrate.js'
-import { createCalendars, toEvent, isExternal, icsText, ICS_EVERY } from '../src/calendars.js'
+import { createCalendars, toEvent, isExternal, icsText, ICS_EVERY, replaceCalendarUrl, calendarLabel, icsComplete } from '../src/calendars.js'
 import { agentContext } from '../src/agent.js'
 
 // 匯入行事曆：Worker 代抓 .ics（worker/src/ics.js）、前端抓回來變成唯讀的日程（src/calendars.js）
@@ -89,6 +89,82 @@ describe('前端：抓回來變成唯讀的日程', () => {
     expect(migrate({ tasks: [], player: {} }).calendars).toEqual([])
   })
 
+  it('同站的課表看得出路徑，長網址留頭尾，不顯示查詢參數', () => {
+    expect(calendarLabel('webcal://school.example/class-a.ics')).toBe('school.example/class-a.ics')
+    expect(calendarLabel('https://school.example/class-b.ics?token=abc')).toBe('school.example/class-b.ics')
+    const label = calendarLabel('https://school.example/' + 'fall/'.repeat(20) + 'class-b.ics')
+    expect(label).toMatch(/^school\.example\/.*….*class-b\.ics$/)
+    expect(label.length).toBeLessThanOrEqual(48)
+    const common = 'https://school.example/' + 'fall/'.repeat(10)
+    const paths = ['music', 'math'].map((subject) => common + subject + '/semester/subscription/basic.ics')
+    expect(calendarLabel(paths[0], paths)).toContain('music')
+    expect(calendarLabel(paths[1], paths)).toContain('math')
+  })
+
+  it('滿十個也能改網址，改錯或重複時保留舊的；同一筆（id、顏色、名稱、開關不變）', () => {
+    const original = store.addCalendar({ url: 'https://school.example/old.ics', color: 4, name: '課表' })
+    const oldUrl = original.url
+    store.updateCalendar(original.id, { on: false })
+    for (let i = 1; i < 10; i++) store.addCalendar({ url: `https://school.example/${i}.ics` })
+    for (const url of ['http://school.example/a.ics', 'https://school.example/1.ics']) {
+      expect(replaceCalendarUrl(store, original.id, url).error).toBeTruthy()
+      expect(store.state.calendars).toContain(original)
+    }
+    const url = 'https://school.example/new.ics'
+    expect(replaceCalendarUrl(store, original.id, url).error).toBeFalsy()
+    expect(store.state.calendars.find((c) => c.url === url)).toMatchObject({ id: original.id, color: 4, name: '課表', on: false })
+    expect(store.state.calendars).toHaveLength(10)
+    expect(store.state.calendars.some((c) => c.url === oldUrl)).toBe(false)
+    // store 那一層也檢查：不對的網址、跟別筆重複的不改
+    expect(store.updateCalendar(original.id, { url: 'javascript:alert(1)' })).toBe(false)
+    expect(store.updateCalendar(original.id, { url: 'https://school.example/1.ics' })).toBe(false)
+    expect(original.url).toBe(url)
+  })
+
+  it('兩個訂閱連路徑都一樣時，看得到用來分辨課表的參數', () => {
+    const feeds = ['choir', 'art'].map((group) => `https://school.example/subscribe?group=${group}&token=private`)
+    expect(calendarLabel(feeds[0], feeds)).toContain('group=choir')
+    expect(calendarLabel(feeds[1], feeds)).toContain('group=art')
+    expect(calendarLabel(feeds[0], feeds)).not.toContain('private')
+    // 私密網址裡的金鑰只露出開頭；兩個只差金鑰的照樣分得出來
+    const g = (k) => `https://calendar.google.com/calendar/ical/me%40example.com/private-${k}/basic.ics`
+    const keys = [g('0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d'), g('9f8e7d6c5b4a39281706f5e4d3c2b1a0')]
+    for (const k of keys) expect(calendarLabel(k, keys)).not.toMatch(/[0-9a-f]{8}/)
+    expect(calendarLabel(keys[0], keys)).not.toBe(calendarLabel(keys[1], keys))
+    // 沒有數字的私密代號也收起來；參數的值像代號的不秀
+    const opaque = 'https://cal.example/feed/abcdefgh-ijkl-mnop-qrst.ics'
+    expect(calendarLabel(opaque)).not.toContain('ijkl')
+    const byCal = ['k1x9q2w8e7r6t5y4', 'z0p9o8i7u6y5t4r3'].map((v) => `https://cal.example/sub?calendar=${v}`)
+    for (const u of byCal) expect(calendarLabel(u, byCal)).not.toMatch(/k1x9q2w8|z0p9o8i7/)
+    expect(calendarLabel(byCal[0], byCal)).not.toBe(calendarLabel(byCal[1], byCal))
+    // 遮好、截短之後還一樣的：加上來源代號分得出來
+    const long = ['piano', 'viola'].map((x) => `https://school.example/subscribe?group=2026-autumn-${x}-performance-and-rehearsals`)
+    expect(calendarLabel(long[0], long)).not.toBe(calendarLabel(long[1], long))
+  })
+
+  it('抓回來的行事曆中途斷掉（沒有結尾、日程開了沒關）：不收，留著上一次的', () => {
+    const ics = (...lines) => lines.join(String.fromCharCode(13, 10))
+    expect(icsComplete(ics('BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'SUMMARY:Trip', 'END:VEVENT', 'END:VCALENDAR', ''))).toBe(true)
+    expect(icsComplete(ics('BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'SUMMARY:Trip'))).toBe(false)
+    expect(icsComplete(ics('BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'SUMMARY:Trip', 'END:VCALENDAR'))).toBe(false)
+  })
+
+  it.each([[404, 'ics missing'], [410, 'ics missing'], [403, 'ics denied'], [503, 'ics unavailable']])('依對方回的 %s 顯示原因及處理方式', async (status, error) => {
+    const c = store.addCalendar({ url: 'https://school.example/test.ics' })
+    const cals = createCalendars(store, { fetcher: async () => reply({ error: 'ics failed', status }, { status: 502 }) })
+    await cals.refresh()
+    expect(cals.status(c.id).error).toBe(error)
+    expect(icsText(error)).toMatch(/更新|再試|換|確認|複製/)
+  })
+
+  it.each([{ ok: true }, { ok: true, text: '<html>登入頁面</html>' }, '<!doctype html>'])('連線成功卻拿不到行事曆時，要提醒換 iCal 網址', async (body) => {
+    const c = store.addCalendar({ url: 'https://school.example/test.ics' })
+    const cals = createCalendars(store, { fetcher: async () => reply(body) })
+    await cals.refresh()
+    expect(cals.status(c.id).error).toBe('not ics')
+    expect(icsText('http 200')).toBe(icsText('not ics'))
+  })
+
   it('抓回來：時間軸、排程、ふじ都看得到；名字沒取的用行事曆自己的；關掉就不見', async () => {
     const cals = createCalendars(store, { fetcher, now: () => Date.now() + t })
     const c = store.addCalendar({ url: 'https://example.com/a.ics', color: 4 })
@@ -129,7 +205,7 @@ describe('前端：抓回來變成唯讀的日程', () => {
     t = ICS_EVERY + 1
     fetcher.mockImplementationOnce(async () => reply({ error: 'ics failed', status: 403 }, { status: 502 }))
     await cals.refresh()
-    expect(cals.status(c.id)).toMatchObject({ error: 'ics failed' })
+    expect(cals.status(c.id)).toMatchObject({ error: 'ics denied' })
     expect(icsText('ics failed')).toContain('拒絕')
     expect(store.eventsOn(TODAY)).toHaveLength(1)
     const again = createCalendars(store, { fetcher, now: () => Date.now() + t })

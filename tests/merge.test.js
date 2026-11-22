@@ -80,6 +80,21 @@ describe('三方合併（merge3）', () => {
     expect(r2.clashes).toEqual([])
   })
 
+  it('訂閱的價錢、調價紀錄、週期、狀態一起看：兩邊都改了價，整組用比較晚改的那一邊（不會拼出兩台都沒有過的帳）', () => {
+    const B = (o) => ({ id: 's', name: '影音', price: 120, cur: 'TWD', priceHistory: [], every: 1, unit: 'month', start: '2026-09-01', trial: false, paid0: 0, status: 'active', end: '', ...o })
+    const base = S({ subscriptions: [B()] })
+    // A：這一期就是 199；B（離線）：下一期起 299
+    const a = B({ price: 199, priceHistory: [{ until: '2026-11-01', price: 120 }] })
+    const b = B({ price: 299, priceHistory: [{ until: '2026-12-01', price: 120 }], name: '影音（家庭）' })
+    const r = merge3(base, S({ subscriptions: [a], updatedAt: 3 }), S({ subscriptions: [b], updatedAt: 2 }))
+    expect(r.state.subscriptions[0]).toMatchObject({ price: 199, priceHistory: [{ until: '2026-11-01', price: 120 }], name: '影音（家庭）' })
+    expect(r.clashes).toEqual(['subscriptions.price'])
+    // 一邊改價、另一邊只改名字：兩邊的都留著
+    const r2 = merge3(base, S({ subscriptions: [a] }), S({ subscriptions: [B({ name: '影音（家庭）' })] }))
+    expect(r2.state.subscriptions[0]).toMatchObject({ price: 199, priceHistory: a.priceHistory, name: '影音（家庭）' })
+    expect(r2.clashes).toEqual([])
+  })
+
   it('跨午夜的日程（兩段）整組看：一台改了時間、一台整組刪掉 → 留改過的那一整組；兩台各自延到隔天 → 只留比較晚改的那一組', () => {
     const P = (id, date, start, end, o = {}) => ({ id, title: '夜班', date, start, end, link: 'L1', ...o })
     const base = S({ events: [P('e1', '2026-11-22', '23:00', '23:59'), P('e2', '2026-11-23', '00:00', '01:00')] })

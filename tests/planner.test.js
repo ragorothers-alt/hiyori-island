@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepStats, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf, firstPickIn, nextEvent } from '../src/planner.js'
+import { sleepStats } from '../src/sleepStats.js'
+import { DEFAULT_RHYTHM, rhythmBlocks, itemBlocks, findConflicts, gaps, optimizeDay, nearestSlot, sleepMinutes, fmtDur, planOrder, nowGuide, busyOf, firstPickIn, nextEvent } from '../src/planner.js'
 
 const R = { ...DEFAULT_RHYTHM, buffer: 0 }
 const MON = '2026-10-26'

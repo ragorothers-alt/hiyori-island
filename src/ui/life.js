@@ -2,7 +2,8 @@ import './life.css'
 import { $, $$, esc, ICON, armConfirm, dateLabel, WEEK_ZH, setHTML } from './dom.js'
 import { LIFE_KINDS, lifeKindOf, ENERGY, ENERGY_COLORS } from '../data/life.js'
 import { moodOf } from '../theme.js'
-import { sleepStats, fmtDur } from '../planner.js'
+import { fmtDur, sleepMinutes } from '../planner.js'
+import { sleepStats, nearClock } from '../sleepStats.js'
 import { addDays, parseDate, toMin, minToHHMM } from '../store.js'
 
 // 生活記錄＋睡眠統計：放在「紀錄」分頁最上方，內容跟著面板上方選的日期走
@@ -16,8 +17,6 @@ const nowHHMM = () => {
   const d = new Date()
   return minToHHMM(d.getHours() * 60 + d.getMinutes())
 }
-// 就寢時間以午夜為中心（22:00 → -120），畫圖才不會被午夜切開
-const aroundMidnight = (m) => (m >= 720 ? m - 1440 : m)
 const hours = (min) => `${(min / 60).toFixed(1).replace(/\.0$/, '')}h`
 const zhDur = (m) => {
   const h = Math.floor(m / 60)
@@ -26,6 +25,14 @@ const zhDur = (m) => {
 }
 const spendOf = (life) => life.items.reduce((a, x) => a + (x.kind === 'spend' ? x.amount : 0), 0)
 const weekOf = (date) => WEEK_ZH[parseDate(date).getDay()]
+// 花費、睡眠圖看的那七天：到選的那一天為止（選了以後的日子就到今天為止）。
+// 看今天時就是「近 7 天」；週一也看得到上週的幾天，不會只剩一天
+function recordWeek(date, today) {
+  const end = today && date > today ? today : date
+  const start = addDays(end, -6)
+  const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8)}`
+  return { start, end, recent: end === today, label: `${md(start)} – ${md(end)}` }
+}
 // 規律度：就寢時間最早與最晚差幾分鐘 → 五格與一句話
 function regularity(spread, n) {
   if (n < 2) return { lv: 0, say: '多記幾天，就看得出睡眠的節奏了' }
@@ -211,8 +218,9 @@ export class LifeView {
     this._fillAdd(changed)
     this._renderList()
     this._renderSum()
-    this._renderSpend()
-    this._renderSleep()
+    const week = recordWeek(date, this.store.today)
+    this._renderSpend(week)
+    this._renderSleep(week)
     this._fillSleep(changed)
   }
 
@@ -401,19 +409,19 @@ export class LifeView {
       ${mood}`)
   }
 
-  // ── 最近七天的花費 ──
-  _renderSpend() {
+  // ── 選的那一天為止的七天花了多少 ──
+  _renderSpend(week = recordWeek(this.date, this.store.today)) {
     const s = this.store
     const days = []
-    for (let i = 6; i >= 0; i--) {
-      const d = addDays(s.today, -i)
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(week.start, i)
       days.push({ d, v: spendOf(s.lifeOn(d)) })
     }
     const total = days.reduce((a, x) => a + x.v, 0)
     const max = Math.max(...days.map((x) => x.v))
-    const head = `<div class="lsp-head"><b>七天的花費</b><small>${total ? `合計 ${money(total)}・每天約 ${money(total / 7)}` : ''}</small></div>`
+    const head = `<div class="lsp-head"><b>${week.recent ? '近 7 天的花費' : '這 7 天的花費'}</b><span>${week.label}</span></div>`
     if (!total) {
-      setHTML(this.el.spend, `${head}<p class="lsp-none">最近七天還沒有花費記錄，選「花費」就能順手記帳</p>`)
+      setHTML(this.el.spend, `${head}<p class="lsp-none">這幾天還沒有花費記錄，選「花費」就能順手記帳</p>`)
       return
     }
     const cols = days.map(({ d, v }) => {
@@ -423,14 +431,14 @@ export class LifeView {
         <small>${v ? shortMoney(v) : ''}</small><i style="height:${h}px"></i><span>${d === s.today ? '今' : weekOf(d)}</span>
       </button>`
     })
-    setHTML(this.el.spend, `${head}<div class="lsp-bars">${cols.join('')}</div>`)
+    setHTML(this.el.spend, `${head}<div class="lsp-bars">${cols.join('')}</div><p class="lsp-total">合計 ${money(total)}・每天約 ${money(total / 7)}</p>`)
   }
 
-  // ── 睡眠：最近七天 ──
-  _renderSleep() {
+  // ── 選的那一天為止的七天睡得如何 ──
+  _renderSleep(week = recordWeek(this.date, this.store.today)) {
     const s = this.store
-    const st = sleepStats(s.state.sleep, s.today, 7)
-    this.el.sleepCount.textContent = st.n ? `近 7 天記了 ${st.n} 晚` : ''
+    const st = sleepStats(s.state.sleep, week.end)
+    this.el.sleepCount.textContent = `${week.label}・記了 ${st.n} 晚`
     setHTML(this.el.chart, this._chartHTML(st))
     setHTML(this.el.stats, this._statsHTML(st))
   }
@@ -440,15 +448,14 @@ export class LifeView {
     // 作息設定的睡眠時段（淡色帶）
     let band = null
     if (r?.sleep && r?.wake) {
-      const a = aroundMidnight(toMin(r.sleep))
-      let b = toMin(r.wake)
-      if (b <= a) b += 1440
-      if (b - a >= 180 && b - a <= 840) band = [a, b]
+      const a = nearClock(toMin(r.sleep), st.center ?? 0)
+      const dur = sleepMinutes({ bed: r.sleep, wake: r.wake })
+      if (dur >= 180 && dur <= 840) band = [a, a + dur]
     }
     // 縱軸範圍：資料與作息帶各留一點邊，至少 8 小時，對齊整點
     const got = st.list.filter((x) => x.dur)
     const marks = got.flatMap((x) => {
-      const bed = aroundMidnight(toMin(x.bed))
+      const bed = nearClock(toMin(x.bed), st.center)
       return [bed, bed + x.dur]
     })
     if (band) marks.push(...band)
@@ -470,19 +477,20 @@ export class LifeView {
       grid.push({ m, label: String((((m / 60) % 24) + 24) % 24) })
     }
     const axis = grid.map((g) => `<small style="top:${pct(g.m)}%">${g.label}</small>`).join('')
-    const lines = grid.map((g) => `<i class="slp-grid${g.m === 0 ? ' mid' : ''}" style="top:${pct(g.m)}%"></i>`).join('')
+    const lines = grid.map((g) => `<i class="slp-grid${g.m % 1440 === 0 ? ' mid' : ''}" style="top:${pct(g.m)}%"></i>`).join('')
     const bandEl = band ? `<i class="slp-band" style="top:${pct(band[0])}%;height:${(((band[1] - band[0]) / span) * 100).toFixed(2)}%"></i>` : ''
     const mid = band ? pct((band[0] + band[1]) / 2) : 50
     const cols = st.list.map((x) => {
       const cls = `${x.date === s.today ? ' today' : ''}${x.date === this.date ? ' sel' : ''}`
       const wk = x.date === s.today ? '今' : weekOf(x.date)
       if (!x.dur) {
-        return `<button type="button" class="slp-col none${cls}" data-day="${x.date}" title="${dateLabel(x.date)}　還沒記錄，點一下補記">
-          <span class="slp-plot"><span class="slp-add" style="top:${mid}%">${ICON.plus}</span></span>
+        const future = x.date > s.today
+        return `<button type="button" class="slp-col none${cls}" data-day="${x.date}" title="${dateLabel(x.date)}　${future ? '還沒到這一天' : '還沒記錄，點一下補記'}">
+          <span class="slp-plot">${future ? '' : `<span class="slp-add" style="top:${mid}%">${ICON.plus}</span>`}</span>
           <span class="slp-foot"><b>—</b><span>${wk}</span></span>
         </button>`
       }
-      const bed = aroundMidnight(toMin(x.bed))
+      const bed = nearClock(toMin(x.bed), st.center)
       const short = x.dur < SHORT
       const tip = `${dateLabel(x.date)}　${x.bed} → ${x.wake}・${fmtDur(x.dur)}${x.q ? `・${SLEEP_Q[x.q]}` : ''}`
       return `<button type="button" class="slp-col${short ? ' short' : ''}${cls}" data-day="${x.date}" title="${tip}">

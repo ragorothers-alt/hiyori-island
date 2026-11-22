@@ -13,14 +13,17 @@ export function installPwa({ store, ui }) {
   // 這個舊頁面第一次要載入的畫面（切回小島、日曆…）會找不到。重新整理一次換成新版；
   // 離線時不試（那是真的連不上），30 秒內也只試一次，免得一直重新整理
   // 存檔沒寫進去（空間滿了）或手上有打到一半的字時不自動重新整理：留一顆按鈕，讓使用者收好再按
+  // updateAsked：問過一次了（之後都改成問，不自動重新整理）；同一張還在畫面上就不再跳一張，收掉了再遇到時再問
   let updateAsked = false
+  let askEl = null
   const askUpdate = (saved) => {
-    if (updateAsked) return
     updateAsked = true
-    ui.toast({
+    if (askEl?.isConnected) return
+    askEl = ui.toast({
       icon: '新', title: '有新版本了', ms: 30000,
       sub: saved ? '手上還有沒打完的字，收好再按「重新整理」' : '這次的變更沒能存進去（空間可能滿了），先到「紀錄」匯出備份再重新整理',
-      action: { label: '重新整理', run: () => { store.flushSave(); location.reload() } },
+      // 跟其他「重新載入」同一顆：存不進去時不載入（手上還有字的話這張已經說了「收好再按」，按了就換）
+      action: { label: '重新整理', run: () => ui._reloadApp({ force: true }) },
     })
   }
   addEventListener('vite:preloadError', (e) => {

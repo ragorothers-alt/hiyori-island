@@ -50,6 +50,9 @@ export class CloudView {
     this.mode = 'join'
     this.draft = code
     this.render()
+    // 輸入框已經開著（又貼了另一組）：框框裡的字也換成新的，看到的就是按「連線」送出的
+    const input = this.$('.cloud-input')
+    if (input) input.value = code
     this.row.scrollIntoView({ block: 'center', behavior: scrollMode() })
   }
 
@@ -156,7 +159,7 @@ export class CloudView {
     this._panel = key
     const panel = this.$('.cloud-panel')
     if (key === 'join') {
-      panel.innerHTML = `<input class="cloud-input" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" maxlength="44" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="同步碼" value="${esc(this.draft)}">`
+      panel.innerHTML = `<input class="cloud-input" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" maxlength="400" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="同步碼" value="${esc(this.draft)}">`
       return
     }
     if (!key) {

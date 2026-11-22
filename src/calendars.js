@@ -4,6 +4,7 @@
 import { SYNC_API } from './cloud.js'
 import { parseICS } from './ics.js'
 import { addDays, dateStr } from './store/util.js'
+import { calUrlOk } from './store/migrate.js'
 
 const KEY = 'hiyori-ics'
 export const ICS_EVERY = 30 * 60000
@@ -18,14 +19,103 @@ export const ICS_PER_CAL = 1500
 // 錯誤代碼 → 給人看的話
 export const ICS_TEXT = {
   'bad url': '網址看起來不對：要 https 或 webcal 開頭的行事曆網址（.ics）',
-  'not ics': '這個網址不是行事曆檔，要用「iCal 格式」的那一個網址',
+  'not ics': '這個網址沒有提供行事曆檔。請到原本的行事曆複製 iCal 訂閱網址。',
   'ics failed': '對方的伺服器拒絕了，網址可能過期或打錯了',
-  'ics unreachable': '連不上那個網址，等一下再試',
+  'ics missing': '找不到這份行事曆了。請確認它還在，再複製新的 iCal 網址。',
+  'ics denied': '這個行事曆沒有開放讀取。請確認分享設定，或換成私密 iCal 網址。',
+  'ics unavailable': '行事曆網站暫時無法回應，過一會兒再試。',
+  'ics unreachable': '連不上行事曆網站。請確認來源網站能打開，再按更新。',
+  'ics partial': '這次抓到的行事曆不完整（中途斷掉了），先留著上一次的，等一下再按更新。',
   'ics too large': '行事曆檔太大了（超過 2 MB）',
   'too many requests': '抓得太頻繁了，等一分鐘再試',
-  offline: '連不上網路，等一下再試',
+  offline: '連不上匯入服務。請確認網路連線，再按更新。',
 }
-export const icsText = (code) => ICS_TEXT[code] || `出了點狀況（${code}）`
+function statusCode(status, fallback) {
+  if (status === 404 || status === 410) return 'ics missing'
+  if (status === 401 || status === 403) return 'ics denied'
+  if (status === 429) return 'too many requests'
+  if (status >= 500) return 'ics unavailable'
+  if (status >= 200 && status < 300) return 'not ics'
+  return fallback
+}
+
+export function icsText(code) {
+  // 舊版抓到空回應時會存「http 200」，連帶把舊訊息換成看得懂的原因。
+  const status = /^http (\d{3})$/i.exec(code)
+  const key = status ? statusCode(Number(status[1]), '') : code
+  return ICS_TEXT[key] || '暫時拿不到行事曆。請確認訂閱網址，再按更新。'
+}
+
+// 網址裡像私密金鑰的那一段只留開頭（畫面上、截圖裡不會整串露出來）：字母數字加起來 16 個以上的整段收起來，
+// 短一點的裡面有 8 個以上連著、夾著數字的也收起來。看得懂的短名字（class-a.ics、basic.ics、music）照樣看得到
+const maskSeg = (seg) => {
+  if (seg.replace(/[^A-Za-z0-9]/g, '').length >= 16) return `${seg.slice(0, 3)}…`
+  return seg.replace(/[A-Za-z0-9_]{8,}/g, (run) => (/\d/.test(run) ? `${run.slice(0, 3)}…` : run))
+}
+function calendarPath(url) {
+  try {
+    const { host, pathname } = new URL(url)
+    return host + pathname.split('/').map(maskSeg).join('/')
+  } catch {
+    return '行事曆網址'
+  }
+}
+// 路徑一樣、靠參數選班級的課表：只秀看得懂的那種參數（group=choir），值像金鑰的不秀
+function readableParam(url, same) {
+  try {
+    const params = new URL(url).searchParams
+    const hit = [...params].find(([key, value]) =>
+      /^(group|class|course|name)$/i.test(key) && value.length <= 24 && maskSeg(value) === value &&
+      same.every((other) => new URL(other).searchParams.get(key) !== value))
+    return hit ? `?${hit[0]}=${hit[1]}` : ''
+  } catch {
+    return ''
+  }
+}
+function baseLabel(url, urls) {
+  let path = calendarPath(url)
+  const others = urls.filter((other) => other !== url)
+  const samePath = others.filter((other) => calendarPath(other) === path)
+  if (path !== '行事曆網址' && samePath.length) path += readableParam(url, samePath)
+  if (path.length <= 48) return path
+  const head = path.slice(0, 25)
+  const tail = path.slice(-22)
+  // 如果只差在被省略的那一段，把不同的字留在中間。
+  let difference = 0
+  for (const otherUrl of others) {
+    const other = calendarPath(otherUrl)
+    if (other === path || !other.startsWith(head) || !other.endsWith(tail)) continue
+    let i = head.length
+    while (i < path.length && other[i] === path[i]) i++
+    difference = Math.max(difference, i)
+  }
+  if (difference) return path.slice(0, 16) + '…' + path.slice(difference - 4, difference + 10) + '…' + path.slice(-16)
+  return head + '…' + tail
+}
+// 設定列上認行事曆用的那一行：遮好、截短之後還跟另一個一樣的，再加一個固定的來源代號
+export function calendarLabel(url, urls = []) {
+  const label = baseLabel(url, urls)
+  const clash = urls.some((other) => other !== url && baseLabel(other, urls) === label)
+  return clash ? `${label}（來源 ${hash(url).slice(0, 5)}）` : label
+}
+
+export function replaceCalendarUrl(store, id, value) {
+  const url = value.trim()
+  const calendar = store.state.calendars.find((c) => c.id === id)
+  if (!calendar) return { error: '這個行事曆已經刪掉了' }
+  if (url === calendar.url) return { calendar }
+  if (!calUrlOk(url)) return { error: icsText('bad url') }
+  if (store.state.calendars.some((c) => c.url === url)) return { error: '這個網址已經加過了' }
+  // 同一筆換網址（id、名字、顏色、開關不變；兩台同步時也還是同一筆，不會一筆變兩筆）
+  if (!store.updateCalendar(id, { url })) return { error: '網址沒換成，請再試一次' }
+  return { calendar }
+}
+
+// 行事曆檔有沒有完整：最後有 END:VCALENDAR、每個 BEGIN:VEVENT 都有 END:VEVENT
+export function icsComplete(text) {
+  const count = (re) => (String(text).match(re) || []).length
+  return /^END:VCALENDAR\s*$/im.test(text) && count(/^BEGIN:VEVENT\s*$/gim) === count(/^END:VEVENT\s*$/gim)
+}
 
 // 字串 → 短的穩定代號（同一筆日程每次抓回來 id 都一樣）
 const hash = (s) => {
@@ -74,10 +164,12 @@ export async function fetchCalendar(url, { today = dateStr(), fetcher = fetch } 
   try {
     body = await res.json()
   } catch {}
-  if (!res.ok || !body?.ok || typeof body.text !== 'string') {
-    const code = body?.error || `http ${res.status}`
+  if (!res.ok || !body?.ok || typeof body.text !== 'string' || !/^\s*BEGIN:VCALENDAR\s*$/im.test(body.text.slice(0, 4000))) {
+    const code = body?.error === 'ics failed' ? statusCode(body.status, 'ics failed') : body?.error || statusCode(res.status, 'error')
     throw Object.assign(new Error(code), { code })
   }
+  // 中途斷掉的（沒有結尾、日程開了沒關）：不收，留著上一次抓到的（不然會換成少了一大半、甚至空的）
+  if (!icsComplete(body.text)) throw Object.assign(new Error('ics partial'), { code: 'ics partial' })
   return parseICS(body.text, { from: addDays(today, -ICS_PAST), to: addDays(today, ICS_AHEAD) })
 }
 

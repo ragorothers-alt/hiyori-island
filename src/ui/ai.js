@@ -96,12 +96,9 @@ export class AiView {
     const model = AI_MODELS.find((m) => m.id === aiModel())
     let info
     let btns
-    if (this.editing) {
-      info = '填你在 Worker 設的通行碼（AI_PASS）。開著線上同步的話，會跟著同步碼（加密後）帶到其他裝置，別台不用再填；不會匯出到檔案'
-      btns = [['save', '儲存並測試', 1], ['cancel', '取消']]
-    } else if (!on) {
-      info = '接上自己 Claude Console 的 API：金鑰放在自己的 Worker 裡，這裡只填通行碼。設好後ふじ會自己動：早上排好今天、替新任務估時間和排空檔、進度落後時重排、晚上準備明天，也能用一句話請她做事（每次都可以撤銷）'
-      btns = [['edit', '設定通行碼', 1]]
+    if (this.editing || !on) {
+      info = '通行碼是讓ふじ接上 Claude 的一組密碼：向幫你架好這個 App 的人拿（自己架的話看下面的「進階」）。接上後ふじ會自己動：早上排好今天、替新任務估時間、進度落後時重排，也能用一句話請她做事，像「幫我排明天」「把會議改到四點」（每次都可以撤銷）'
+      btns = this.editing ? [['save', '儲存並測試', 1], ['cancel', '取消']] : [['edit', '設定通行碼', 1]]
     } else {
       info = `${esc(this.result || (model.id === 'auto' ? '已設定・自動選模型（對話、新任務用 Sonnet，自己整理用 Opus）' : `已設定・用 ${model.label}`))}・自己整理的方式（自動／先問我／關）在教練分頁的「ふじ」`
       // 通行碼太短容易被猜中：提醒到 Worker 重設一組長一點的（這裡跟著改）
@@ -123,7 +120,8 @@ export class AiView {
     const panel = this.$('.ai-panel')
     if (key === 'edit') {
       panel.innerHTML = `<input class="cloud-input ai-pass" type="password" maxlength="200" autocomplete="off" spellcheck="false" placeholder="通行碼" aria-label="Claude 通行碼">
-        <details class="ai-how"><summary>還沒設定 Worker？</summary>
+        <small>開著線上同步時，通行碼會加密同步到其他裝置。匯出的備份不含通行碼。</small>
+        <details class="ai-how"><summary>進階 · 自己架設聊天服務</summary>
           <p>在專案的 <code>worker</code> 資料夾執行下面兩行，照提示貼上（Claude Console → API Keys 建立的金鑰，和自己想的一組通行碼，至少 ${PASS_MIN} 個字）。金鑰只存在 Cloudflare，不會出現在這個網頁裡。</p>
           <pre>npx wrangler@4 secret put ANTHROPIC_API_KEY
 npx wrangler@4 secret put AI_PASS</pre>

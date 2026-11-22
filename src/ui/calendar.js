@@ -243,6 +243,17 @@ export class CalendarView {
     if (act === 'today') return this.moveTo(this.store.today)
     if (act === 'go') return this.goTo(this.date)
     if (act === 'review') return this.hooks.openReview(this.date)
+    if (act === 'project') {
+      this._back = null
+      this.close()
+      return this.hooks.openProject?.(btn.dataset.id, btn.dataset.sec)
+    }
+    // 自己記的重要日子：關掉日曆，到日程頁的「重要日子」改
+    if (act === 'date-edit') {
+      this._back = null
+      this.close()
+      return this.hooks.editDate?.(btn.dataset.id)
+    }
     // 扣款的訂閱：關掉日曆，到紀錄頁打開那個訂閱
     if (btn.dataset.open === 'sub') {
       // 焦點要留在打開的訂閱卡上，不要等關完又跳回原本按的那顆
@@ -676,6 +687,24 @@ export class CalendarView {
     const gTasks = ghosts.filter((r) => r.kind === 'task')
     const mood = sum.mood && moodOf(sum.mood.mood)
     const secs = []
+
+    // 重要日子：自己記的（考試、截止、紀念）、專案的截止日、里程碑的期限（月曆格子上標了「考」「期」的那幾個）
+    const marks = date >= today ? s.upcomingDates(Infinity, Infinity).filter((x) => x.date === date) : s.datesOn(date)
+    if (marks.length) {
+      const rows = marks
+        .map((x) => {
+          const k = DUE_KINDS[x.kind] || DATE_KINDS.day
+          const left = date > today ? `還有 ${daysBetween(today, date)} 天` : date === today ? '就是今天' : `${daysBetween(date, today)} 天前`
+          const sub = x.project ? `專案的截止日・${left}` : x.pid ? `「${esc(x.projectName || '')}」的里程碑・${left}` : `${k.label}・${left}`
+          const inner = `<i class="cd-k">${k.kanji}</i><span class="cd-t">${esc(x.title)}<small>${sub}</small></span>`
+          // 專案的截止日、里程碑：點了打開那個專案；自己記的：點了到日程頁改
+          return x.project || x.pid
+            ? `<li><button type="button" class="cd-row dt" data-act="project" data-id="${esc(x.pid || x.id)}"${x.pid ? ' data-sec="ms"' : ''} title="打開專案">${inner}</button></li>`
+            : `<li><button type="button" class="cd-row dt" data-act="date-edit" data-id="${esc(x.id)}" title="改這個重要日子">${inner}<span class="cd-go">改</span></button></li>`
+        })
+        .join('')
+      secs.push(this._sec('重要日子', 'きねんび', '', rows))
+    }
 
     // 整天的日程
     if (sum.allDay.length) {

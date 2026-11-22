@@ -4,10 +4,10 @@ import { CaptureView } from './ui/capture.js'
 import { calmMotion } from './ui/motion.js'
 import { lifeKindOf } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
-import { fmtMoney, chargesBetween } from './subs.js'
+import { fmtMoney, chargesBetween, subAtCharge } from './subs.js'
 import { TAGS, tagOf, EVENT_COLORS, PROJECT_COLORS, WEEK_JP, WEEK_ZH, MAX_STARS, XP, CHARM } from './theme.js'
 import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, floating, shiftEnd } from './store.js'
-import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
+import { blockedHelp, notifySupported, notifyPermission, requestNotify } from './reminders.js'
 import { native, nativeMottos } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
 import { parseQuick, parseSpend, timeRange } from './parse.js'
@@ -149,6 +149,11 @@ export class UI {
       hoverEvent: (id) => hooks.hoverEvent(id),
       openWeekCard: (wk) => this.openWeekCard(wk),
       openProject: (id, sec) => this.openProject(id, sec),
+      // 日曆那天的詳情裡按了自己記的重要日子：到日程頁打開那一筆的編輯
+      editDate: (id) => {
+        this.setTab('schedule')
+        this.dates.edit(id)
+      },
       // 日曆上點了扣款的訂閱：到紀錄頁、打開那一張
       openSub: (id) => {
         this.setTab('records')
@@ -447,13 +452,43 @@ export class UI {
       if (err?.updating) return
       // 頁面裡先放了閃著的底（教練）：換成沒下載到、按一下再試，不要一直看起來像還在下載
       if (lz.root) return this._lzFailed(lz, want?.fn || ((v) => v.render?.()))
-      this.toast({ icon: '！', title: '這個畫面還沒下載', sub: '連上網路再試一次' })
+      this._loadFailToast('！', '這個畫面還沒下載', err)
     })
   }
   _lzFailed(lz, fn) {
     lz.failed = true
-    lz.root.innerHTML = '<div class="lz-fail" role="alert"><b>這一頁還沒下載到</b><small>連上網路後再試一次</small><button type="button" class="btn-ghost">再試一次</button></div>'
-    lz.root.querySelector('button').onclick = () => this._use(lz, fn)
+    // 連著網路還是沒下載到：多半是換了新版、舊的檔案已經不在了，再試一次也一樣，給「重新載入」
+    const online = navigator.onLine !== false
+    lz.root.innerHTML = `<div class="lz-fail" role="alert"><b>這一頁還沒下載到</b><small>${online ? '可能剛換了新版，重新載入一下就好' : '連上網路後再試一次'}</small><div class="lz-acts">${online ? '<button type="button" class="btn-ghost" data-lz="reload">重新載入</button>' : ''}<button type="button" class="btn-ghost" data-lz="retry">再試一次</button></div></div>`
+    lz.root.querySelector('[data-lz="retry"]').onclick = () => this._use(lz, fn)
+    const re = lz.root.querySelector('[data-lz="reload"]')
+    if (re) re.onclick = () => this._reloadApp()
+  }
+  // 分開下載的那幾塊（畫面、更新紀錄）載入失敗時怎麼說。err.updating：部署了新版、pwa.js 已經在換（不另外說）；
+  // 連著網路還是失敗：多半是換了新版、舊的檔案已經不在了，給一顆「重新載入」；真的離線才叫人連網路
+  _loadFailToast(icon, title, err, offSub = '連上網路再試一次') {
+    if (err?.updating) return
+    if (navigator.onLine === false) return this.toast({ icon, title, sub: offSub })
+    this.toast({
+      icon, title, ms: 12000,
+      sub: this.hasDraft() ? '可能剛換了新版。手上還有沒打完的字，收好再按「重新載入」' : '可能剛換了新版，重新載入一下就好',
+      // 有字的話上面已經說了「收好再按」：按了就載入（存不進去時照樣不載入）
+      action: { label: '重新載入', run: () => this._reloadApp({ force: true }) },
+    })
+  }
+  // 重新載入之前先存：存不進去（空間滿了）就先不載入，說一聲（載入了這次的變更就不見了）。
+  // 手上還有沒打完的字（快速記錄、編輯到一半的表單）：重新載入會不見，先問一聲（force：問過了、還是要載入）
+  _reloadApp({ force = false } = {}) {
+    if (this.store.flushSave() === false) {
+      return this.toast({ icon: '存', title: '先別重新載入', sub: '這次的變更沒能存進去（空間可能滿了），先到「紀錄」匯出備份', ms: 9000 })
+    }
+    if (!force && this.hasDraft()) {
+      return this.toast({
+        icon: '新', title: '手上還有沒打完的字', sub: '重新載入的話，打到一半的字會不見：先記下來、送出，或複製起來', ms: 12000,
+        actions: [{ label: '還是重新載入', soft: true, run: () => this._reloadApp({ force: true }) }],
+      })
+    }
+    location.reload()
   }
   // 延後載入的畫面正在下載：一張「正在打開…」的提示卡（好幾個一起下載時共用一張，都好了才收）
   _busy(d) {
@@ -729,7 +764,7 @@ export class UI {
         ? {
             since,
             events: days.flatMap((date) => s.eventsOn(date).filter(own).map((e) => ({ title: e.title, date, start: e.start, end: e.end }))),
-            charges: s.state.subscriptions.flatMap((sub) => chargesBetween(sub, days[0], yesterday).map((date) => ({ name: sub.name, date, price: fmtMoney(sub.price, sub.cur) }))),
+            charges: s.state.subscriptions.flatMap((sub) => chargesBetween(sub, days[0], yesterday).map((date) => ({ name: sub.name, date, price: fmtMoney(subAtCharge(sub, date).price, subAtCharge(sub, date).cur) }))),
             habits: todayProgress(s.state.habits, yesterday),
           }
         : null,
@@ -1545,11 +1580,25 @@ export class UI {
     let CHANGELOG
     try {
       ;({ CHANGELOG } = await import('./data/changelog.js'))
-    } catch {
-      return this.toast({ icon: '新', title: '更新紀錄還沒下載', sub: '連上網路再打開一次' })
+    } catch (err) {
+      return this._loadFailToast('新', '更新紀錄還沒下載', err, '連上網路再打開一次')
     }
+    // 這一版先列前三項（其餘的點開），舊的版本收起來只留標題：一打開就看得出這次改了什麼。
+    // 同一版後來又加了幾項（看過的是「這一版:37 項」）：先列看過之後新加的那幾項
+    const li = (xs) => xs.map((x) => `<li>${esc(x)}</li>`).join('')
+    const head = (e) => `${+e.date.slice(5, 7)}/${+e.date.slice(8)}<b>${esc(e.title)}</b>`
+    const more = (xs, label) => (xs.length ? `<details class="news-more"><summary>${label}</summary><ul>${li(xs)}</ul></details>` : '')
+    const [seenId, seenN] = String(readLocal(NEWS_KEY, '') || '').split(':')
     $('#newsList').innerHTML = CHANGELOG.slice(0, 8)
-      .map((e) => `<section><h4>${+e.date.slice(5, 7)}/${+e.date.slice(8)}<b>${esc(e.title)}</b></h4><ul>${e.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>`)
+      .map((e, i) => {
+        if (i) return `<details class="news-old"><summary><h4>${head(e)}</h4></summary><ul>${li(e.items)}</ul></details>`
+        const n = +seenN
+        if (seenId === e.id && n > 0 && n < e.items.length) {
+          const fresh = e.items.slice(n)
+          return `<section><h4>${head(e)}</h4><p class="news-fresh">上次看過之後，新加了 ${fresh.length} 項</p><ul>${li(fresh.slice(0, 3))}</ul>${more(fresh.slice(3), `新加的還有 ${fresh.length - 3} 項`)}${more(e.items.slice(0, n), `這一版之前的 ${n} 項`)}</section>`
+        }
+        return `<section><h4>${head(e)}</h4><ul>${li(e.items.slice(0, 3))}</ul>${more(e.items.slice(3), `這一版還有 ${e.items.length - 3} 項`)}</section>`
+      })
       .join('')
     $('#newsModal').hidden = false
     writeLocal(NEWS_KEY, newsVersion())
@@ -1728,10 +1777,25 @@ export class UI {
     }
     const perm = notifyPermission()
     const on = st.notify && perm === 'granted'
+    this._watchNotifyPerm()
     // 不提醒日程時也能開：就寢、重要日子、專注到點的通知都用這個開關
     btn.disabled = perm === 'denied'
     setOn(btn, on)
     btn.textContent = perm === 'denied' ? '通知已被瀏覽器封鎖' : on ? '系統通知：開' : '開啟系統通知'
+    // 被封鎖了：網頁自己不能再問，寫出到哪裡改回允許（日程頁和設定頁那一列都寫）
+    const info = $('#remindSetInfo')
+    if (info) {
+      info.dataset.base ??= info.textContent
+      info.textContent = perm === 'denied' ? `通知被瀏覽器封鎖了，要收通知：${this._blockedHelp()}` : info.dataset.base
+      info.classList.toggle('warn', perm === 'denied')
+    }
+    if (perm === 'denied') {
+      test.hidden = true
+      this._renderPushLast(true)
+      hint.hidden = false
+      hint.textContent = `被封鎖時只在看著 App 時提醒。要重新打開：${this._blockedHelp()}`
+      return
+    }
     // 專注到點的通知：鎖著螢幕也收得到的（推播）才有「試一則」
     const state = this.hooks.push?.state
     test.hidden = !on || !pushSupported() || state === 'unsupported'
@@ -1745,6 +1809,20 @@ export class UI {
         : state === 'error'
           ? '專注到點、休息結束也會通知。現在連不上通知伺服器：頁面開著時照常通知，鎖著螢幕時可能收不到'
           : '專注到點、休息結束也會通知，鎖著螢幕、切到別的 App 也收得到（鎖著時專注到點，休息要等你回到 App 才開始算）'
+  }
+
+  _blockedHelp() {
+    const app = matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true
+    return blockedHelp(navigator.userAgent, app)
+  }
+
+  // 在網站設定裡改了通知權限（不一定會切走頁面）：權限一變就重畫這兩列
+  _watchNotifyPerm() {
+    if (this._permWatch || native || !navigator.permissions?.query) return
+    this._permWatch = navigator.permissions
+      .query({ name: 'notifications' })
+      .then((st) => st.addEventListener('change', () => this.renderRemind()))
+      .catch(() => {})
   }
 
   // 「上一則到點通知幾點送到這台」：到點沒看到通知時，看這一行就知道是沒送到，還是送到了被收掉
@@ -1909,7 +1987,7 @@ export class UI {
       </button>`
     $('#shopGrid').innerHTML = charm + list
       .map(({ i, st }) => {
-        const badge = i.exclusive ? '<i class="shop-badge wk">週限定</i>' : i.season ? `<i class="shop-badge s-${i.season}">${SEASON_ZH[i.season]}</i>` : ''
+        const badge = i.exclusive ? '<i class="shop-badge shop-wk">週限定</i>' : i.season ? `<i class="shop-badge s-${i.season}">${SEASON_ZH[i.season]}</i>` : ''
         const price = st.lock ? `<span class="price lock">${st.lock}</span>` : st.free ? '<span class="price free">免費</span>' : `<span class="price"><i class="konpeito"></i>${i.price}</span>`
         return `<button class="shop-item ${st.lock ? 'locked' : ''}" data-key="${i.key}" title="${esc(i.desc)}" ${st.ok ? '' : 'disabled'}>
         ${badge}<img src="${thumbs?.[i.key] || BLANK}" alt="" />

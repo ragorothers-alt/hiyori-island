@@ -248,6 +248,10 @@ body.night .cd-star { color: #f3cf7f; }
 .cd-row.hb:not(.ok):not(.quit):not(.slip) .cd-t { color: var(--ink-soft); }
 .cd-row.slip { --c: #e0708e; background: rgba(241, 155, 178, .12); }
 .cd-row.sl { --c: #6f9fd0; }
+/* 重要日子：考試、截止、紀念（跟日程頁的倒數小卡同一個紫）；右邊的「改」是要去改的意思 */
+.cd-row.dt { --c: #8f78c9; }
+body.night .cd-row.dt { --c: #c9b8ef; }
+.cd-go { flex: none; padding: 2px 8px; border-radius: 9px; font-size: max(var(--fmin), 11.5px); color: var(--ink-soft); background: var(--glass-strong); }
 body.night .cd-row.sl { --c: #9fcdf0; }
 .cd-n { flex: none; font-family: var(--font-num); font-size: max(var(--fmin), 11.5px); color: var(--ink-faint); }
 .cd-row.hb.ok .cd-n { color: #4b977a; font-weight: 600; }

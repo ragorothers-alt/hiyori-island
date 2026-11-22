@@ -120,6 +120,10 @@ body.night .dt-chip.soon small { color: #ffb0c4; }
 .dt-del svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2.4; }
 .dt-add { flex: none; margin-left: auto; padding: 0 12px; min-height: 32px; border-radius: 12px; border: 1px dashed rgba(120, 150, 190, .45); color: var(--ink-soft); font-size: 12.5px; }
 .dt-add:hover, .dt-add[aria-expanded="true"] { background: var(--glass-hover); color: var(--ink); }
+/* 「全部 N 個」在新增的左邊；展開了就換行全部攤開（手機也不用一直往右滑） */
+.dt-all { border-style: solid; font-family: var(--font-num); }
+.dt-all + .dt-add { margin-left: 0; }
+.dt-row.all { flex-wrap: wrap; overflow: visible; }
 .dt-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; padding: 10px; border-radius: 16px; background: var(--glass-strong); border: 1px solid var(--glass-border); animation: fadeUp .3s var(--ease); }
 .dt-form input { border: 0; outline: 0; padding: 7px 10px; border-radius: 11px; background: var(--field); font-size: 13px; color: var(--ink); }
 .dt-form input[name="title"] { flex: 1; min-width: 120px; }

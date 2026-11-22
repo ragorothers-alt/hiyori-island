@@ -109,6 +109,13 @@ describe('同步碼與加密', () => {
     expect(normalizeCode('0000-0000-0000-0000-0000')).toBeNull()
     expect(normalizeCode('0000-0000-0000-0000-0000-0000')).toBeNull()
   })
+  it('整段分享連結貼進同步碼的輸入框也認得', () => {
+    const code = newCode()
+    expect(normalizeCode(shareLink(code, 'https://example.test/app/'))).toBe(code)
+    expect(normalizeCode(`  ${shareLink(code, 'https://example.test/app/?x=1')}  `)).toBe(code)
+    expect(normalizeCode('https://example.test/app/#sync=%E0%A4%A')).toBeNull()
+    expect(normalizeCode('https://example.test/app/#sync=ABCD')).toBeNull()
+  })
 
   it('以前的 16 碼和新的 28 碼推出不同的 vault，各自解得開自己的資料', async () => {
     const old = await deriveKeys('ABCD-EFGH-JKMN-PQRS')

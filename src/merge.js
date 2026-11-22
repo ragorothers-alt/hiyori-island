@@ -21,6 +21,9 @@ const GROUPS = {
   tasks: [['date', 'at', 'dur', 'ongoing']],
   routines: [['start', 'end'], ['repeat', 'startDate']],
   habits: [['days', 'target', 'unit']],
+  // 訂閱的價錢、幣別、調價紀錄、週期、狀態（取消、重新訂閱時一起變的）：兩邊都動了就整組用比較晚改的那一邊，
+  // 不會拼出一邊的新價格配另一邊的調價紀錄（「歷來約付」算出兩台都沒有過的數字）
+  subscriptions: [['price', 'cur', 'priceHistory', 'every', 'unit', 'start', 'trial', 'paid0', 'status', 'end']],
 }
 // 兩邊都改了就整個用比較晚改的那一邊（不拆開來合）：計時（跨裝置的計時是一整個狀態）
 const ATOMIC = new Set(['timer'])

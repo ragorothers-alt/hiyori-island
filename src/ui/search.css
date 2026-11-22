@@ -18,3 +18,5 @@
 .fd-row.done .fd-t { color: var(--ink-faint); text-decoration: line-through; text-decoration-color: rgba(140, 150, 170, .5); }
 .find-list mark { background: rgba(255, 214, 120, .45); color: inherit; border-radius: 3px; padding: 0 1px; }
 .find-tip:empty { display: none; }
+.fd-more { align-self: center; flex: none; }
+#page-settings :is(.set-row, .backup-list)[tabindex="-1"]:focus { outline: 2px solid var(--focus); outline-offset: 1px; }

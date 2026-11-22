@@ -5,6 +5,32 @@ const TODAY = '2026-11-22'
 const task = (o) => ({ id: o.title, date: TODAY, done: false, subs: [], note: '', ...o })
 
 describe('找找看（searchAll）', () => {
+  it('再多看一頁可以找到被擠到後面的紀錄，加日期也能直接找到那天', () => {
+    const life = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [
+      `2026-10-${String(i + 1).padStart(2, '0')}`, { items: [{ id: String(i), text: '書店咖啡' }] },
+    ]))
+    life['2026-09-23'] = { items: [{ id: 'old', text: '書店咖啡' }] }
+    life['2025-09-23'] = { items: [{ id: 'lastYear', text: '書店咖啡' }] }
+    const find = (q, page = 1) => searchAll({ life }, q, { today: TODAY, page })
+    expect(find('書店咖啡').life).toHaveLength(20)
+    expect(find('書店咖啡', 2).life).toHaveLength(32)
+    expect(find('書店咖啡 ９／２３').life.map((x) => x.item.id)).toEqual(['old', 'lastYear'])
+    expect(find('2026-09-23').life.map((x) => x.item.id)).toEqual(['old'])
+  })
+
+  it('找設定列時也認得常用的說法，選到的是那一列的識別碼', () => {
+    const settings = [
+      { id: 'fontPick', title: '字體大小' },
+      { id: 'syncRow', title: '資料夾同步' },
+      { id: 'remindSetInfo', title: '日程提醒、系統通知' },
+    ]
+    for (const [q, id] of [['字級', 'fontPick'], ['資料夾同步', 'syncRow'], ['通知', 'remindSetInfo']]) {
+      const r = searchAll({}, q, { today: TODAY, settings })
+      expect(r.setting.map((x) => x.item.id)).toEqual([id])
+      expect(r.total).toBe(1)
+    }
+  })
+
   it('哪一天的任務都找得到：還沒做的在前（逾期的、今天的、之後的照日期），做完的照完成時間新到舊；子任務、說明裡的也找，附上找到的那一段', () => {
     const state = {
       tasks: [
@@ -61,5 +87,21 @@ describe('找找看（searchAll）', () => {
     expect(r.life.map((x) => x.item.id)).toEqual(['c', 'b', 'a'])
     expect(r.task).toHaveLength(LIMIT.task)
     expect(r.total).toBe(LIMIT.task + 5 + 1 + 3)
+  })
+
+  it('加日期找：好幾天的整天日程，中間和最後一天也算（寫不寫年份都行、跨年也行）', () => {
+    const state = {
+      events: [
+        { id: 'trip', title: 'Trip', date: '2026-09-22', endDate: '2026-09-24', allDay: true, start: '00:00', end: '23:59' },
+        { id: 'ny', title: 'Trip', date: '2026-12-30', endDate: '2027-01-02', allDay: true, start: '00:00', end: '23:59' },
+      ],
+    }
+    const ids = (q) => searchAll(state, q, { today: TODAY }).event.map((x) => x.item.id)
+    expect(ids('Trip 9/22')).toEqual(['trip'])
+    expect(ids('Trip 9/23')).toEqual(['trip'])
+    expect(ids('Trip 2026-09-24')).toEqual(['trip'])
+    expect(ids('Trip 9/25')).toEqual([])
+    expect(ids('Trip 1/1')).toEqual(['ny'])
+    expect(ids('Trip 2027/1/2')).toEqual(['ny'])
   })
 })

@@ -1,5 +1,5 @@
 import { esc, armConfirm } from './dom.js'
-import { icsText } from '../calendars.js'
+import { icsText, calendarLabel, replaceCalendarUrl } from '../calendars.js'
 import { EVENT_COLORS } from '../theme.js'
 
 // 設定裡「匯入行事曆」那一列：貼上 Google 日曆的私密網址、學校課表的 .ics 網址，日程帶進來（唯讀），排程和ふじ都會避開。
@@ -13,13 +13,6 @@ const ago = (t) => {
   const h = Math.round(m / 60)
   return h < 48 ? `${h} 小時前` : `${Math.round(h / 24)} 天前`
 }
-const hostOf = (url) => {
-  try {
-    return new URL(url.replace(/^webcals?:/i, 'https:')).hostname
-  } catch {
-    return url.slice(0, 30)
-  }
-}
 
 export class CalendarRow {
   constructor(row, store, calendars, { toast }) {
@@ -32,22 +25,43 @@ export class CalendarRow {
       <form class="ics-add" autocomplete="off"><input class="cloud-input ics-input" name="url" type="url" inputmode="url" placeholder="https://… 或 webcal://…（.ics）" aria-label="行事曆網址（iCal 格式）" spellcheck="false" /><button class="chip-toggle on" type="submit">加入</button></form>
       <small class="ics-help">Google 日曆：電腦版網頁 → 設定 → 點左邊那個行事曆 →「iCal 格式的私密網址」。這個網址等於鑰匙，不要給別人；只存在你的資料裡（線上同步是加密的）。</small>`
     this.$ = (s) => row.querySelector(s)
+    this.editor = document.createElement('form')
+    this.editor.className = 'ics-add ics-edit'
+    this.editor.autocomplete = 'off'
+    this.editor.innerHTML = `<input type="url" name="url" required class="cloud-input ics-input" aria-label="新的行事曆網址" placeholder="貼上新的 iCal 網址" spellcheck="false" />
+      <button class="chip-toggle on" type="submit">儲存網址</button><button class="chip-toggle" type="button" data-ics="cancel">取消</button>`
+    this.editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        e.preventDefault()
+        this.closeEditor(this.editId)
+      }
+    })
     row.addEventListener('submit', (e) => {
       e.preventDefault()
-      const input = this.$('.ics-input')
+      const input = e.target.elements.url
       const url = input.value.trim()
       if (!url) return input.focus()
+      if (e.target === this.editor) {
+        const { calendar, error } = replaceCalendarUrl(this.store, this.editId, url)
+        if (error) {
+          this.toast({ icon: '暦', title: '網址沒換成', sub: error })
+          return input.focus()
+        }
+        this.closeEditor(calendar.id)
+        return this.toast({ icon: '暦', title: '網址存好了', sub: calendarLabel(url) })
+      }
       const c = this.store.addCalendar({ url, color: this.store.state.calendars.length + 3 })
       if (!c) {
         const dup = this.store.state.calendars.some((x) => x.url === url)
         return this.toast({ icon: '暦', title: dup ? '這個行事曆已經加過了' : '加不進來', sub: dup ? '' : '網址要是 https 或 webcal 開頭的行事曆網址（最多 10 個）' })
       }
       input.value = ''
-      this.toast({ icon: '暦', title: '加好了，正在抓日程', sub: hostOf(url) })
+      this.toast({ icon: '暦', title: '加好了，正在抓日程', sub: calendarLabel(url) })
       this.calendars.refresh({ force: true }).then(() => {
         const st = this.calendars.status(c.id)
         if (st?.error) this.toast({ icon: '暦', title: '這個行事曆抓不到', sub: icsText(st.error) })
-        else if (st) this.toast({ icon: '暦', title: `帶進 ${st.events.length} 個日程`, sub: `${this.store.state.calendars.find((x) => x.id === c.id)?.name || hostOf(url)}・前一週到之後三個月` })
+        else if (st) this.toast({ icon: '暦', title: `帶進 ${st.events.length} 個日程`, sub: `${this.store.state.calendars.find((x) => x.id === c.id)?.name || calendarLabel(url)}・前一週到之後三個月` })
       })
     })
     row.addEventListener('click', (e) => {
@@ -55,7 +69,13 @@ export class CalendarRow {
       if (!b) return
       const id = b.dataset.id
       const act = b.dataset.ics
-      if (act === 'toggle') {
+      if (act === 'edit') {
+        this.editId = id
+        this.editor.elements.url.value = this.store.state.calendars.find((c) => c.id === id).url
+        b.closest('li').append(this.editor)
+        this.editor.elements.url.focus()
+      } else if (act === 'cancel') this.closeEditor(this.editId)
+      else if (act === 'toggle') {
         const c = this.store.state.calendars.find((x) => x.id === id)
         if (c) this.store.updateCalendar(id, { on: !c.on })
       } else if (act === 'refresh') this.calendars.refresh({ force: true })
@@ -65,21 +85,38 @@ export class CalendarRow {
     store.on('change', () => this.render())
     this.render()
   }
+  closeEditor(id) {
+    this.editor.remove()
+    this.editor.reset()
+    this.editId = null
+    Array.from(this.row.querySelectorAll('[data-ics="edit"]')).find((b) => b.dataset.id === id)?.focus()
+  }
   render() {
     const list = this.store.state.calendars
-    const key = JSON.stringify(list.map((c) => [c.id, c.name, c.on, c.color, this.calendars.status(c.id)?.at, this.calendars.status(c.id)?.error, this.calendars.status(c.id)?.loading, this.calendars.status(c.id)?.events?.length]))
+    const key = JSON.stringify(list.map((c) => [c.id, c.url, c.name, c.on, c.color, this.calendars.status(c.id)?.at, this.calendars.status(c.id)?.error, this.calendars.status(c.id)?.loading, this.calendars.status(c.id)?.events?.length]))
     if (key === this._key) return
     this._key = key
+    const focused = this.editor.contains(document.activeElement) ? document.activeElement : null
+    const urls = list.map((c) => c.url)
     this.$('.ics-list').innerHTML = list
       .map((c) => {
         const st = this.calendars.status(c.id)
+        const source = calendarLabel(c.url, urls)
         const info = !c.on ? '關著（不顯示、排程也不避開）' : st?.loading ? '正在抓…' : st?.error ? `${icsText(st.error)}${st.events?.length ? `（先用上次抓到的 ${st.events.length} 個）` : ''}` : st ? `${st.events.length} 個日程・${ago(st.at)}更新` : '還沒抓'
         return `<li class="${c.on ? '' : 'off'}${st?.error ? ' err' : ''}"><i class="ics-dot" style="--c:${EVENT_COLORS[c.color % EVENT_COLORS.length]}"></i>
-          <div><b>${esc(c.name || hostOf(c.url))}</b><small>${esc(info)}</small></div>
+          <div><b>${esc(c.name || source)}</b>${c.name ? `<small class="ics-source">${esc(source)}</small>` : ''}<small>${esc(info)}</small></div>
           <div class="sync-btns"><button type="button" class="chip-toggle ${c.on ? 'on' : ''}" data-ics="toggle" data-id="${esc(c.id)}" aria-pressed="${c.on}">${c.on ? '顯示中' : '關著'}</button>
           <button type="button" class="chip-toggle" data-ics="refresh" data-id="${esc(c.id)}" ${c.on && !st?.loading ? '' : 'disabled'}>更新</button>
+          <button type="button" class="chip-toggle" data-ics="edit" data-id="${esc(c.id)}">改網址</button>
           <button type="button" class="chip-toggle danger" data-ics="remove" data-id="${esc(c.id)}">刪掉</button></div></li>`
       })
       .join('')
+    if (this.editId) {
+      const b = Array.from(this.row.querySelectorAll('[data-ics="edit"]')).find((button) => button.dataset.id === this.editId)
+      if (b) {
+        b.closest('li').append(this.editor)
+        focused?.focus({ preventScroll: true })
+      } else this.closeEditor()
+    }
   }
 }

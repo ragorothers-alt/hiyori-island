@@ -36,6 +36,20 @@ export const notifySupported = () => !!native || 'Notification' in window
 export const notifyPermission = () => (native ? (nativeCanNotify() ? 'granted' : 'default') : notifySupported() ? Notification.permission : 'denied')
 export const requestNotify = () => (native ? nativeAskNotify() : Notification.requestPermission())
 
+// 通知被瀏覽器封鎖了（按過「封鎖」，網頁自己不能再問）：照瀏覽器說怎麼在網站設定裡改回允許
+// ua：navigator.userAgent；app：從主畫面／安裝的 App 打開的（standalone）
+export function blockedHelp(ua = '', app = false) {
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && /Mobile\//.test(ua))
+  const android = /Android/.test(ua)
+  if (ios) return app ? 'iPhone 的「設定」→「通知」→ 找到ひより日和，打開「允許通知」，再回到這裡' : 'iPhone／iPad 要先在 Safari 按「分享」→「加入主畫面」，從主畫面打開後再開啟'
+  if (android) return app ? '長按主畫面上的ひより日和圖示 →「應用程式資訊」→「通知」打開，再回到這裡' : '點網址列左邊的圖示 →「權限」→ 把「通知」打開，再回到這裡'
+  if (/Firefox\//.test(ua)) return '點網址列左邊的圖示，把「傳送通知」的封鎖清掉，再按一次「開啟系統通知」'
+  if (/Safari\//.test(ua) && !/Chrome\/|Chromium\/|Edg\//.test(ua)) return 'Safari 選單 →「設定」→「網站」→「通知」，把這個網站改成「允許」'
+  const edge = /Edg\//.test(ua)
+  if (app) return `視窗右上角的「⋯」→「應用程式資訊」→ 把「通知」改成允許`
+  return `點網址列左邊的圖示 →「${edge ? '此網站的權限' : '網站設定'}」→ 把「通知」改成「允許」，再回到這裡`
+}
+
 export class Reminders {
   // 警語交給別人排的時候（Android 殼排好鬧鐘、網頁交給伺服器推）怎麼分工：
   //   external()：現在交給別人排了嗎；hidden(t)：到點的這一則（t）頁面先不念、留給另一邊嗎

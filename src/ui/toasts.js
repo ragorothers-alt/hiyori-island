@@ -281,6 +281,7 @@ export const toastMethods = {
       }
       this._holdToast(el, ms)
     } else el._life = setTimeout(() => this._dropToast(el), ms)
+    return el
   },
 
 }

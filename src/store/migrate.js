@@ -467,6 +467,7 @@ function cleanCalendars(list) {
 // ── 訂閱服務（扣款日、月費怎麼算在 src/subs.js）──
 // 上限只防異常大的匯入；新增時到了就不再加
 export const SUBS_MAX = 300
+export const SUB_PRICE_CHANGES_MAX = 240
 const money = (v) => (v !== '' && v != null && Number.isFinite(+v) && +v >= 0 ? Math.min(1e7, Math.round(+v * 100) / 100) : null)
 // 管理（取消）訂閱的網址：只收 http／https（訂閱表單也用這個先檢查）
 export const httpUrl = (v) => {
@@ -485,8 +486,18 @@ function cleanSub(x, today) {
   if (!name || price == null) return null
   const pay = str(x.pay, 20).trim()
   const status = x.status === 'cancelled' ? 'cancelled' : 'active'
+  const prices = new Map()
+  if (Array.isArray(x.priceHistory)) {
+    for (const row of x.priceHistory.slice(0, SUB_PRICE_CHANGES_MAX)) {
+      if (!isObj(row) || !DATE_RE.test(row.until) || typeof row.price !== 'number') continue
+      const oldPrice = money(row.price)
+      // 那時候的幣別（換過幣別的才有）
+      if (oldPrice != null) prices.set(row.until, { until: row.until, price: oldPrice, ...(CURRENCIES[row.cur] ? { cur: row.cur } : {}) })
+    }
+  }
+  const priceHistory = [...prices.keys()].sort().map((until) => prices.get(until))
   return {
-    id: str(x.id), name, price, cur: CURRENCIES[x.cur] ? x.cur : 'TWD',
+    id: str(x.id), name, price, priceHistory, cur: CURRENCIES[x.cur] ? x.cur : 'TWD',
     every: num(x.every, 1, 36, 1), unit: SUB_UNITS[x.unit] ? x.unit : 'month',
     start: ymd(x.start, today), trial: !!x.trial, cat: SUB_CATS[x.cat] ? x.cat : 'other',
     remind: x.remind === -1 || REMIND_DAYS.includes(x.remind) ? x.remind : 1,

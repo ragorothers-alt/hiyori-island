@@ -33,4 +33,12 @@
 .ics-dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: var(--c); }
 .ics-add { display: flex; gap: 6px; }
 .ics-add .ics-input { flex: 1; min-width: 0; text-transform: none; letter-spacing: 0; font-family: inherit; font-size: 13px; }
+.ics-list .ics-source { overflow-wrap: anywhere; color: var(--ink-soft); }
+.ics-edit { grid-column: 1 / -1; flex-wrap: wrap; }
+.ics-edit .ics-input { flex-basis: 100%; }
 .ics-help { font-size: max(var(--fmin), 11px); color: var(--ink-faint); line-height: 1.6; }
+.backup-row small { overflow-wrap: anywhere; }
+.backup-row .backup-question,
+.backup-row:has([data-backup][data-armed]) .backup-heading { display: none; }
+.backup-row:has([data-backup][data-armed]) .backup-question { display: inline; }
+.backup-row [data-backup] { flex: none; }

@@ -8,6 +8,21 @@ import { CloudView } from './cloud.js'
 import { readBackups, restoreBackup } from '../sync.js'
 import { THEME_INFO, QUALITY_INFO, hhmm } from './shared.js'
 
+function backupSummary({ state, at }) {
+  const tasks = Array.isArray(state.tasks) ? state.tasks : []
+  const projects = Array.isArray(state.projects) ? state.projects.length : 0
+  // 任務可以重新排序，要用加入時間找最新的那件。
+  let latest = null
+  for (const task of tasks) {
+    if (task?.title && (!latest || (task.createdAt || 0) >= (latest.createdAt || 0))) latest = task
+  }
+  const changed = new Date(state.updatedAt || at || NaN)
+  const modified = Number.isFinite(changed.getTime())
+    ? `最後修改 ${dateStr(changed)} ${changed.toTimeString().slice(0, 8)}`
+    : '沒有修改時間紀錄'
+  return `${tasks.length} 件任務・${projects} 個專案<br>${modified}<br>${latest ? `最新加入的任務：${esc(latest.title)}` : '還沒有任務'}`
+}
+
 export const settingsMethods = {
   // ── 紀錄 ──
   renderSettings() {
@@ -92,9 +107,14 @@ export const settingsMethods = {
       if (r) return this._rescueAction(r)
       const b = e.target.closest('[data-backup]')
       if (!b) return
+      const i = +b.dataset.backup
+      if (!b.dataset.armed) b.backupChoice = this.shownBackups[i]
       armConfirm(b, '再按一次還原', () => {
         try {
-          if (restoreBackup(this.store, +b.dataset.backup)) this.toast({ icon: '戻', title: '已還原備份', sub: '還原前的小島也留了一份，還原錯了可以再換回來' })
+          // 另一個分頁可能剛留了一份備份，位置換了就讓使用者重新選。
+          if (JSON.stringify(b.backupChoice) !== JSON.stringify(readBackups()[i])) {
+            this.toast({ icon: '！', title: '備份清單剛更新了，請再選一次' })
+          } else if (restoreBackup(this.store, i)) this.toast({ icon: '戻', title: '已還原備份', sub: '還原前的小島也留了一份，還原錯了可以再換回來' })
         } catch (err) {
           this.toast({ icon: '！', title: '這份備份沒辦法還原', sub: err.message })
         }
@@ -165,10 +185,11 @@ export const settingsMethods = {
 
   renderSync() {
     this.cloudView?.render()
-    const when = (t) => `${new Date(t).getMonth() + 1}/${new Date(t).getDate()} ${hhmm(t)}`
+    const when = (t) => t && Number.isFinite(new Date(t).getTime()) ? `${new Date(t).getMonth() + 1}/${new Date(t).getDate()} ${hhmm(t)}` : '時間不詳'
     // 被取代的資料（兩種同步、匯入、重置、還原共用，留最近幾份）：還在選邊時先不顯示
     const choosing = this.cloud?.state === 'conflict' || this.sync?.state === 'conflict'
     const list = choosing ? [] : readBackups()
+    this.shownBackups = list
     const rescue = readRescue()
     $('#backupList').hidden = !list.length && !rescue
     const kb = (s) => `${Math.max(1, Math.round(s.length / 1024))} KB`
@@ -187,16 +208,14 @@ export const settingsMethods = {
             ? `${when(bk.at)} 的這台版本，兩台都改過、自動合在一起之前留的`
             : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
         const n = list.length > 1 ? `<span class="bk-n">${i + 1} / ${list.length}</span>` : ''
-        return `<div class="set-row"><div><b>被取代的資料${n}</b><small>${info}</small></div><button class="chip-toggle" data-backup="${i}">還原</button></div>`
+        return `<div class="set-row backup-row"><div><b><span class="backup-heading">被取代的資料</span><span class="backup-question">要還原這份備份嗎？</span>${n}</b><small>${info}</small><small id="backupSummary${i}">${backupSummary(bk)}</small></div><button class="chip-toggle" data-backup="${i}" aria-describedby="backupSummary${i}">還原</button></div>`
       })
       .join(''))
     const sy = this.sync
     if (!sy) return
-    // 手機和 Firefox 不能直接存取檔案：有線上同步就夠了，整列藏起來
-    $('#syncRow').hidden = sy.state === 'unsupported'
     const name = esc(sy.fileName)
     const view = {
-      unsupported: ['', []],
+      unsupported: ['這個瀏覽器不能連結資料夾。想在不同裝置接著用，可以用上面的線上同步。', []],
       off: ['把資料自動存進 OneDrive、Dropbox 等雲端資料夾裡的一個檔案，其他電腦連結同一個檔案就能共用。檔案沒有加密，看得到那個資料夾的人都讀得到內容，請放在只有自己能看的地方', [['create', '建立同步檔', 1], ['choose', '連結既有檔案']]],
       'needs-permission': [`已記住「${name}」，瀏覽器需要你同意一次才能繼續同步`, [['resume', '繼續同步', 1], ['unlink', '解除']]],
       linked: [`已連結「${name}」・${sy.lastSync ? `${hhmm(sy.lastSync)} 同步過` : '同步中…'}`, [['now', '立即同步'], ['unlink', '解除']]],

@@ -146,11 +146,67 @@ describe('store：訂閱', () => {
     expect(store.resumeSubscription(s.id)).toBe('kept')
     expect(s).toMatchObject({ status: 'active', end: '', start: '2026-01-15', paid0: 0 })
     expect(store.cancelSubscription(s.id)).toBe(true)
-    // 一個月後重新訂閱：之前那段（1/15～10/15 共 10 次，照現在的價格）記進 paid0，從今天重新算
+    // 11/15 的新價格還沒扣就停了：1/15～10/15 都是 390 元
     vi.setSystemTime(new Date(2026, 11, 20, 12))
     expect(store.resumeSubscription(s.id)).toBe('restart')
-    expect(s).toMatchObject({ status: 'active', end: '', start: '2026-12-20', paid0: 4200 })
-    expect(paidSoFar(s, '2026-12-20')).toBe(4200 + 420)
+    expect(s).toMatchObject({ status: 'active', end: '', start: '2026-12-20', paid0: 3900 })
+    expect(paidSoFar(s, '2026-12-20')).toBe(3900 + 420)
+  })
+
+  it('三期各 120 元，預設下一期才扣 199 元；重開存檔還是照各期的價格', () => {
+    const s = store.addSubscription({ name: '設計素材月費', price: 120, start: '2026-09-01' })
+    expect(paidSoFar(s, store.today)).toBe(360)
+    store.updateSubscription(s.id, { price: 199 })
+    store.importJSON(store.exportJSON())
+    const saved = store.subscription(s.id)
+    expect(paidSoFar(saved, '2026-11-30')).toBe(360)
+    expect(paidSoFar(saved, '2026-12-01')).toBe(559)
+    expect(store.subChargesOn('2026-11-01')[0].price).toBe(120)
+    expect(store.subChargesOn('2026-12-01')[0].price).toBe(199)
+  })
+
+  it('這一期就是新價格：月底也找得到這一期，同一期再改只取最後的價格', () => {
+    const s = store.addSubscription({ name: '月底扣', price: 120, start: '2026-08-31' })
+    store.updateSubscription(s.id, { price: 199, priceFrom: 'current' })
+    expect(paidSoFar(s, store.today)).toBe(439)
+    store.updateSubscription(s.id, { price: 99, priceFrom: 'current' })
+    store.updateSubscription(s.id, { price: 159 })
+    expect(paidSoFar(s, '2026-10-30')).toBe(240)
+    expect(paidSoFar(s, '2026-10-31')).toBe(339)
+    expect(paidSoFar(s, '2026-11-30')).toBe(498)
+  })
+
+  it('今天扣的算這一期；下期調價時今天的日曆、提醒和本月待扣仍是舊價', () => {
+    const s = store.addSubscription({ name: '每週扣', price: 120, start: '2026-10-23', unit: 'week' })
+    store.updateSubscription(s.id, { price: 199 })
+    expect(store.subChargesOn(store.today)[0].price).toBe(120)
+    expect(store.subReminders()[0].sub.price).toBe(120)
+    expect(store.subsSummary().monthLeft).toBe(120 + 3 * 199)
+    expect(paidSoFar(s, store.today)).toBe(360)
+    // 改成這一期就生效，原先排在下一期的同一個價格也跟著移過來
+    store.updateSubscription(s.id, { price: 199, priceFrom: 'current' })
+    expect(paidSoFar(s, store.today)).toBe(439)
+  })
+
+  it('下一期起換幣別：以前扣的照當時的幣別（日曆、調價紀錄），歷來約付照匯率換成現在的幣別', () => {
+    const s = store.addSubscription({ name: '海外訂閱', price: 120, start: '2026-09-01' })
+    store.setSubRate('USD', 30)
+    store.updateSubscription(s.id, { price: 5, cur: 'USD' })
+    expect(s.priceHistory).toEqual([{ until: '2026-12-01', price: 120, cur: 'TWD' }])
+    expect(store.subChargesOn('2026-11-01')[0]).toMatchObject({ price: 120, cur: 'TWD' })
+    expect(store.subChargesOn('2026-12-01')[0]).toMatchObject({ price: 5, cur: 'USD' })
+    expect(paidSoFar(s, store.today, store.state.subRates)).toBe(12)
+    expect(paidSoFar(s, '2026-12-01', store.state.subRates)).toBe(17)
+    store.importJSON(store.exportJSON())
+    expect(store.subscription(s.id).priceHistory).toEqual([{ until: '2026-12-01', price: 120, cur: 'TWD' }])
+  })
+
+  it('還在試用就調價：記下第一次收費的日子，試用期間照樣是 0 元', () => {
+    const s = store.addSubscription({ name: '還在試用', price: 120, start: '2026-11-15', trial: true })
+    store.updateSubscription(s.id, { price: 199 })
+    expect(s.priceHistory).toEqual([{ until: '2026-11-15', price: 120 }])
+    expect(paidSoFar(s, store.today)).toBe(0)
+    expect(paidSoFar(s, '2026-11-15')).toBe(199)
   })
 
   it('匯出匯入後都在；壞掉的資料讀進來時清掉；匯率可以改，不合理的用預設', () => {
@@ -169,6 +225,24 @@ describe('store：訂閱', () => {
     store.importJSON(JSON.stringify({ tasks: [], player: {}, subscriptions: [null, 5, { name: 'ok', price: 1 }, { name: '', price: 1 }, { name: 'bad', price: 'x' }], subRates: { USD: 'x', JPY: 0.2 } }))
     expect(store.state.subscriptions.map((x) => x.name)).toEqual(['ok'])
     expect(store.state.subRates).toMatchObject({ USD: 31, JPY: 0.2 })
+  })
+
+  it('讀舊存檔照原價算；調價紀錄只收真的日期和金額，同一天取最後一筆', () => {
+    const history = [
+      null, { until: '2026-02-30', price: 10 }, { until: ['2026-11-01'], price: 20 },
+      ...[true, {}, '', null, -1, '20'].map((price, i) => ({ until: `2026-10-0${i + 1}`, price })),
+      { until: '2026-12-01', price: 1e10 }, { until: '2026-11-01', price: 8 },
+      { until: '2026-11-01', price: 12.345, note: '多帶的' },
+    ]
+    const many = Array.from({ length: 600 }, (_, i) => ({ until: `${2000 + i}-01-01`, price: i }))
+    const subscriptions = [undefined, {}, history, many].map((priceHistory, i) => sub({ id: 's' + i, price: 50, priceHistory }))
+    store.importJSON(JSON.stringify({ tasks: [], player: {}, subscriptions }))
+    expect(paidSoFar(store.subscription('s0'), '2026-03-31')).toBe(150)
+    expect(store.subscription('s1').priceHistory).toEqual([])
+    expect(store.subscription('s2').priceHistory).toEqual([
+      { until: '2026-11-01', price: 12.35 }, { until: '2026-12-01', price: 1e7 },
+    ])
+    expect(store.subscription('s3').priceHistory).toHaveLength(240)
   })
 
   it('哪天要扣款（日曆用）；該提醒的扣款：照提前天數，免費試用的第一次至少前 3 天', () => {

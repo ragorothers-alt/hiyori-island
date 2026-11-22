@@ -127,7 +127,14 @@ body.night .ls-cell b.gold { color: #f3cf7f; }
 .life-spend { padding: 9px 12px 6px; border-radius: 16px; background: var(--field); border: 1px solid var(--glass-border); }
 .lsp-head { display: flex; align-items: baseline; gap: 8px; }
 .lsp-head b { font-family: var(--font-display); font-weight: 400; font-size: 13px; letter-spacing: .1em; white-space: nowrap; }
-.lsp-head small { margin-left: auto; font-family: var(--font-num); font-size: max(var(--fmin), 11px); color: var(--ink-soft); text-align: right; }
+.lsp-head span, .lsp-total { margin-left: auto; font-family: var(--font-num); font-size: max(var(--fmin), 11px); color: var(--ink-soft); text-align: right; }
+.lsp-total { margin: 4px 0 0; }
+
+.journal li.journal-more { justify-content: center; background: transparent; padding: 2px; }
+.journal-more button { min-height: 44px; }
+/* 故事獨佔下一列，後面的花會先補滿選到的那一列；換寬度也跟著排。 */
+#dexGrid { grid-auto-flow: row dense; }
+#dexGrid .dex-detail { grid-column: 1 / -1; margin: 0; color: var(--ink-soft); }
 .lsp-none { margin: 4px 0 4px; font-size: max(var(--fmin), 11.5px); color: var(--ink-faint); }
 .lsp-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 4px; }
 .lsp-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px; height: 74px; padding: 2px 0 3px; border-radius: 10px; transition: background .2s; }

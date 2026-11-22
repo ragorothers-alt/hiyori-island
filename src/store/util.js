@@ -23,7 +23,9 @@ const POMO_SIDS = 20
 //    舊版照舊的意思去用會出錯的（像 4 的長期任務）才加
 // 7：每天的紀錄多了回神紀錄（history 的 nudges／backs／onTask）：6 版讀每天的紀錄時只留認得的欄位，存回去就整個洗掉。
 //    從這一版開始，每天的紀錄裡不認得的欄位也原樣留著
-export const DATA_VERSION = 7
+// 8：訂閱的調價紀錄（priceHistory）：7 版讀訂閱時只留認得的欄位（訂閱不留不認得的），存回去調價紀錄就不見，
+//    以前扣過的整段又照新的價格算
+export const DATA_VERSION = 8
 // 每個習慣記住最近幾天給過獎勵（日期倒退時不重領；再久以前的日子不會倒退回去）
 const HABIT_PAID_DAYS = 120
 export const newerData = (s) => !!s && typeof s === 'object' && Number(s.version) > DATA_VERSION

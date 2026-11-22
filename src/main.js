@@ -2398,11 +2398,15 @@ async function boot() {
     if (r && timerToast(r)) timerSaid = Date.now()
   })
   // 分享連結（#sync=同步碼）：先從網址拿掉，再到設定裡等使用者按「連線」
-  const linkCode = codeFromHash()
-  if (linkCode) {
-    history.replaceState(null, '', location.pathname + location.search)
-    ui.offerCloud(linkCode)
+  const takeLink = () => {
+    const code = codeFromHash()
+    if (!code) return
+    history.replaceState(history.state, '', location.pathname + location.search)
+    ui.offerCloud(code)
   }
+  takeLink()
+  // 同一個連結貼回已經開著的這一頁（網址只差 # 後面，不會重新載入）：一樣到設定裡填好
+  addEventListener('hashchange', takeLink)
 
   // ── 時間 ──
   let lastMin = -1

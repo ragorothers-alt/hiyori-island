@@ -1,6 +1,6 @@
-import { SUBS_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PARK_MAX, parkText, calUrlOk, CALENDARS_MAX } from './migrate.js'
+import { SUBS_MAX, SUB_PRICE_CHANGES_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PARK_MAX, parkText, calUrlOk, CALENDARS_MAX } from './migrate.js'
 import { uid, addDays, daysBetween, dateStr } from './util.js'
-import { nextCharge, paidCount, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
+import { nextCharge, paidSoFar, priceChangeDate, revisedPriceHistory, subAtCharge, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS, XP, pullOf } from '../theme.js'
 import { grantKey } from './grants.js'
@@ -56,7 +56,7 @@ export const extrasMethods = {
   addSubscription(data = {}) {
     this._refreshToday()
     if (this.state.subscriptions.length >= SUBS_MAX) return null
-    const sub = cleanSub({ ...data, id: uid(), status: 'active', end: '', paid0: 0, createdAt: Date.now() }, this.today)
+    const sub = cleanSub({ ...data, id: uid(), status: 'active', end: '', paid0: 0, priceHistory: [], createdAt: Date.now() }, this.today)
     if (!sub) return null
     this.state.subscriptions.push(sub)
     this._finish([['subAdded', sub]])
@@ -67,11 +67,17 @@ export const extrasMethods = {
   },
   // 改名稱、金額、週期、提醒…；狀態（取消、重新訂閱）和付過的金額只能用下面的方法改
   updateSubscription(id, patch = {}) {
+    this._refreshToday()
     const old = this.subscription(id)
     if (!old) return false
-    const { id: _, status, end, paid0, createdAt, ...rest } = patch
+    const { id: _, status, end, paid0, createdAt, priceHistory, priceFrom, ...rest } = patch
     const next = cleanSub({ ...old, ...rest }, this.today)
     if (!next) return false
+    if (next.price !== old.price || next.cur !== old.cur || ('price' in rest && priceFrom === 'current')) {
+      const date = priceChangeDate(next, this.today, priceFrom)
+      next.priceHistory = revisedPriceHistory(old, date, next.price, next.cur)
+      if (next.priceHistory.length > SUB_PRICE_CHANGES_MAX) return false
+    }
     Object.assign(old, next)
     this._finish([['subChanged', old]])
     return true
@@ -99,7 +105,7 @@ export const extrasMethods = {
       this._finish([['subChanged', s]])
       return 'kept'
     }
-    s.paid0 = Math.round((s.paid0 + paidCount(s, this.today) * s.price) * 100) / 100
+    s.paid0 = paidSoFar(s, this.today, this.state.subRates)
     s.status = 'active'
     s.end = ''
     s.trial = false
@@ -125,7 +131,7 @@ export const extrasMethods = {
   },
   // 那天要扣款的訂閱（日曆用）
   subChargesOn(date) {
-    return this.state.subscriptions.filter((s) => chargesBetween(s, date, date).length)
+    return this.state.subscriptions.filter((s) => chargesBetween(s, date, date).length).map((s) => subAtCharge(s, date))
   },
   // 現在該提醒的扣款：訂閱中、下次扣款在提醒天數內（免費試用的第一次扣款至少提前 3 天）。
   // days：還有幾天；trial：這次是試用結束後的第一次扣款
@@ -138,7 +144,7 @@ export const extrasMethods = {
       if (!date) continue
       const trial = s.trial && date === s.start
       const days = daysBetween(this.today, date)
-      if (days <= (trial ? Math.max(3, s.remind) : s.remind)) out.push({ id: s.id, sub: s, date, days, trial })
+      if (days <= (trial ? Math.max(3, s.remind) : s.remind)) out.push({ id: s.id, sub: subAtCharge(s, date), date, days, trial })
     }
     return out.sort((a, b) => a.date.localeCompare(b.date))
   },
@@ -401,10 +407,27 @@ export const extrasMethods = {
     this._finish([['parked', item]])
     return item
   },
+  // 不用做了：拿掉這一筆。回傳 { item, index, ds }（「復原」用 restorePark 放回去；ds 是哪一份小島的），沒有這一筆回傳 null
   unpark(id) {
-    const n = this.state.parked.length
-    this.state.parked = this.state.parked.filter((x) => x.id !== id)
-    if (this.state.parked.length !== n) this._finish()
+    const index = this.state.parked.findIndex((x) => x.id === id)
+    if (index < 0) return null
+    const item = this.state.parked[index]
+    this.state.parked = this.state.parked.filter((x) => x !== item)
+    this._finish()
+    return { item, index, ds: this.state.tallyGen }
+  },
+  // 剛拿掉的那一筆放回原來的位置（同一個 id、記下的時間不變）。回傳 true；滿了是 'full'；
+  // 已經在了、字不對、小島整份換過（重置、匯入：別的小島的不放進來）是 false
+  restorePark({ item, index, ds } = {}) {
+    const text = parkText(item?.text)
+    if (!text || !item.id || (ds !== undefined && ds !== this.state.tallyGen) || this.state.parked.some((x) => x.id === item.id)) return false
+    if (this.state.parked.length >= PARK_MAX) return 'full'
+    const at = Number.isFinite(item.at) && item.at > 0 ? item.at : Date.now()
+    const list = [...this.state.parked]
+    list.splice(Math.max(0, Math.min(Number.isInteger(index) ? index : list.length, list.length)), 0, { id: String(item.id), text, at })
+    this.state.parked = list
+    this._finish()
+    return true
   },
   // 記下的那件變成 date 那天的任務（拿掉這一筆）；回傳新的任務
   parkToTask(id, date) {
@@ -426,13 +449,21 @@ export const extrasMethods = {
     this._finish([['calendarsChanged', c]])
     return c
   },
+  // 回傳有沒有改成（網址不對、跟另一個重複是 false，整筆不改）
   updateCalendar(id, patch = {}) {
     const c = this._find('calendars', id)
-    if (!c) return
+    if (!c) return false
+    if ('url' in patch) {
+      const u = String(patch.url || '').trim()
+      if (!calUrlOk(u) || this.state.calendars.some((x) => x !== c && x.url === u)) return false
+      // 換網址：同一個 id（顏色、名字、開關、兩台同步時都還是同一筆），抓回來的舊日程由 calendars.js 照網址清掉
+      c.url = u
+    }
     if ('name' in patch) c.name = str(patch.name, 30).trim()
     if ('on' in patch) c.on = !!patch.on
     if ('color' in patch) c.color = Math.max(0, Math.min(99, Math.round(+patch.color) || 0))
     this._finish([['calendarsChanged', c]])
+    return true
   },
   removeCalendar(id) {
     const before = this.state.calendars.length
@@ -455,6 +486,20 @@ export const extrasMethods = {
     this.state.dates.push(d)
     this._finish([['dateAdded', { ...d, days: daysBetween(this.today, date) }]])
     return d
+  },
+  // 改名稱、日子、種類（考試／截止日／紀念日）；不對的欄位整筆不改，回傳 false
+  updateDate(id, patch = {}) {
+    const d = this._find('dates', id)
+    if (!d) return false
+    const title = 'title' in patch ? str(patch.title, 30).trim() : d.title
+    const date = 'date' in patch ? patch.date : d.date
+    const kind = 'kind' in patch ? patch.kind : d.kind
+    if (!title || !DATE_RE.test(date) || !DATE_KINDS[kind]) return false
+    if (title === d.title && date === d.date && kind === d.kind) return true
+    Object.assign(d, { title, date, kind })
+    // （不發 dateChanged：那是「看的日期換了」）
+    this._finish()
+    return true
   },
   deleteDate(id) {
     this.state.dates = this.state.dates.filter((d) => d.id !== id)

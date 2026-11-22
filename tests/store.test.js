@@ -2376,6 +2376,52 @@ describe('先記下來', () => {
     expect(m[0]).toEqual({ id: 'p10', text: '第 10 件', at: 1010 })
     expect(migrate({ ...raw, parked: 'x' }).parked).toEqual([])
   })
+
+  it('不用做了之後可以復原：放回原來的位置、同一個 id 和記下的時間；已經放回、滿了就不放', () => {
+    const a = store.park('回信')
+    const b = store.park('帶備用燈')
+    const c = store.park('繳電費')
+    vi.setSystemTime(Date.now() + 60000)
+    const gone = store.unpark(b.id)
+    expect(gone).toEqual({ item: b, index: 1, ds: store.state.tallyGen })
+    expect(store.unpark('nope')).toBeNull()
+    expect(store.state.parked.map((x) => x.text)).toEqual(['回信', '繳電費'])
+    expect(store.restorePark(gone)).toBe(true)
+    expect(store.state.parked).toEqual([a, b, c])
+    // 按了兩次「復原」：不會多一筆
+    expect(store.restorePark(gone)).toBe(false)
+    expect(store.state.parked).toHaveLength(3)
+    // 拿掉之後又記了很多、滿了：不放回去
+    const g2 = store.unpark(a.id)
+    for (let i = 0; i < 48; i++) store.park(`第 ${i} 件`)
+    expect(store.state.parked).toHaveLength(50)
+    expect(store.restorePark(g2)).toBe('full')
+    expect(store.restorePark({ item: { id: 'x', text: '   ' }, index: 0 })).toBe(false)
+    // 小島整份換過（重置、匯入另一份）：別的小島的那一筆不放進來
+    store.unpark(store.state.parked[0].id)
+    const g3 = store.unpark(store.state.parked[0].id)
+    store.importJSON(store.exportJSON())
+    expect(store.restorePark(g3)).toBe(false)
+  })
+})
+
+describe('重要日子：改', () => {
+  it('改名稱、日子、種類；不對的欄位整筆不改；改了照新的日子倒數', () => {
+    const d = store.addDate({ title: '發表會', date: addDays(TODAY, 120), kind: 'day' })
+    expect(store.updateDate(d.id, { title: '  期末發表  ', date: addDays(TODAY, 3), kind: 'deadline' })).toBe(true)
+    expect(store.state.dates[0]).toMatchObject({ id: d.id, title: '期末發表', date: addDays(TODAY, 3), kind: 'deadline', createdAt: d.createdAt })
+    expect(store.upcomingDates().map((x) => [x.title, x.days])).toEqual([['期末發表', 3]])
+    expect(store.updateDate(d.id, { title: '   ' })).toBe(false)
+    expect(store.updateDate(d.id, { date: '2026-02-30x' })).toBe(false)
+    expect(store.updateDate(d.id, { kind: 'party' })).toBe(false)
+    expect(store.updateDate('nope', { title: 'x' })).toBe(false)
+    expect(store.state.dates[0].title).toBe('期末發表')
+    // 只改一欄：其他照舊
+    expect(store.updateDate(d.id, { date: addDays(TODAY, 10) })).toBe(true)
+    expect(store.state.dates[0]).toMatchObject({ title: '期末發表', kind: 'deadline', date: addDays(TODAY, 10) })
+    store.importJSON(store.exportJSON())
+    expect(store.state.dates[0].date).toBe(addDays(TODAY, 10))
+  })
 })
 
 describe('週報', () => {

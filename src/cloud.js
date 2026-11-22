@@ -26,9 +26,19 @@ export function newCode() {
   return [...bytes].map((b) => ALPHABET[b % 32]).join('').match(/.{4}/g).join('-')
 }
 
-// 「ab12 cd34…」→「AB12-CD34-…」；不是 28 碼（或以前的 16 碼）回傳 null。O/I/L 容易跟 0/1 看錯，一律當成數字
+// 「ab12 cd34…」→「AB12-CD34-…」；不是 28 碼（或以前的 16 碼）回傳 null。O/I/L 容易跟 0/1 看錯，一律當成數字。
+// 整段分享連結（…#sync=同步碼）貼進輸入框也認得：拿 sync= 後面那一段
 export function normalizeCode(text) {
-  const s = String(text ?? '')
+  let raw = String(text ?? '')
+  const m = /[#&]sync=([^&\s]+)/.exec(raw)
+  if (m) {
+    try {
+      raw = decodeURIComponent(m[1])
+    } catch {
+      return null
+    }
+  }
+  const s = raw
     .toUpperCase()
     .replace(/[\s-]/g, '')
     .replace(/O/g, '0')

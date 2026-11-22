@@ -220,7 +220,23 @@ export class TodayView {
         const li = b.closest('li')
         const near = (li?.nextElementSibling || li?.previousElementSibling)?.querySelector('[data-id]')?.dataset.id
         this._fkNear = near ? `${b.dataset.fk.slice(0, 3)}${near}` : null
-        if (b.dataset.act === 'park-drop') return s.unpark(id)
+        // 不用做了：拿掉，提示卡上寫原文、可以復原（單手誤按到 × 的話，記了很久的那一筆不會就這樣不見）
+        if (b.dataset.act === 'park-drop') {
+          const gone = s.unpark(id)
+          if (gone) {
+            this.hooks.toast({
+              icon: '記', title: '拿掉了這一筆', sub: `「${gone.item.text}」`, ms: 7000,
+              actions: [{
+                label: '復原',
+                run: () => {
+                  if (s.restorePark(gone) !== 'full') return
+                  this.hooks.toast({ icon: '記', title: '放不回去：先記下的事滿了', sub: `先處理掉一件再記：「${gone.item.text}」`, ms: 9000 })
+                },
+              }],
+            })
+          }
+          return
+        }
         s.tick()
         const tmr = b.dataset.act === 'park-tmr'
         const t = s.parkToTask(id, tmr ? addDays(s.today, 1) : s.today)

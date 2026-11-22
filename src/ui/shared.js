@@ -68,7 +68,7 @@ export const writeLocal = (k, v) => {
   } catch {}
 }
 // 鍵盤可以停的地方（看得到的）
-export const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+export const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), details > summary, [tabindex]:not([tabindex="-1"])'
 export const focusables = (root) => [...root.querySelectorAll(FOCUSABLE)].filter((el) => el.getClientRects().length)
 // 疊在畫面的第幾層：body 底下的那一個（對話框、提示卡、專注頁…都是）的 z-index
 export const layerZ = (el) => {

@@ -5,6 +5,8 @@
 //     月、年照開始那天的日期扣，那個月沒有那一天（31 號、2/29）就在月底扣
 //   status：active（訂閱中）| cancelled（取消了）。取消了的 end 是「不再扣款」的那一天：end 之前的扣款照算
 //   paid0：重新訂閱以前那一段已經付過的金額（跟 price 同一種幣別）
+//   priceHistory：每筆 { until, price, cur? } 記的是調價日「之前」的價格（cur：那時候的幣別，沒寫就是現在的），照日期排；
+//     最後一次調價起用訂閱上的 price、cur
 //   remind：扣款前幾天提醒（0＝當天、-1＝不提醒）
 
 export const SUB_UNITS = {
@@ -105,8 +107,43 @@ export function paidCount(sub, today) {
   if (upto < sub.start) return 0
   return indexFrom(sub, plusDays(upto, 1))
 }
-// 到 today 為止大約付了多少（照現在的價格算，加上重新訂閱以前付的），跟 price 同一種幣別
-export const paidSoFar = (sub, today) => paidCount(sub, today) * sub.price + (sub.paid0 || 0)
+// 今天扣的已經算這一期；還沒開始訂的，第一次扣款就用新價格
+export function priceChangeDate(sub, today, from = 'next') {
+  const count = paidCount(sub, today)
+  return chargeAt(sub, Math.max(0, from === 'current' ? count - 1 : count))
+}
+
+// 那一次扣款的價格和幣別（調價以前的照當時的）
+export function subAtCharge(sub, date) {
+  const old = sub.priceHistory?.find((row) => date < row.until)
+  return old ? { ...sub, price: old.price, cur: old.cur || sub.cur } : sub
+}
+
+// 同一期又改價，就換掉那期原先排好的價格。更早的紀錄還要留給以前的扣款用。cur：新的幣別（沒給就是沒換）
+export function revisedPriceHistory(sub, date, price, cur = sub.cur) {
+  const history = sub.priceHistory || []
+  const earlier = history.filter((row) => row.until < date)
+  const row = history.find((x) => x.until >= date)
+  const previous = row ? { price: row.price, cur: row.cur || sub.cur } : { price: sub.price, cur: sub.cur }
+  if (previous.price !== price || previous.cur !== cur) earlier.push({ until: date, price: previous.price, ...(previous.cur !== cur ? { cur: previous.cur } : {}) })
+  // 換了幣別：以前沒寫幣別的那幾筆（跟訂閱當時同一種）補上
+  return cur === sub.cur ? earlier : earlier.map((x) => (x.cur ? x : { ...x, cur: sub.cur }))
+}
+
+// 到 today 為止大約付了多少（跟現在的 price 同一種幣別；調價以前的照當時的價格，換過幣別的照匯率 rates 換算），加上重新訂閱以前付的
+export function paidSoFar(sub, today, rates) {
+  const count = paidCount(sub, today)
+  let cents = Math.round((sub.paid0 || 0) * 100)
+  let billed = 0
+  for (const { until, price, cur } of sub.priceHistory || []) {
+    if (billed === count) break
+    const end = until > today ? count : Math.min(count, indexFrom(sub, until))
+    const each = cur && cur !== sub.cur ? (price * rateOf(cur, rates)) / rateOf(sub.cur, rates) : price
+    cents += (end - billed) * Math.round(each * 100)
+    billed = end
+  }
+  return (cents + (count - billed) * Math.round(sub.price * 100)) / 100
+}
 
 // 換算成每個月大約多少（跟 price 同一種幣別）
 export function monthlyOf(sub) {
@@ -150,11 +187,16 @@ export function subsSummary(list, today, rates, days = 30) {
   for (const s of active) byCat[s.cat] = (byCat[s.cat] || 0) + toTWD(monthlyOf(s), s.cur, rates)
   const until = plusDays(today, days)
   const upcoming = []
-  for (const s of list) for (const date of chargesBetween(s, today, until)) upcoming.push({ sub: s, date, days: between(today, date) })
+  for (const s of list) for (const date of chargesBetween(s, today, until)) upcoming.push({ sub: subAtCharge(s, date), date, days: between(today, date) })
   upcoming.sort((a, b) => a.date.localeCompare(b.date) || toTWD(b.sub.price, b.sub.cur, rates) - toTWD(a.sub.price, a.sub.cur, rates))
   const end = monthEnd(today)
   let monthLeft = 0
-  for (const s of list) monthLeft += chargesBetween(s, today, end).length * toTWD(s.price, s.cur, rates)
+  for (const s of list) {
+    for (const date of chargesBetween(s, today, end)) {
+      const c = subAtCharge(s, date)
+      monthLeft += toTWD(c.price, c.cur, rates)
+    }
+  }
   const saved = cancelled.reduce((a, s) => a + toTWD(monthlyOf(s), s.cur, rates), 0)
   return { count: active.length, monthly, yearly: monthly * 12, monthLeft, upcoming, byCat, saved, cancelled: cancelled.length }
 }
