@@ -1,6 +1,7 @@
 // 提醒：日程與排進時段的任務開始前 N 分鐘提醒一次、就寢前 30 分鐘提醒準備睡覺（App 內 + 系統通知）。
 // 已提醒過的記錄在 localStorage，重新整理不會重複提醒；改了開始時間會再提醒一次。
 import { addDays, dateStr, toMin } from './store.js'
+import { stampAt } from './store/util.js'
 import { activeMottos, awake, mottoOf, pauseOf, planMottos, stepMotto } from './mottos.js'
 import { native, nativeAskNotify, nativeCanNotify } from './native.js'
 import { doneOn, streak } from './habits.js'
@@ -42,10 +43,11 @@ export class Reminders {
   //   handled()：另一邊記著的「念到哪一則了」（通知過、或頁面念過的最後一則）；
   //   claim(at)：頁面要念這一則，先跟另一邊說（另一邊剛好搶先通知了的話回 false）
   //   posted()：App 關著時手機發過的日程、任務、就寢提醒 [{ key, date }]（remindPlan.js 排的）：記成提醒過了，不再跳提示卡
-  constructor(store, onRemind, { external = () => false, hidden = () => typeof document !== 'undefined' && !!document.hidden, handled = () => 0, claim = () => true, posted = () => [] } = {}) {
+  // ready()：可以檢查了嗎（別人發過哪幾則還在讀的時候先不檢查，不會先跳一次已經發過的）
+  constructor(store, onRemind, { external = () => false, hidden = () => typeof document !== 'undefined' && !!document.hidden, handled = () => 0, claim = () => true, posted = () => [], ready = () => true } = {}) {
     this.store = store
     this.onRemind = onRemind
-    Object.assign(this, { external, hidden, handled, claim, posted })
+    Object.assign(this, { external, hidden, handled, claim, posted, ready })
     this.sent = load()
     // 訂閱這次扣款提醒過了（存不進 localStorage 時也記得，不會每秒響一次）
     this.subSent = {}
@@ -233,6 +235,7 @@ export class Reminders {
   }
 
   check(now = new Date()) {
+    if (!this.ready()) return
     this._merge()
     this.markSent(this.posted())
     const lead = this.store.state.settings.remindLead
@@ -281,16 +284,18 @@ export class Reminders {
       }
       if (begun && !done.includes(`${key}!`) && this._claim(date, `${key}!`)) this.onRemind({ ...item, start: at }, 0, 'taskStart')
     }
-    // 就寢前 30 分鐘（之後 10 分鐘內打開 App 也會補提醒）。照「過了幾分鐘」算，跨過午夜也對得上
-    // （就寢 00:25 → 23:55 起的 10 分鐘）；記在這段開始的那一天，過了午夜不會再提醒一次
+    // 就寢前 30 分鐘（之後 10 分鐘內打開 App 也會補提醒）。照那一天就寢那一刻往前 30 分鐘的時間點算（跟交給手機、伺服器的
+    // remindPlan.js 一樣）：跨過午夜（就寢 00:25 → 23:55 起的 10 分鐘）、換夏令時間那天也對得上；記在這段開始的那一天，過了午夜不會再提醒一次
     const r = this.store.state.rhythm
     const bedKey = `bed@${r.sleep}`
-    const at = (toMin(r.sleep) - 30 + 1440) % 1440
-    const since = (mins - at + 1440) % 1440
-    if (r.bedRemind && since < 10) {
-      const night = mins - since >= 0 ? today : addDays(today, -1)
-      if (!(this.sent[night] || []).includes(bedKey) && this._claim(night, bedKey)) {
-        this.onRemind({ id: 'bedtime', title: '就寢', start: r.sleep }, 30, 'bed')
+    if (r.bedRemind) {
+      for (const day of [yesterday, today, tomorrow]) {
+        const at = stampAt(day, r.sleep) - 30 * 60000
+        if (+now < at || +now >= at + 10 * 60000) continue
+        const night = dateStr(new Date(at))
+        if (!(this.sent[night] || []).includes(bedKey) && this._claim(night, bedKey)) {
+          this.onRemind({ id: 'bedtime', title: '就寢', start: r.sleep }, 30, 'bed')
+        }
       }
     }
     // 重要日子和里程碑期限：前一天和當天，早上 8 點後第一次打開時提醒一次（專案的截止日另外有提醒）

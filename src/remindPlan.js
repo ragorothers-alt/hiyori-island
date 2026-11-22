@@ -3,7 +3,7 @@
 // 規則、字跟頁面開著時的提醒一樣（reminders.js 的 check、main.js 的 onRemind），key 也一樣（`${id}@${開始時間}`，記在那一天）：
 // 頁面已經提醒過的不排；手機發過的，回到 App 時記成提醒過（reminders.js 的 markSent），不會再跳一次提示卡。
 // 例行公事還沒長出來的那幾天（明天、後天）照例行公事本身排，id 跟之後長出來的那一筆一樣
-import { addDays, dateStr, parseDate, toMin, repeatMatches, routineInstanceId } from './store/util.js'
+import { addDays, dateStr, repeatMatches, routineInstanceId, stampAt } from './store/util.js'
 
 export const REMIND_AHEAD = 47 * 3600000
 // 手機最多排幾則（一天十幾件排了時段的也排得下）
@@ -13,12 +13,7 @@ const DAYS = 4
 // 晚到多久還發：開始後 15 分鐘內（跟頁面一樣，睡著時錯過的也補）；就寢的到就寢那一刻
 const LATE = 15 * 60000
 
-// 那一天的 HH:MM 是幾點（照這台的時區；換夏令時間那天也對）
-const stamp = (date, hhmm) => {
-  const d = parseDate(date)
-  const m = toMin(hhmm)
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(m / 60), m % 60).getTime()
-}
+const stamp = stampAt
 
 // 那一天有時段的日程、排了時段的任務（例行公事還沒長出來的也算）：[項目, 種類]
 function itemsOn(store, date) {

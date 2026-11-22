@@ -14,12 +14,15 @@ const walk = (dir, base = '') =>
 // 代號用 dist 裡每個檔案的路徑和內容算：只改 index.html、manifest、圖示或 sw.js 本身（檔名都不變）也會換新快取
 const swVersion = () => {
   let files = []
+  let entry = ''
   let dir = 'dist'
   return {
     name: 'hiyori-sw-version',
     apply: 'build',
     generateBundle(options, bundle) {
       files = Object.keys(bundle).sort()
+      // 首頁真正的入口 JS（index.html 的 <script type="module">）：Service Worker 認首頁時要對得上它
+      entry = Object.values(bundle).find((c) => c.type === 'chunk' && c.isEntry && c.facadeModuleId?.endsWith('/index.html'))?.fileName || Object.values(bundle).find((c) => c.type === 'chunk' && c.isEntry)?.fileName || ''
       dir = options.dir || dir
     },
     closeBundle() {
@@ -28,8 +31,11 @@ const swVersion = () => {
       for (const f of walk(dir)) hash.update(`${f}\n`).update(readFileSync(join(dir, f))).update('\n')
       const id = hash.digest('hex').slice(0, 10)
       const src = readFileSync(file, 'utf8')
-      const out = src.replace("const VERSION = 'hiyori-v1'", `const VERSION = 'hiyori-${id}'`).replace('const BUILD = []', `const BUILD = ${JSON.stringify(files)}`)
-      if (out === src) throw new Error('sw.js 裡找不到 VERSION／BUILD，建置代號沒有填進去')
+      const out = src
+        .replace("const VERSION = 'hiyori-v1'", `const VERSION = 'hiyori-${id}'`)
+        .replace('const BUILD = []', `const BUILD = ${JSON.stringify(files)}`)
+        .replace("const ENTRY = ''", `const ENTRY = ${JSON.stringify(entry)}`)
+      if (!entry || !out.includes(`const ENTRY = ${JSON.stringify(entry)}`) || !out.includes(`'hiyori-${id}'`)) throw new Error('sw.js 裡找不到 VERSION／BUILD／ENTRY，建置代號沒有填進去')
       writeFileSync(file, out)
     },
   }

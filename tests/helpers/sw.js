@@ -60,10 +60,11 @@ export class FakeCaches {
 }
 
 // 跟建置時一樣把版本和檔案清單填進去，再跑一次 sw.js，拿到它註冊的事件
-export function loadSW({ version = 'hiyori-new', build = [], caches, fetch = async () => new Response('ok'), clients = {}, registration = {} }) {
+export function loadSW({ version = 'hiyori-new', build = [], entry = '', caches, fetch = async () => new Response('ok'), clients = {}, registration = {} }) {
   const src = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8')
     .replace("const VERSION = 'hiyori-v1'", `const VERSION = '${version}'`)
     .replace('const BUILD = []', `const BUILD = ${JSON.stringify(build)}`)
+    .replace("const ENTRY = ''", `const ENTRY = ${JSON.stringify(entry)}`)
   const on = {}
   const self = {
     addEventListener: (type, fn) => (on[type] = fn),

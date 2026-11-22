@@ -6,6 +6,7 @@
 //   CloudSync（cloud.js）：透過線上同步伺服器，手機也能用
 import { dropBackup, keepBackup, newRev, readBackup, readBackups, newerData, NEWER_MSG, NEWER_TAB_MSG, NO_SAVE_MSG } from './store.js'
 import { migrate } from './store/migrate.js'
+import { merge3 } from './merge.js'
 
 // 被取代的資料（留最近幾份）由 store.js 管：兩個分頁同時改了資料時也會用到
 export { readBackup, readBackups }
@@ -34,6 +35,12 @@ const onlyTimer = (a, b) => {
     return false
   }
 }
+// 上次兩邊同步好的那一份（自動合併的 base）：整份存在 IndexedDB（可能很大，不擠 localStorage 的空間），記著是哪一版。
+// 讀到的不是現在的 base 那一版（寫到一半、別的分頁換過、被清掉）就不合併，照舊讓使用者選邊
+export const baseStates = {
+  read: (key) => idb('readonly', (s) => s.get(`base:${key}`)).catch(() => null),
+  write: (key, rev, json) => idb('readwrite', (s) => (rev ? s.put({ rev, json }, `base:${key}`) : s.delete(`base:${key}`))).catch(() => {}),
+}
 const readKey = (k) => {
   try {
     return localStorage.getItem(k) || ''
@@ -47,14 +54,19 @@ const readKey = (k) => {
 //   _pull(have)                          讀雲端：null = 還沒有資料；{ rev, savedAt, same: true } = 跟 have 同一版；{ rev, savedAt, state }
 //   _push(expect, { rev, savedAt }, json, opts)  寫雲端，雲端不是 expect 那一版時回傳 false（別台剛寫過）
 //   _fail(e)                             讀寫失敗時要進哪個狀態
+// onMerged({ clashes, rev })：兩邊都改過、自動合在一起了（clashes：兩邊改了同一個地方、用了比較晚改的那一邊的位置；
+// rev：合併前這台那一版，留成了備份，換得回去，見 undoMerge）
 export class SyncEngine {
-  constructor(store, { baseKey, remote, delay = 2500, poll = 60000, onStatus = () => {}, onPulled = () => {}, onConflict = () => {} }) {
+  constructor(store, { baseKey, remote, delay = 2500, poll = 60000, onStatus = () => {}, onPulled = () => {}, onConflict = () => {}, onMerged = () => {}, bases = baseStates, autoMerge = true }) {
     this.store = store
     this.baseKey = baseKey
     this.remote = remote // 備份裡標記「雲端那一份」用的名字
     this.onStatus = onStatus
     this.onPulled = onPulled
     this.onConflict = onConflict
+    this.onMerged = onMerged
+    this.bases = bases
+    this.autoMerge = autoMerge
     this.state = 'off'
     this.message = ''
     this.lastSync = 0
@@ -97,12 +109,30 @@ export class SyncEngine {
     this.message = message
     this.onStatus(this)
   }
-  _setBase(rev) {
+  // json：那一版的內容（之後兩邊都改過時拿來合併）；沒給就只換版本，存著的那一份不動（版本對不上就不會被拿來用）
+  _setBase(rev, json = '') {
     this.base = rev || ''
     try {
       if (rev) localStorage.setItem(this.baseKey, rev)
       else localStorage.removeItem(this.baseKey)
     } catch {}
+    // 這個分頁剛寫的那一份也記在記憶體裡（IndexedDB 還沒寫完、寫不進去時也拿得到）
+    if (!rev) {
+      this._snap = null
+      this.bases.write(this.baseKey, '', '')
+    } else if (json) {
+      this._snap = { rev, json }
+      this.bases.write(this.baseKey, rev, json)
+    }
+  }
+  // 還沒存過 base 那一份（這個功能上線前就同步好了）：這台現在就是 base 那一版，存一份
+  async _seedBase() {
+    const rev = this.base
+    if (!rev || this._seeded === rev || (this.store.state.rev || '') !== rev) return
+    this._seeded = rev
+    const have = await this.bases.read(this.baseKey)
+    if (have?.rev === rev || this.base !== rev || (this.store.state.rev || '') !== rev) return
+    this.bases.write(this.baseKey, rev, JSON.stringify(this.store.state))
   }
   _relink() {
     clearTimeout(this._timer)
@@ -165,16 +195,75 @@ export class SyncEngine {
     // （之後就算在範例島上加了東西也一樣）。一律拿雲端的回來，這台後來加的留成備份；
     // 不會把範例島蓋到雲端、再傳到每一台。範例島上已經加了東西的話，那份一定要先備份成功才換
     if (this.base && (!local || this.store.loadFailed)) return this._load(remote, { strict: true })
-    if (remote.rev === this.base) return local !== this.base ? this._write(this.base) : this._ok()
+    if (remote.rev === this.base) {
+      if (local !== this.base) return this._write(this.base)
+      this._seedBase()
+      return this._ok()
+    }
     // 同一個版本（例如解除後重新連結）
-    if (local === remote.rev) return this._synced(local)
+    if (local === remote.rev) return this._synced(local, JSON.stringify(this.store.state))
     if (local === this.base) return this._load(remote)
-    // 兩邊都有新變更：不自動決定，交給使用者
+    // 兩邊都有新變更：有上次同步好的那一份就自動合在一起（見 merge.js）
+    if (this.autoMerge && this.base && (await this._merge(remote, epoch))) return
+    if (epoch !== this.epoch) return
+    // 合不了（剛連結還沒同步過、其中一邊整份換過、上次那一份沒存到）：交給使用者
     // first：剛連結（還沒同步過），兩邊各有一份小島
     const st = this.store.state
     this.conflict = { remoteAt: remote.savedAt, localAt: st.updatedAt, rev: remote.rev, savedAt: remote.savedAt, state: remote.state, first: !this.base }
     this._set('conflict')
     this.onConflict(this.conflict)
+  }
+
+  // 自動合併：base（上次同步好的那一份）、這台、雲端三份照 merge.js 合成一份，當成這台改的一版推上去。
+  // 合併前這台的那一份留成備份（設定裡、合併的提示卡上換得回去）。回傳有沒有處理掉（false：照舊讓使用者選邊）
+  async _merge(remote, epoch) {
+    const snap = this._snap?.rev === this.base ? this._snap : await this.bases.read(this.baseKey)
+    if (epoch !== this.epoch) return true
+    if (!snap || snap.rev !== this.base || typeof snap.json !== 'string') return false
+    const st = this.store.state
+    // 等著讀的時候這台換成了別的一版（另一個分頁同步了、使用者匯入了）：照新的再比一次
+    if ((st.rev || '') === this.base || st.rev === remote.rev) {
+      this._again = true
+      return true
+    }
+    let out = null
+    let theirs = ''
+    try {
+      theirs = JSON.stringify(remote.state)
+      out = merge3(JSON.parse(snap.json), st, remote.state)
+    } catch (e) {
+      console.warn('[hiyori] 自動合併失敗', e)
+    }
+    if (!out) return false
+    const rev = st.rev
+    if (!keepBackup(st, 'merge', st.updatedAt)) {
+      this._set('error', NO_ROOM)
+      return true
+    }
+    try {
+      this.store.replaceState(out.state, Math.max(Date.now(), (st.updatedAt || 0) + 1, (remote.savedAt || 0) + 1), { soft: true })
+    } catch (e) {
+      console.warn('[hiyori] 合併出來的資料讀不進去', e)
+      dropBackup(0)
+      return false
+    }
+    if (!this.store.saved) {
+      this._set('error', NO_SAVE)
+      return true
+    }
+    // 合好的這一份已經包含雲端那一版：之後再跟雲端比，從那一版開始算（推上去之前又被別台寫過，再合一次也不會把那一版的數字加兩次）
+    this._setBase(remote.rev, theirs)
+    this.onMerged({ clashes: out.clashes, rev })
+    await this._write(remote.rev)
+    return true
+  }
+  // 換回合併前這台的那一份（rev：onMerged 給的）：當成一次新的變更，會再同步出去。合併好的那一份也留成備份
+  undoMerge(rev) {
+    const i = readBackups().findIndex((b) => b.from === 'merge' && b.state?.rev === rev)
+    if (i < 0) return false
+    const done = restoreBackup(this.store, i)
+    if (done) this.onStatus(this)
+    return done
   }
 
   // keep：'remote'（用雲端的）或 'local'（用這台的）。被捨棄的那一份一定要先備份成功
@@ -225,7 +314,7 @@ export class SyncEngine {
       return
     }
     this.store.saveNow()
-    this._synced(version.rev)
+    this._synced(version.rev, json)
   }
 
   _load(remote, { strict = false } = {}) {
@@ -238,17 +327,21 @@ export class SyncEngine {
     } catch (e) {
       return this._fail(e)
     }
-    if (this._synced(remote.rev)) this.onPulled(remote.savedAt)
+    let json = ''
+    try {
+      json = JSON.stringify(remote.state)
+    } catch {}
+    if (this._synced(remote.rev, json)) this.onPulled(remote.savedAt)
   }
 
   // 同步好了：這台的存檔也寫進去了，才把 base 記成這一版。存不進去（瀏覽器空間滿了）時 base 不動——
   // 不然重新整理後讀到的是還沒更新的舊存檔，會被當成「這台改過」推上去，蓋掉雲端比較新的資料
-  _synced(rev) {
+  _synced(rev, json = '') {
     if (!this.store.saved) {
       this._set('error', NO_SAVE)
       return false
     }
-    this._setBase(rev)
+    this._setBase(rev, json)
     this._ok()
     return true
   }

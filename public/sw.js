@@ -3,6 +3,8 @@
 // 每次部署換一個新快取：舊快取裡新版還用得到的檔案（例如沒變的 three.js）搬過來，其他的整個丟掉，帶 hash 的舊檔不會一直累積
 const VERSION = 'hiyori-v1'
 const BUILD = []
+// 這一版首頁的入口 JS（建置時填進來）：首頁一定要用到它才算這一版的首頁（維護頁、只引了別的檔案的頁面都不算）
+const ENTRY = ''
 const SHELL = ['./', './index.html', './manifest.webmanifest', './favicon.svg', './icons/icon-192.png', './icons/icon-512.png']
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com']
 // 計時器到點的推播：頁面把要顯示的字放在這個快取裡（src/push.js 也寫了一份，要一起改）。
@@ -42,11 +44,12 @@ const isHome = (url) => {
   const u = new URL(url)
   return u.origin === scope.origin && (u.pathname === scope.pathname || u.pathname === `${scope.pathname}index.html`)
 }
-// 是這一版的首頁嗎：HTML、有入口的 JS，入口的 JS／CSS 都是這一版建置出來的檔案（BUILD；開發時沒有建置清單就只看前兩個）
+// 是這一版的首頁嗎：HTML、用到這一版的入口 JS（ENTRY）、用到的 JS／CSS 都是這一版建置出來的檔案（BUILD；開發時沒有建置清單就只看有沒有 JS）
+const usesEntry = (assets) => !ENTRY || assets.some((a) => new URL(a, self.registration.scope).href.replace(/[?#].*$/, '') === new URL(ENTRY, self.registration.scope).href)
 function isBuildHome(res, html) {
   if (!/text\/html/i.test(res.headers.get('Content-Type') || '')) return false
   const assets = entryAssets(html)
-  if (!assets.some((a) => /\.js(?:$|\?)/.test(a))) return false
+  if (!assets.some((a) => /\.js(?:$|\?)/.test(a)) || !usesEntry(assets)) return false
   if (!BUILD.length) return true
   const built = new Set(BUILD.map((f) => new URL(f, self.registration.scope).href))
   return assets.every((a) => built.has(new URL(a, self.registration.scope).href.replace(/[?#].*$/, '')))
@@ -55,8 +58,9 @@ async function keepHome(req, res) {
   if (!isHome(req.url) || !/text\/html/i.test(res.headers.get('Content-Type') || '')) return
   const cache = await caches.open(VERSION)
   const html = await res.clone().text()
+  // 這一版的首頁才換（維護頁的 JS 被快取過了也不算）：用到這一版的入口 JS，用到的檔案這個快取裡都有
+  if (!isBuildHome(res, html)) return
   const assets = entryAssets(html)
-  if (!assets.some((a) => /\.js(?:$|\?)/.test(a))) return
   for (const a of assets) if (!(await cache.match(new URL(a, self.registration.scope).href, { ignoreVary: true }))) return
   await cache.put('./index.html', res)
 }
@@ -303,10 +307,11 @@ async function showPush() {
     // 先記下這幾則顯示過了再顯示（同一則推播送了兩次、頁面在背景也記過的就不再顯示）
     const old = await readJSON(cache, REMIND_SHOWN)
     remindsBefore = Array.isArray(old) ? old : []
-    const seen = new Set(remindsBefore.map((x) => x?.key))
+    // 照日子和 key 認（就寢的 key 每天都一樣）；頁面自己提醒過的也記在這裡
+    const seen = new Set(remindsBefore.map((x) => `${x?.key}|${x?.date}`))
     // 晚到多久還顯示：每一則的 until（日程開始後 15 分鐘內、就寢那一刻以前），沒寫的照 REMIND_LATE
     const lastFor = (x) => (Number.isFinite(x.until) ? x.until : x.at + REMIND_LATE)
-    reminds = list.filter((x) => x?.remind && typeof x.key === 'string' && typeof x.title === 'string' && Number.isFinite(x.at) && x.at <= now + 5000 && now < lastFor(x) && !seen.has(x.key))
+    reminds = list.filter((x) => x?.remind && typeof x.key === 'string' && typeof x.title === 'string' && Number.isFinite(x.at) && x.at <= now + 5000 && now < lastFor(x) && !seen.has(`${x.key}|${x.date}`))
     if (reminds.length) await putJSON(cache, REMIND_SHOWN, [...remindsBefore, ...reminds.map((x) => ({ key: x.key, date: x.date, at: x.at }))].slice(-80))
     const again1 = (x) => (x.fuji ? repeat(x, 'fuji', FUJI_LOG) : repeat(x, 'motto', MOTTO_LOG))
     // 已經念過、顯示過的（念到哪一則的記號以後的才算新的）

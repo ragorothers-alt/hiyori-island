@@ -45,3 +45,14 @@ export function bondLevel(pts) {
   const next = BOND_LEVELS[cur.level] || null
   return { ...cur, pts, next: next?.need ?? null }
 }
+
+// もち送的金平糖：那一天固定是幾顆（3～6 顆）。兩台同一天各自打開都一樣多，兩台都改過、合在一起時認得出是同一份（merge.js）
+const hash01 = (str) => {
+  let h = 2166136261
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return ((h >>> 0) % 1000003) / 1000003
+}
+export const giftCoins = (day) => 3 + Math.floor(hash01(`${day}:gift`) * 4)

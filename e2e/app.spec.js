@@ -4587,7 +4587,10 @@ test('網頁版：日程開始前的提醒在頁面關掉時也會響（跟警�
     Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
     if (sessionStorage.getItem('seed') === '1') {
       sessionStorage.removeItem('seed')
-      const events = [{ id: 'e2e-ev1', title: '牙醫', date: ymd, start: '10:30', end: '11:30' }]
+      const events = [
+        { id: 'e2e-ev1', title: '牙醫', date: ymd, start: '10:30', end: '11:30' },
+        { id: 'e2e-ev2', title: '健身', date: ymd, start: '12:00', end: '13:00' },
+      ]
       localStorage.removeItem('hiyori-daily-rev')
       localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks: [], events, player: {}, mottos: [], settings: { notify: true, remindLead: 10 } }))
     }
@@ -4640,6 +4643,28 @@ test('網頁版：日程開始前的提醒在頁面關掉時也會響（跟警�
   await expect.poll(() => page.evaluate((d) => JSON.parse(localStorage.getItem('hiyori-reminded') || '{}')[d] || [], ymd)).toContain('e2e-ev1@10:30')
   await page.waitForTimeout(1500)
   await expect(page.locator('#toasts .toast', { hasText: '牙醫' })).toHaveCount(0)
+
+  // 健身（12:00，11:50 提醒）：頁面在背景時到點 → 交給 Service Worker，頁面不跳卡、不響；
+  // 推播一直沒送到（沒顯示過）→ 回到頁面時還在期限內，照常提醒，也記給 Service Worker（推播晚到也不會再顯示一次）
+  await page.evaluate(() => {
+    window.__hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  // 伺服器排著 11:50 那一則（第一次離開頁面時就交了）
+  expect(armed().at(-1).body.after.some((x) => Math.abs(x - 110 * 60000) < 1000)).toBe(true)
+  await page.clock.setFixedTime(new Date(T + 110 * 60000 + 5000))
+  await expect.poll(() => page.evaluate((d) => JSON.parse(localStorage.getItem('hiyori-reminded') || '{}')[d] || [], ymd)).toContain('e2e-ev2@12:00')
+  await page.waitForTimeout(1200)
+  await expect(page.locator('#toasts .toast', { hasText: '健身' })).toHaveCount(0)
+  // 交出去、還沒送到的這一則留在交給伺服器的那一串裡（重排時不會被取消）
+  expect((await file('__motto-plan')).some((x) => x.key === 'e2e-ev2@12:00')).toBe(true)
+  await page.clock.setFixedTime(new Date(T + 111 * 60000))
+  await page.evaluate(() => {
+    window.__hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect(page.locator('#toasts .toast', { hasText: '健身' })).toBeVisible()
+  await expect.poll(async () => (await file('__remind-shown'))?.some((x) => x.key === 'e2e-ev2@12:00' && x.date === ymd)).toBe(true)
 })
 
 // 收到推播後顯示什麼、頁面和 Service Worker 怎麼分「念到哪」在 tests/sw.test.js、tests/mottoPush.test.js 測
@@ -5275,6 +5300,104 @@ test.describe('跨裝置的計時', () => {
   })
 })
 
+test.describe('線上同步：兩台都改過', () => {
+  test.use({ serviceWorkers: 'block' })
+  test('一台離線時兩台各加了任務、各做完一件：連回來後自動合在一起（不用選邊），兩邊的任務和經驗值都在；可以換回合併前', async ({ page, context, browser, site }) => {
+    test.setTimeout(120000)
+    const vault = { rev: null, savedAt: 0, data: null }
+    // A 斷線時：A 的同步請求一律連不上
+    const off = { a: false }
+    const api = (who) => async (route) => {
+      if (off[who]) return route.abort('internetdisconnected')
+      const req = route.request()
+      const path = new URL(req.url()).pathname
+      let body = {}
+      try {
+        body = JSON.parse(req.postData() || '{}')
+      } catch {}
+      const headers = { 'Access-Control-Allow-Origin': '*' }
+      if (path === '/v1/pull') {
+        if (!vault.rev) return route.fulfill({ json: { rev: null }, headers })
+        if (body.peek || body.have === vault.rev) return route.fulfill({ json: { rev: vault.rev, savedAt: vault.savedAt, same: true }, headers })
+        return route.fulfill({ json: { rev: vault.rev, savedAt: vault.savedAt, data: vault.data }, headers })
+      }
+      if (path === '/v1/push') {
+        if ((body.base ?? null) !== vault.rev) return route.fulfill({ status: 409, json: { error: 'conflict', rev: vault.rev }, headers })
+        Object.assign(vault, { rev: body.rev, savedAt: body.savedAt, data: body.data })
+        return route.fulfill({ json: { rev: body.rev }, headers })
+      }
+      return route.fulfill({ json: { ok: true }, headers })
+    }
+    const CODE = 'ABCD-EFGH-JKMN-PQRS-TVWX-YZ01-2345'
+    const device = async (ctx, who) => {
+      await noFonts(ctx)
+      await ctx.route(/\/v1\//, api(who))
+      await ctx.addInitScript((code) => {
+        if (!localStorage.getItem('hiyori-cloud-code')) localStorage.setItem('hiyori-cloud-code', code)
+        if (!localStorage.getItem('hiyori-layout')) localStorage.setItem('hiyori-layout', '"app"')
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        if (!localStorage.getItem('hiyori-brief-day')) localStorage.setItem('hiyori-brief-day', JSON.stringify(today))
+      }, CODE)
+    }
+    const sent = (p) => expect.poll(() => p.evaluate(() => window.hiyori.cloudSync.state === 'linked' && !window.hiyori.cloudSync.dirty), { timeout: 15000 }).toBe(true)
+    const titles = (p) => p.evaluate(() => window.hiyori.store.state.tasks.map((t) => t.title))
+    const xp = (p) => p.evaluate(() => window.hiyori.store.state.player.xp)
+    const addDone = (p, title) =>
+      p.evaluate((t) => {
+        const s = window.hiyori.store
+        s.toggleTask(s.addTask({ title: t, date: s.today }).id)
+      }, title)
+
+    await device(context, 'a')
+    await page.goto(site.url)
+    await bootReady(page)
+    await sent(page)
+    const ctxB = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 820, height: 1180 } })
+    await device(ctxB, 'b')
+    const b = await ctxB.newPage()
+    await b.goto(site.url)
+    await bootReady(b)
+    await expect.poll(() => b.evaluate(() => window.hiyori.cloudSync.state), { timeout: 15000 }).toMatch(/linked|conflict/)
+    if ((await b.evaluate(() => window.hiyori.cloudSync.state)) === 'conflict') await b.evaluate(() => window.hiyori.cloudSync.resolve('remote'))
+    await expect.poll(() => b.evaluate(() => window.hiyori.store.state.rev)).toBe(vault.rev)
+    // A 也拿到 B 那一份（同一版），兩台從同一版開始
+    await page.evaluate(() => window.hiyori.cloudSync.sync())
+    await expect.poll(() => page.evaluate(() => window.hiyori.store.state.rev)).toBe(vault.rev)
+    const xp0 = await xp(page)
+
+    // A 斷線，加了一件、做完；B 也加了一件、做完，推上去
+    off.a = true
+    await addDone(page, '在 A 離線時加的')
+    await expect.poll(() => page.evaluate(() => window.hiyori.cloudSync.state), { timeout: 15000 }).toBe('offline')
+    const gain = (await xp(page)) - xp0
+    expect(gain).toBeGreaterThan(0)
+    await addDone(b, '在 B 加的')
+    await sent(b)
+
+    // A 連回來：自動合在一起，說一聲；沒有變成要選邊
+    off.a = false
+    await page.evaluate(() => window.hiyori.cloudSync.sync())
+    await sent(page)
+    await expect(page.locator('#toasts .toast', { hasText: '兩台都改過，已經合在一起了' })).toBeVisible()
+    expect(await titles(page)).toEqual(expect.arrayContaining(['在 A 離線時加的', '在 B 加的']))
+    expect(await xp(page)).toBe(xp0 + 2 * gain)
+    // B 拿回合好的那一份
+    await b.evaluate(() => window.hiyori.cloudSync.sync())
+    await expect.poll(() => b.evaluate(() => window.hiyori.store.state.rev)).toBe(vault.rev)
+    expect(await titles(b)).toEqual(expect.arrayContaining(['在 A 離線時加的', '在 B 加的']))
+    expect(await xp(b)).toBe(xp0 + 2 * gain)
+    expect(await b.evaluate(() => window.hiyori.cloudSync.state)).toBe('linked')
+
+    // 換回合併前：A 回到自己原本那一份（B 加的不在了），設定的備份裡寫著是合併前留的
+    await page.locator('#toasts .toast', { hasText: '兩台都改過' }).getByRole('button', { name: '換回合併前' }).click()
+    await expect(page.locator('#toasts .toast', { hasText: '換回合併前這台的了' })).toBeVisible()
+    expect(await titles(page)).toContain('在 A 離線時加的')
+    expect(await titles(page)).not.toContain('在 B 加的')
+    await ctxB.close()
+  })
+})
+
 test('跨過午夜的日程：日程頁填 23:30 到 00:30，存成這天和隔天兩段，隔天的時間軸看得到；改開始時結束跟著挪', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
@@ -5457,6 +5580,54 @@ test('逾期的任務：超過 4 件時先列最要緊的 3 件、可以展開�
   await page.locator('#toasts .toast', { hasText: '2 件移到明天了' }).getByRole('button', { name: '撤銷' }).click()
   await expect.poll(moved).toEqual({ 逾期1: dates['逾期1'], 逾期4: dates['逾期4'] })
   expect(await page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '逾期2').date)).toBe(await page.evaluate(() => window.hiyori.store.today))
+})
+
+test('返回鍵的邊界：前進鍵走到關掉的那一層，之後返回一次就離開；舊版留下的紀錄跳過；小島收起面板時專案不算一層', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto('about:blank')
+  await page.goto(site.url)
+  await bootReady(page)
+  const hb = () => page.evaluate(() => history.state?.hb || 0)
+  const settle = () => page.waitForTimeout(700)
+  // 找找看：返回關掉，前進走到那一筆（已經關掉了）：改寫成不算一層，留在 App 裡
+  await page.evaluate(() => window.hiyori.ui.openSearch())
+  await expect.poll(hb).toBe(1)
+  await page.evaluate(() => history.back())
+  await expect(page.locator('#search')).toBeHidden()
+  await page.evaluate(() => history.forward())
+  await settle()
+  await expect(page.locator('#search')).toBeHidden()
+  expect(page.url()).toBe(site.url)
+  // 返回一次就離開（不會停在多出來的那一筆）
+  await page.goBack()
+  await expect.poll(() => page.url()).toBe('about:blank')
+
+  // 舊版留下的紀錄（{ hiyori: 時間 }）：更新後停在上面，開場就退回去；返回一次就離開
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    history.pushState({ hiyori: Date.now() }, '')
+    history.pushState({ hiyori: Date.now() + 1 }, '')
+  })
+  await page.reload()
+  await bootReady(page)
+  await settle()
+  await page.goBack()
+  await expect.poll(() => page.url()).toBe('about:blank')
+
+  // 小島模式：開著專案時收起面板，專案不算一層（紀錄跟著退）；再打開面板記回來
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => localStorage.setItem('hiyori-layout', '"island"'))
+  await page.reload()
+  await bootReady(page)
+  const id = await page.evaluate(() => window.hiyori.store.addProject({ name: '收起面板', milestones: ['一'] }).id)
+  await page.evaluate((pid) => window.hiyori.ui.openProject(pid), id)
+  await expect.poll(hb).toBe(1)
+  await page.evaluate(() => window.hiyori.ui.togglePanel(true))
+  await expect.poll(hb).toBe(0)
+  await page.evaluate(() => window.hiyori.ui.togglePanel(false))
+  await expect.poll(hb).toBe(1)
 })
 
 test('返回鍵：先關最上面那一層（找找看、快速記錄打到一半的字留著），再從專案回到列表；自己按 × 關掉的不會多退一步', async ({ page, context, site }) => {

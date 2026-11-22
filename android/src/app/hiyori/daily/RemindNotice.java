@@ -78,36 +78,48 @@ final class RemindNotice {
         }
     }
 
-    // 網頁交來的：{ items: [{ at, until, key, date, title, body, tag }] }，空字串是都不提醒了（排著的全部取消）。
-    // 網頁排的只有還沒到的：已經到點、鬧鐘還沒來得及發的那幾則（同一刻網頁剛好重排）留著，不然兩邊都沒發。
+    // 同一則的代號：key 加上那一天（就寢的 key 每天都一樣）
+    private static String id(JSONObject o) {
+        return o.optString("key") + "|" + o.optString("date");
+    }
+
+    // 網頁交來的：{ items: [{ at, until, key, date, title, body, tag }], shown: ["key|date"] }；空字串是都不提醒了（排著的全部取消）。
+    // 網頁排的只有還沒到的：已經到點、鬧鐘還沒來得及發的那幾則（同一刻網頁剛好重排、手機睡著晚了）先留著，
+    // 排在最前面（不會被 60 則的上限擠掉，明天同一個 key 的那一則也不會頂掉它）；頁面自己提醒過的（shown）不再發。
     // 內容當成資料看，只收需要的欄位
     static synchronized void plan(Context c, String json) {
         long now = System.currentTimeMillis();
         JSONArray items = new JSONArray();
-        java.util.HashSet<String> keys = new java.util.HashSet<>();
+        java.util.HashSet<String> ids = new java.util.HashSet<>();
         try {
-            JSONArray in = json == null || json.isEmpty() ? null : new JSONObject(json).optJSONArray("items");
+            JSONObject root = json == null || json.isEmpty() ? null : new JSONObject(json);
+            JSONArray in = root == null ? null : root.optJSONArray("items");
             if (in == null) {
                 keep(c, items, now);
                 return;
+            }
+            java.util.HashSet<String> shown = new java.util.HashSet<>();
+            JSONArray sh = root.optJSONArray("shown");
+            for (int i = 0; sh != null && i < sh.length() && i < 80; i++) shown.add(clip(sh.optString(i), 140));
+            JSONArray old = read(c, KEY);
+            for (int i = 0; i < old.length() && items.length() < MAX; i++) {
+                JSONObject o = old.optJSONObject(i);
+                if (o == null || o.optLong("at", 0) > now || now >= until(o) || shown.contains(id(o)) || ids.contains(id(o))) continue;
+                items.put(o);
+                ids.add(id(o));
             }
             for (int i = 0; i < in.length() && items.length() < MAX; i++) {
                 JSONObject o = in.optJSONObject(i);
                 if (o == null) continue;
                 long at = o.optLong("at", 0);
                 String title = o.optString("title");
-                String key = o.optString("key");
-                if (at <= 0 || title.isEmpty() || key.isEmpty()) continue;
+                String key = clip(o.optString("key"), 120);
+                String date = clip(o.optString("date"), 10);
+                if (at <= 0 || title.isEmpty() || key.isEmpty() || ids.contains(key + "|" + date) || shown.contains(key + "|" + date)) continue;
                 long u = o.optLong("until", 0);
-                items.put(new JSONObject().put("at", at).put("until", u > at ? u : at + LATE).put("key", clip(key, 120)).put("date", clip(o.optString("date"), 10))
+                items.put(new JSONObject().put("at", at).put("until", u > at ? u : at + LATE).put("key", key).put("date", date)
                         .put("title", clip(title, 80)).put("body", clip(o.optString("body"), 200)).put("tag", clip(o.optString("tag"), 60)));
-                keys.add(clip(key, 120));
-            }
-            JSONArray old = read(c, KEY);
-            for (int i = 0; i < old.length() && items.length() < MAX; i++) {
-                JSONObject o = old.optJSONObject(i);
-                if (o == null || o.optLong("at", 0) > now || keys.contains(o.optString("key"))) continue;
-                items.put(o);
+                ids.add(key + "|" + date);
             }
         } catch (Exception ignored) {
         }

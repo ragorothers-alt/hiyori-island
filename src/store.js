@@ -10,7 +10,7 @@ import { MOTTO_EVERY } from './mottos.js'
 import { isEvent, CHEERS } from './events.js'
 import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE } from './store/migrate.js'
 import { projectProgress, progressAll } from './projects.js'
-import { bondLevel, BOND_POINTS, actLevel, outfitOf, outfitLevel } from './data/bond.js'
+import { bondLevel, BOND_POINTS, actLevel, outfitOf, outfitLevel, giftCoins } from './data/bond.js'
 import { townOf, townChanges } from './data/town.js'
 import { flowerOf, COMMON_BY_TAG } from './data/flowers.js'
 import { bestStreak, bestClean, todayProgress, applies, doneOn } from './habits.js'
@@ -873,7 +873,7 @@ export class Store {
     this._bondGain(BOND_POINTS.visit, this._pending)
     if (this.bond.level >= actLevel('gift') && b.gift !== this.today) {
       b.gift = this.today
-      const coins = 3 + Math.floor(hash01(this.today + ':gift') * 4)
+      const coins = giftCoins(this.today)
       this.state.player.coins += coins
       this._pending.push(['gift', { coins }])
     }

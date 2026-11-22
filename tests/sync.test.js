@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Store } from '../src/store.js'
 import { FileSync, readBackups } from '../src/sync.js'
+// 這裡測的是兩邊都改過時讓使用者選邊（沒有上次同步好的那一份時）：自動合併在 merge.test.js
+const PICK = { autoMerge: false }
 
 // 模擬兩台裝置：各自一份 localStorage，共用同一個雲端檔案
 class Mem {
@@ -42,7 +44,7 @@ function device() {
   const prev = globalThis.localStorage
   globalThis.localStorage = mem
   const store = new Store()
-  const sync = new FileSync(store)
+  const sync = new FileSync(store, PICK)
   globalThis.localStorage = prev
   // 每次操作這台裝置前，切換成它自己的 localStorage
   const run = async (fn) => {
@@ -64,7 +66,7 @@ function reopen(dev) {
   const prev = globalThis.localStorage
   globalThis.localStorage = dev.mem
   const store = new Store()
-  const sync = new FileSync(store)
+  const sync = new FileSync(store, PICK)
   globalThis.localStorage = prev
   const run = async (fn) => {
     globalThis.localStorage = dev.mem
@@ -234,7 +236,7 @@ describe('雲端資料夾同步', () => {
     const prev = globalThis.localStorage
     globalThis.localStorage = { getItem() { throw new Error('SecurityError') }, setItem() { throw new Error('SecurityError') }, removeItem() {} }
     try {
-      const s = new FileSync(a.store)
+      const s = new FileSync(a.store, PICK)
       expect(s.base).toBe('')
     } finally {
       globalThis.localStorage = prev
@@ -430,7 +432,7 @@ describe('雲端資料夾同步', () => {
     globalThis.localStorage = a.mem
     const store = new Store()
     expect(store.state.rev).toBe(String(at))
-    const sync = new FileSync(store)
+    const sync = new FileSync(store, PICK)
     sync.handle = file
     sync.state = 'linked'
     await sync.sync()

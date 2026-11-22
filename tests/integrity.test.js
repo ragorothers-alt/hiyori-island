@@ -8,6 +8,8 @@ import { planRules } from '../src/coach.js'
 import { FileSync } from '../src/sync.js'
 import { TALLY_KEEP } from '../src/store/extras.js'
 import { MOTTO_LOG_KEEP } from '../src/push.js'
+// 這裡測的是兩邊都改過時讓使用者選邊（沒有上次同步好的那一份時）：自動合併在 merge.test.js
+const PICK = { autoMerge: false }
 
 const KEY = 'hiyori-daily-v1'
 let store
@@ -433,7 +435,7 @@ describe('同一個瀏覽器開兩個分頁', () => {
     globalThis.window ??= globalThis
     globalThis.document ??= { hidden: true, addEventListener() {} }
     globalThis.addEventListener = (type, fn) => type === 'storage' && handlers.push(fn)
-    const sync = new FileSync(store)
+    const sync = new FileSync(store, PICK)
     delete globalThis.addEventListener
     localStorage.setItem('hiyori-sync-base', 'rev-from-other-tab')
     for (const fn of handlers) fn({ key: 'hiyori-sync-base' })
@@ -507,7 +509,7 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     globalThis.window ??= globalThis
     globalThis.document ??= { hidden: true, addEventListener() {} }
     globalThis.addEventListener ??= () => {}
-    const sync = new FileSync(store)
+    const sync = new FileSync(store, PICK)
     sync.state = 'linked'
     const v3 = { ...JSON.parse(store.exportJSON()), version: NEXT, rev: 'cloud-v3' }
     const pushed = vi.fn()

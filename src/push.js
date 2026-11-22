@@ -635,9 +635,12 @@ export class MottoPush extends PushBase {
         if (this.saving) await this.saving
         if (!(await this._saveTexts())) return false
       }
+      // 同一個時間換了內容（換了一件、改了字）的不算對得上：照時間、key、字一起比
       const saved = await this._read(MOTTO_FILE)
-      const have = new Set(Array.isArray(saved) ? saved.map((x) => x?.at) : [])
-      if (times.every((t) => have.has(t))) return true
+      const sig = (x) => JSON.stringify([x?.at, x?.key ?? null, x?.title ?? '', x?.body ?? ''])
+      const have = new Set(Array.isArray(saved) ? saved.map(sig) : [])
+      const want = this.list.filter((x) => times.includes(x.at))
+      if (times.every((t) => want.some((x) => x.at === t)) && want.every((x) => have.has(sig(x)))) return true
       this.savedKey = null
     }
     return false
@@ -695,8 +698,12 @@ export class MottoPush extends PushBase {
       if (cur?.seq === seq) writeMottoArmed({ ...cur, endpoint: sub.endpoint, ok })
     }
     try {
+      // 這一串的字這個分頁已經存好了：先送（從前面直接關掉頁面時，等讀快取的這一下頁面就沒了，請求根本送不出去），
+      // 送出去之後再讀回來核對（另一個分頁剛好蓋掉了的話照這邊的再存一次）
+      const first = !times.length || (this.savedKey === this.listKey && !this.saving) ? this.api('/v1/push/mottos', body(sub), { keepalive: true }) : null
+      first?.catch(() => {})
       if (times.length && !(await this._textsCover(times))) throw new Error('警語的字沒存進快取')
-      const r = await this.api('/v1/push/mottos', body(sub), { keepalive: true })
+      const r = await (first ?? this.api('/v1/push/mottos', body(sub), { keepalive: true }))
       const again = await this._resub(sub, r?.key)
       if (again) {
         sub = this.sub = again
@@ -735,6 +742,21 @@ export class MottoPush extends PushBase {
     await this.saving
     await this._saveTexts(false)
     this.sub = null
+  }
+
+  // 頁面自己提醒過的日程、任務、就寢提醒（[{ key, date, at }]）也記進同一份紀錄：推播晚到、或別的推播送到時，
+  // Service Worker 不會再顯示一次（照日子和 key 認）
+  async markRemindShown(list) {
+    try {
+      const reg = await this._reg()
+      if (!reg) return
+      const cache = await this.storage.open(PLAN_CACHE)
+      const url = new URL(REMIND_SHOWN, reg.scope).href
+      const old = await (await cache.match(url))?.json().catch(() => null)
+      const have = Array.isArray(old) ? old : []
+      const add = list.filter((x) => !have.some((y) => y?.key === x.key && y?.date === x.date))
+      if (add.length) await cache.put(url, jsonRes([...have, ...add].slice(-80)))
+    } catch {}
   }
 
   // 推播送到時 Service Worker 顯示過的日程、任務、就寢提醒：[{ key, date }]（頁面記成提醒過了，回來時不再跳提示卡）

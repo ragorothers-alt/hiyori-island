@@ -142,6 +142,33 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
     await log([{ got: NOW + 60 * MIN, at: NOW + 60 * MIN }, { got: NOW - 5 * MIN, at: NOW + 90 * MIN }])
     expect(await p.shown()).toEqual([{ id: `${NOW + 60 * MIN}:${NOW + 60 * MIN}`, at: NOW + 60 * MIN }, { id: `${NOW - 5 * MIN}:${NOW + 90 * MIN}`, at: NOW + 90 * MIN }])
   })
+  it('從前面直接關掉頁面：字已經存好的話，交給伺服器的請求在同一刻就送出去（不等讀快取，頁面關掉前來得及送）', async () => {
+    const p = await boot()
+    p.sync(items(15, 30), false, now)
+    await flush()
+    await flush()
+    expect(p.savedKey).toBe(p.listKey)
+    calls = []
+    p.sync(items(15, 30), true, now)
+    // 還沒讓出執行緒：請求已經送出去了
+    expect(mottoCalls().map((c) => c.body.after)).toEqual([[15 * MIN, 30 * MIN]])
+    await flush()
+    await flush()
+    expect(mottoCalls()).toHaveLength(1)
+  })
+  it('同一個時間換了內容：快取裡舊的字不算對得上，先存新的再交', async () => {
+    const p = await boot()
+    p.sync(items(15), false, now)
+    await flush()
+    await flush()
+    // 另一個分頁把同一個時間的字蓋成別的
+    await (await caches.open(PLAN_CACHE)).put(SCOPE + MOTTO_FILE, new Response(JSON.stringify([{ at: NOW + 15 * MIN, title: '舊的', body: '舊的' }])))
+    p.sync(items(15), true, now)
+    await flush()
+    await flush()
+    await flush()
+    expect((await file(MOTTO_FILE)).map((x) => x.body)).toEqual(['第 15 分'])
+  })
   it('日程、任務的提醒跟警語排在同一串（remind: true）：離開頁面時一起交給伺服器；Service Worker 顯示過的回到頁面時讀得到', async () => {
     const p = await boot()
     const remind = { at: NOW + 20 * MIN, key: 'e1@09:30', date: '2026-11-10', title: 'ひより · 會', body: '10 分鐘後開始（09:30）', tag: 'e1', remind: true }

@@ -41,6 +41,12 @@ export function parseDate(s) {
   const [y, m, d] = s.split('-').map(Number)
   return new Date(y, m - 1, d)
 }
+// 那一天的 HH:MM 是幾點（時間戳，照這台的時區；換夏令時間那天也對：不存在的 02:30 落在 03:30，重複的那一小時取第一次）
+export function stampAt(date, hhmm) {
+  const d = parseDate(date)
+  const m = toMin(hhmm)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(m / 60), m % 60).getTime()
+}
 export function addDays(s, n) {
   const d = parseDate(s)
   d.setDate(d.getDate() + n)

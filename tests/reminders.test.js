@@ -436,6 +436,32 @@ describe('任務與就寢提醒', () => {
     expect(other.mock.calls.filter((c) => c[2] === 'bed')).toHaveLength(1)
   })
 
+  it('換夏令時間那天的就寢提醒：照就寢那一刻往前 30 分鐘的時間點（春天 03:15 就寢照樣提醒，秋天 02:15 不會提早）', () => {
+    const tz = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      const bedAt = (iso) => {
+        const fn = vi.fn()
+        const r = new Reminders(store, fn)
+        localStorage.clear()
+        r.sent = {}
+        r.check(new Date(iso))
+        return fn.mock.calls.filter((c) => c[2] === 'bed').length
+      }
+      // 2026/3/8 凌晨 2 點撥到 3 點：03:15 就寢，真的往前 30 分鐘是 01:45（以前照鐘面算成不存在的 02:45，整個漏掉）
+      store.setRhythm({ sleep: '03:15' })
+      expect(bedAt('2026-03-08T01:46:00-05:00')).toBe(1)
+      expect(bedAt('2026-03-08T03:01:00-04:00')).toBe(0)
+      // 2026/11/1 凌晨 2 點撥回 1 點：02:15 就寢，提醒在 01:45（EST 那一次，就寢前 30 分鐘），不是第一次的 01:45
+      store.setRhythm({ sleep: '02:15' })
+      expect(bedAt('2026-11-01T00:46:00-04:00')).toBe(0)
+      expect(bedAt('2026-11-01T01:46:00-05:00')).toBe(1)
+    } finally {
+      if (tz === undefined) delete process.env.TZ
+      else process.env.TZ = tz
+    }
+  })
+
   it('就寢前 30 分鐘提醒一次，可以關掉；不受日程提醒設定影響', () => {
     store.setSetting('remindLead', -1)
     reminders.check(at(22, 59))

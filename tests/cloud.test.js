@@ -6,6 +6,8 @@ import { CloudSync, codeFromHash, deriveKeys, newCode, normalizeCode, seal, shar
 import { FileSync } from '../src/sync.js'
 import { AI_MODELS, aiExtras, aiModel, aiPass, aiUnshared, setAiModel, setAiPass } from '../src/ai.js'
 import { createD1 } from './helpers/d1.js'
+// 這裡測的是兩邊都改過時讓使用者選邊（沒有上次同步好的那一份時）：自動合併在 merge.test.js
+const PICK = { autoMerge: false }
 
 // 每台裝置各自一份 localStorage；fetch 直接交給真正的 Worker 程式，資料庫是記憶體裡的 SQLite
 class Mem {
@@ -58,7 +60,7 @@ function device() {
   const prev = globalThis.localStorage
   globalThis.localStorage = mem
   const store = new Store()
-  const sync = new CloudSync(store)
+  const sync = new CloudSync(store, PICK)
   globalThis.localStorage = prev
   const run = async (fn) => {
     globalThis.localStorage = mem
@@ -387,7 +389,7 @@ describe('線上同步', () => {
     // B 另外連一個同步檔，寫進比較新的版本
     const file = { content: '', name: 'f.json', getFile: async () => ({ text: async () => file.content }), createWritable: async () => ({ write: async (d) => (file.content = d), close: async () => {} }), isSameEntry: async () => false }
     const fs = await b.run(async (s) => {
-      const f = new FileSync(s)
+      const f = new FileSync(s, PICK)
       f.state = 'off'
       await f._link(file)
       return f
@@ -508,7 +510,7 @@ describe('線上同步', () => {
     try {
       const store = new Store()
       expect(store.loadFailed).toBeTruthy()
-      const sync = new CloudSync(store)
+      const sync = new CloudSync(store, PICK)
       await sync.init()
       expect(titles(store)).toContain('A 的任務')
       expect(sync.state).toBe('linked')
@@ -520,7 +522,7 @@ describe('線上同步', () => {
   it('同一個瀏覽器的另一個分頁停止同步：這個分頁也停下來，不再往那組同步碼送資料', async () => {
     const { a, b } = await pair()
     // 同一台的第二個分頁：同一份 localStorage、同一組同步碼
-    const tab2 = new CloudSync(a.store)
+    const tab2 = new CloudSync(a.store, PICK)
     await a.run(() => tab2.init())
     expect(tab2.state).toBe('linked')
     await a.run((_s, sync) => sync.stop())
@@ -544,7 +546,7 @@ describe('線上同步', () => {
 
   it('重新開啟 App 時用記住的同步碼繼續同步', async () => {
     const { a, code } = await pair()
-    const again = new CloudSync(a.store)
+    const again = new CloudSync(a.store, PICK)
     await a.run(() => again.init())
     expect(again.state).toBe('linked')
     expect(again.code).toBe(code)

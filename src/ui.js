@@ -921,48 +921,107 @@ export class UI {
 
   // ── 返回鍵（瀏覽器的上一頁、Android 的返回鍵、滑鼠的上一頁鍵）：先關最上面那一層（對話框、找找看、快速記錄、
   // 編輯面板、今日摘要、專注頁、商店、日曆），再從專案的任務頁回到專案、從專案回到列表；都沒有了才真的離開 App。
-  // 開著幾層（_backDepth）就記著幾筆瀏覽紀錄，每一筆的 state 寫著它是第幾層（{ hiyori: n }），現在退到第幾層直接讀 history.state，
+  // 開著幾層（_backDepth）就記著幾筆瀏覽紀錄，每一筆的 state 寫著它是第幾層、排在第幾筆（{ hb: n, pos }），現在退到第幾層直接讀 history.state，
   // 不靠自己數（連續開關好幾層、退的那一下還在路上時數會錯，退過頭就離開 App 了）。
   // 開了一層：補到一樣多；自己按 × 或 Esc 關掉的：退回一樣多（一次退完，收到 popstate 之前不再補）；
   // 按了返回鍵（popstate、不是自己退的）：多出來的那幾層一層一層關，關不掉的（擋著）把紀錄補回去
   _bindBack() {
     this._going = false
-    // 紀錄上寫的是第幾層（hb：這一套寫的；別的格式、不合理的數字都當成最底下那一層）
+    this._skipping = 0
+    // 紀錄上寫的是第幾層（hb：這一套寫的；別的格式、不合理的數字都當成最底下那一層）、排在第幾筆（pos：分得出按的是返回還是前進）
     const stateDepth = () => {
       const n = history.state?.hb
       return Number.isInteger(n) && n > 0 && n <= 50 ? n : 0
     }
+    const posOf = () => (Number.isInteger(history.state?.pos) ? history.state.pos : null)
+    // 不算一層的紀錄：前進鍵走到、那一層已經關掉了的（改寫成 skip），舊版留下的（{ hiyori: 時間 }）
+    const stale = () => {
+      const st = history.state
+      return !!st && typeof st === 'object' && (st.skip === 1 || ('hiyori' in st && !('hb' in st)))
+    }
     this._stateDepth = stateDepth
+    this._staleEntry = stale
+    // 開場的這一筆還沒記過位置：記成最底下那一層。舊版留下的那一筆（重新整理、更新後還停在上面）不算一層：記成跳過、退回它前面那一筆
+    this._pos = posOf() ?? 0
+    const oldAtBoot = stale()
+    if (posOf() == null || oldAtBoot) {
+      try {
+        history.replaceState({ hb: oldAtBoot ? 0 : stateDepth(), pos: this._pos, ...(oldAtBoot ? { skip: 1 } : {}) }, '')
+      } catch {}
+    }
     addEventListener('popstate', () => {
+      const pos = posOf()
+      const dir = pos == null || pos <= this._pos ? -1 : 1
+      this._pos = pos ?? this._pos - 1
+      // 走到還沒記過位置的那一筆（App 一打開的那一筆）：記上，之後分得出返回、前進
+      if (pos == null && !stale()) {
+        try {
+          history.replaceState({ ...(history.state || {}), hb: stateDepth(), pos: this._pos }, '')
+        } catch {}
+      }
       if (this._going) {
+        // 正在跳過不算一層的紀錄：還是那種的話照原本的方向接著走
+        if (this._skipping && stale()) return void history.go(this._skipping)
         this._going = false
+        this._skipping = 0
         clearTimeout(this._goingT)
         return this._syncBack()
       }
       const have = stateDepth()
       // 按了返回鍵：多出來的那幾層一層一層關，關不掉的（擋著）之後把紀錄補回去
-      for (let n = this._backDepth(); n > have; ) {
-        this._backOne()
-        const m = this._backDepth()
-        if (m >= n) break
-        n = m
+      if (dir < 0) {
+        for (let n = this._backDepth(); n > have; ) {
+          this._backOne()
+          const m = this._backDepth()
+          if (m >= n) break
+          n = m
+        }
       }
-      // 按了前進鍵（或回到之前留下的那一筆）：關掉的那一層打不回來，這一筆改寫成現在的層數就好，
-      // 不把人拉回去（再按前進才走得到後面的頁面）
       const want = this._backDepth()
-      if (want < have) {
+      // 走到不算一層的那一筆：接著往同一個方向走（返回鍵按一次退一層、不用多按；前進鍵走得到後面的頁面）
+      if (stale() && want <= have) return this._skip(dir)
+      // 前進鍵走到的是已經關掉的那一層（打不回來）：這一筆改寫成不算一層，接著往前走（不把人拉回去，也不會留下一筆要多退的）
+      if (dir > 0 && want < have) {
         try {
-          history.replaceState({ hb: want }, '')
+          history.replaceState({ hb: want, pos: this._pos, skip: 1 }, '')
         } catch {}
+        return this._skip(1)
       }
       this._syncBack()
     })
     // 重新整理之前開著的那幾層已經不在了：退回最底下那一筆（同一頁裡的切換，不會重新載入），返回鍵按一次就離開
-    this._syncBack()
+    if (oldAtBoot) this._skip(-1)
+    else this._syncBack()
     // 哪一層打開、關掉（hidden 換了）、按了什麼（專案、任務頁開關）之後：對一下紀錄跟開著的層數
     new MutationObserver(() => this._syncBackSoon()).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true })
+    // 小島模式收起、打開面板（滑一下、點地圖）：專案算不算一層跟著變
+    const panel = $('#panel')
+    if (panel) new MutationObserver(() => this._syncBackSoon()).observe(panel, { attributes: true, attributeFilter: ['class'] })
     // （點了、按了之後：等這一下的處理都跑完再對，不然對到的是打開之前的樣子）
     for (const ev of ['click', 'keyup']) document.addEventListener(ev, () => setTimeout(() => this._syncBack()), true)
+  }
+  // 往 dir 的方向再走一筆（跳過不算一層的紀錄）；那個方向沒有了就停在這一筆（瀏覽器說得出來的先問：不用等）。
+  // 收不到 popstate（沒有了、瀏覽器擋了）也不會卡住：一下子之後照現在的再對一次
+  // 往前走、前面沒有了：退回原本那一筆（前進鍵等於沒按），不留下一筆要多退的
+  _skip(dir) {
+    const nav = globalThis.navigation
+    const can = nav && typeof nav.canGoForward === 'boolean' ? (dir > 0 ? nav.canGoForward : nav.canGoBack) : null
+    if (can === false) return dir > 0 ? this._skip(-1) : this._syncBack()
+    this._going = true
+    this._skipping = dir
+    clearTimeout(this._goingT)
+    this._goingT = setTimeout(() => {
+      this._going = false
+      this._skipping = 0
+      if (dir > 0 && this._staleEntry?.()) return this._skip(-1)
+      this._syncBack()
+    }, 600)
+    try {
+      history.go(dir)
+    } catch {
+      this._going = false
+      this._skipping = 0
+    }
   }
   // 現在開著幾層（跟 _topLayer 看的一樣），加上專案（看著專案頁時：專案 1 層、任務頁再 1 層）
   _backDepth() {
@@ -986,10 +1045,12 @@ export class UI {
     const want = this._backDepth()
     const have = this._stateDepth()
     try {
-      if (want > have) for (let n = have + 1; n <= want; n++) history.pushState({ hb: n }, '')
+      if (want > have) for (let n = have + 1; n <= want; n++) history.pushState({ hb: n, pos: ++this._pos }, '')
       else if (want < have) {
         this._going = true
+        this._skipping = 0
         // 一直沒收到 popstate（瀏覽器擋了）：不要卡住，之後照現在的再對一次
+        clearTimeout(this._goingT)
         this._goingT = setTimeout(() => {
           this._going = false
           this._syncBack()
@@ -3272,7 +3333,9 @@ export class UI {
         const src = { local: '這台', file: '同步檔', tab: '另一個分頁' }[bk.from] || '雲端'
         const info = before
           ? `${when(bk.savedAt)} ${before}前的小島，留著備用`
-          : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
+          : bk.from === 'merge'
+            ? `${when(bk.at)} 的這台版本，兩台都改過、自動合在一起之前留的`
+            : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
         const n = list.length > 1 ? `<span class="bk-n">${i + 1} / ${list.length}</span>` : ''
         return `<div class="set-row"><div><b>被取代的資料${n}</b><small>${info}</small></div><button class="chip-toggle" data-backup="${i}">還原</button></div>`
       })

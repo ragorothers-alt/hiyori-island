@@ -443,18 +443,58 @@ async function boot() {
   // 不等下一秒的檢查（剛改完就離開 App 的話頁面會睡著，手機上留著的還是舊的那一串）
   let syncMottos = () => {}
   let syncReminds = () => {}
-  // 這一則提醒（key：reminders.js 的那一個），交給別人發嗎（交出去的那一串 sentReminds 裡有這一則才算；
-  // 匯入的行事曆、排不下的、ふじ睡前那則會說的就寢提醒都不在裡面，頁面自己發）：
-  //   Android 殼：App 不在前面（頁面看不到，或分割畫面時另一邊在前面）就是手機發
-  //   網頁：頁面看不到、伺服器排著這一則的推播（Service Worker 顯示）
+  // Service Worker 顯示過的提醒還在讀幾份（讀完 Reminders 才檢查）
+  let shownReading = 0
+  // 日程、任務、就寢的提醒交給手機（Android 殼）、Service Worker（網頁的推播）發的那一串（remindPlan.js 排的，sentReminds）。
+  // 頁面自己的提醒（reminders.js，key 一樣）到點時：
+  //   交出去的那一串裡有這一則（同一個 key、現在在它排的時間到期限之間；匯入的行事曆、排不下的、ふじ睡前那則會說的就寢提醒都不在裡面），
+  //   而且頁面不在前面（Android：頁面看不到、或分割畫面時另一邊在前面；網頁：頁面看不到、伺服器排著這一則的推播）：
+  //     交給那邊發，這邊不響、不跳卡（delegated 記著）。回到頁面時，那邊發過的記成提醒過了；沒發出去的（通知被關掉、
+  //     推播沒送到）還在期限內就照常提醒（rereminds）
+  //   其他時候頁面自己提醒，記給那邊看（Service Worker 的紀錄、交給手機的 shown），同一則不再發一次
   let sentReminds = []
   let webReminds = []
-  const byOther = (kind, key) => {
-    const now = Date.now()
-    const r = sentReminds.filter((x) => x.key === key && Math.abs(x.at - now) < 20 * 60000).sort((a, b) => Math.abs(a.at - now) - Math.abs(b.at - now))[0]
+  const delegated = new Map()
+  const pageShown = []
+  let replaying = false
+  const planned = (key, now = Date.now()) => sentReminds.find((x) => x.key === key && x.at <= now + 60000 && now < (x.until || x.at + 15 * 60000))
+  const remindKeyOf = (kind, e) => ({ event: `${e.id}@${e.start}`, task: `${e.id}@${e.start}`, taskStart: `${e.id}@${e.start}!`, bed: `bed@${store.state.rhythm.sleep}` })[kind] || null
+  const byOther = (r) => (nativeReminders() ? document.hidden || nativeAway() : document.hidden && !!mottoPush?.covers(r.at))
+  // 頁面要提醒這一則了：交出去就回傳 true（這邊什麼都不做）；頁面自己提醒的話記給那邊看
+  const handOver = (kind, e, min) => {
+    const key = remindKeyOf(kind, e)
+    const r = key && planned(key)
     if (!r) return false
-    if (nativeReminders()) return document.hidden || nativeAway()
-    return document.hidden && !!mottoPush?.covers(r.at)
+    const id = `${r.key}|${r.date}`
+    if (!replaying && byOther(r)) {
+      delegated.set(id, { r, args: [e, min, kind] })
+      return true
+    }
+    if (!pageShown.includes(id)) pageShown.push(id)
+    pageShown.splice(0, Math.max(0, pageShown.length - 40))
+    mottoPush?.markRemindShown([{ key: r.key, date: r.date, at: r.at }])
+    if (nativeReminders()) syncReminds(true)
+    return false
+  }
+  // 回到頁面（看得到、Android 的 App 在前面）時：交出去的那幾則，那邊發過的（list）不再提醒，沒發出去、還在期限內的照常提醒
+  const rereminds = (list) => {
+    for (const x of list) delegated.delete(`${x.key}|${x.date}`)
+    if (!delegated.size || document.hidden || nativeAway()) return
+    const now = Date.now()
+    const due = [...delegated.values()].filter((d) => now < (d.r.until || d.r.at + 15 * 60000))
+    delegated.clear()
+    // 這一輪檢查做完再說（提醒過的記號先記好）
+    if (due.length)
+      setTimeout(() => {
+        for (const d of due) {
+          replaying = true
+          try {
+            reminders.onRemind(...d.args)
+          } finally {
+            replaying = false
+          }
+        }
+      })
   }
   // Service Worker 顯示過的提醒（推播送到時）：Reminders 下一次檢查時記成提醒過了
   const webShown = []
@@ -1534,6 +1574,8 @@ async function boot() {
   const reminders = new Reminders(store, (e, min, kind = 'event') => {
     // 設定裡「時間到的提醒」關著：警語以外的都不說（照樣記成提醒過了，打開時不會一口氣補一串）
     if (kind !== 'motto' && store.state.settings.remindOn === false) return
+    // 交給手機、Service Worker 發了（頁面在背景）：這邊不響、不跳卡
+    if (handOver(kind, e, min)) return
     // 重要日子：前一天ふじ提醒，當天もち也來打氣
     // 里程碑期限：一樣前一天ふじ提醒、當天もち打氣；說得出還差幾個細項
     if (kind === 'date' && e.pid) {
@@ -1679,7 +1721,7 @@ async function boot() {
         ...(day && !first ? { actions: [{ label: `挑${word}的第一件`, soft: true, run: () => ui.openFirst() }] } : {}),
       })
       // ふじ睡前那則是同一刻：只跳一則（bedNotice 決定誰說）。手機排著就寢提醒的話由手機發
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !byOther('bed', `bed@${store.state.rhythm.sleep}`)) {
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) {
         const out = bedNotice(Date.now(), { title: 'ひより · 就寢提醒', body: `預定 ${e.start} 就寢`, tag: 'bedtime' })
         if (out) systemNotify(out.title, out.body, out.tag)
       }
@@ -1719,7 +1761,7 @@ async function boot() {
           { label: '晚 15 分鐘', soft: true, run: later },
         ],
       })
-      if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !byOther('taskStart', `${t.id}@${e.start}!`)) systemNotify(`ひより · ${t.title}`, `排在 ${e.start}，現在開始吧`, t.id)
+      if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${t.title}`, `排在 ${e.start}，現在開始吧`, t.id)
       return
     }
     // 排定的任務排的時間到了還沒做完：問一聲做完了沒，寫著下一件是什麼（轉換最難：一不小心就做過頭）。
@@ -1780,15 +1822,22 @@ async function boot() {
     const early = kind === 'task' && ui.focus.mode !== 'focus' ? [{ label: '▶ 現在就開始', soft: true, run: startTask(e.id, (id) => ui.focus.startWith(id)) }] : []
     ui.toast({ icon: kind === 'task' ? '時' : '鐘', title: e.title, sub: kind === 'task' ? `排定的任務・${when}` : when, ms: early.length ? 12000 : 9000, ...(early.length ? { actions: early } : {}) })
     if (kind === 'event' && store.selectedDate === store.today) scene?.pulseEvent(e.id)
-    if (store.state.settings.notify && (document.hidden || !document.hasFocus()) && !byOther(kind, `${e.id}@${e.start}`)) systemNotify(`ひより · ${e.title}`, when, e.id)
+    if (store.state.settings.notify && (document.hidden || !document.hasFocus())) systemNotify(`ひより · ${e.title}`, when, e.id)
   }, {
     // 警語交給手機、伺服器排時怎麼分工（見 reminders.js 的 _motto）
     external: () => mottoExternal(),
     hidden: (t) => (mottoPush ? mottoPush.defer(t, document.hidden) : document.hidden || nativeAway()),
     handled: () => (mottoPush ? mottoPush.done : nativeMottoHandled()),
     claim: (at) => (mottoPush ? mottoPush.claim(at) : nativeMottoClaim(at)),
-    // App 關著、在背景時手機發過的日程、任務、就寢提醒：記成提醒過了（回到 App 不再跳一次提示卡）
-    posted: () => [...nativeRemindPosted(), ...webShown.splice(0)],
+    // App 關著、在背景時手機、Service Worker 發過的日程、任務、就寢提醒：記成提醒過了（回到 App 不再跳一次提示卡）；
+    // 交出去卻沒發出去的照常提醒
+    posted: () => {
+      const list = [...nativeRemindPosted(), ...webShown.splice(0)]
+      rereminds(list)
+      return list
+    },
+    // Service Worker 顯示過哪幾則還在讀（開場、回到頁面時）：讀完才檢查，不會先跳一次已經顯示過的
+    ready: () => !shownReading,
   })
 
   // ── 專注中離開 App ──
@@ -2190,11 +2239,17 @@ async function boot() {
     if (!force && !remindDirty && now - remindAt < 60000) return
     remindDirty = false
     remindAt = now
-    const items = remindPlan(store, now, { sent: reminders.sent, bed: bedText })
+    let items = remindPlan(store, now, { sent: reminders.sent, bed: bedText })
+    const st = store.state.settings
     if (phone) {
-      if (sendReminders(items)) sentReminds = items
+      // 頁面自己提醒過的那幾則一起交過去：手機那邊到點還沒發的就不發了
+      if (sendReminders(items, { off: st.remindOn === false || !st.notify, shown: pageShown })) sentReminds = items
       return
     }
+    // 交給 Service Worker 了、推播還沒送到的那幾則（已經到點，remindPlan 不會再排）：還在期限內就留在這一串裡，
+    // 伺服器照樣送（不然重排時就被取消了，兩邊都沒發）
+    const carry = [...delegated.values()].map((d) => d.r).filter((r) => now < (r.until || r.at + 15 * 60000) && !items.some((x) => x.key === r.key && x.date === r.date))
+    if (carry.length) items = [...carry, ...items].sort((a, b) => a.at - b.at)
     // 一樣的就留著同一份（mottoPush.sync 照這一串有沒有換決定要不要重存、重送）
     const key = JSON.stringify(items)
     if (key === webRemindsKey) return
@@ -2203,8 +2258,14 @@ async function boot() {
     sentReminds = items
     syncMottos()
   }
-  // 回到頁面：鎖著、關著時 Service Worker 顯示過的提醒先讀進來，記成提醒過了（不再跳提示卡）
-  const readShown = () => mottoPush?.remindShown().then((v) => webShown.push(...v)).catch(() => {})
+  // 回到頁面：鎖著、關著時 Service Worker 顯示過的提醒先讀進來，記成提醒過了（不再跳提示卡）。讀的時候先不檢查（最多等 5 秒）
+  const readShown = () => {
+    if (!mottoPush) return
+    shownReading++
+    return Promise.race([mottoPush.remindShown().then((v) => webShown.push(...v)), new Promise((r) => setTimeout(r, 5000))])
+      .catch(() => {})
+      .finally(() => shownReading--)
+  }
   document.addEventListener('visibilitychange', () => !document.hidden && readShown())
   readShown()
   store.on('dirty', () => (remindDirty = true))
@@ -2213,6 +2274,29 @@ async function boot() {
 
   // ── 同步：線上同步（同步碼，手機也能用）＋資料夾同步（資料寫進 OneDrive／Dropbox 裡的檔案）。兩種可以同時開 ──
   const onConflict = () => ui.toast({ icon: '雲', title: '兩邊都有新的變更', sub: '到「設定 → 資料與同步」選要保留哪一邊', ms: 7000 })
+  // 兩台都改過、自動合在一起了：說一聲；兩邊改了同一個地方的，用了比較晚改的那一邊。合併前這台的那一份留著，換得回去
+  const onMerged = (engine) => ({ clashes, rev }) =>
+    ui.toast({
+      icon: '雲',
+      title: '兩台都改過，已經合在一起了',
+      sub: clashes.length ? `兩邊都新增、修改的都留著；${clashes.length} 個地方兩邊改得不一樣，用了比較晚改的那一邊` : '兩邊新增、修改的都留著',
+      ms: 9000,
+      tag: 'merge',
+      actions: [
+        {
+          label: '換回合併前',
+          soft: true,
+          run: () => {
+            try {
+              if (engine.undoMerge(rev)) ui.toast({ icon: '戻', title: '換回合併前這台的了', sub: '合併好的那一份也留了備份，在「設定 → 資料與同步」' })
+              else ui.toast({ icon: '戻', title: '合併前的那一份已經不在了', sub: '備份最多留 3 份，被比較新的擠掉了' })
+            } catch (e) {
+              ui.toast({ icon: '!', title: '換不回去', sub: e?.message || String(e) })
+            }
+          },
+        },
+      ],
+    })
   // 剛說了別台的計時（那一張就夠了，「已同步別台裝置的變更」不再說）
   let timerSaid = 0
   const pulledToast = (o) => Date.now() - timerSaid > 3000 && ui.toast(o)
@@ -2228,11 +2312,13 @@ async function boot() {
     onStatus: () => ui.renderSync(),
     onPulled: () => pulledToast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),
     onConflict,
+    onMerged: (x) => onMerged(cloudSync)(x),
   })
   const fileSync = new FileSync(store, {
     onStatus: () => ui.renderSync(),
     onPulled: () => pulledToast({ icon: '雲', title: '已載入雲端的新資料', sub: '別台裝置的變更同步過來了' }),
     onConflict,
+    onMerged: (x) => onMerged(fileSync)(x),
   })
   ui.attachCloud(cloudSync)
   ui.attachSync(fileSync)

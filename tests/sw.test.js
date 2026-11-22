@@ -115,6 +115,37 @@ describe('Service Worker', () => {
     }
   })
 
+  it('安裝：首頁一定要用到這一版的入口 JS（只引了這一版的 three.js 那種別的檔案也不算）', async () => {
+    const build = ['assets/index-new.js', 'assets/index-new.css', 'assets/three-x.js', 'index.html']
+    const other = '<script type="module" src="./assets/three-x.js"></script><h1>維護中</h1>'
+    for (const [home, ok] of [[other, false], [HTML, true]]) {
+      const f = fetcher(null, home)
+      const caches = new FakeCaches(f)
+      await (await caches.open('hiyori-old')).put('./index.html', new Response('old'))
+      const on = loadSW({ caches, fetch: f, build, entry: 'assets/index-new.js' })
+      if (ok) await run(on.install, {})
+      else await expect(run(on.install, {})).rejects.toThrow()
+      expect(await caches.keys()).toEqual(ok ? ['hiyori-old', 'hiyori-new'] : ['hiyori-old'])
+    }
+  })
+
+  it('頁面：維護頁自己的 JS 被快取過了，再打開時也不會換掉離線首頁（要用到這一版的入口 JS）', async () => {
+    const caches = new FakeCaches()
+    const cur = await caches.open('hiyori-new')
+    await cur.put('./index.html', new Response('old home'))
+    await cur.put('./assets/index-a.js', new Response('a'))
+    await cur.put('./assets/maint.js', new Response('m'))
+    const req = { method: 'GET', mode: 'navigate', url: SCOPE }
+    const page = (h) => loadSW({ caches, fetch: async () => html(h), entry: 'assets/index-a.js' })
+    await run(page('<script src="./assets/maint.js"></script><h1>維護中</h1>').fetch, { request: req })
+    await new Promise((r) => setTimeout(r))
+    expect(await (await cur.match('./index.html')).text()).toBe('old home')
+    const home = '<script type="module" src="./assets/index-a.js"></script>'
+    await run(page(home).fetch, { request: req })
+    await new Promise((r) => setTimeout(r))
+    expect(await (await cur.match('./index.html')).text()).toBe(home)
+  })
+
   it('安裝：入口 JS 抓不到就讓安裝失敗，舊版和舊快取留著', async () => {
     const f = fetcher('index-new.js')
     const caches = new FakeCaches(f)
@@ -468,6 +499,21 @@ describe('Service Worker：警語的推播', () => {
       vi.setSystemTime(NOW + 3000)
       await run(s.on.push, { data: null })
       expect([...s.alerts].sort()).toEqual(['ひより · e1@12:10', 'ひより · t1@12:10', 'ひより · 給自己的警語'].sort())
+    }))
+
+  it('顯示過了照日子和 key 認：就寢（key 每天都一樣）第二晚照樣顯示；頁面自己提醒過的（記在同一份）不再顯示', () =>
+    withClock(async () => {
+      const bed = { at: NOW, key: 'bed@23:00', date: '2026-11-10', title: 'ひより · 就寢提醒', body: '預定 23:00 就寢', tag: 'bedtime', remind: true }
+      const ev = { at: NOW, key: 'e1@12:10', date: '2026-11-10', title: 'ひより · 會', body: '現在開始', tag: 'e1', remind: true }
+      const s = setup({ mottos: [bed, ev], windows: () => [] })
+      await s.ready
+      // 前一晚的就寢、頁面剛提醒過的那一則
+      await (await s.caches.open('hiyoripush')).put(SCOPE + '__remind-shown', new Response(JSON.stringify([
+        { key: 'bed@23:00', date: '2026-11-09', at: NOW - 86400000 },
+        { key: 'e1@12:10', date: '2026-11-10', at: NOW },
+      ]))) // prettier-ignore
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.tag)).toEqual(['bedtime'])
     }))
 
   it('提醒沒顯示出來（瀏覽器出錯）：「顯示過了」拿掉，下一則推播來時照樣顯示', () =>

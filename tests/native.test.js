@@ -53,16 +53,21 @@ describe('Android 殼的即時倒數', () => {
 })
 
 describe('日程、任務、就寢的提醒交給手機的鬧鐘（第 7 版的殼）', () => {
-  it('舊版的殼不送；內容沒變不重送，空的是都不提醒了', () => {
+  it('舊版的殼不送；內容沒變不重送；沒有要提醒的照樣送一串空的（到點還沒發的留著），關掉提醒才是空字串（全部取消）', () => {
     expect(nativeReminders({ reminders() {} })).toBe(false)
-    expect(sendReminders([{ at: AT }], {})).toBe(false)
+    expect(sendReminders([{ at: AT }], {}, {})).toBe(false)
     const got = []
     const bridge = { reminders: (j) => got.push(j), remindPosted: () => '[]' }
     const items = [{ at: AT, key: 'e1@09:00', date: '2026-10-25', title: 'ひより · 會', body: '10 分鐘後開始（09:00）', tag: 'e1' }]
-    expect(sendReminders(items, bridge)).toBe(true)
-    expect(sendReminders([...items], bridge)).toBe(true)
-    expect(got).toEqual([JSON.stringify({ items })])
-    sendReminders([], bridge)
+    expect(sendReminders(items, {}, bridge)).toBe(true)
+    expect(sendReminders([...items], {}, bridge)).toBe(true)
+    expect(got).toEqual([JSON.stringify({ items, shown: [] })])
+    // 頁面自己提醒過的一起交過去
+    sendReminders(items, { shown: ['e0@08:00|2026-10-25'] }, bridge)
+    expect(JSON.parse(got.at(-1)).shown).toEqual(['e0@08:00|2026-10-25'])
+    sendReminders([], {}, bridge)
+    expect(got.at(-1)).toBe(JSON.stringify({ items: [], shown: [] }))
+    sendReminders([], { off: true }, bridge)
     expect(got.at(-1)).toBe('')
   })
 
