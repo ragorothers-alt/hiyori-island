@@ -135,6 +135,8 @@ function seed(samples = true) {
     subRates: cleanRates(),
     // 最近記過的專注（番茄鐘每一輪的 id）：兩個分頁同一輪到點時只記一次
     pomoSids: [],
+    // 那幾輪各記了什麼（{ id: { m 分鐘, xp, x 加時 0/1, d 日子, t 任務, p 專案, s 時段 } }）：兩台都記了同一輪、合在一起時扣回一份用
+    pomoGot: {},
     // 跨裝置的計時（最後按計時按鈕、到點時接手的那一台送的樣子）：沒開過同步是 null
     timer: null,
     lotsPlan: 1,
@@ -442,6 +444,27 @@ function cleanDates(list) {
 }
 // 重要日子的上限：只防異常大的匯入；新增時到了就不再加，讀檔不會刪掉合法的紀錄
 export const DATES_MAX = 1000
+const POMO_SLOTS = ['focusLate', 'focusAm', 'focusPm', 'focusEve']
+// 只留還記著的那幾輪（pomoSids 裡有的）
+function cleanPomoGot(v, sids) {
+  const out = {}
+  if (!isObj(v) || !Array.isArray(sids)) return out
+  for (const id of sids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS)) {
+    const g = v[id]
+    if (!isObj(g)) continue
+    out[id] = {
+      m: num(g.m, 0, 600, 0),
+      xp: num(g.xp, 0, 10000, 0),
+      x: g.x ? 1 : 0,
+      d: DATE_RE.test(g.d) ? g.d : '',
+      t: ID_RE.test(g.t) ? g.t : null,
+      p: ID_RE.test(g.p) ? g.p : null,
+      s: POMO_SLOTS.includes(g.s) ? g.s : null,
+    }
+  }
+  return out
+}
+export const LINEAGE_MAX = 64
 
 // ── 匯入的行事曆（Google 日曆的私密網址、學校課表的 .ics）：只存訂閱的設定，抓回來的日程放在這台裝置（src/calendars.js）──
 // url 只收 https／webcal（私人網址等於鑰匙：跟著加密的同步走，匯出的檔案裡也有）；on：要不要顯示、算進排程
@@ -594,7 +617,7 @@ const newTempo = (unit = '') => ({ unit: unitOf(unit), goal: null, log: [], met:
 export const blankTask = (o = {}) => ({
   id: uid(), title: '', date: dateStr(), priority: 2, tag: 'life', done: false, rewarded: false, createdAt: Date.now(), doneAt: null,
   routineId: null, pomos: 0, star: false, first: false, flower: null, dur: null, at: null, coach: null, moved: 0,
-  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null, due: null, spent: 0,
+  project: null, ms: null, ongoing: false, msAuto: null, note: '', subs: [], tempo: null, touched: null, due: null, spent: 0, xpGot: null,
   ...o,
 })
 
@@ -669,6 +692,8 @@ export function cleanTask(t, today = dateStr()) {
     due: DATE_RE.test(t.due) ? t.due : null,
     // spent：用專注計時實際做了幾分鐘（加總）。跟預估（dur）比，看得出平常估得準不準
     spent: num(t.spent, 0, 99999, 0),
+    // xpGot：完成時拿了幾點經驗（兩台都打勾了這一件、合在一起時扣回一份用；舊存檔沒有是 null）
+    xpGot: t.xpGot == null ? null : num(t.xpGot, 0, 10000, 0),
   }
 }
 
@@ -976,6 +1001,8 @@ function migrate(s) {
       id: str(h.id), name, kind, icon: str(h.icon, 2) || (kind === 'quit' ? '禁' : '習'), color: num(h.color, 0, 99, 0),
       target: num(h.target, 1, 99, 1), unit: str(h.unit, 6).trim() || '次', days: weekdays(h.days),
       start: ymd(h.start, today), createdAt: ts(h.createdAt) || Date.now(), archived: !!h.archived,
+      // 補打卡把開始日往前移之前，原本的開始日（補的那幾格又取消時移回去）；沒移過是空字串
+      ...(DATE_RE.test(h.start0) && h.start0 > ymd(h.start, today) ? { start0: h.start0 } : {}),
       log: counts(h.log), urges: counts(h.urges), slips, ms: num(h.ms, 0, 9999, 0), paid: ymd(h.paid, ''),
       // 給過獎勵的日子（照日期記，系統日期倒退再走回來也不會重領）；舊存檔只有 paid 那一天
       paidDays: [...new Set([...(Array.isArray(h.paidDays) ? h.paidDays : []), h.paid].filter((d) => DATE_RE.test(d)))].sort().slice(-HABIT_PAID_DAYS),
@@ -1028,9 +1055,12 @@ function migrate(s) {
     tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
+    pomoGot: cleanPomoGot(s.pomoGot, s.pomoSids),
     timer: cleanTimer(s.timer),
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',
+    // 這一版包含了之前的哪幾版（最近 LINEAGE_MAX 個）：同步時看得出雲端那一版是不是已經有這台的這一版（不用合併、不會重複算）
+    lineage: Array.isArray(s.lineage) ? [...new Set(s.lineage.filter((x) => typeof x === 'string' && REV_RE.test(x)))].slice(-LINEAGE_MAX) : [],
   }
   // 新版 App 寫的資料（只會在開機時讀到，而且讀到了就不再寫回去，見 newerApp）：
   // 看不懂的頂層欄位原樣留著、版本號也不往回改，萬一寫出去也不會把新版的欄位洗掉。

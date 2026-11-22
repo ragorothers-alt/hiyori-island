@@ -223,7 +223,6 @@ body.night .td-now time { background: rgba(241, 155, 178, .2); color: #ffb3c8; }
 /* 點任務名稱就開始專注：名稱本身是按鈕，滑過時名稱和旁邊的 ▶ 一起亮 */
 .td-go { text-align: left; cursor: pointer; border-radius: 10px; padding: 3px 6px; margin: -3px -6px; transition: background .2s; }
 .td-go:hover { background: color-mix(in srgb, var(--n, var(--sky)) 14%, transparent); }
-:is(.td-t, .td-mos li, .tn-fits li):has(.td-go:hover) .td-mini[data-act="focus"] { color: var(--ink); background: rgba(140, 170, 200, .16); }
 .td-t.on { border-color: color-mix(in srgb, var(--n) 70%, transparent); background: color-mix(in srgb, var(--n) 10%, var(--field)); }
 .td-focusing, .td-tm small em.td-focusing { display: inline-block; flex: none; font-style: normal; font-size: max(var(--fmin), 11px); letter-spacing: .06em; padding: 1px 7px; border-radius: 7px; color: #9a4d65; background: rgba(241, 155, 178, .22); }
 body.night .td-focusing, body.night .td-tm small em.td-focusing { color: #ffbfd0; }

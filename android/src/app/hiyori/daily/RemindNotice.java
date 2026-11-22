@@ -19,6 +19,8 @@ final class RemindNotice {
     private static final String PREFS = "hiyori";
     private static final String KEY = "reminds";
     private static final String KEY_POSTED = "remindPosted";
+    // 排的時候手機是哪個時區：換了時區（出國、跨時區）時照當地的同一個時間重排（日程記的是幾月幾號幾點）
+    private static final String KEY_ZONE = "remindZone";
     // 晚了這麼久還沒發的就不發了：每一則的 until（日程開始後 15 分鐘內、就寢那一刻以前），沒寫的照 LATE
     private static final long LATE = 15 * 60_000L;
     private static final int MAX = 60;
@@ -64,7 +66,7 @@ final class RemindNotice {
             rest.put(o);
             if (next == 0 || at < next) next = at;
         }
-        prefs(c).edit().putString(KEY, rest.toString()).apply();
+        prefs(c).edit().putString(KEY, rest.toString()).putString(KEY_ZONE, java.util.TimeZone.getDefault().getID()).apply();
         AlarmManager alarms = c.getSystemService(AlarmManager.class);
         if (next == 0) {
             alarms.cancel(alarm(c));
@@ -171,5 +173,39 @@ final class RemindNotice {
     // 開機、App 更新後：鬧鐘被清掉了，照存著的重排（剛好錯過、還不算太晚的那一則馬上補發）
     static synchronized void restore(Context c) {
         keep(c, read(c, KEY), System.currentTimeMillis());
+    }
+
+    // 手機換了時區：排著的每一則照「排的時候那個時區的幾點幾分」換成現在這個時區的同一個時間（期限跟著挪），再排。
+    // 下次打開 App 時網頁也會照新的時區重排一次
+    static synchronized void retime(Context c) {
+        String was = prefs(c).getString(KEY_ZONE, "");
+        java.util.TimeZone now = java.util.TimeZone.getDefault();
+        JSONArray items = read(c, KEY);
+        if (!was.isEmpty() && !was.equals(now.getID())) {
+            java.util.TimeZone old = java.util.TimeZone.getTimeZone(was);
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject o = items.optJSONObject(i);
+                long at = o == null ? 0 : o.optLong("at", 0);
+                if (at <= 0) continue;
+                long d = shift(at, old, now) - at;
+                try {
+                    o.put("at", at + d).put("until", until(o) + d);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        keep(c, items, System.currentTimeMillis());
+    }
+
+    // 那一刻在 from 時區是幾月幾號幾點幾分，換成 to 時區的同一個時間
+    static long shift(long at, java.util.TimeZone from, java.util.TimeZone to) {
+        java.util.Calendar a = java.util.Calendar.getInstance(from);
+        a.setTimeInMillis(at);
+        java.util.Calendar b = java.util.Calendar.getInstance(to);
+        b.clear();
+        b.set(a.get(java.util.Calendar.YEAR), a.get(java.util.Calendar.MONTH), a.get(java.util.Calendar.DAY_OF_MONTH),
+                a.get(java.util.Calendar.HOUR_OF_DAY), a.get(java.util.Calendar.MINUTE), a.get(java.util.Calendar.SECOND));
+        b.set(java.util.Calendar.MILLISECOND, a.get(java.util.Calendar.MILLISECOND));
+        return b.getTimeInMillis();
     }
 }

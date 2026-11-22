@@ -216,8 +216,10 @@ export const layersMethods = {
   // 提示卡上按得到的按鈕（正在收起來的不算）。最上面那一層疊得比提示卡高（對話框、今日摘要）時，
   // 提示卡在它的遮罩後面，一顆都不算
   _toastButtons(top) {
-    if (top && layerZ(top) > layerZ($('#toasts'))) return []
-    return focusables($('#toasts')).filter((b) => !b.closest('.toast.out'))
+    // 常駐的警示列（存不進去時的「匯出資料」）也轉得到
+    const alerts = top && layerZ(top) > layerZ($('#alerts')) ? [] : focusables($('#alerts'))
+    if (top && layerZ(top) > layerZ($('#toasts'))) return alerts
+    return [...focusables($('#toasts')).filter((b) => !b.closest('.toast.out')), ...alerts]
   },
   // 提示卡收掉時焦點要去的地方：進來之前的地方（還在、看得到、在最上面那一層裡），不然是最上面那一層的第一顆
   _toastHome(el) {

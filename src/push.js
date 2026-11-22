@@ -27,6 +27,9 @@ export const MOTTO_LOG = '__motto-log'
 export const MOTTO_LOG_KEEP = 150
 // 推播送到時 Service Worker 顯示過的日程、任務、就寢提醒 [{ key, date, at }]（public/sw.js 也寫了一份，要一起改）
 export const REMIND_SHOWN = '__remind-shown'
+// 一則一個檔案（頁面和 Service Worker 同時記也不會互相蓋掉；public/sw.js 也寫了一份，要一起改）
+export const REMIND_DIR = '__remind-shown/'
+const remindFile = (x) => REMIND_DIR + encodeURIComponent(`${x.key}|${x.date}`)
 // 念到的那一則比現在晚這麼久以上：時鐘被往回調過了（推播會早幾秒到，一點點不算）
 const MOTTO_REWIND = 10 * 60000
 // 警語一次最多交給伺服器幾則（伺服器的上限也是 200）
@@ -751,18 +754,33 @@ export class MottoPush extends PushBase {
       const reg = await this._reg()
       if (!reg) return
       const cache = await this.storage.open(PLAN_CACHE)
-      const url = new URL(REMIND_SHOWN, reg.scope).href
-      const old = await (await cache.match(url))?.json().catch(() => null)
-      const have = Array.isArray(old) ? old : []
-      const add = list.filter((x) => !have.some((y) => y?.key === x.key && y?.date === x.date))
-      if (add.length) await cache.put(url, jsonRes([...have, ...add].slice(-80)))
+      for (const x of list) await cache.put(new URL(remindFile(x), reg.scope).href, jsonRes({ key: x.key, date: x.date, at: x.at }))
+      // 三天以前的清掉（推播一直沒來、Service Worker 沒機會清的時候）
+      const dir = new URL(REMIND_DIR, reg.scope).href
+      for (const req of await cache.keys()) {
+        if (!String(req.url).startsWith(dir)) continue
+        const v = await (await cache.match(req.url))?.json().catch(() => null)
+        if (!(Number(v?.at) > this.now() - 3 * 86400000)) await cache.delete(req.url)
+      }
     } catch {}
   }
 
   // 推播送到時 Service Worker 顯示過的日程、任務、就寢提醒：[{ key, date }]（頁面記成提醒過了，回來時不再跳提示卡）
   async remindShown() {
-    const v = await this._read(REMIND_SHOWN)
-    return Array.isArray(v) ? v.filter((x) => x && typeof x.key === 'string' && typeof x.date === 'string').map(({ key, date }) => ({ key, date })) : []
+    const old = await this._read(REMIND_SHOWN)
+    const all = Array.isArray(old) ? [...old] : []
+    try {
+      const reg = await this._reg()
+      if (reg && !(await this._cacheMissing())) {
+        const cache = await this.storage.open(PLAN_CACHE)
+        const dir = new URL(REMIND_DIR, reg.scope).href
+        for (const req of await cache.keys()) {
+          if (!String(req.url).startsWith(dir)) continue
+          all.push(await (await cache.match(req.url))?.json().catch(() => null))
+        }
+      }
+    } catch {}
+    return all.filter((x) => x && typeof x.key === 'string' && typeof x.date === 'string').map(({ key, date }) => ({ key, date }))
   }
 
   // 上一則警語的推播 { got, at }（沒有是 null）：警語卡上寫「上一則推播幾點送到」

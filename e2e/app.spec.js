@@ -4617,6 +4617,15 @@ test('網頁版：日程開始前的提醒在頁面關掉時也會響（跟警�
       const hit = await (await caches.open('hiyoripush')).match(new URL(n, (await navigator.serviceWorker.ready).scope).href)
       return hit ? hit.json() : null
     }, name)
+  // 顯示過的提醒：一則一個檔案（__remind-shown/key|date）
+  const shownFiles = () =>
+    page.evaluate(async () => {
+      const c = await caches.open('hiyoripush')
+      const dir = new URL('__remind-shown/', (await navigator.serviceWorker.ready).scope).href
+      const out = []
+      for (const r of await c.keys()) if (r.url.startsWith(dir)) out.push(await (await c.match(r.url)).json())
+      return out
+    })
   // 10:20 那一則（10:30 開始前 10 分鐘）的字留在快取裡；看著頁面時不交給伺服器
   await expect
     .poll(async () => (await file('__motto-plan'))?.find((x) => x.remind))
@@ -4664,7 +4673,7 @@ test('網頁版：日程開始前的提醒在頁面關掉時也會響（跟警�
     document.dispatchEvent(new Event('visibilitychange'))
   })
   await expect(page.locator('#toasts .toast', { hasText: '健身' })).toBeVisible()
-  await expect.poll(async () => (await file('__remind-shown'))?.some((x) => x.key === 'e2e-ev2@12:00' && x.date === ymd)).toBe(true)
+  await expect.poll(async () => (await shownFiles()).some((x) => x.key === 'e2e-ev2@12:00' && x.date === ymd)).toBe(true)
 })
 
 // 收到推播後顯示什麼、頁面和 Service Worker 怎麼分「念到哪」在 tests/sw.test.js、tests/mottoPush.test.js 測
@@ -5461,6 +5470,22 @@ test('存不進去：上方一直留著警示列，可以馬上匯出；又存�
   // 提示卡會自己收掉，警示列不會
   await page.waitForTimeout(4000)
   await expect(bar).toBeVisible()
+  // 手機上叫出快速記錄：卡片往下讓，右上的 × 不會被警示列蓋住；Tab 轉得到警示列的「匯出資料」
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.keyboard.press('n')
+  await expect(page.locator('#capInput')).toBeFocused()
+  await expect.poll(async () => {
+    const a = await bar.boundingBox()
+    const x = await page.locator('#capClose').boundingBox()
+    return !!a && !!x && x.y >= a.y + a.height
+  }).toBe(true)
+  let reached = false
+  for (let i = 0; i < 20 && !reached; i++) {
+    await page.keyboard.press('Tab')
+    reached = await page.evaluate(() => !!document.activeElement?.closest('#alerts'))
+  }
+  expect(reached).toBe(true)
+  await page.keyboard.press('Escape')
   await page.evaluate(() => (Storage.prototype.setItem = window.__realSet))
   await bar.getByRole('button', { name: '再試一次' }).click()
   await expect(bar).toHaveCount(0)
@@ -5530,6 +5555,19 @@ test('找找看：別的頁按 / 或 Ctrl+K、點放大鏡都叫得出來；哪�
   await expect(page.locator('#findLive')).toContainText('排到後面了')
   await page.keyboard.press('Control+k')
   await expect(page.locator('#search')).toBeHidden()
+  // 生活記錄（別天的）：打開後捲到那一則、焦點也在它上面（不會回到打開找找看之前按的那一格）
+  const lid = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const x = new Date(s.today)
+    x.setDate(x.getDate() - 2)
+    const d = `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`
+    return s.addLife(d, { kind: 'note', text: '跨日的會議筆記' }).id
+  })
+  await page.keyboard.press('Control+k')
+  await input.fill('跨日的會議筆記')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#search')).toBeHidden()
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('.life-item')?.dataset.id)).toBe(lid)
 })
 
 test('逾期的任務：超過 4 件時先列最要緊的 3 件、可以展開；挑幾件一起移到明天，撤銷後回到各自原本那天', async ({ page, context, site }) => {
@@ -5728,4 +5766,82 @@ test('沒接 Claude 的ふじ：除了設定通行碼，也有現在就能用的
   await page.evaluate(() => window.hiyori.ui.openAgent())
   await page.locator('.ag-local').getByRole('button', { name: '把今天的任務排進空檔' }).click()
   await expect.poll(() => page.evaluate(() => window.hiyori.ui.tab)).toBe('schedule')
+})
+
+test('設定的匯入：鍵盤按得到「匯入資料」；選好檔案先列出檔案裡有什麼，按「換成這份」才換（取消、Esc 不動）；開關的名字是那一列的標題', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => window.hiyori.ui.setTab('settings'))
+  // 開關報讀得出是哪一個（不是只有「開」）
+  await expect(page.locator('#soundSetBtn')).toHaveAccessibleName('音效')
+  await expect(page.locator('#powerBtn')).toHaveAccessibleName('省電模式')
+  // 不是開關的按鈕（「看看」）名字不變
+  await expect(page.locator('#newsBtn')).toHaveAccessibleName('看看')
+  // 按鈕：Tab 停得到、Enter 打開選檔
+  const btn = page.locator('#importBtn')
+  await btn.focus()
+  await expect(btn).toBeFocused()
+  const file = await page.evaluate(() => {
+    const s = JSON.parse(JSON.stringify(window.hiyori.store.state))
+    s.tasks = [{ id: 'imp-1', title: '從備份來的任務', date: window.hiyori.store.today, priority: 2, tag: 'life', done: false }]
+    return JSON.stringify(s)
+  })
+  const before = await page.evaluate(() => window.hiyori.store.state.tasks.length)
+  const pick = async () => {
+    const chooser = page.waitForEvent('filechooser')
+    await btn.press('Enter')
+    await (await chooser).setFiles({ name: 'hiyori-backup.json', mimeType: 'application/json', buffer: Buffer.from(file) })
+  }
+  await pick()
+  const box = page.locator('#importCheck')
+  await expect(box).toBeVisible()
+  await expect(box).toContainText('hiyori-backup.json')
+  await expect(box).toContainText('任務 1 件')
+  await expect(box.getByRole('button', { name: '取消' })).toBeFocused()
+  // 還沒換
+  expect(await page.evaluate(() => window.hiyori.store.state.tasks.length)).toBe(before)
+  await page.keyboard.press('Escape')
+  await expect(box).toBeHidden()
+  await expect(btn).toBeFocused()
+  expect(await page.evaluate(() => window.hiyori.store.state.tasks.some((t) => t.id === 'imp-1'))).toBe(false)
+  // 再選一次、換成這份
+  await pick()
+  await box.getByRole('button', { name: '換成這份' }).click()
+  await expect(box).toBeHidden()
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.map((t) => t.id))).toEqual(['imp-1'])
+  // 不是存檔的檔案：直接說，不出確認
+  const chooser = page.waitForEvent('filechooser')
+  await btn.press('Enter')
+  await (await chooser).setFiles({ name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"a":1}') })
+  await expect(page.locator('#toasts .toast', { hasText: '匯入失敗' })).toBeVisible()
+  await expect(box).toBeHidden()
+})
+
+test('總覽的今日前三要務：點名稱打開那一件（看得到完整的標題、可以改），▶ 專注（鍵盤也按得到）；範例的日程也標著「範例」', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  const id = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = s.addTask({ title: '把下週活動要準備的東西全部列出來，最後要通知場地方', priority: 3 })
+    s.toggleStar(t.id)
+    window.hiyori.ui.setTab('today')
+    return t.id
+  })
+  const row = page.locator('.td-tops li', { hasText: '把下週活動' })
+  const name = row.getByRole('button', { name: /^打開「把下週活動/ })
+  await expect(name).toBeVisible()
+  await name.click()
+  const sheet = page.locator('#editSheet form')
+  await expect(sheet.locator('[name="title"]')).toHaveValue('把下週活動要準備的東西全部列出來，最後要通知場地方')
+  await page.keyboard.press('Escape')
+  await expect(sheet).toBeHidden()
+  const play = row.getByRole('button', { name: /^專注在「把下週活動/ })
+  await play.focus()
+  await expect(play).toBeFocused()
+  // 範例的日程（第一次打開時放的）：行程上標著「範例」
+  const ex = await page.evaluate(() => window.hiyori.store.eventsOn(window.hiyori.store.today).some((e) => window.hiyori.store.isSample(e)))
+  if (ex) await expect(page.locator('.td-sched .td-evc .ex-tag').first()).toBeVisible()
+  expect(id).toBeTruthy()
 })

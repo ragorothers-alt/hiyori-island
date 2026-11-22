@@ -513,6 +513,10 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .stamps .stamp:nth-child(4n):is(:hover, :focus) .tip { transform: none; }
 .data-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 20px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .data-tools > * { font-size: 12px; }
+.import-check { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, transparent); display: grid; gap: 4px; }
+.import-check small { color: var(--ink-soft, inherit); font-size: 12px; line-height: 1.5; }
+.import-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.import-acts > button { font-size: 13px; }
 
 /* ── 每日任務 ── */
 .quests { position: fixed; left: 20px; bottom: 18px; z-index: 10; width: 268px; padding: 12px 14px; }

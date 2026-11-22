@@ -7,7 +7,7 @@ import { FileSync } from '../src/sync.js'
 import { AI_MODELS, aiExtras, aiModel, aiPass, aiUnshared, setAiModel, setAiPass } from '../src/ai.js'
 import { createD1 } from './helpers/d1.js'
 // 這裡測的是兩邊都改過時讓使用者選邊（沒有上次同步好的那一份時）：自動合併在 merge.test.js
-const PICK = { autoMerge: false }
+const PICK = { autoMerge: false, locks: null }
 
 // 每台裝置各自一份 localStorage；fetch 直接交給真正的 Worker 程式，資料庫是記憶體裡的 SQLite
 class Mem {

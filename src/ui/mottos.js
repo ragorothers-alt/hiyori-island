@@ -165,7 +165,7 @@ export class MottosView {
           ${reach ? `<div class="mt-reach"><small>${esc(reach)}<span class="mt-last" data-r="last" hidden></span></small>${ask ? '<button type="button" class="chip-toggle" data-act="notify">打開系統通知</button>' : ''}</div>` : ''}</div>
         ${every && on ? this._pauseRow() + this._eventsRow(evOn) : ''}
         ${this._catRow()}
-        <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}">${bar ? '開' : '關'}</button></div>`
+        <div class="set-row"><div><b>放在面板上方</b><small>每 15 分鐘換一句，點一下換下一句</small></div><button type="button" class="chip-toggle${bar ? ' on' : ''}" data-act="bar" aria-pressed="${bar}" aria-label="放在面板上方">${bar ? '開' : '關'}</button></div>`
       : '')
     pickOne($$('[data-act="every"]', this.el.set), (x) => +x.dataset.v === every)
     if (kind === 'push') this._renderLast()
@@ -207,7 +207,7 @@ export class MottosView {
     // 那一場結束了：換回平常的說明
     if (cur) this._eventT = setTimeout(() => keepFocus(this.el.set, () => this.render()), Math.max(1000, eventQuiet([cur], today)[0][1] - now + 500))
     return `<div class="set-row mt-events"><div><b>日程中先不提醒</b><small>${text}</small></div>
-      <button type="button" class="chip-toggle${on ? ' on' : ''}" data-act="events" aria-pressed="${on}">${on ? '開' : '關'}</button></div>`
+      <button type="button" class="chip-toggle${on ? ' on' : ''}" data-act="events" aria-pressed="${on}" aria-label="日程中先不提醒">${on ? '開' : '關'}</button></div>`
   }
 
   // 專注中貓咪念一句：上面的定時提醒專注中不打擾，改由專注頁上的貓咪小聲念（不出聲、不跳通知）

@@ -180,6 +180,9 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
     expect(await p.remindShown()).toEqual([])
     await (await caches.open(PLAN_CACHE)).put(SCOPE + '__remind-shown', new Response(JSON.stringify([{ key: 'e1@09:30', date: '2026-11-10', at: remind.at }, { key: 3 }, null])))
     expect(await p.remindShown()).toEqual([{ key: 'e1@09:30', date: '2026-11-10' }])
+    // 頁面自己記的（一則一個檔案）：舊的那一份不動、兩邊都讀得到；同時記兩則也不會互相蓋掉
+    await Promise.all([p.markRemindShown([{ key: 'bed@23:00', date: '2026-11-10', at: remind.at }]), p.markRemindShown([{ key: 't1@10:00', date: '2026-11-10', at: remind.at }])])
+    expect((await p.remindShown()).map((x) => x.key).sort()).toEqual(['bed@23:00', 'e1@09:30', 't1@10:00'])
   })
 
   it('時鐘被往回調了（念到的那一則在十分鐘以後）：念到哪改回現在（快取裡的也照寫），頁面又念得到；推播早幾秒到的不算', async () => {

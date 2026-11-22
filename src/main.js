@@ -2258,11 +2258,12 @@ async function boot() {
     sentReminds = items
     syncMottos()
   }
-  // 回到頁面：鎖著、關著時 Service Worker 顯示過的提醒先讀進來，記成提醒過了（不再跳提示卡）。讀的時候先不檢查（最多等 5 秒）
+  // 回到頁面：鎖著、關著時 Service Worker 顯示過的提醒先讀進來，記成提醒過了（不再跳提示卡）。讀的時候先不檢查
+  // （最多等 20 秒：手機剛解鎖時讀快取有時要好幾秒，太早放行會把通知已經提醒過的那一則再跳一次）
   const readShown = () => {
     if (!mottoPush) return
     shownReading++
-    return Promise.race([mottoPush.remindShown().then((v) => webShown.push(...v)), new Promise((r) => setTimeout(r, 5000))])
+    return Promise.race([mottoPush.remindShown().then((v) => webShown.push(...v)), new Promise((r) => setTimeout(r, 20000))])
       .catch(() => {})
       .finally(() => shownReading--)
   }

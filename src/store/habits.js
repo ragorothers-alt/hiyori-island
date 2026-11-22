@@ -51,12 +51,19 @@ export const habitsMethods = {
     if (date < h.start) {
       // 補開始日以前的卡（剛開始記、但其實已經做了幾天）：開始日往前移，最多 12 週
       if (delta <= 0 || daysBetween(date, this.today) > 84) return
+      h.start0 ||= h.start
       h.start = date
     }
     const before = doneOn(h, date)
     const n = Math.max(0, Math.min(99, countOn(h, date) + delta))
     if (n) h.log[date] = n
     else delete h.log[date]
+    // 補的那一格（開始日）又取消了：開始日移回去——移到還留著的、補的那幾格最早的一格，都沒了就回到原本的開始日
+    if (!n && h.start0 && date === h.start) {
+      const left = Object.keys(h.log).filter((d) => d < h.start0 && h.log[d] > 0).sort()
+      h.start = left[0] || h.start0
+      if (h.start === h.start0) delete h.start0
+    }
     const fx = [['habitCheck', { habit: h, date, count: n, delta }]]
     // 獎勵只給今天該做的習慣；休息日多做也能記，但不算進完成與連續天數
     if (!before && doneOn(h, date) && date === this.today && h.paid !== this.today && !h.paidDays?.includes(this.today) && applies(h, date)) {

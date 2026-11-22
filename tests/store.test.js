@@ -90,6 +90,21 @@ describe('日期、時間與重複規則', () => {
   })
 })
 
+describe('太長的標題', () => {
+  it('超過 80 字的任務、日程：標題留前面那一段（加 …），完整的字放進備註；不到的照原樣', () => {
+    const long = '下週的活動要準備的東西很多：'.repeat(6) + '最後要通知場地方'
+    const t = store.addTask({ title: long })
+    expect(t.title).toHaveLength(80)
+    expect(t.title.endsWith('…')).toBe(true)
+    expect(t.note).toBe(long)
+    expect(store.addTask({ title: '買牛奶' })).toMatchObject({ title: '買牛奶', note: '' })
+    const e = store.addEvent({ title: long, start: '10:00', end: '11:00', note: '帶名牌' })
+    expect(e.title).toHaveLength(80)
+    expect(e.note).toBe(`${long}
+帶名牌`.slice(0, 200))
+  })
+})
+
 describe('任務經驗值與升級', () => {
   it.each([
     ['低', 1, 10, 2], ['中', 2, 15, 3], ['高', 3, 25, 5],

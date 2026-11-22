@@ -159,17 +159,22 @@ export const recordsMethods = {
       this.renderSettings()
     }
     $('#exportBtn').onclick = () => this.exportData()
+    // 匯入：按鈕（鍵盤也按得到）打開選檔；選好先列出檔案裡有什麼、會換掉現在的哪些，確定了才換
+    $('#importBtn').onclick = () => $('#importInput').click()
     $('#importInput').onchange = async (e) => {
       const f = e.target.files[0]
-      if (!f) return
-      try {
-        this.store.importJSON(await f.text())
-        this.toast({ icon: '入', title: '資料已匯入', sub: '原本的小島留成備份，選錯檔案的話可以在設定裡還原' })
-        this.renderSync()
-      } catch (err) {
-        this.toast({ icon: '！', title: '匯入失敗', sub: err.message })
-      }
       e.target.value = ''
+      if (!f) return
+      let text = ''
+      let obj = null
+      try {
+        text = await f.text()
+        obj = JSON.parse(text)
+      } catch {
+        return this.toast({ icon: '！', title: '匯入失敗', sub: '檔案不是 JSON 格式' })
+      }
+      if (!obj || typeof obj !== 'object' || !Array.isArray(obj.tasks) || !obj.player || typeof obj.player !== 'object') return this.toast({ icon: '！', title: '匯入失敗', sub: '不是有效的ひより存檔' })
+      this._importCheck(f.name, text, obj)
     }
     $('#sampleBtn').onclick = (e) =>
       armConfirm(e.currentTarget, '再按一次清除範例', () => {
@@ -201,6 +206,48 @@ export const recordsMethods = {
       })
   },
 
+  // 選好的備份檔：列出檔案裡有什麼、跟現在這台比，按「換成這份」才換（原本的留成備份）
+  _importCheck(name, text, obj) {
+    const box = $('#importCheck')
+    const count = (s) => {
+      const n = (k) => (Array.isArray(s?.[k]) ? s[k].length : 0)
+      return `任務 ${n('tasks')} 件、日程 ${n('events')} 個、專案 ${n('projects')} 個、習慣 ${n('habits')} 個`
+    }
+    const at = Number(obj.updatedAt)
+    const when = Number.isFinite(at) && at > 0 ? new Date(at).toLocaleString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '不知道'
+    box.innerHTML = `<b id="importCheckTitle">要換成「${esc(String(name).slice(0, 60))}」嗎？</b>
+      <small>檔案裡：${esc(count(obj))}（最後改在 ${esc(when)}）</small>
+      <small>現在這台：${esc(count(this.store.state))}。換掉的會留成備份，之後可以在上面的備份裡換回來</small>
+      <div class="import-acts"><button type="button" class="btn-primary" data-imp="yes">換成這份</button><button type="button" class="btn-ghost" data-imp="no">取消</button></div>`
+    box.hidden = false
+    const close = () => {
+      box.hidden = true
+      box.innerHTML = ''
+      $('#importBtn').focus()
+    }
+    box.onclick = (e) => {
+      const b = e.target.closest('button[data-imp]')
+      if (!b) return
+      if (b.dataset.imp === 'no') return close()
+      try {
+        this.store.importJSON(text)
+        box.hidden = true
+        box.innerHTML = ''
+        this.toast({ icon: '入', title: '資料已匯入', sub: '原本的小島留成備份，選錯檔案的話可以在設定裡還原' })
+        this.renderSync()
+        $('#importBtn').focus()
+      } catch (err) {
+        this.toast({ icon: '！', title: '匯入失敗', sub: err.message })
+      }
+    }
+    box.onkeydown = (e) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      close()
+    }
+    box.querySelector('[data-imp="no"]').focus()
+  },
+
   // 紀錄頁最上面那一排：照頁面上看得到的標題排出來，點了跳到那一段（設定在最下面，放第一個）
   _renderRecNav() {
     const nav = $('#recNav')
@@ -216,6 +263,9 @@ export const recordsMethods = {
         // 捲動區上面留了這一排的高度（--rec-pad）：標題停在它下面，不會被它蓋住
         this._recPad()
         el.scrollIntoView({ behavior: scrollMode(), block: 'start' })
+        // 焦點跟著到那一段的標題：接著按 Tab 從那一段往下走，不會被拉回這一排（報讀也念得到到了哪）
+        if (!el.matches('a, button, input, select, textarea, [tabindex]')) el.setAttribute('tabindex', '-1')
+        el.focus({ preventScroll: true })
       })
       // 捲動時亮起現在看的那一段
       let raf = 0

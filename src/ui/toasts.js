@@ -185,6 +185,11 @@ export const toastMethods = {
     }
     if (old) old.replaceWith(el)
     else box.append(el)
+    // 警示列有多高（--alerts-h）：快速記錄這種靠上放的卡片往下讓，右上的 × 不會被蓋住
+    if (!this._alertsRO && typeof ResizeObserver === 'function') {
+      this._alertsRO = new ResizeObserver(() => document.documentElement.style.setProperty('--alerts-h', box.children.length ? `${Math.ceil(box.getBoundingClientRect().height) + 8}px` : '0px'))
+      this._alertsRO.observe(box)
+    }
   },
 
   // ── 通知 ──

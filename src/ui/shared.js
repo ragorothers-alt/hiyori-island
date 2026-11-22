@@ -4,6 +4,7 @@ import { native, deskWeb } from '../native.js'
 import { parseQuick, describeQuick } from '../parse.js'
 import { LEVEL_TITLES } from '../data/lines.js'
 import { $ } from './dom.js'
+import { TITLE_MAX } from '../store/util.js'
 import { LATEST } from '../data/latest.js'
 
 export const TAB_ORDER = ['today', 'tasks', 'schedule', 'coach', 'habits', 'projects', 'records']
@@ -83,6 +84,7 @@ export const quickChips = (p, today, asTask) => {
   const q = asTask ? asTimedTask(p) : p
   const chips = describeQuick(q, today)
   if (asTask) chips.unshift(`任務・${q.at}`)
+  if ((p.title || '').length > TITLE_MAX) chips.push(`標題 ${p.title.length} 字：超過 ${TITLE_MAX} 字的放進備註`)
   return chips
 }
 export const swapBtn = (asTask) => `<button type="button" class="qp-swap" data-swap aria-pressed="${asTask}" title="${asTask ? '改回日程（有開始和結束的行程）' : '改成有時段的任務（會開花、可以專注、做完打勾）'}">${asTask ? '改回日程' : '改成任務'}</button>`

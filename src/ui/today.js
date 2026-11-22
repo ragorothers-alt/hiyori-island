@@ -474,8 +474,8 @@ export class TodayView {
       const k = esc(t.id)
       const d = taskDur(t)
       const at = Math.ceil(g.next.start / 5) * 5 + d <= g.next.end ? slotAt : toHHMM(g.next.start)
-      return `<li><i style="--c:${tagOf(t.tag).color}"></i>${this._focusName(t, `${this.store.isSample?.(t) ? '<em class="ex-tag">範例</em>' : ''}${t.star ? '★ ' : ''}${esc(t.title)}`, 'tn-name', `nf-${k}`)}<small>${dur(d)}</small>
-        <button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="專注在這件事上">${IC.play}</button>
+      return `<li><i style="--c:${tagOf(t.tag).color}"></i>${this._taskName(t, `${this.store.isSample?.(t) ? '<em class="ex-tag">範例</em>' : ''}${t.star ? '★ ' : ''}${esc(t.title)}`, 'tn-name', `nf-${k}`)}<small>${dur(d)}</small>
+        ${this._playBtn(t, `np-${k}`)}
         <button type="button" class="tn-slot" data-act="slot" data-id="${k}" data-v="${at}" data-fk="ns-${k}" title="排進這段空檔">排進 ${at}</button></li>`
     }
     let sug = ''
@@ -565,9 +565,9 @@ export class TodayView {
   // ── 今日行程：今天的日程和排了時段的任務，照時間排；「現在」畫一條紅線 ──
   _schedHTML(today, tasks, nowMin) {
     const items = [
-      ...this.store.eventsOn(today).map((e) => ({ kind: 'event', id: e.id, title: e.title, at: toMin(e.start), len: toMin(e.end) - toMin(e.start), done: e.done, color: EVENT_COLORS[e.color % EVENT_COLORS.length] })),
+      ...this.store.eventsOn(today).map((e) => ({ kind: 'event', id: e.id, title: e.title, at: toMin(e.start), len: toMin(e.end) - toMin(e.start), done: e.done, color: EVENT_COLORS[e.color % EVENT_COLORS.length], ex: !!this.store.isSample?.(e) })),
       // 做完的任務不留在行程裡（日程做完了照樣留著，跟日程分頁的時間軸一樣）
-      ...tasks.filter((t) => t.at && !t.done).map((t) => ({ kind: 'task', id: t.id, title: t.title, at: toMin(t.at), len: taskDur(t), done: t.done, color: tagOf(t.tag).color })),
+      ...tasks.filter((t) => t.at && !t.done).map((t) => ({ kind: 'task', id: t.id, title: t.title, at: toMin(t.at), len: taskDur(t), done: t.done, color: tagOf(t.tag).color, ex: !!this.store.isSample?.(t) })),
     ].sort((a, b) => a.at - b.at || (a.kind === 'event' ? -1 : 1))
     // 整天的日程（朋友來玩、旅行）排在最上面，不在時間線上
     const all = this.store.allDayOn(today)
@@ -576,7 +576,7 @@ export class TodayView {
         .map((e) => {
           const multi = e.endDate && e.endDate !== e.date
           const nth = multi ? `<small>第 ${Math.round((parseDate(today) - parseDate(e.date)) / 864e5) + 1}／${Math.round((parseDate(e.endDate) - parseDate(e.date)) / 864e5) + 1} 天</small>` : ''
-          return `<button type="button" class="td-adc" data-act="edit" data-type="event" data-id="${esc(e.id)}" data-fk="ad-${esc(e.id)}" style="--c:${EVENT_COLORS[e.color % EVENT_COLORS.length]}"><em>整天</em><span>${esc(e.title)}</span>${nth}</button>`
+          return `<button type="button" class="td-adc" data-act="edit" data-type="event" data-id="${esc(e.id)}" data-fk="ad-${esc(e.id)}" style="--c:${EVENT_COLORS[e.color % EVENT_COLORS.length]}"><em>整天</em><span>${this.store.isSample?.(e) ? '<em class="ex-tag">範例</em>' : ''}${esc(e.title)}</span>${nth}</button>`
         })
         .join('')}</div>`
       : ''
@@ -596,7 +596,7 @@ export class TodayView {
     const row = (it) => `<li class="td-ev${it.done ? ' done' : ''}${it.at + Math.max(it.len, 0) <= nowMin && !it.done ? ' past' : ''}${it.kind === 'task' && !it.done ? ' has-go' : ''}" style="--c:${it.color}">
         <time>${hhmm(it.at)}</time><i class="td-dot"></i>
         <button type="button" class="td-evc" data-act="edit" data-type="${it.kind}" data-id="${esc(it.id)}" data-fk="ev-${esc(it.id)}">
-          ${it.done ? IC.check : iconOf(it.title, it.kind)}<span>${esc(it.title)}</span>${it.len > 0 ? `<small>${dur(it.len)}</small>` : ''}
+          ${it.done ? IC.check : iconOf(it.title, it.kind)}<span>${it.ex ? '<em class="ex-tag">範例</em>' : ''}${esc(it.title)}</span>${it.len > 0 ? `<small>${dur(it.len)}</small>` : ''}
         </button>${go(it)}</li>`
     const nowRow = `<li class="td-now" aria-label="現在 ${hhmm(nowMin)}"><time>${hhmm(nowMin)}</time><i></i></li>`
     const at = items.findIndex((it) => it.at > nowMin)
@@ -629,10 +629,10 @@ export class TodayView {
       return `<li class="td-t n${i + 1}${t.done ? ' done' : ''}${sug ? ' sug' : ''}${on ? ' on' : ''}">
         <b class="td-n">${i + 1}</b>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="${!!t.done}">${ICON.check}</button>
-        ${this._focusName(t, meta, 'td-tm', `fc-${k}`)}
+        ${this._taskName(t, meta, 'td-tm', `fc-${k}`)}
         ${t.dur ? `<span class="td-dur">${IC.timer}${dur(t.dur)}</span>` : ''}
         ${sug ? `<button type="button" class="td-mini" data-act="star" data-id="${k}" data-fk="st-${k}" title="選為今天的本命（完成時雙倍 XP）" aria-label="把「${esc(t.title)}」選為本命">${IC.star}</button>` : ''}
-        ${t.done || on ? '' : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="專注在這件事上">${IC.play}</button>`}
+        ${t.done || on ? '' : this._playBtn(t, `pl-${k}`)}
       </li>`
     }
     const hint = stars.length < 3 && list.some((t) => !t.star) ? '<p class="td-hint">按 ☆ 把它選成本命：今天最重要的三件，完成時雙倍 XP</p>' : ''
@@ -654,15 +654,18 @@ export class TodayView {
     return `<div class="td-idle"><p class="td-idle-h">好久沒碰的長期事</p><ul class="td-mos">${list.map(row).join('')}</ul></div>`
   }
 
-  // 任務名稱：還沒做完的是一顆按鈕，點了就開始專注（旁邊的 ▶ 只是給滑鼠的捷徑，鍵盤走名稱這顆）
-  _focusName(t, inner, cls, fk) {
-    if (t.done) return `<div class="${cls}">${inner}</div>`
+  // 任務名稱：一顆按鈕，點了打開那一件（看得到完整的標題、說明、子任務，可以改）。專注走旁邊的 ▶
+  _taskName(t, inner, cls, fk) {
     const k = esc(t.id)
-    const label = t.id === this.hooks.focusTaskId?.() ? `正在專注「${esc(t.title)}」` : `專注在「${esc(t.title)}」`
-    return `<button type="button" class="${cls} td-go" data-act="focus" data-id="${k}" data-fk="${fk}" title="點一下選怎麼專注（倒數、正向、長度、輪數）" aria-label="${label}">${inner}</button>`
+    return `<button type="button" class="${cls} td-go" data-act="edit" data-type="task" data-id="${k}" data-fk="${fk}" title="${esc(t.title)}（點一下看完整內容、編輯）" aria-label="打開「${esc(t.title)}」">${inner}</button>`
+  }
+  // ▶：選怎麼專注（倒數、正向、長度、輪數），鍵盤也按得到
+  _playBtn(t, fk) {
+    const k = esc(t.id)
+    return `<button type="button" class="td-mini" data-act="focus" data-id="${k}" data-fk="${fk}" title="專注在這件事上" aria-label="專注在「${esc(t.title)}」">${IC.play}</button>`
   }
 
-  // 前三件以外、今天還沒做的任務：收在「其他任務」裡，展開後一樣點名稱就開始專注
+  // 前三件以外、今天還沒做的任務：收在「其他任務」裡，展開後一樣點名稱打開、▶ 專注
   _moreHTML(tasks, shown, focusId) {
     const ids = new Set(shown.map((t) => t.id))
     const order = (a, b) => b.priority - a.priority || (a.at ? toMin(a.at) : 1e4) - (b.at ? toMin(b.at) : 1e4) || a.createdAt - b.createdAt
@@ -675,8 +678,8 @@ export class TodayView {
       const inner = `<i style="--c:${tagOf(t.tag).color}"></i><span>${this.store.isSample?.(t) ? '<em class="ex-tag">範例</em>' : ''}${esc(t.title)}</span>${on ? '<em class="td-focusing">專注中</em>' : t.first ? '<em class="td-first-chip">先做這件</em>' : ''}${t.at ? `<small>${t.at}</small>` : ''}<small>${dur(taskDur(t))}</small>`
       return `<li>
         <button type="button" class="td-check" data-act="toggle" data-id="${k}" data-fk="tg-${k}" aria-label="完成「${esc(t.title)}」" aria-pressed="false">${ICON.check}</button>
-        ${this._focusName(t, inner, 'td-mo', `mo-${k}`)}
-        ${on ? '' : `<button type="button" class="td-mini" data-act="focus" data-id="${k}" tabindex="-1" aria-hidden="true" title="專注在這件事上">${IC.play}</button>`}</li>`
+        ${this._taskName(t, inner, 'td-mo', `mo-${k}`)}
+        ${on ? '' : this._playBtn(t, `mp-${k}`)}</li>`
     }
     return `<button type="button" class="td-more-btn" data-act="more" data-fk="more" aria-expanded="${open}">${open ? '收起' : `其他今天的任務 ${rest.length} 件`}<i>${open ? '▴' : '▾'}</i></button>
       ${open ? `<ul class="td-mos">${rest.map(row).join('')}</ul>` : ''}`

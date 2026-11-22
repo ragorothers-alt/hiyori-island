@@ -4,6 +4,14 @@ import { FakeCaches, SCOPE, loadSW, run } from './helpers/sw.js'
 
 const html = (h) => new Response(h, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
 
+// 顯示過的提醒（一則一個檔案：__remind-shown/key|date），照 key 排
+async function remindFiles(s) {
+  const c = await s.caches.open('hiyoripush')
+  const out = []
+  for (const r of await c.keys()) if (r.url.startsWith(SCOPE + '__remind-shown/')) out.push(await (await c.match(r.url)).json())
+  return out.sort((a, b) => a.key.localeCompare(b.key))
+}
+
 describe('Service Worker', () => {
   it('更新時：舊快取裡新版還用得到的檔案搬過來，其他的丟掉；別的網站的快取不動', async () => {
     const caches = new FakeCaches()
@@ -487,7 +495,7 @@ describe('Service Worker：警語的推播', () => {
       expect(s.shown().map((n) => n.tag).sort()).toEqual(['e1', 'motto', 't1'])
       expect(s.shown().find((n) => n.tag === 'e1')).toMatchObject({ title: 'ひより · e1@12:10', body: '10 分鐘後開始', renotify: true, silent: false })
       expect(s.shown().find((n) => n.tag === 'e1').actions).toBeUndefined()
-      expect(await (await (await s.caches.open('hiyoripush')).match(SCOPE + '__remind-shown'))?.json()).toEqual([
+      expect(await remindFiles(s)).toEqual([
         { key: 'e1@12:10', date: '2026-11-10', at: NOW },
         { key: 't1@12:10', date: '2026-11-10', at: NOW },
       ])
@@ -499,6 +507,21 @@ describe('Service Worker：警語的推播', () => {
       vi.setSystemTime(NOW + 3000)
       await run(s.on.push, { data: null })
       expect([...s.alerts].sort()).toEqual(['ひより · e1@12:10', 'ひより · t1@12:10', 'ひより · 給自己的警語'].sort())
+    }))
+
+  it('頁面記的（一則一個檔案）也認得；三天以前的清掉', () =>
+    withClock(async () => {
+      const ev = { at: NOW, key: 'e1@12:10', date: '2026-11-10', title: 'ひより · 會', body: '現在開始', tag: 'e1', remind: true }
+      const t = { at: NOW, key: 't1@12:10', date: '2026-11-10', title: 'ひより · 任務', body: '現在開始', tag: 't1', remind: true }
+      const s = setup({ mottos: [ev, t], windows: () => [] })
+      await s.ready
+      const c = await s.caches.open('hiyoripush')
+      const put = (x) => c.put(SCOPE + '__remind-shown/' + encodeURIComponent(`${x.key}|${x.date}`), new Response(JSON.stringify(x)))
+      await put({ key: 'e1@12:10', date: '2026-11-10', at: NOW })
+      await put({ key: 'old@08:00', date: '2026-11-05', at: NOW - 5 * 86400000 })
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.tag)).toEqual(['t1'])
+      expect((await remindFiles(s)).map((x) => x.key).sort()).toEqual(['e1@12:10', 't1@12:10'])
     }))
 
   it('顯示過了照日子和 key 認：就寢（key 每天都一樣）第二晚照樣顯示；頁面自己提醒過的（記在同一份）不再顯示', () =>
@@ -523,7 +546,7 @@ describe('Service Worker：警語的推播', () => {
       await s.ready
       s.ctl.broken = true
       await run(s.on.push, { data: null }).catch(() => {})
-      expect(await (await (await s.caches.open('hiyoripush')).match(SCOPE + '__remind-shown'))?.json()).toEqual([])
+      expect(await remindFiles(s)).toEqual([])
       s.ctl.broken = false
       await run(s.on.push, { data: null })
       expect(s.shown().map((n) => n.tag)).toEqual(['e1'])

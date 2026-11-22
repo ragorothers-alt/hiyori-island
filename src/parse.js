@@ -27,6 +27,9 @@ const DUE_DAY = '大後天|大后天|後天|后天|明天|明日|今天|今日|\
 // 幾小時（可以接著幾分）：1.5小時、2個半小時、半小時、1小時30分鐘、1小時30分、2h、1hr 15min
 const HOURS = /(?:(\d+(?:\.\d+)?)\s*(?:個)?\s*(半)?|(半)\s*(?:個)?)\s*(?:小時|hr|h)(?![a-z])(?:\s*(\d+)\s*(?:分鐘|分钟|分|min|m)(?![a-z]))?/gi
 
+// 成對的引號、書名號（ASCII 的單引號不算：英文的 don't、it's）
+const QUOTED = /「[^「」]*」|『[^『』]*』|《[^《》]*》|〈[^〈〉]*〉|“[^“”]*”|"[^"]*"|【[^【】]*】|﹁[^﹁﹂]*﹂/g
+
 function toMinutes(period, h, m, guessPm = false) {
   if (h > 24 || m > 59) return null
   // 沒寫上午／下午時：1～6 點在行事曆裡幾乎都是指下午
@@ -76,7 +79,9 @@ function readTime(match, offset, evening = false, inherit = null) {
 // span：多給一個 span（原本想要幾分鐘：「23:00 到 1:00」是兩小時、沒寫結束是寫的時長或一小時）。
 // 日程只能排在同一天（結束最晚 23:59），改成有時段的任務時照這個算長度
 export function parseQuick(input, { today = dateStr(), projects = [], span = false } = {}) {
-  let text = ` ${input} `
+  // 引號、書名號裡的字是名字（歌名、書名、引用的話）：先換成記號，日期、時間、標籤都不看它，最後換回原文
+  const kept = []
+  let text = ` ${String(input ?? '').replace(QUOTED, (m) => `\uE000${String.fromCharCode(0xe100 + kept.push(m) - 1)}\uE001`)} `
   // 對到專案時才會多 project（id）和 projectName
   const out = { title: '', kind: 'task', date: null, start: null, end: null, priority: null, tag: null, repeat: null, star: false, chips: [] }
   // 寫了時間的那一行原本想要幾分鐘（見上面的 span）
@@ -296,7 +301,11 @@ export function parseQuick(input, { today = dateStr(), projects = [], span = fal
   // 截止日只有任務有
   if (out.kind === 'event') delete out.due
   if (span && out.kind === 'event' && want != null) out.span = want
-  out.title = text.replace(/\s+/g, ' ').replace(/^[\s,，、:：]+|[\s,，、:：]+$/g, '').trim()
+  out.title = text
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,，、:：]+|[\s,，、:：]+$/g, '')
+    .trim()
+    .replace(/\uE000([\uE100-\uEFFF])\uE001/g, (_, c) => kept[c.charCodeAt(0) - 0xe100] ?? '')
   return out
 }
 

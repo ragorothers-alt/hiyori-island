@@ -9,6 +9,7 @@
 // 合不了的回傳 null（交給使用者選邊）：沒有 base、其中一邊整份換過（匯入、還原備份、重置：tallyGen 不一樣）
 import { BOND_POINTS, giftCoins } from './data/bond.js'
 import { XP } from './theme.js'
+import { dateStr } from './store/util.js'
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -49,6 +50,30 @@ class Canon {
   }
 }
 
+// 那一天整個不見了等於空的那一天（逐筆合，不是「一邊刪、一邊改」整天留下）
+const EMPTY = { life: () => ({ items: [], energy: 0 }) }
+
+// 跨午夜的日程存成兩段（同一個 link）：合併前包成一筆（id 是開始那一段的），整組比；合完再拆回來
+function collapseLinks(events) {
+  if (!Array.isArray(events)) return events
+  const groups = new Map()
+  for (const e of events) if (isObj(e) && typeof e.link === 'string' && e.link) (groups.get(e.link) || groups.set(e.link, []).get(e.link)).push(e)
+  const out = []
+  const done = new Set()
+  for (const e of events) {
+    if (!isObj(e) || !e.link || !groups.has(e.link)) {
+      out.push(e)
+      continue
+    }
+    if (done.has(e.link)) continue
+    done.add(e.link)
+    const pieces = [...groups.get(e.link)].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.start).localeCompare(String(b.start)))
+    out.push({ id: pieces[0].id, __pieces: pieces })
+  }
+  return out
+}
+const expandLinks = (events) => (Array.isArray(events) ? events.flatMap((e) => (isObj(e) && Array.isArray(e.__pieces) ? e.__pieces : [e])) : events)
+
 // 這個位置的數字兩邊都改了要怎麼合：'sum'（兩邊加的都算）、'max'、'or'（位元）、'once'（兩邊變得一樣就只算一次）；null 是一般的
 function numRule(p) {
   const n = p.length
@@ -68,6 +93,8 @@ function numRule(p) {
   if (a === 'habits' && n === 4 && b === '[]' && (c === 'log' || c === 'urges')) return 'sum'
   if (a === 'habits' && n === 3 && b === '[]' && (c === 'ms' || c === 'msPaid')) return 'max'
   if (a === 'projects' && n === 4 && b === '[]' && c === 'focus') return 'sum'
+  // 任務上番茄鐘的顆數、實際做了幾分鐘：兩台各做了幾輪都算
+  if (a === 'tasks' && n === 3 && b === '[]' && (c === 'pomos' || c === 'spent')) return 'sum'
   return null
 }
 // 底下有兩邊加的都要算的數字（'sum'）的位置：兩邊變得一模一樣也要往下看（各做了一件同樣經驗值的任務，是兩件）
@@ -75,6 +102,7 @@ const SUMS = [
   ['player', 'xp'], ['player', 'coins'], ['player', 'stats', '*'], ['player', 'bond', 'pts'],
   ['history', '*', '*'], ['history', '*', 'pulls', '*'], ['dex', '*', 'n'],
   ['habits', '[]', 'log', '*'], ['habits', '[]', 'urges', '*'], ['projects', '[]', 'focus', '*'],
+  ['tasks', '[]', 'pomos'], ['tasks', '[]', 'spent'],
 ]
 const holdsSums = (path) => SUMS.some((r) => r.length > path.length && path.every((x, i) => r[i] === '*' || r[i] === x))
 
@@ -83,7 +111,8 @@ function mergeNum(rule, b, m, t) {
   if (rule === 'sum') return m + t - base
   if (rule === 'max') return Math.max(m, t)
   if (rule === 'or') return m | t
-  if (rule === 'once') return m === t ? m : m + t - base
+  // お守り：兩邊都少了一樣多是跨日時各自用掉同一個（只算一次）；其他（一邊買、兩邊都買）照加減
+  if (rule === 'once') return m === t && m < base ? m : m + t - base
   return undefined
 }
 
@@ -132,6 +161,11 @@ class Merger {
     if (b !== undefined && same(b, m)) return t
     if (b !== undefined && same(b, t)) return m
     // 兩邊都改了
+    // 跨午夜的那一組（collapseLinks 包起來的）：整組用比較晚改的那一邊（不拆開來合，不會只剩半段、多一段）
+    if ((isObj(m) && m.__pieces) || (isObj(t) && t.__pieces)) {
+      this.clash(path)
+      return this.pick(m, t)
+    }
     if (path.length === 1 && ATOMIC.has(last)) {
       this.clash(path)
       return this.pick(m, t)
@@ -166,7 +200,15 @@ class Merger {
       const inT = k in t
       const inB = k in b
       if (inM && inT) out[k] = this.merge(inB ? b[k] : undefined, m[k], t[k], [...path, k])
-      else {
+      else if (inB && numRule([...path, k]) === 'sum' && typeof b[k] === 'number' && typeof (inM ? m[k] : t[k]) === 'number') {
+        // 計數的鍵不見了是那一邊減到 0（習慣某天的次數撤到 0 就拿掉）：當成 0 照加減
+        const v = mergeNum('sum', b[k], inM ? m[k] : 0, inT ? t[k] : 0)
+        if (v > 0) out[k] = v
+      } else if (inB && EMPTY[path.join('.')] && isObj(inM ? m[k] : t[k])) {
+        // 那一天的紀錄整個不見了是那一邊刪光了（生活記錄刪掉最後一則）：當成空的那一天逐筆比，另一邊新增的留著、刪掉的不會復活
+        const empty = EMPTY[path.join('.')]()
+        out[k] = this.merge(b[k], inM ? m[k] : empty, inT ? t[k] : empty, [...path, k])
+      } else {
         // 只有一邊有：另一邊刪掉了（base 裡有）或這一邊新增的（base 裡沒有）
         const v = inM ? m[k] : t[k]
         if (!inB) out[k] = v
@@ -220,23 +262,101 @@ class Merger {
   }
 }
 
-// 跨日時每台各自做的（每天第一次打開的好感度、もち送的金平糖、戒除里程碑的經驗值，見 store.js 的 _visit、_quitMilestones）：
-// 兩台都做過（記的日子、里程碑變得一樣）就是同一件事，加了兩次的那一份扣回去
+// 兩台各自做了同一件事、各給了一次獎勵（經驗值、金平糖、統計、每天的紀錄都加了兩次）：扣回一份。認得出來的：
+//   跨日時各自做的：每天第一次打開的好感度、もち送的金平糖、戒除里程碑（見 store.js 的 _visit、_quitMilestones）
+//   一天只給一次的：習慣打卡的獎勵（paidDays 同一天）、本命全清、全部做完、習慣全做完（那天的記號兩邊都從沒有變成有）
+//   同一件任務兩台都打勾了（兩邊都給過獎勵；完成時記下的 xpGot 是拿了多少）
 function dedupeDaily(base, mine, theirs, out) {
   const both = (f) => {
     const m = f(mine)
-    return m !== undefined && m === f(theirs) && m !== f(base)
+    return m !== undefined && m !== false && m === f(theirs) && m !== f(base)
   }
   const p = out.player
   if (!isObj(p)) return
-  const less = (k, n) => typeof p[k] === 'number' && (p[k] = Math.max(0, p[k] - n))
-  if (isObj(p.bond) && typeof p.bond.pts === 'number' && both((s) => s.player?.bond?.visit)) p.bond.pts = Math.max(0, p.bond.pts - BOND_POINTS.visit)
-  if (both((s) => s.player?.bond?.gift)) less('coins', giftCoins(mine.player.bond.gift))
+  const stats = isObj(p.stats) ? p.stats : {}
+  const less = (o, k, n) => isObj(o) && typeof o[k] === 'number' && (o[k] = Math.max(0, o[k] - n))
+  const day = (d) => (isObj(out.history) && isObj(out.history[d]) ? out.history[d] : null)
+  // 扣回一份經驗值（和跟著給的金平糖、那一天記的經驗值）
+  const gain = (xp, d = null) => {
+    less(p, 'xp', xp)
+    less(p, 'coins', Math.max(1, Math.round(xp / 5)))
+    if (d) less(day(d), 'xp', xp)
+  }
+  const find = (s, list, id) => (Array.isArray(s?.[list]) ? s[list].find((x) => x?.id === id) : undefined)
+  if (both((s) => s.player?.bond?.visit)) less(p.bond, 'pts', BOND_POINTS.visit)
+  if (both((s) => s.player?.bond?.gift)) less(p, 'coins', giftCoins(mine.player.bond.gift))
   for (const h of Array.isArray(out.habits) ? out.habits : []) {
-    const paid = (s) => (Array.isArray(s.habits) ? s.habits.find((x) => x?.id === h?.id)?.msPaid : undefined)
-    if (!both(paid)) continue
-    less('xp', XP.quitMilestone)
-    less('coins', Math.max(1, Math.round(XP.quitMilestone / 5)))
+    if (both((s) => find(s, 'habits', h?.id)?.msPaid)) gain(XP.quitMilestone)
+    const paid = (s) => new Set(find(s, 'habits', h?.id)?.paidDays || [])
+    const [pb, pm, pt] = [paid(base), paid(mine), paid(theirs)]
+    for (const d of pm) {
+      if (!pt.has(d) || pb.has(d)) continue
+      gain(XP.habit, d)
+      less(stats, 'habitChecks', 1)
+      less(day(d), 'habits', 1)
+    }
+  }
+  for (const d of Object.keys(isObj(out.history) ? out.history : {})) {
+    const flag = (k) => both((s) => s.history?.[d]?.[k] === true || undefined)
+    if (flag('starAll')) {
+      gain(XP.starAll, d)
+      less(stats, 'starDays', 1)
+      less(p.bond, 'pts', BOND_POINTS.starAll)
+    }
+    if (flag('perfect')) {
+      gain(XP.perfectDay, d)
+      less(stats, 'perfectDays', 1)
+    }
+    if (flag('habitAll')) {
+      gain(XP.habitAll, d)
+      less(p.bond, 'pts', BOND_POINTS.habitAll)
+    }
+  }
+  for (const t of Array.isArray(out.tasks) ? out.tasks : []) {
+    const [tb, tm, tt] = [find(base, 'tasks', t?.id), find(mine, 'tasks', t?.id), find(theirs, 'tasks', t?.id)]
+    if (!tm?.rewarded || !tt?.rewarded || tb?.rewarded || !Number.isFinite(tm.xpGot) || !Number.isFinite(tm.doneAt)) continue
+    const xp = tm.xpGot
+    const h = new Date(tm.doneAt).getHours()
+    const d = day(dateStr(new Date(tm.doneAt)))
+    gain(xp)
+    less(d, 'xp', xp)
+    less(stats, 'tasksDone', 1)
+    if (tm.priority === 3) less(stats, 'highTasksDone', 1)
+    if (tm.star) less(stats, 'starsDone', 1)
+    if (h < 9) less(stats, 'earlyTasks', 1)
+    if (h >= 22) less(stats, 'nightTasks', 1)
+    less(d, 'tasks', 1)
+    if (tm.priority === 3) less(d, 'high', 1)
+    if (h < 12) less(d, 'early', 1)
+    if (tm.star) less(d, 'stars', 1)
+    if (tm.routineId) less(d, 'routines', 1)
+    // 花の図鑑：同一朵花記了兩次（各自開的花不一樣的話，兩朵都留著）
+    if (tm.flower && tm.flower === tt.flower && isObj(out.dex?.[tm.flower]) && out.dex[tm.flower].n > 1) out.dex[tm.flower].n--
+  }
+  // 同一輪番茄鐘兩台都記了（跨裝置的計時同時到點、兩台都開著）：照那一輪記下的（pomoGot）扣回一份
+  const sids = (s) => new Set(Array.isArray(s?.pomoSids) ? s.pomoSids : [])
+  const [sb, st] = [sids(base), sids(theirs)]
+  for (const id of sids(mine)) {
+    const g = mine.pomoGot?.[id]
+    if (!st.has(id) || sb.has(id) || !isObj(g) || !isObj(theirs.pomoGot?.[id])) continue
+    const m = Number(g.m) || 0
+    const d = g.d ? day(g.d) : null
+    gain(Number(g.xp) || 0, g.d || null)
+    less(stats, 'focusMinutes', m)
+    less(d, 'focus', m)
+    if (g.s) less(d, g.s, m)
+    if (!g.x) {
+      less(stats, 'pomodoros', 1)
+      less(d, 'pomodoros', 1)
+      less(p.bond, 'pts', BOND_POINTS.pomodoro)
+    }
+    const task = g.t && Array.isArray(out.tasks) ? out.tasks.find((x) => x?.id === g.t) : null
+    if (task) {
+      if (!g.x) less(task, 'pomos', 1)
+      less(task, 'spent', Math.round(m))
+    }
+    const proj = g.p && Array.isArray(out.projects) ? out.projects.find((x) => x?.id === g.p) : null
+    if (proj && m && g.d) less(proj.focus, g.d, Math.round(m))
   }
 }
 
@@ -246,9 +366,14 @@ export function merge3(base, mine, theirs) {
   const gen = (s) => s.tallyGen || ''
   if (gen(mine) !== gen(base) || gen(theirs) !== gen(base)) return null
   const m = new Merger((mine.updatedAt || 0) >= (theirs.updatedAt || 0))
-  const state = m.obj(base, mine, theirs, [])
+  const wrap = (x) => (Array.isArray(x.events) ? { ...x, events: collapseLinks(x.events) } : x)
+  const state = m.obj(wrap(base), wrap(mine), wrap(theirs), [])
+  state.events = expandLinks(state.events)
   dedupeDaily(base, mine, theirs, state)
   state.updatedAt = Math.max(mine.updatedAt || 0, theirs.updatedAt || 0)
+  // 合好的這一份包含兩邊的這一版（和它們之前的）：之後同步看得出來，不會再合一次
+  const lin = (x) => (Array.isArray(x.lineage) ? x.lineage : [])
+  state.lineage = [...new Set([...lin(theirs), theirs.rev, ...lin(mine), mine.rev].filter((x) => typeof x === 'string' && x))].slice(-64)
   delete state.rev
   return { state, clashes: m.clashes }
 }

@@ -9,7 +9,7 @@ import { FileSync } from '../src/sync.js'
 import { TALLY_KEEP } from '../src/store/extras.js'
 import { MOTTO_LOG_KEEP } from '../src/push.js'
 // 這裡測的是兩邊都改過時讓使用者選邊（沒有上次同步好的那一份時）：自動合併在 merge.test.js
-const PICK = { autoMerge: false }
+const PICK = { autoMerge: false, locks: null }
 
 const KEY = 'hiyori-daily-v1'
 let store

@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { Store } from '../src/store.js'
 import { FileSync, readBackups } from '../src/sync.js'
 // 這裡測的是兩邊都改過時讓使用者選邊（沒有上次同步好的那一份時）：自動合併在 merge.test.js
-const PICK = { autoMerge: false }
+const PICK = { autoMerge: false, locks: null }
 
 // 模擬兩台裝置：各自一份 localStorage，共用同一個雲端檔案
 class Mem {

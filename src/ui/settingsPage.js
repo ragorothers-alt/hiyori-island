@@ -2,7 +2,7 @@
 import { canHaptics, hapticsOn, IOS } from './haptics.js'
 import { dateStr, readRescue, dropRescue } from '../store.js'
 import { nativeBack, deskWeb } from '../native.js'
-import { $, $$, esc, armConfirm, setHTML, setOn, pickOne } from './dom.js'
+import { $, $$, esc, armConfirm, setHTML, setOn, pickOne, nameToggles } from './dom.js'
 import { LATEST } from '../data/latest.js'
 import { CloudView } from './cloud.js'
 import { readBackups, restoreBackup } from '../sync.js'
@@ -79,6 +79,7 @@ export const settingsMethods = {
     const btn = $('#sampleBtn')
     btn.hidden = !n
     if (n && !btn.dataset.armed) btn.textContent = `清除範例資料（${n} 筆）`
+    nameToggles()
   },
 
   // ── 同步 ──

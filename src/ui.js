@@ -1334,7 +1334,19 @@ export class UI {
     }
     s.selectDate(r.date)
     this.setTab('records')
-    requestAnimationFrame(() => $('#lifeRoot')?.scrollIntoView({ block: 'start', behavior: scrollMode() }))
+    // 捲到找到的那一則、焦點也跟過去（不會回到打開找找看之前按的那一格）。紀錄頁慢一點才畫好的話多等一下（最多 3 秒）
+    const id = r.item?.id
+    const until = performance.now() + 3000
+    const go = () => {
+      const row = id ? [...document.querySelectorAll('#lifeRoot .life-item')].find((x) => x.dataset.id === id) : null
+      if (!row && id && performance.now() < until && this.tab === 'records') return void setTimeout(go, 50)
+      ;(row || $('#lifeRoot'))?.scrollIntoView({ block: row ? 'center' : 'start', behavior: scrollMode() })
+      const btn = row?.querySelector('.li-main')
+      if (!btn) return
+      row.classList.add('fresh')
+      btn.focus({ preventScroll: true })
+    }
+    requestAnimationFrame(() => requestAnimationFrame(go))
   }
   openCapture(mode) {
     // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去

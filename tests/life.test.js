@@ -168,6 +168,17 @@ describe('養成習慣', () => {
     expect(h.start).toBe(addDays(TODAY, -2))
     expect(h.log).toEqual({ [addDays(TODAY, -2)]: 1 })
     expect(store.player.xp).toBe(0)
+    // 再往前補一格、取消最早那一格：開始日移回還留著的那一格；都取消了回到原本的開始日（存檔讀回來也記得）
+    store.checkHabit(h.id, addDays(TODAY, -7))
+    expect(h.start).toBe(addDays(TODAY, -7))
+    store.checkHabit(h.id, addDays(TODAY, -7), -1)
+    expect(h.start).toBe(addDays(TODAY, -2))
+    store.flushSave()
+    const again = new Store()
+    again.checkHabit(h.id, addDays(TODAY, -2), -1)
+    expect(again.habit(h.id).start).toBe(TODAY)
+    expect(again.habit(h.id).start0).toBeUndefined()
+    store.checkHabit(h.id, addDays(TODAY, -2), -1)
     h.log = {}
     store.updateHabit(h.id, { archived: true })
     store.checkHabit(h.id)

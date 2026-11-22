@@ -159,3 +159,10 @@ export function shiftEnd(prevStart, end, start) {
 }
 
 export { HABIT_PAID_DAYS, townStages, POMO_SIDS, LEGACY_QUESTS, REV_RE }
+// 任務、日程的標題最多幾個字；貼了更長的一段：標題留前面那一段（加 …），完整的字放進備註（不會默默截掉）
+export const TITLE_MAX = 80
+export function longTitle(v) {
+  const full = String(v || '').trim().replace(/\s+/g, ' ')
+  if (full.length <= TITLE_MAX) return { title: full, note: '' }
+  return { title: `${full.slice(0, TITLE_MAX - 1).trimEnd()}…`, note: full }
+}

@@ -1,6 +1,6 @@
 import { blankTask, TIME_RE, newTempo, isObj, floating, cleanPatch, TASK_PATCH, DATE_RE, str, TEMPLATES_MAX, blank, taskSig } from './migrate.js'
 import { PROJECT_LIMITS as PL, taskMilestone, unitOf, bpmOf } from '../projects.js'
-import { uid, seasonKey, daysBetween, dateStr, addDays, isSampleId } from './util.js'
+import { uid, seasonKey, daysBetween, dateStr, addDays, isSampleId, longTitle } from './util.js'
 import { taskDur, sessionLen, SPLIT_MAX } from '../planner.js'
 import { MAX_STARS, TAGS, PRIORITIES, SOFT_CAP, XP } from '../theme.js'
 import { BOND_POINTS } from '../data/bond.js'
@@ -13,8 +13,9 @@ export const tasksMethods = {
   addTask({ title, priority = 2, tag = 'life', date = this.selectedDate, dur = null, at = null, project = null, ms = null, ongoing = false, subs = [], tempo = false, due = null }) {
     const p = project ? this._find('projects', project) : null
     const long = !!ongoing && !!p
+    const name = longTitle(title)
     const t = blankTask({
-      title: String(title || '').trim(), date: long ? this.today : date, priority, tag, due: DATE_RE.test(due) ? due : null,
+      title: name.title, note: name.note.slice(0, PL.taskNote), date: long ? this.today : date, priority, tag, due: DATE_RE.test(due) ? due : null,
       dur: dur ? Math.max(5, Math.min(600, Math.round(dur))) : null, at: !long && TIME_RE.test(at) ? at : null,
       project: p ? project : null, ms: p?.milestones.some((m) => m.id === ms) ? ms : null, ongoing: long,
       subs: (Array.isArray(subs) ? subs : [])
@@ -151,6 +152,7 @@ export const tasksMethods = {
         const tired = d.tasks > SOFT_CAP
         if (tired) xp = Math.ceil(xp / 2)
         if (d.tasks === SOFT_CAP + 1) fx.push(['tired', { count: d.tasks }])
+        t.xpGot = xp
         this._gain(xp, fx, { kind: t.star ? 'star' : 'task', id: t.id, tired })
         this._bloom(t, d, fx)
         if (t.star) fx.push(['starDone', t])

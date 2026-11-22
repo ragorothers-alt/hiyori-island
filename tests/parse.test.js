@@ -212,6 +212,20 @@ describe('快速輸入解析', () => {
   })
 })
 
+describe('引號、書名號裡的字照原文', () => {
+  const today = '2026-11-22'
+  it('歌名、書名、引用的話裡的日期、時間、標籤不算（「整理《明天會更好》歌詞」是今天做的、標題照原文）', () => {
+    expect(parseQuick('整理《明天會更好》歌詞', { today })).toMatchObject({ title: '整理《明天會更好》歌詞', date: null, kind: 'task' })
+    expect(parseQuick('明天 練「下午3點的咖啡」這首 #工作', { today })).toMatchObject({ title: '練「下午3點的咖啡」這首', date: '2026-11-23', kind: 'task', tag: 'work' })
+    expect(parseQuick('買“週五”牌牛奶 週五前', { today })).toMatchObject({ title: '買“週五”牌牛奶', due: '2026-11-27', date: null })
+    expect(parseQuick('讀『三天後』 15:00', { today })).toMatchObject({ title: '讀『三天後』', kind: 'event', start: '15:00' })
+    // 沒有成對的：照常解析
+    expect(parseQuick('「明天開會', { today })).toMatchObject({ date: '2026-11-23' })
+    // 英文的單引號不算
+    expect(parseQuick("don't forget 明天", { today })).toMatchObject({ title: "don't forget", date: '2026-11-23' })
+  })
+})
+
 describe('寫了時間的那一行原本想要多長（span）', () => {
   it('跨過半夜的照原本的長度：結束留著隔天的時間（存的時候分成兩段）；沒寫結束的照寫的時長或一小時、截在那天；沒要 span 時不多給', () => {
     const at = (text) => parseQuick(text, { today: TODAY, span: true })

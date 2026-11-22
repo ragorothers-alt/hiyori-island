@@ -27,7 +27,11 @@ const ACT_FILE = '__act'
 const MOTTO_LATE = 10 * 60000
 // 日程、排定的任務、就寢的提醒（src/remindPlan.js 排的，跟警語排在同一串，remind: true）：顯示過的 [{ key, date, at }]，
 // 頁面回來時讀（src/push.js 的 remindShown），記成提醒過了。晚了這麼久就不顯示（跟頁面一樣：開始後 15 分鐘內還補）
+// 一則一個檔案（REMIND_DIR + key|date）：頁面和 Service Worker 同時記也不會互相蓋掉（讀了整份、加一筆、寫回去，會蓋掉對方剛加的）。
+// 舊版記的整份 REMIND_SHOWN 照樣讀
 const REMIND_SHOWN = '__remind-shown'
+const REMIND_DIR = '__remind-shown/'
+const REMIND_KEEP = 3 * 86400000
 const REMIND_LATE = 15 * 60000
 // 計時器到點多久以內的字還對得上（推播最晚 10 分鐘後送到）
 const TIMER_LATE = 15 * 60000
@@ -236,6 +240,34 @@ async function readJSON(cache, name) {
   }
 }
 const putJSON = (cache, name, v) => cache.put(fileUrl(name), new Response(JSON.stringify(v), { headers: { 'Content-Type': 'application/json' } }))
+const remindFile = (x) => REMIND_DIR + encodeURIComponent(`${x.key}|${x.date}`)
+// 顯示過的提醒 [{ key, date, at }]：一則一個檔案的，加上舊版記的那一份
+async function readReminds(cache) {
+  const out = []
+  const old = await readJSON(cache, REMIND_SHOWN)
+  if (Array.isArray(old)) out.push(...old)
+  const dir = fileUrl(REMIND_DIR)
+  for (const req of await cache.keys()) {
+    if (!String(req.url).startsWith(dir)) continue
+    try {
+      const v = await (await cache.match(req.url))?.json()
+      if (v && typeof v === 'object') out.push(v)
+    } catch {}
+  }
+  return out
+}
+// 記下這幾則顯示過了（一則一個檔案），順便清掉三天以前的
+async function addReminds(cache, list, now) {
+  for (const x of list) await putJSON(cache, remindFile(x), { key: x.key, date: x.date, at: x.at })
+  const dir = fileUrl(REMIND_DIR)
+  for (const req of await cache.keys()) {
+    if (!String(req.url).startsWith(dir)) continue
+    try {
+      const v = await (await cache.match(req.url))?.json()
+      if (!(Number(v?.at) > now - REMIND_KEEP)) await cache.delete(req.url)
+    } catch {}
+  }
+}
 
 // 警語通知上的按鈕：字裡寫著現在該做的那一件（頁面排的時候 focus 是 true）才有「開始專注」；「先停 1 小時」都有。
 // 按了打開 App，由頁面去做（看不到按鈕的瀏覽器，例如 iPhone，就只是一般的通知）
@@ -305,14 +337,13 @@ async function showPush() {
     const list = Array.isArray(mottos) ? mottos : []
     const picks = [latestDue(list.filter((x) => !x?.fuji && !x?.remind), now, MOTTO_LATE), latestDue(list.filter((x) => x?.fuji), now, MOTTO_LATE)].filter(Boolean)
     // 先記下這幾則顯示過了再顯示（同一則推播送了兩次、頁面在背景也記過的就不再顯示）
-    const old = await readJSON(cache, REMIND_SHOWN)
-    remindsBefore = Array.isArray(old) ? old : []
+    remindsBefore = await readReminds(cache)
     // 照日子和 key 認（就寢的 key 每天都一樣）；頁面自己提醒過的也記在這裡
     const seen = new Set(remindsBefore.map((x) => `${x?.key}|${x?.date}`))
     // 晚到多久還顯示：每一則的 until（日程開始後 15 分鐘內、就寢那一刻以前），沒寫的照 REMIND_LATE
     const lastFor = (x) => (Number.isFinite(x.until) ? x.until : x.at + REMIND_LATE)
     reminds = list.filter((x) => x?.remind && typeof x.key === 'string' && typeof x.title === 'string' && Number.isFinite(x.at) && x.at <= now + 5000 && now < lastFor(x) && !seen.has(`${x.key}|${x.date}`))
-    if (reminds.length) await putJSON(cache, REMIND_SHOWN, [...remindsBefore, ...reminds.map((x) => ({ key: x.key, date: x.date, at: x.at }))].slice(-80))
+    if (reminds.length) await addReminds(cache, reminds, now)
     const again1 = (x) => (x.fuji ? repeat(x, 'fuji', FUJI_LOG) : repeat(x, 'motto', MOTTO_LOG))
     // 已經念過、顯示過的（念到哪一則的記號以後的才算新的）
     const keepNew = (d) => (x) => (x.at > d ? true : (again1(x), false))
@@ -367,10 +398,7 @@ async function showPush() {
       try {
         if (s.kind === 'timer' && (await readJSON(cache, SHOWN_FILE))?.at === s.at) await putJSON(cache, SHOWN_FILE, shownBefore || {})
         if (s.kind === 'motto' && Number((await readJSON(cache, MOTTO_DONE))?.at) === s.at) await putJSON(cache, MOTTO_DONE, doneBefore || { at: 0 })
-        if (s.kind === 'remind') {
-          const cur = await readJSON(cache, REMIND_SHOWN)
-          if (Array.isArray(cur)) await putJSON(cache, REMIND_SHOWN, cur.filter((x) => x?.key !== s.key))
-        }
+        if (s.kind === 'remind') await cache.delete(fileUrl(remindFile(s)))
       } catch {}
     }
   }

@@ -4,11 +4,11 @@
 // store/tasks.js、projects.js、habits.js、extras.js、coach.js：各領域的方法。
 // 這裡保留 Store 核心與其餘區段，並轉出原本的公開名稱。
 
-import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS, overnight, spanLen, OVERNIGHT_MAX, routineInstanceId } from './store/util.js'
+import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS, overnight, spanLen, OVERNIGHT_MAX, routineInstanceId, longTitle } from './store/util.js'
 import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM, CAT_MOTTOS } from './theme.js'
 import { MOTTO_EVERY } from './mottos.js'
 import { isEvent, CHEERS } from './events.js'
-import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE } from './store/migrate.js'
+import { migrate, seed, emptyDay, floating, blankTask, allDayEnd, cleanPatch, EVENT_PATCH, ID_RE, isObj, DATE_RE, LINEAGE_MAX } from './store/migrate.js'
 import { projectProgress, progressAll } from './projects.js'
 import { bondLevel, BOND_POINTS, actLevel, outfitOf, outfitLevel, giftCoins } from './data/bond.js'
 import { townOf, townChanges } from './data/town.js'
@@ -350,7 +350,7 @@ export class Store {
   save(touch = true) {
     if (touch) {
       this.state.updatedAt = this._nextVersion()
-      this.state.rev = newRev()
+      this._newRev()
       this.emit('dirty')
     }
     // 同一個動作裡的幾次存檔併成一次，而且在這個動作結束前就寫好：另一個分頁的存檔事件插不進中間
@@ -364,6 +364,29 @@ export class Store {
   // 還在排隊的存檔現在寫出去
   flushSave() {
     return this._saveQueued ? this.saveNow() : this.saved
+  }
+  // 換一個新的版本識別，上一版記進 lineage（這一版包含了它）
+  _newRev() {
+    const s = this.state
+    if (s.rev) s.lineage = [...(s.lineage || []).filter((x) => x !== s.rev), s.rev].slice(-LINEAGE_MAX)
+    s.rev = newRev()
+  }
+  // 另一個分頁剛存過、這邊還沒換成那一版（storage 事件還在路上），這邊也沒有還沒存的變更：先換成存檔裡那一版（同步之前用）。回傳有沒有換
+  catchUp() {
+    let disk = ''
+    try {
+      disk = localStorage.getItem(REV_KEY) || ''
+    } catch {
+      return false
+    }
+    if (!disk || disk === this._diskRev || (this.state.rev || '') !== this._diskRev) return false
+    return this._adoptDisk()
+  }
+  // 兩台都改過、合在一起之後：合起來才湊齊的（兩台各勾了最後幾個里程碑）補算落成
+  settleMerged() {
+    const fx = []
+    for (const p of this.state.projects) this._completeProject(p, fx)
+    if (fx.length) this._finish(fx)
   }
   // 版本號一定比上一版大：就算這台電腦的時鐘比別台慢，新的變更也不會被當成舊的
   _nextVersion() {
@@ -412,7 +435,8 @@ export class Store {
         this._diskTallies()
       }
       const t0 = performance.now()
-      writeMain(JSON.stringify(this.state), keep)
+      // keepBackups：至少要留下的備份份數（合併時剛留的那一份不能被主存檔擠掉）
+      writeMain(JSON.stringify(this.state), Math.max(keep, this.keepBackups || 0))
       this._slowSave = performance.now() - t0 > SLOW_SAVE
       localStorage.setItem(REV_KEY, this.state.rev || '')
       rememberLook(this.state.settings.theme)
@@ -1028,7 +1052,10 @@ export class Store {
   // allDay：整天的（沒有時段），endDate 是最後一天（不填就是一天）
   // 結束比開始早（23:30–00:30）：跨過午夜，到隔天才結束（overnight）。結束跟開始一樣、或「跨過午夜」要超過 16 小時（多半是填錯）：補成一小時
   addEvent({ title, start = '09:00', end = '10:00', color = 0, date = this.selectedDate, note = '', allDay = false, endDate = '' }) {
-    if (!title.trim()) return null
+    if (!String(title || '').trim()) return null
+    const name = longTitle(title)
+    title = name.title
+    if (name.note) note = [name.note, String(note || '').trim()].filter(Boolean).join('\n')
     const over = !allDay && overnight(start, end)
     if (allDay) [start, end] = ['00:00', '23:59']
     else if (!over && toMin(end) <= toMin(start)) end = start === '23:30' ? '23:59' : minToHHMM(Math.min(toMin(start) + 60, 1439))
@@ -1224,12 +1251,18 @@ export class Store {
     d.focus += minutes
     // 這次專注落在哪個時段：用中間的時間點算
     const mid = new Date(Date.now() - minutes * 30000).getHours()
-    d[mid < 5 ? 'focusLate' : mid < 12 ? 'focusAm' : mid < 18 ? 'focusPm' : 'focusEve'] += minutes
+    const slot = mid < 5 ? 'focusLate' : mid < 12 ? 'focusAm' : mid < 18 ? 'focusPm' : 'focusEve'
+    d[slot] += minutes
     // XP 依長度：25 分＝原本的份量，短的少一點、長的最多兩倍
-    if (extra) this._gain(Math.round(XP.pomodoro * Math.min(2, minutes / 25)), fx, { kind: 'focus' })
-    else {
-      this._gain(Math.round(XP.pomodoro * Math.min(2, Math.max(0.4, minutes / 25))), fx, { kind: 'focus' })
-      this._bondGain(BOND_POINTS.pomodoro, fx)
+    const xp = Math.round(XP.pomodoro * (extra ? Math.min(2, minutes / 25) : Math.min(2, Math.max(0.4, minutes / 25))))
+    this._gain(xp, fx, { kind: 'focus' })
+    if (!extra) this._bondGain(BOND_POINTS.pomodoro, fx)
+    // 這一輪記了什麼（兩台都記了同一輪、合在一起時照這個扣回一份）
+    if (ID_RE.test(sid)) {
+      const keep = {}
+      for (const id of this.state.pomoSids) if (this.state.pomoGot?.[id]) keep[id] = this.state.pomoGot[id]
+      keep[sid] = { m: minutes, xp, x: extra ? 1 : 0, d: this.today, t: task?.id || null, p: proj?.id || null, s: slot }
+      this.state.pomoGot = keep
     }
     this._finish(fx)
     return true
@@ -1361,6 +1394,7 @@ export class Store {
     else if (!soft && !peer) next.tallyGen = uid()
     // 同步拉回的那一版數字比這台少：算成這台改過一次（換 rev），下一輪同步推上去，別台才拿得到這台多記的
     if (raised && !peer) {
+      next.lineage = [...(next.lineage || []).filter((x) => x !== next.rev), next.rev].slice(-LINEAGE_MAX)
       next.rev = newRev()
       next.updatedAt = Math.max(Date.now(), updatedAt + 1)
     }

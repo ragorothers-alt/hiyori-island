@@ -86,6 +86,14 @@ export function setOn(el, on) {
   el.classList.toggle('on', !!on)
   el.setAttribute('aria-pressed', on ? 'true' : 'false')
 }
+// 設定裡的開關（上面只寫「開」「關」）：用那一列的標題當名字（開著沒有看 aria-pressed），報讀時聽得出是哪一個開關
+export function nameToggles(root = document) {
+  for (const b of root.querySelectorAll('.set-row .chip-toggle')) {
+    if (!/^[開關]$/.test(b.textContent.trim())) continue
+    const t = b.closest('.set-row')?.querySelector('b')?.textContent.replace(/\s+/g, ' ').trim()
+    if (t && b.getAttribute('aria-label') !== t) b.setAttribute('aria-label', t)
+  }
+}
 // 一組選項裡只有一個是選的
 export function pickOne(els, isOn) {
   for (const el of els) setOn(el, isOn(el))
