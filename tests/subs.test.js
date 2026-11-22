@@ -201,6 +201,26 @@ describe('store：訂閱', () => {
     expect(store.subscription(s.id).priceHistory).toEqual([{ until: '2026-12-01', price: 120, cur: 'TWD' }])
   })
 
+  it('同一期換了外幣又換回台幣：以前的照台幣算；重新訂閱時調價紀錄清掉、之前付的照匯率跟著換幣別', () => {
+    const s = store.addSubscription({ name: '換來換去', price: 100, start: '2026-09-01' })
+    store.setSubRate('USD', 30)
+    store.updateSubscription(s.id, { price: 10, cur: 'USD' })
+    store.updateSubscription(s.id, { price: 120, cur: 'TWD' })
+    expect(s.priceHistory).toEqual([{ until: '2026-12-01', price: 100 }])
+    expect(paidSoFar(s, store.today, store.state.subRates)).toBe(300)
+    // 下一期起調價、取消、過了很久再重新訂閱：重新訂閱以後照現在的價格
+    store.updateSubscription(s.id, { price: 150 })
+    store.cancelSubscription(s.id)
+    vi.setSystemTime(new Date(2027, 2, 10, 12))
+    expect(store.resumeSubscription(s.id)).toBe('restart')
+    expect(s.priceHistory).toEqual([])
+    expect(store.subChargesOn('2027-03-10')[0].price).toBe(150)
+    const paid0 = s.paid0
+    // 重新訂閱之後換成美金：之前付的（台幣）照匯率換成美金
+    store.updateSubscription(s.id, { price: 5, cur: 'USD' })
+    expect(s.paid0).toBeCloseTo(paid0 / 30, 2)
+  })
+
   it('還在試用就調價：記下第一次收費的日子，試用期間照樣是 0 元', () => {
     const s = store.addSubscription({ name: '還在試用', price: 120, start: '2026-11-15', trial: true })
     store.updateSubscription(s.id, { price: 199 })

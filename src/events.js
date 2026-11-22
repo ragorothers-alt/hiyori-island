@@ -9,6 +9,7 @@ export const EVENTS = {
   dateChanged: '看的日期換了（或跨日）',
   saveFailed: '存不進去（多半是瀏覽器空間滿了）',
   saveRecovered: '又存得進去了',
+  tabMerged: '同一個瀏覽器的另一個分頁也改了資料：兩邊合在一起了',
   newerApp: '另一個分頁已經是新版 App：這邊不讀也不寫，要重新整理',
 
   // ── 任務與本命 ──

@@ -122,12 +122,12 @@ export function subAtCharge(sub, date) {
 // 同一期又改價，就換掉那期原先排好的價格。更早的紀錄還要留給以前的扣款用。cur：新的幣別（沒給就是沒換）
 export function revisedPriceHistory(sub, date, price, cur = sub.cur) {
   const history = sub.priceHistory || []
-  const earlier = history.filter((row) => row.until < date)
+  // 換了幣別：以前沒寫幣別的那幾筆（跟訂閱當時同一種）先補上（之後沒寫的就是指新的幣別）
+  const earlier = history.filter((row) => row.until < date).map((x) => (cur === sub.cur || x.cur ? x : { ...x, cur: sub.cur }))
   const row = history.find((x) => x.until >= date)
   const previous = row ? { price: row.price, cur: row.cur || sub.cur } : { price: sub.price, cur: sub.cur }
   if (previous.price !== price || previous.cur !== cur) earlier.push({ until: date, price: previous.price, ...(previous.cur !== cur ? { cur: previous.cur } : {}) })
-  // 換了幣別：以前沒寫幣別的那幾筆（跟訂閱當時同一種）補上
-  return cur === sub.cur ? earlier : earlier.map((x) => (x.cur ? x : { ...x, cur: sub.cur }))
+  return earlier
 }
 
 // 到 today 為止大約付了多少（跟現在的 price 同一種幣別；調價以前的照當時的價格，換過幣別的照匯率 rates 換算），加上重新訂閱以前付的

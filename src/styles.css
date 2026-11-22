@@ -113,7 +113,7 @@ body.night {
   transition: opacity .9s var(--ease), visibility .9s;
   font-family: var(--font-display); color: var(--ink-soft); letter-spacing: .2em;
 }
-#loader.done { opacity: 0; visibility: hidden; }
+#loader.done { opacity: 0; visibility: hidden; pointer-events: none; }
 body.night #loader { background: linear-gradient(180deg, #192147, #283667 70%, #3a3f72); }
 .loader-mochi {
   width: 74px; height: 58px; border-radius: 50% 50% 46% 46% / 60% 60% 40% 40%;
@@ -268,6 +268,15 @@ body.night .chip-btn { background: rgba(241, 155, 178, .2); color: #ffc4d4; }
 .btn-ghost:hover { background: var(--glass-hover); color: var(--ink); }
 .btn-ghost.wide { width: 100%; padding: 11px; margin-bottom: 12px; letter-spacing: .06em; }
 .btn-ghost.danger { color: var(--warn-ink); border-color: rgba(220, 120, 150, .4); }
+.chip-toggle.danger { color: var(--warn-ink); }
+/* 範例收起來了（任務頁最上面一行） */
+.sample-note { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; padding: 8px 8px 8px 14px; border-radius: 14px; background: var(--glass-strong); border: 1px solid var(--glass-border); font-size: 13px; color: var(--ink-soft); }
+.sample-note[hidden] { display: none; }
+.sample-note span { flex: 1; min-width: 12em; }
+.sample-note .link-btn { padding: 5px 12px; min-height: 32px; border-radius: 999px; border: 1px solid var(--glass-border); color: var(--ink); font: inherit; }
+.sample-note .link-btn:hover { background: var(--glass-hover); }
+.sample-note .sn-x { width: 32px; height: 32px; border-radius: 10px; color: var(--ink-faint); font-size: 16px; }
+.sample-note .sn-x:hover { background: var(--glass-hover); color: var(--ink); }
 .time-field input, .date-field input {
   border: 0; outline: 0; background: rgba(140, 170, 200, .14); border-radius: 10px; padding: 4px 6px; font-family: var(--font-num); font-size: 13px;
 }
@@ -467,6 +476,12 @@ body[data-tab="records"] .panel-body { scroll-padding-top: var(--rec-pad, 0px); 
 .rec-nav { position: sticky; top: 0; z-index: 4; display: flex; gap: 6px; margin: 0 0 10px; padding: 6px; border-radius: 16px; overflow-x: auto; scrollbar-width: none; background: var(--lg-bg-strong); backdrop-filter: var(--lg-filter); -webkit-backdrop-filter: var(--lg-filter); border: 1px solid var(--glass-border); }
 .rec-nav::-webkit-scrollbar { display: none; }
 .rec-nav:empty { display: none; }
+/* 窄的畫面放不下一排：留一條細的捲軸，看得出右邊還有（黏在上面、一排就好，不換成兩三排吃掉一大塊） */
+@media (max-width: 640px) {
+  .rec-nav { scrollbar-width: thin; padding-bottom: 4px; }
+  .rec-nav::-webkit-scrollbar { display: block; height: 4px; }
+  .rec-nav::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+}
 .rec-nav button { flex: none; padding: 6px 12px; border-radius: 12px; font-size: 12.5px; color: var(--ink-soft); background: rgba(140, 170, 200, .12); white-space: nowrap; transition: background .15s, color .15s; }
 .rec-nav button:hover { color: var(--ink); background: rgba(140, 170, 200, .24); }
 .rec-nav button.on { color: #a8395d; background: var(--lg-sel, rgba(140, 170, 200, .3)); }
@@ -515,6 +530,19 @@ body.night .stamp:not(.locked) .stamp-k { background: radial-gradient(circle, #4
 .data-tools { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 20px; padding-top: 14px; border-top: 1px dashed var(--line); }
 .data-tools > * { font-size: 12px; }
 .import-check { margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, transparent); display: grid; gap: 4px; }
+/* 重置的確認：另外一塊、按鈕在別的位置（連按、按著 Enter 不會清空） */
+.reset-check { margin-top: 10px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warn-ink) 45%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--warn-ink) 7%, transparent); display: grid; gap: 6px; }
+.reset-check b { font-size: 14px; }
+.reset-check small { font-size: 12.5px; color: var(--ink-soft); line-height: 1.55; }
+.reset-drop { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; cursor: pointer; }
+.reset-drop input { margin-top: 3px; flex: none; }
+.reset-acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 4px; }
+/* 資料放在哪裡：平常收著 */
+.data-where { margin-top: 12px; font-size: 12.5px; color: var(--ink-soft); }
+.data-where summary { cursor: pointer; padding: 6px 2px; color: var(--ink); }
+.data-where ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 6px; line-height: 1.6; }
+.data-where b { color: var(--ink); font-weight: 600; }
+.backup-drop small { color: var(--ink-faint); }
 .import-check small { color: var(--ink-soft, inherit); font-size: 12px; line-height: 1.5; }
 .import-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .import-acts > button { font-size: 13px; }
@@ -1260,6 +1288,8 @@ body.app-mode .panel.full { top: 76px; animation: none; }
 body.app-mode .dock { z-index: 46; }
 body.app-mode .dock :is(#shopBtn, #viewBtn, #panelBtn, #appBtn, #roomBtn) { display: none; }
 body.app-mode .focus-pick { z-index: 47; }
+/* 日曆是蓋住整個畫面的對話框：App 模式的底列（46）要在它下面，不然平板、電腦上會蓋住最後一排日子（選專注的小窗照樣在上面） */
+body.app-mode .calendar { z-index: 47; }
 body.app-mode .full-btn { width: auto; padding: 0 12px; display: flex; align-items: center; gap: 5px; color: var(--ink-soft); }
 body.app-mode .full-btn svg { width: 19px; height: 19px; }
 body.app-mode .full-label { display: inline; font-size: 13px; letter-spacing: .08em; }

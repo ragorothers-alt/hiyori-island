@@ -218,6 +218,13 @@ class Plant {
   }
 
   apply(task, instant = false, today = null) {
+    const { done, tag, flower, priority, pomos, star, date } = task
+    const late = !done && today && date < today ? Math.round((new Date(today) - new Date(date)) / 86400000) : 0
+    const wilt = late ? Math.min(1, 0.4 + late * 0.2) : 0
+    // store 會直接改任務物件；記住畫面用到的值，別只比物件是不是同一個
+    const appearance = [!!done, tag, done && flower, priority, Math.min(pomos || 0, 4), !done && !!star, wilt]
+    if (!instant && this.appearance?.every((value, i) => value === appearance[i])) return
+    this.appearance = appearance
     const look = task.done ? lookOf(task) : null
     this.look = look
     this.color = new THREE.Color(look ? look.colors[0] : tagOf(task.tag).color)
@@ -230,8 +237,7 @@ class Plant {
     this.group.scale.setScalar(([0.85, 1, 1.25][task.priority - 1] || 1) * 1.65 * grow)
     this.baseScale = this.group.scale.x
     this._setStar(task.star && !task.done, instant)
-    const late = !task.done && today && task.date < today ? Math.round((new Date(today) - new Date(task.date)) / 86400000) : 0
-    this._setWilt(late ? Math.min(1, 0.4 + late * 0.2) : 0, instant)
+    this._setWilt(wilt, instant)
     const target = task.done ? 1 : 0
     if (instant) {
       this._setOpen(target)

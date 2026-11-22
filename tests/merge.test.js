@@ -89,6 +89,11 @@ describe('三方合併（merge3）', () => {
     const r = merge3(base, S({ subscriptions: [a], updatedAt: 3 }), S({ subscriptions: [b], updatedAt: 2 }))
     expect(r.state.subscriptions[0]).toMatchObject({ price: 199, priceHistory: [{ until: '2026-11-01', price: 120 }], name: '影音（家庭）' })
     expect(r.clashes).toEqual(['subscriptions.price'])
+    // 一邊改價、另一邊取消訂閱：兩邊的都留著（價錢一組、取消一組）
+    const off = B({ status: 'cancelled', end: '2026-12-01' })
+    const r3 = merge3(base, S({ subscriptions: [a], updatedAt: 3 }), S({ subscriptions: [off], updatedAt: 2 }))
+    expect(r3.state.subscriptions[0]).toMatchObject({ price: 199, priceHistory: a.priceHistory, status: 'cancelled', end: '2026-12-01' })
+    expect(r3.clashes).toEqual([])
     // 一邊改價、另一邊只改名字：兩邊的都留著
     const r2 = merge3(base, S({ subscriptions: [a] }), S({ subscriptions: [B({ name: '影音（家庭）' })] }))
     expect(r2.state.subscriptions[0]).toMatchObject({ price: 199, priceHistory: a.priceHistory, name: '影音（家庭）' })

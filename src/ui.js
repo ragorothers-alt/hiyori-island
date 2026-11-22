@@ -469,18 +469,43 @@ export class UI {
   _loadFailToast(icon, title, err, offSub = '連上網路再試一次') {
     if (err?.updating) return
     if (navigator.onLine === false) return this.toast({ icon, title, sub: offSub })
+    const draft = this.hasDraft()
     this.toast({
       icon, title, ms: 12000,
-      sub: this.hasDraft() ? '可能剛換了新版。手上還有沒打完的字，收好再按「重新載入」' : '可能剛換了新版，重新載入一下就好',
-      // 有字的話上面已經說了「收好再按」：按了就載入（存不進去時照樣不載入）
-      action: { label: '重新載入', run: () => this._reloadApp({ force: true }) },
+      sub: draft ? '可能剛換了新版。手上還有沒打完的字，收好再按「重新載入」' : '可能剛換了新版，重新載入一下就好',
+      // 上面已經說了「收好再按」的：按了就載入（存不進去時照樣不載入）；沒說的，之後才打了字再按的話先問
+      action: { label: '重新載入', run: () => this._reloadApp({ force: draft }) },
     })
+  }
+  // 範例收起來了（自己記了第一件）：任務頁最上面一行，可以放回範例。不用提示卡：電腦上提示卡在右上角，
+  // 會蓋住剛記的那一件的 ▶，滑鼠停在提示卡上它又不走，點不到那一件
+  showSampleNote(undo) {
+    const el = $('#sampleNote')
+    el.innerHTML = '<span>範例收起來了，島上現在只有你自己的東西</span><button type="button" class="link-btn" data-act="undo">放回範例</button><button type="button" class="sn-x" data-act="x" aria-label="知道了，收起這一行">×</button>'
+    el.hidden = false
+    // 報讀：一直在的那一格換字才念得到（剛從藏起來變出來的不一定念）
+    const live = $('#sampleLive')
+    live.textContent = ''
+    setTimeout(() => (live.textContent = '範例收起來了。任務頁最上面可以放回範例'), 100)
+    el.onclick = (e) => {
+      const b = e.target.closest('button')
+      if (!b) return
+      // 用鍵盤按的（焦點在這一行上）：這一行收起來後焦點放到記任務的欄位，不會掉回頁首；滑鼠、手指點的不搶焦點（手機上不會跳出鍵盤）
+      const back = e.detail === 0 && el.contains(document.activeElement)
+      el.hidden = true
+      if (b.dataset.act === 'undo') undo()
+      if (back) $('#taskTitle')?.focus({ preventScroll: true })
+    }
+  }
+  // 整份換掉了（匯入、還原、重置、同步拉回）：那一次收起來的範例放不回去了，這一行也收掉
+  hideSampleNote() {
+    $('#sampleNote').hidden = true
   }
   // 重新載入之前先存：存不進去（空間滿了）就先不載入，說一聲（載入了這次的變更就不見了）。
   // 手上還有沒打完的字（快速記錄、編輯到一半的表單）：重新載入會不見，先問一聲（force：問過了、還是要載入）
   _reloadApp({ force = false } = {}) {
     if (this.store.flushSave() === false) {
-      return this.toast({ icon: '存', title: '先別重新載入', sub: '這次的變更沒能存進去（空間可能滿了），先到「紀錄」匯出備份', ms: 9000 })
+      return this.toast({ icon: '存', title: '先別重新載入', sub: '這次的變更沒能存進去（空間可能滿了），先到「設定」匯出資料', ms: 9000 })
     }
     if (!force && this.hasDraft()) {
       return this.toast({
@@ -1414,11 +1439,12 @@ export class UI {
     }
     s.selectDate(r.date)
     this.setTab('records')
-    // 捲到找到的那一則、焦點也跟過去（不會回到打開找找看之前按的那一格）。紀錄頁慢一點才畫好的話多等一下（最多 3 秒）
-    // 面板剛展開（手機上還是 inert）時 focus() 會悄悄沒作用：焦點真的到了那一則才停，沒到就再等一下（最多 3 秒）。
+    // 捲到找到的那一則、焦點也跟過去（不會回到打開找找看之前按的那一格）。紀錄頁慢一點才畫好的話多等一下（最多 8 秒：
+    // 慢的機器第一次打開紀錄頁要載入、畫一陣子；等的時候使用者自己動了就不做，不會突然搶走焦點）
+    // 面板剛展開（手機上還是 inert）時 focus() 會悄悄沒作用：焦點真的到了那一則才停，沒到就再等一下。
     // 聚焦好了一次就結束；這段時間使用者自己點了、按了鍵盤，也整個不做了（不搶走使用者的焦點）
     const id = r.item?.id
-    const until = performance.now() + 3000
+    const until = performance.now() + 8000
     let done = false
     let shown = false
     const stop = () => {
@@ -1428,7 +1454,7 @@ export class UI {
     }
     addEventListener('pointerdown', stop, true)
     addEventListener('keydown', stop, true)
-    setTimeout(stop, 3100)
+    setTimeout(stop, 8100)
     const go = () => {
       if (done) return
       const row = id ? [...document.querySelectorAll('#lifeRoot .life-item')].find((x) => x.dataset.id === id) : null
@@ -1577,18 +1603,24 @@ export class UI {
   }
   // 整份更新紀錄很大：打開這裡才載入（離線時沒有快取就說一聲）
   async openNews() {
+    if (this._newsLoading) return
+    // 上次看到哪裡：在下載之前讀（連按兩下時，第一下寫了「看過了」，第二下才不會以為全都看過）
+    const seen = readLocal(NEWS_KEY, '')
     let CHANGELOG
+    this._newsLoading = true
     try {
       ;({ CHANGELOG } = await import('./data/changelog.js'))
     } catch (err) {
       return this._loadFailToast('新', '更新紀錄還沒下載', err, '連上網路再打開一次')
+    } finally {
+      this._newsLoading = false
     }
     // 這一版先列前三項（其餘的點開），舊的版本收起來只留標題：一打開就看得出這次改了什麼。
     // 同一版後來又加了幾項（看過的是「這一版:37 項」）：先列看過之後新加的那幾項
     const li = (xs) => xs.map((x) => `<li>${esc(x)}</li>`).join('')
     const head = (e) => `${+e.date.slice(5, 7)}/${+e.date.slice(8)}<b>${esc(e.title)}</b>`
     const more = (xs, label) => (xs.length ? `<details class="news-more"><summary>${label}</summary><ul>${li(xs)}</ul></details>` : '')
-    const [seenId, seenN] = String(readLocal(NEWS_KEY, '') || '').split(':')
+    const [seenId, seenN] = String(seen || '').split(':')
     $('#newsList').innerHTML = CHANGELOG.slice(0, 8)
       .map((e, i) => {
         if (i) return `<details class="news-old"><summary><h4>${head(e)}</h4></summary><ul>${li(e.items)}</ul></details>`

@@ -21,6 +21,7 @@ import { Placed, spotFree, radiusOf } from './scene/placed.js'
 import { Cabin } from './scene/cabin.js'
 import { Room } from './scene/room.js'
 import { Town, islandPath } from './scene/town.js'
+import { yieldToPage } from './scene/util.js'
 import { SHOP_ITEMS } from './data/shop.js'
 import { sfx } from './audio.js'
 import { UNLOCKS, tagOf, PRIORITIES, PROJECT_COLORS, EVENT_COLORS } from './theme.js'
@@ -33,6 +34,24 @@ import { pick, short, fill, line } from './voice.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+async function waitForPanel() {
+  const loader = document.getElementById('loader')
+  if (loader && !document.hidden && getComputedStyle(loader).visibility !== 'hidden') {
+    // main.js 先淡出載入畫面。等面板真的點得到，再建立可能卡一下的 WebGL context
+    await new Promise((resolve) => {
+      const done = (e) => {
+        if (e && (e.target !== loader || e.propertyName !== 'visibility')) return
+        clearTimeout(timer)
+        loader.removeEventListener('transitionend', done)
+        resolve()
+      }
+      const timer = setTimeout(done, 1200)
+      loader.addEventListener('transitionend', done)
+    })
+  }
+  if (!document.hidden) await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+}
+
 // ctx 由 main.js 給：store、ui、params；talk／duet 挑台詞（App 模式也送到小對話框）；season() 現在的季節；
 // syncNight(night) 換深色玻璃；notice 是ひより町長大的通知；started() 開始建了（之後失敗就不重試，免得事件綁兩次）；
 // attach(小島) 建好了，main.js 從這時起把演出交給小島
@@ -41,51 +60,66 @@ export async function createIsland(ctx) {
   // 兩位主角的模型和字型一起載
   const catsReady = preloadCats()
   // 等字型載入，3D 刻度文字才會用對字體（最多等 2.5 秒）
-  await Promise.race([document.fonts?.ready, sleep(2500)])
+  await Promise.all([waitForPanel(), Promise.race([document.fonts?.ready, sleep(2500)])])
 
   const world = new World(document.getElementById('scene'))
   world.onContextGone = () => ui.toast({ icon: '島', title: '小島的畫面不見了', sub: '系統收回了顯示資源，重新整理頁面就會回來', ms: 9000 })
   ctx.started()
+  await yieldToPage()
   const sky = new Sky(world)
   if (params.has('hour')) sky.hourOverride = parseFloat(params.get('hour'))
   sky.theme = store.state.settings.theme
+  await yieldToPage()
   // 島的大小跟著專案町：用到外圈的地時島比較大，先定好再蓋島和島外的東西
   const islandR = islandRadius(store.state.town.plevel)
   LAYOUT.radius = islandR
   LAYOUT.path.z0 = islandR - 0.7
   world.setIslandRadius(islandR)
   const island = new Island(world)
+  await yieldToPage()
   const decor = new Decor(world, sky)
   const garden = new Garden(world, sky)
   const houses = new ProjectHouses(world, sky)
+  await yieldToPage()
   // 專案町的街道與小物；房子只蓋在已經鋪好路的地上，城鎮升級的演出時才把新地上的房子蓋起來
   const ptown = new ProjectTown(world, sky)
   ptown.setLevel(store.state.town.plevel)
   const builtProjects = () => store.towerProjects().filter((p) => p.slot < lotsAt(ptown.level))
+  await yieldToPage()
   const ring = new TimeRing(world, sky)
   const labels = new Labels(world)
   const cabin = new Cabin(world, sky)
-  const room = new Room(world, sky)
   // ── もち和ふじ ──
   const homeAt = (p) => new THREE.Vector3(p.x, 0, p.z)
+  await yieldToPage()
   await catsReady
-  // 從這裡到最後都不再等待：等模型的時候資料可能變了（App 模式切回小島時可以一邊用），
-  // 上面先蓋的部分照最新的資料補齊，底下的都照最新的資料建，事件接上之前不會漏掉變更
+  const mochi = new Character(world, labels, sky, { id: 'mochi', name: 'もち', build: () => buildCat('mochi'), home: homeAt(LAYOUT.home), seat: 0, study: 'read' })
+  await yieldToPage()
+  const fuji = new Character(world, labels, sky, { id: 'fuji', name: 'ふじ', build: () => buildCat('fuji'), home: homeAt(LAYOUT.home2), seat: 1, study: 'write' })
+  await yieldToPage()
+  const room = new Room(world, sky)
+  const cast = { mochi, fuji }
+  const duo = new Duo(world, labels, { list: [mochi, fuji], cabin, room })
+  const fx = new Particles(world, sky)
+  const placed = new Placed(world, sky)
+  const town = new Town(world, labels, island, sky)
+  await yieldToPage()
+  const initialProjects = builtProjects().map((p) => ({ ...p }))
+  await houses.buildInitial(initialProjects, store.progressOf(initialProjects), store.today, yieldToPage)
+  await town.buildInitial({ ...store.state.town.seen }, yieldToPage)
+
+  // 建造期間面板可以改資料或讀進存檔。接事件之前，先把上面建好的部分對到最新的資料
   sky.theme = store.state.settings.theme
   const R0 = islandRadius(store.state.town.plevel)
   if (island.setRadius(R0)) {
     world.setIslandRadius(R0)
     decor.relayout(store.level.level)
     ring.relayout()
+    town.reset()
+  } else if (Object.entries(town.districts).some(([key, d]) => (store.state.town.seen[key] || 0) < d.stage)) {
+    town.reset()
   }
   ptown.setLevel(store.state.town.plevel)
-  const mochi = new Character(world, labels, sky, { id: 'mochi', name: 'もち', build: () => buildCat('mochi'), home: homeAt(LAYOUT.home), seat: 0, study: 'read' })
-  const fuji = new Character(world, labels, sky, { id: 'fuji', name: 'ふじ', build: () => buildCat('fuji'), home: homeAt(LAYOUT.home2), seat: 1, study: 'write' })
-  const cast = { mochi, fuji }
-  const duo = new Duo(world, labels, { list: [mochi, fuji], cabin, room })
-  const fx = new Particles(world, sky)
-  const placed = new Placed(world, sky)
-  const town = new Town(world, labels, island, sky)
   world.powerSave = store.state.settings.powerSave
   // 畫質：auto 時觸控手機用標準（不做 MSAA、白天不開泛光、解析度和陰影降一級），其他用高
   const applyQuality = (q) => {
@@ -102,7 +136,8 @@ export async function createIsland(ctx) {
     fx.setSeason(season)
     for (const c of duo.list) c.setSeason(season)
   }
-  applySeason(ctx.season())
+  const initialSeason = ctx.season()
+  applySeason(initialSeason)
 
   // ── 浮動經驗值 ──
   const floatText = (pos, text, big = false, coins = 0) => {
@@ -1205,13 +1240,6 @@ export async function createIsland(ctx) {
   // ── 開場 ──
   syncScene(false)
   placed.sync(store.state.placed)
-  world.start()
-  // 專注以番茄鐘為準：正在專注（含暫停中）的話兩人直接在屋裡；已經結束的不重播，獎勵也只在 main.js 給一次
-  if (ui.focus.mode === 'focus') {
-    duo.setFocus(true, true)
-    garden.setFocus(ui.focus.task?.id || null)
-  }
-
   const scene = {
     // ── 說話與小特效（main.js 挑好台詞、決定誰說）──
     say: (who, text, ms) => cast[who]?.say(text, ms),
@@ -1300,8 +1328,18 @@ export async function createIsland(ctx) {
     // 方便除錯：在 console 用 hiyori.sky.hourOverride = 20
     debug: { world, sky, mochi, fuji, duo, cabin, room, fx, decor, placed, town, ptown, houses, resizeIsland, visit: startVisit },
   }
+  // 先把能提早做的 WebGL 工作分開處理，第一幀才不用一口氣等著色器和貼圖
+  await Promise.race([world.precompile().catch(() => {}), sleep(18000)])
+  // 預熱期間還是能用面板；接手時用現在的設定及番茄鐘狀態
+  world.powerSave = store.state.settings.powerSave
+  applyQuality(store.state.settings.quality)
+  sky.theme = store.state.settings.theme
+  if (ctx.season() !== initialSeason) applySeason(ctx.season())
+  if (ui.focus.mode === 'focus') {
+    duo.setFocus(true, true)
+    garden.setFocus(ui.focus.task?.id || null)
+  }
+  world.start()
   ctx.attach(scene)
-  // 在 App 模式後面建好的（要切回小島）：先在背景把著色器編好再換畫面，切過去的第一幀才不會卡住
-  if (world.hidden) await Promise.race([world.precompile(), sleep(4000)])
   return scene
 }

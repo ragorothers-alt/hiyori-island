@@ -39,6 +39,8 @@ export const reviewDraft = {
   get(date, saved, ds = '') {
     const d = this.all()[date]
     if (!d || typeof d !== 'object' || (d.ds || '') !== ds || this.same(d, saved) || (!d.mood && !String(d.text || '').trim())) return null
+    // 留草稿之後又在別的地方記下來了（總覽的今日反思、另一台同步過來的）：記下來的比較新，草稿不要了
+    if (saved?.at && !(d.at > saved.at)) return null
     return { mood: typeof d.mood === 'string' ? d.mood : null, text: String(d.text || '').slice(0, 500) }
   },
   // 回傳有沒有存好（沒東西要留、拿掉了也算存好）
@@ -74,7 +76,7 @@ export const reviewMethods = {
     const wardrobe = (who, current) => `<div class="outfit-row"><span class="outfit-who">${who === 'fuji' ? 'ふじ' : 'もち'}</span><div class="outfits" role="group" aria-label="${who === 'fuji' ? 'ふじ' : 'もち'}的衣裝">${OUTFITS.map((o) => {
       const lv = outfitLevel(o.key)
       const locked = lv > b.level
-      return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" data-who="${who}" aria-pressed="${o.key === current}" ${locked ? `disabled aria-label="${esc(`${o.name}（好感度 Lv.${lv} 解鎖）`)}"` : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
+      return `<button class="outfit ${o.key === current ? 'on' : ''}" data-outfit="${o.key}" data-who="${who}" aria-pressed="${o.key === current}" ${locked ? `disabled aria-label="${esc(`Lv.${lv}，${o.name}（達到這個好感度就解鎖）`)}"` : ''} title="${esc(locked ? `好感度 Lv.${lv} 解鎖` : o.desc)}">${locked ? `<small>Lv.${lv}</small>` : esc(o.name)}</button>`
     }).join('')}</div></div>`
     $('#bondCount').textContent = `Lv.${b.level}`
     setHTML($('#bondBox'), `
@@ -308,10 +310,10 @@ export const reviewMethods = {
       $('#reviewForm').requestSubmit()
     })
     $('#reviewLater').onclick = () => {
+      if (!this.closeReview()) return
       try {
         localStorage.setItem('hiyori-review-later', this.store.today)
       } catch {}
-      this.closeReview()
     }
     $('#reviewModal').addEventListener('click', (e) => {
       if (e.target.id === 'reviewModal') $('#reviewLater').click()
@@ -341,6 +343,7 @@ export const reviewMethods = {
     this._fillReview(prev || null, reviewDraft.get(date, prev, s.state.tallyGen))
     // 打開時的樣子：關掉時沒動過就不碰草稿（另一個分頁剛留的草稿不會被這邊的空白蓋掉）
     this._reviewWas = this._reviewNow()
+    this._reviewWarned = false
     $('#reviewModal').hidden = false
     this.hooks.reviewOpened?.()
   },
@@ -360,8 +363,10 @@ export const reviewMethods = {
     if (keep && !$('#reviewModal').hidden && this.reviewDate) {
       const now = this._reviewNow()
       const s = this.store
-      if (!reviewDraft.same(now, this._reviewWas) && !reviewDraft.put(this.reviewDate, now, s.state.journal[this.reviewDate], s.state.tallyGen)) {
-        this.toast({ icon: '記', title: '改到一半的字存不下來', sub: '瀏覽器的空間可能滿了：先按「記下來」，或把字複製起來再關', ms: 9000 })
+      // 說過一次了（使用者已經知道、還是要關）：直接關，這次改的不留
+      if (!this._reviewWarned && !reviewDraft.same(now, this._reviewWas) && !reviewDraft.put(this.reviewDate, now, s.state.journal[this.reviewDate], s.state.tallyGen)) {
+        this._reviewWarned = true
+        this.toast({ icon: '記', title: '改到一半的字存不下來', sub: '瀏覽器的空間可能滿了：先按「記下來」，或把字複製起來；再關一次就直接關（這次改的不留）', ms: 9000 })
         return false
       }
     }

@@ -1,6 +1,6 @@
 // 資料正確性的回歸測試：多分頁、拆任務、睡眠獎勵、教練的回答、跨日、提醒與壞掉的數字
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Store, addDays, dateStr, readBackup, DATA_VERSION } from '../src/store.js'
+import { Store, addDays, dateStr, readBackup, readBackups, DATA_VERSION } from '../src/store.js'
 // 比這一版新的存檔格式
 const NEXT = DATA_VERSION + 1
 import { Reminders } from '../src/reminders.js'
@@ -391,6 +391,49 @@ describe('同一個瀏覽器開兩個分頁', () => {
     expect(store.state.rev).toBe(b.state.rev)
     expect(readBackup().from).toBe('tab')
     expect(readBackup().state.tasks.map((t) => t.title)).toContain('A 的任務')
+  })
+
+  it('這邊排著還沒寫出去時，另一個分頁也加了東西：兩邊合在一起，兩件都在（不是一邊只剩在備份裡）', () => {
+    store.saveNow()
+    const b = new Store()
+    const merged = vi.fn()
+    store.on('tabMerged', merged)
+    store.addTask({ title: 'A 的任務' })
+    b.addTask({ title: 'B 的任務' })
+    b.flushSave()
+    // A 排著的存檔現在才寫：看到 B 剛寫過，兩邊合在一起
+    store.flushSave()
+    const disk = JSON.parse(localStorage.getItem(KEY)).tasks.map((t) => t.title)
+    expect(disk).toEqual(expect.arrayContaining(['A 的任務', 'B 的任務']))
+    expect(store.state.tasks.map((t) => t.title)).toEqual(expect.arrayContaining(['A 的任務', 'B 的任務']))
+    expect(merged).toHaveBeenCalledTimes(1)
+    expect(store.saved).toBe(true)
+    // B 換成合好的那一版之後再改：照常寫，不會又合一次、也不會丟掉 A 的
+    b._otherTabSaved({ key: KEY })
+    b.addTask({ title: 'B 的第二件' })
+    b.flushSave()
+    expect(new Store().state.tasks.map((t) => t.title)).toEqual(expect.arrayContaining(['A 的任務', 'B 的任務', 'B 的第二件']))
+  })
+
+  it('存檔標的版本記號跟存檔本身對不上（記號沒寫進去）：照樣合一次就好，不會一直合下去、把數字加了又加', () => {
+    store.saveNow()
+    const b = new Store()
+    const merged = vi.fn()
+    store.on('tabMerged', merged)
+    const coins = store.state.player.coins
+    store.addTask({ title: 'A 的任務' })
+    b.addTask({ title: 'B 的任務' })
+    b.flushSave()
+    // B 寫了存檔，但版本記號停在一個舊的（寫記號那一下失敗了）
+    localStorage.setItem('hiyori-daily-rev', 'stale-rev')
+    store.flushSave()
+    expect(merged).toHaveBeenCalledTimes(1)
+    const disk = JSON.parse(localStorage.getItem(KEY))
+    expect(disk.tasks.map((t) => t.title)).toEqual(expect.arrayContaining(['A 的任務', 'B 的任務']))
+    expect(disk.player.coins).toBe(coins)
+    expect(store.saved).toBe(true)
+    // B 那一版只留了一份備份
+    expect(readBackups().filter((x) => x.from === 'tab')).toHaveLength(1)
   })
 
   it('這邊剛改、還沒寫出去時就收到事件：這邊的變更不會被丟掉', async () => {

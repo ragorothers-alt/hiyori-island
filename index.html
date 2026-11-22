@@ -181,6 +181,8 @@
         <div class="star-bar" id="starBar" hidden></div>
         </div>
         <div class="pg-main">
+        <div class="sample-note" id="sampleNote" hidden></div>
+        <p class="sr-only" id="sampleLive" role="status"></p>
         <div id="stuckBox"></div>
         <div id="overdueBox"></div>
         <ul class="list" id="taskList"></ul>
@@ -358,7 +360,7 @@
         </div>
         <h3 class="sec-title">專注<small>しゅうちゅう</small></h3>
         <div class="settings">
-          <div class="set-row"><div><b>計時的設定</b><small>倒數或正向、一輪幾分鐘、休息、連續幾輪、到點自動延長、背景聲、每天的專注目標</small></div><button class="chip-toggle" id="focusSetBtn">打開</button></div>
+          <div class="set-row"><div><b>計時的設定</b><small>倒數或正向、一輪幾分鐘、休息、連續幾輪、到點自動延長、背景聲、每天的專注目標</small></div><button class="chip-toggle" id="focusSetBtn" aria-label="打開計時的設定">打開</button></div>
           <div class="set-row" id="awayRow" hidden><div><b>專注中叫我回來</b><small>專注時切去用別的 App 超過 3 分鐘，用通知叫你回來（鎖著手機專心時不會吵）</small></div><button class="chip-toggle" id="awayBtn"></button></div>
           <div class="set-row" id="tabRow" hidden><div><b>專注中切到別的分頁太久叫我回來</b><small>專注時切到別的分頁或視窗超過 3 分鐘，用通知叫你回來一次（工作本身就要用到別的分頁、視窗的話不用開）</small></div><button class="chip-toggle" id="tabBtn"></button></div>
         </div>
@@ -369,7 +371,7 @@
         <h3 class="sec-title">ふじ<small>AI のひしょ</small></h3>
         <div class="settings">
           <div class="set-row sync-row" id="aiRow"></div>
-          <div class="set-row"><div><b>ふじ的頁面</b><small>她自己整理的方式、App 關著時的通知、跟她說過的話和她做過的事</small></div><button class="chip-toggle" id="agentSetBtn">打開</button></div>
+          <div class="set-row"><div><b>ふじ的頁面</b><small>她自己整理的方式、App 關著時的通知、跟她說過的話和她做過的事</small></div><button class="chip-toggle" id="agentSetBtn" aria-label="打開ふじ的頁面">打開</button></div>
         </div>
         <h3 class="sec-title">資料與同步<small>データ</small></h3>
         <div class="settings">
@@ -382,9 +384,27 @@
           <button class="btn-ghost" id="exportBtn">匯出資料</button>
           <button class="btn-ghost" id="importBtn" type="button">匯入資料</button><input type="file" id="importInput" accept="application/json,.json" hidden tabindex="-1" aria-hidden="true" />
           <button class="btn-ghost" id="sampleBtn" hidden></button>
-          <button class="btn-ghost danger" id="resetBtn">重置小島</button>
+          <button class="btn-ghost danger" id="resetBtn" aria-expanded="false" aria-controls="resetCheck">重置小島</button>
         </div>
         <div class="import-check" id="importCheck" role="group" aria-labelledby="importCheckTitle" hidden></div>
+        <!-- 重置要在這一塊另外確認（按鈕不在原本的位置：連按兩下、按著 Enter 不會就清空） -->
+        <div class="reset-check" id="resetCheck" role="group" aria-labelledby="resetCheckTitle" hidden>
+          <b id="resetCheckTitle">清空整座小島？</b>
+          <small>所有任務、日程、專案、習慣和紀錄都會刪掉。清空前的小島會留成備份，後悔的話可以在上面的備份裡還原。</small>
+          <label class="reset-drop"><input type="checkbox" id="resetDrop" /><span>也刪掉所有備份（刪了就找不回來；要把這台交給別人、或清出空間時用）</span></label>
+          <div class="reset-acts"><button type="button" class="btn-ghost" id="resetCancel">取消</button><button type="button" class="btn-ghost danger" id="resetGo">清空小島</button></div>
+        </div>
+        <details class="data-where">
+          <summary>你的資料放在哪裡</summary>
+          <ul>
+            <li><b>這台瀏覽器裡</b>：任務、紀錄這些都存在這個網站的瀏覽器儲存空間，不會自己傳到別的地方。清除瀏覽器的網站資料、解除安裝 App 時會一起刪掉，先「匯出資料」留一份。</li>
+            <li><b>線上同步</b>：在裝置上加密後才上傳，伺服器只拿得到看不懂的內容；同步碼就是鑰匙，別給不認識的人。</li>
+            <li><b>資料夾同步</b>：寫成一般的 JSON 檔放在你選的資料夾（OneDrive、Dropbox…），沒有加密，跟那個資料夾一樣安全。</li>
+            <li><b>匯出的檔案</b>：一般的 JSON 檔，打開就看得到內容，收好別亂傳。</li>
+            <li><b>ふじ（接上 Claude 時）</b>：請她排程、跟她說話時，相關的任務和日程會經過你設定的 Worker 交給 Claude 處理。</li>
+            <li><b>備份</b>：同步、匯入、重置之前留的那幾份也在這台瀏覽器裡（上面的清單），可以還原，也可以全部刪掉。</li>
+          </ul>
+        </details>
         <div class="settings set-foot">
           <div class="set-row"><div><b>這一版的新功能<i class="news-dot" id="newsDot" hidden></i></b><small id="newsInfo"></small></div><button class="chip-toggle" id="newsBtn">看看</button></div>
           <div class="set-row"><div><b>意見回饋</b><small>想要的功能、遇到的問題，到 GitHub 上告訴我們（需要 GitHub 帳號）</small></div><button class="chip-toggle" id="feedbackBtn">寫回饋</button></div>

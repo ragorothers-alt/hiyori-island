@@ -103,5 +103,10 @@ describe('找找看（searchAll）', () => {
     expect(ids('Trip 9/25')).toEqual([])
     expect(ids('Trip 1/1')).toEqual(['ny'])
     expect(ids('Trip 2027/1/2')).toEqual(['ny'])
+    // 日曆上沒有的日子不當成日期（2/30、平年的 2/29）
+    const feb = { events: [{ id: 'f', title: 'Camp', date: '2026-02-27', endDate: '2026-03-02', allDay: true, start: '00:00', end: '23:59' }] }
+    expect(searchAll(feb, 'Camp 2/30', { today: TODAY }).event).toEqual([])
+    expect(searchAll(feb, 'Camp 2026-02-29', { today: TODAY }).event).toEqual([])
+    expect(searchAll(feb, 'Camp 2/28', { today: TODAY }).event.map((x) => x.item.id)).toEqual(['f'])
   })
 })

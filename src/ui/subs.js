@@ -162,8 +162,8 @@ export class SubsView {
     let line
     if (cancelled) line = sub.end > today ? `已取消・用到 ${md(sub.end)}` : sub.end ? `已取消・${ymd(sub.end)} 起不再扣款` : '已取消'
     else line = `${cycleLabel(sub)}・${trial ? '試用到' : '下次'} ${md(next)}・${when(days)}`
-    const per = sub.unit === 'month' && sub.every === 1 ? '' : `<small>每月約 ${fmtTWD(toTWD(monthlyOf(charge), sub.cur, rates))}</small>`
-    const twd = sub.cur !== 'TWD' && !per ? `<small>約 ${fmtTWD(toTWD(charge.price, sub.cur, rates))}</small>` : ''
+    const per = sub.unit === 'month' && sub.every === 1 ? '' : `<small>每月約 ${fmtTWD(toTWD(monthlyOf(charge), charge.cur, rates))}</small>`
+    const twd = charge.cur !== 'TWD' && !per ? `<small>約 ${fmtTWD(toTWD(charge.price, charge.cur, rates))}</small>` : ''
     const badge = trial ? '<em class="sb-badge">試用中</em>' : ''
     const n = paidCount(sub, today)
     const paid = paidSoFar(sub, today, rates)
@@ -186,7 +186,7 @@ export class SubsView {
       <button type="button" class="sb-main" data-act="toggle" aria-expanded="${open}"${open ? ` aria-controls="sbm-${esc(sub.id)}"` : ''}>
         <span class="sb-k" title="${c.label}">${c.kanji}</span>
         <span class="sb-t"><b>${esc(sub.name)}${badge}</b><small>${line}</small></span>
-        <span class="sb-p"><b>${fmtMoney(charge.price, sub.cur)}</b>${per || twd}</span>
+        <span class="sb-p"><b>${fmtMoney(charge.price, charge.cur)}</b>${per || twd}</span>
       </button>${more}</li>`
   }
 
@@ -215,7 +215,7 @@ export class SubsView {
 
   // ── 匯率：只列有用到的外幣 ──
   _ratesHTML(list) {
-    const used = [...new Set(list.map((x) => x.cur))].filter((k) => k !== 'TWD')
+    const used = [...new Set(list.flatMap((x) => [x.cur, ...(x.priceHistory || []).map((r) => r.cur)]))].filter((k) => k && k !== 'TWD')
     if (!used.length) return ''
     const rates = this.store.state.subRates
     const rows = used
@@ -298,7 +298,7 @@ export class SubsView {
   }
 
   _input(e) {
-    if (this.form?.id && ['price', 'start', 'every'].includes(e.target.name)) this._priceOptions()
+    if (this.form?.id && ['price', 'cur', 'start', 'every'].includes(e.target.name)) this._priceOptions()
     // 打服務名稱時順便猜分類（還沒自己選過的話）。猜不到就回到預設的影音：
     // 不然打「Apple TV+」打到一半猜成音樂，打完了還停在音樂
     if (e.target.name !== 'name' || !this.form || this.form.catTouched) return
@@ -311,7 +311,7 @@ export class SubsView {
   _priceOptions() {
     const sub = this.store.subscription(this.form.id)
     if (!sub) return
-    const { price, priceFrom, start, every } = $('form', this.el.form).elements
+    const { price, priceFrom, start, every, cur } = $('form', this.el.form).elements
     const schedule = { ...sub, start: start.value, every: every.valueAsNumber, unit: this.form.unit }
     const valid = /^\d{4}-\d{2}-\d{2}$/.test(schedule.start) && every.validity.valid && schedule.every >= 1
     const label = priceFrom.closest('label')
@@ -319,7 +319,8 @@ export class SubsView {
     if (label.hidden) return
     const current = priceChangeDate(schedule, this.store.today, 'current')
     const next = priceChangeDate(schedule, this.store.today)
-    label.hidden = price.valueAsNumber === sub.price && subAtCharge(sub, current).price === sub.price
+    const was = subAtCharge(sub, current)
+    label.hidden = price.valueAsNumber === sub.price && cur.value === sub.cur && was.price === sub.price && was.cur === sub.cur
     priceFrom.options[0].textContent = `${next === current ? '第一次扣款' : '下一期'}（${ymd(next)}）`
     priceFrom.options[1].textContent = `這一期就是新價格（${ymd(current)}）`
     priceFrom.options[1].disabled = next === current
@@ -357,7 +358,7 @@ export class SubsView {
     this.open.add(sub.id)
     this.render()
     $(`.sb-card[data-id="${CSS.escape(sub.id)}"] .sb-main`, this.root)?.focus({ preventScroll: true })
-    this.hooks.toast?.({ icon: SUB_CATS[sub.cat].kanji, title: id ? `改好了「${sub.name}」` : `記下「${sub.name}」`, sub: next ? `${sub.trial && next === sub.start ? '試用到' : '下次扣款'} ${md(next)}・${fmtMoney(subAtCharge(sub, next).price, sub.cur)}` : '' })
+    this.hooks.toast?.({ icon: SUB_CATS[sub.cat].kanji, title: id ? `改好了「${sub.name}」` : `記下「${sub.name}」`, sub: next ? `${sub.trial && next === sub.start ? '試用到' : '下次扣款'} ${md(next)}・${fmtMoney(subAtCharge(sub, next).price, subAtCharge(sub, next).cur)}` : '' })
   }
 
   _click(e) {

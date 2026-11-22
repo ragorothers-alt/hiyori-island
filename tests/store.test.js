@@ -971,6 +971,37 @@ describe('存檔讀不進來、存不進去', () => {
     expect(titlesOf(readBackup().state)).toContain('重置前')
   })
 
+  it('重置時勾了「也刪掉備份」：清空、之前的備份也全部刪掉（不留重置前那一份）', () => {
+    store.addTask({ title: '私事' })
+    store.importJSON(store.exportJSON())
+    expect(readBackups().length).toBeGreaterThan(0)
+    // 之前讀不懂時留下的原文也是這台的舊資料：一起刪（要把這台交給別人時用）
+    localStorage.setItem(RESCUE_KEY, JSON.stringify({ at: 1, error: 'x', raw: '{"私事":1}' }))
+    store.loadFailed = { rescued: true, partial: ['tasks'] }
+    expect(store.reset({ force: true, backup: false })).toBe(true)
+    expect(store.state.tasks).toEqual([])
+    expect(readBackups()).toEqual([])
+    expect(readRescue()).toBeNull()
+    expect(store.loadFailed).toBeNull()
+    expect(localStorage.getItem('hiyori-daily-v1')).not.toContain('私事')
+  })
+
+  it('重置時要刪備份但刪不掉（瀏覽器不讓改）：不清空', () => {
+    store.addTask({ title: '還在' })
+    store.saveNow()
+    const removeItem = localStorage.removeItem
+    localStorage.removeItem = function (k) {
+      if (k === 'hiyori-backup') throw new Error('SecurityError')
+      return removeItem.call(this, k)
+    }
+    try {
+      expect(() => store.reset({ force: true, backup: false })).toThrow('備份刪不掉')
+    } finally {
+      localStorage.removeItem = removeItem
+    }
+    expect(titlesOf(store.state)).toContain('還在')
+  })
+
   it('重置前另一個分頁剛寫過（還沒收到通知）：不刪，先換成那一版；新版 App 寫的更不刪', () => {
     store.addTask({ title: '這邊的' })
     store.saveNow()
@@ -2343,6 +2374,58 @@ describe('ふじ的排程教練與重要日子', () => {
     expect(ctx.rhythm).toBe(store.state.rhythm)
   })
 
+})
+
+describe('存檔有一部分樣子不對', () => {
+  it('任務變成一串字：其他的照常讀進來，原文另外留一份、記成讀不懂了哪幾份', () => {
+    store.addTask({ title: '原本的任務' })
+    store.addHabit?.({ name: '喝水' })
+    store.saveNow()
+    const raw = JSON.parse(localStorage.getItem('hiyori-daily-v1'))
+    raw.tasks = 'oops'
+    raw.journal = ['壞掉']
+    // 花的圖鑑、每天的紀錄這種一本一本的也算（以前會被靜靜清成空的）
+    raw.dex = ['壞掉']
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify(raw))
+    const s = new Store()
+    expect(s.loadFailed).toEqual({ rescued: true, partial: ['tasks', 'journal', 'dex'] })
+    expect(readRescue().raw).toContain('"tasks":"oops"')
+    expect(s.state.tasks.filter((t) => t.title === '原本的任務')).toEqual([])
+    // 原文另外留了也一樣：沒改過就不寫（開場的例行存檔不會把讀不懂的那幾份當成空的寫進去，下次打開還看得出壞過）
+    expect(s.saveNow()).toBe(false)
+    expect(JSON.parse(localStorage.getItem('hiyori-daily-v1')).tasks).toBe('oops')
+    expect(new Store().loadFailed).toEqual({ rescued: true, partial: ['tasks', 'journal', 'dex'] })
+    // 自己改了資料：照常寫（讀得懂的那些不會因為這樣存不了）
+    s.addTask({ title: '新的' })
+    expect(s.saveNow()).toBe(true)
+    expect(JSON.parse(localStorage.getItem('hiyori-daily-v1')).tasks).not.toBe('oops')
+    // 樣子都對的存檔：沒事
+    store.importJSON(store.exportJSON())
+    expect(new Store().loadFailed).toBeFalsy()
+  })
+
+  it('原文留不下來（空間不夠）時，沒改過就不寫：讀不懂的那幾份還留在存檔裡', () => {
+    store.saveNow()
+    const raw = JSON.parse(localStorage.getItem('hiyori-daily-v1'))
+    raw.tasks = 'oops'
+    localStorage.setItem('hiyori-daily-v1', JSON.stringify(raw))
+    const setItem = localStorage.setItem
+    localStorage.setItem = function (k, v) {
+      if (k === RESCUE_KEY) throw new Error('QuotaExceededError')
+      return setItem.call(this, k, v)
+    }
+    try {
+      const s = new Store()
+      expect(s.loadFailed).toEqual({ rescued: false, partial: ['tasks'] })
+      expect(s.saveNow()).toBe(false)
+      expect(JSON.parse(localStorage.getItem('hiyori-daily-v1')).tasks).toBe('oops')
+      // 自己改了資料：照常寫
+      s.addTask({ title: '新的' })
+      expect(s.saveNow()).toBe(true)
+    } finally {
+      localStorage.setItem = setItem
+    }
+  })
 })
 
 describe('先記下來', () => {

@@ -673,7 +673,7 @@ export class TodayView {
   // 任務名稱：一顆按鈕，點了打開那一件（看得到完整的標題、說明、子任務，可以改）。專注走旁邊的 ▶
   _taskName(t, inner, cls, fk) {
     const k = esc(t.id)
-    return `<button type="button" class="${cls} td-go" data-act="edit" data-type="task" data-id="${k}" data-fk="${fk}" title="${esc(t.title)}（點一下看完整內容、編輯）" aria-label="打開「${esc(t.title)}」">${inner}</button>`
+    return `<button type="button" class="${cls} td-go" data-act="edit" data-type="task" data-id="${k}" data-fk="${fk}" title="${esc(t.title)}（點一下看完整內容、編輯）">${inner}</button>`
   }
   // ▶：選怎麼專注（倒數、正向、長度、輪數），鍵盤也按得到
   _playBtn(t, fk) {

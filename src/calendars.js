@@ -48,7 +48,12 @@ export function icsText(code) {
 
 // 網址裡像私密金鑰的那一段只留開頭（畫面上、截圖裡不會整串露出來）：字母數字加起來 16 個以上的整段收起來，
 // 短一點的裡面有 8 個以上連著、夾著數字的也收起來。看得懂的短名字（class-a.ics、basic.ics、music）照樣看得到
-const maskSeg = (seg) => {
+const maskSeg = (raw) => {
+  // 中文檔名在網址裡是 %E8%B3%87…：先解回中文再看（不然三個字以上就被當成金鑰）
+  let seg = raw
+  try {
+    seg = decodeURIComponent(raw)
+  } catch {}
   if (seg.replace(/[^A-Za-z0-9]/g, '').length >= 16) return `${seg.slice(0, 3)}…`
   return seg.replace(/[A-Za-z0-9_]{8,}/g, (run) => (/\d/.test(run) ? `${run.slice(0, 3)}…` : run))
 }
@@ -89,7 +94,10 @@ function baseLabel(url, urls) {
     while (i < path.length && other[i] === path[i]) i++
     difference = Math.max(difference, i)
   }
-  if (difference) return path.slice(0, 16) + '…' + path.slice(difference - 4, difference + 10) + '…' + path.slice(-16)
+  // 不同的那一段放中間（夾在頭尾之間，不跟頭尾重疊）
+  const from = Math.max(16, Math.min(difference - 4, path.length - 30))
+  const to = Math.min(from + 14, path.length - 16)
+  if (difference && to > from) return path.slice(0, 16) + '…' + path.slice(from, to) + '…' + path.slice(-16)
   return head + '…' + tail
 }
 // 設定列上認行事曆用的那一行：遮好、截短之後還跟另一個一樣的，再加一個固定的來源代號

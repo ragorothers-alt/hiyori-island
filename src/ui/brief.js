@@ -53,7 +53,7 @@ export class BriefView {
     this.goes = [...gone, ...b.today, ...b.alerts].map((x) => x.go)
     const list = (items, from) => items.map((it, i) => item(it, from + i, from + i)).join('')
     this.card.innerHTML = `
-      <header class="bf-head"><b class="bf-hello">${esc(b.hello)}</b><time>${esc(b.date)}</time><button type="button" class="icon-btn bf-x" data-act="ok" aria-label="關閉今日摘要" title="關閉 (Esc)">×</button></header>
+      <div class="bf-head"><b class="bf-hello">${esc(b.hello)}</b><time>${esc(b.date)}</time><button type="button" class="icon-btn bf-x" data-act="ok" aria-label="關閉今日摘要" title="關閉 (Esc)">×</button></div>
       <p class="bf-lead"><span class="bf-typed" aria-hidden="true"></span><span class="sr-only">${esc(b.lead)}</span></p>
       <div class="bf-body" hidden>
         ${gone.length ? `<h4>你不在的時候<small>${esc(b.away.label)}</small></h4><ul class="bf-list">${list(gone, 0)}</ul>` : ''}

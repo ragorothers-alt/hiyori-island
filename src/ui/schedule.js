@@ -96,7 +96,7 @@ export class ScheduleView {
           const dd = parseDate(d)
           const ev = s.eventsOn(d).length + s.allDayOn(d).length
           const left = s.tasksOn(d).filter((t) => !t.done).length
-          const name = `${dd.getMonth() + 1}/${dd.getDate()}（${WEEK_ZH[dd.getDay()]}）${ev ? `・${ev} 個日程` : ''}${left ? `・${left} 件待辦` : ''}`
+          const name = `${WEEK_ZH[dd.getDay()]} ${dd.getDate()}，${dd.getMonth() + 1} 月${ev ? `，${ev} 個日程` : ''}${left ? `，${left} 件待辦` : ''}`
           return `<button class="ws-day ${d === s.selectedDate ? 'on' : ''} ${d === s.today ? 'today' : ''} ${dd.getDay() % 6 === 0 ? 'weekend' : ''}" data-date="${d}" aria-label="${name}" aria-pressed="${d === s.selectedDate}"${d === s.today ? ' aria-current="date"' : ''}>
             <small>${WEEK_ZH[dd.getDay()]}</small><b>${dd.getDate()}</b><i>${ev ? '<em class="e"></em>' : ''}${left ? '<em class="t"></em>' : ''}</i></button>`
         })

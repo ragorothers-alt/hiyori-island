@@ -263,22 +263,34 @@ export class ProjectHouses {
     else done()
   }
 
+  _add(project, progress, animate, today) {
+    const h = new House(project, project.slot)
+    this.houses.set(project.id, h)
+    this.group.add(h.group)
+    h.setState(project, progress, false, today)
+    if (animate) {
+      h.group.scale.setScalar(0.001)
+      tween(0.9, (k) => h.group.scale.setScalar(Math.max(0.001, k)), { easing: ease.outBack })
+    }
+  }
+
+  // 開場先一棟一棟蓋，最後再由 sync 對齊這段時間內有沒有編輯過專案
+  async buildInitial(projects, progress, today, pause) {
+    for (const p of projects) {
+      this._add(p, progress.get(p.id), false, today)
+      await pause()
+    }
+  }
+
   // 回傳 [{ id, positions }]：本次蓋上去的位置
   sync(projects, progressOf, animate = true, today = null) {
     const bySlot = new Map(projects.map((p) => [p.id, p.slot]))
     for (const [id, h] of this.houses) if (bySlot.get(id) !== h.slot) this._remove(id, animate && !bySlot.has(id))
     const built = []
     for (const p of projects) {
-      let h = this.houses.get(p.id)
+      const h = this.houses.get(p.id)
       if (!h) {
-        h = new House(p, p.slot)
-        this.houses.set(p.id, h)
-        this.group.add(h.group)
-        h.setState(p, progressOf(p), false, today)
-        if (animate) {
-          h.group.scale.setScalar(0.001)
-          tween(0.9, (k) => h.group.scale.setScalar(Math.max(0.001, k)), { easing: ease.outBack })
-        }
+        this._add(p, progressOf(p), animate, today)
         continue
       }
       const fresh = h.setState(p, progressOf(p), animate, today)

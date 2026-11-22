@@ -40,6 +40,13 @@ describe('回顧的草稿', () => {
     }
   })
 
+  it('留了草稿之後又在別的地方記下來（總覽的今日反思、另一台）：記下來的比較新，不放草稿', () => {
+    reviewDraft.put('2026-11-22', { mood: 'rain', text: 'A' }, null, 'g')
+    const at = reviewDraft.all()['2026-11-22'].at
+    expect(reviewDraft.get('2026-11-22', { mood: 'sunny', text: 'B', at: at + 1 }, 'g')).toBeNull()
+    expect(reviewDraft.get('2026-11-22', { mood: 'sunny', text: 'B', at: at - 1 }, 'g')).toEqual({ mood: 'rain', text: 'A' })
+  })
+
   it('存的東西壞掉了也不會讓回顧打不開', () => {
     localStorage.setItem('hiyori-review-draft', '{壞掉')
     expect(reviewDraft.get('2026-11-22', saved)).toBeNull()

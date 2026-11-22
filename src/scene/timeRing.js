@@ -139,6 +139,12 @@ export class TimeRing {
   }
 
   sync(events, isToday) {
+    // 勾任務或改別的設定時，時之環留下原本的光帶（也就不會打斷光帶正在播的動畫）
+    if (isToday === this.isToday && events.length === this.arcs.size && events.every((e, i) => {
+      const a = this.arcs.get(e.id)
+      return a && a.order === i && a.start === e.start && a.end === e.end && a.colorIndex === e.color &&
+        a.done === e.done && a.title === e.title && a.g === `${a.m0}-${a.m1}`
+    })) return
     this.isToday = isToday
     this.now.visible = isToday
     this.progress.visible = isToday
@@ -149,7 +155,7 @@ export class TimeRing {
     // 重疊的日程分層堆疊
     const lanes = []
     const sorted = [...events].sort((a, b) => toMin(a.start) - toMin(b.start))
-    for (const e of sorted) {
+    for (const [order, e] of sorted.entries()) {
       const m0 = toMin(e.start)
       const m1 = Math.max(m0 + 10, toMin(e.end))
       let lane = lanes.findIndex((end) => end <= m0)
@@ -171,7 +177,7 @@ export class TimeRing {
         a.mesh.material.emissive.copy(a.color)
       }
       a.mesh.position.y = Y + 0.06 + lane * LANE_H
-      Object.assign(a, { e, m0, m1, lane })
+      Object.assign(a, { e, m0, m1, lane, order, start: e.start, end: e.end, colorIndex: e.color, done: e.done, title: e.title })
       this.arcs.set(e.id, a)
     }
     for (const a of old.values()) {

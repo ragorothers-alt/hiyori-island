@@ -1,6 +1,6 @@
 // UI 的方法（從 ui.js 搬過來，掛回 UI.prototype）：設定頁：各項設定、線上同步、資料夾同步、備份和救回來的存檔
 import { canHaptics, hapticsOn, IOS } from './haptics.js'
-import { dateStr, readRescue, dropRescue } from '../store.js'
+import { dateStr, readRescue, dropRescue, clearBackups } from '../store.js'
 import { nativeBack, deskWeb } from '../native.js'
 import { $, $$, esc, armConfirm, setHTML, setOn, pickOne, nameToggles } from './dom.js'
 import { LATEST } from '../data/latest.js'
@@ -105,6 +105,18 @@ export const settingsMethods = {
     $('#backupList').addEventListener('click', (e) => {
       const r = e.target.closest('[data-rescue]')
       if (r) return this._rescueAction(r)
+      // 全部刪掉（刪了就找不回來）
+      const d = e.target.closest('[data-backup-drop]')
+      if (d) {
+        return armConfirm(d, '再按一次，刪掉全部備份', () => {
+          if (!clearBackups()) return this.toast({ icon: '！', title: '備份沒有刪掉', sub: '瀏覽器不讓改這個網站的資料，等一下再試' })
+          const back = d.contains(document.activeElement)
+          this.renderSync()
+          // 那一列跟著清單不見了：焦點放到下面的「匯出資料」，鍵盤不會掉回頁首
+          if (back) $('#exportBtn')?.focus({ preventScroll: true })
+          this.toast({ icon: '掃', title: '備份都刪掉了', sub: '現在的小島沒有動' })
+        })
+      }
       const b = e.target.closest('[data-backup]')
       if (!b) return
       const i = +b.dataset.backup
@@ -206,11 +218,13 @@ export const settingsMethods = {
           ? `${when(bk.savedAt)} ${before}前的小島，留著備用`
           : bk.from === 'merge'
             ? `${when(bk.at)} 的這台版本，兩台都改過、自動合在一起之前留的`
-            : `${when(bk.at)} 的${src}版本，${bk.from === 'tab' ? '兩個分頁同時改了資料時' : '同步時'}被比較新的資料取代，留著備用`
+            : bk.from === 'tab'
+              ? `${when(bk.at)} 的另一個分頁版本，兩個分頁同時改了資料、合在一起之前留的`
+              : `${when(bk.at)} 的${src}版本，同步時被比較新的資料取代，留著備用`
         const n = list.length > 1 ? `<span class="bk-n">${i + 1} / ${list.length}</span>` : ''
         return `<div class="set-row backup-row"><div><b><span class="backup-heading">被取代的資料</span><span class="backup-question">要還原這份備份嗎？</span>${n}</b><small>${info}</small><small id="backupSummary${i}">${backupSummary(bk)}</small></div><button class="chip-toggle" data-backup="${i}" aria-describedby="backupSummary${i}">還原</button></div>`
       })
-      .join(''))
+      .join('') + (list.length ? `<div class="set-row backup-row backup-drop"><div><small>這些備份只放在這台瀏覽器裡。不需要了、或要把這台交給別人時，可以全部刪掉（刪了就找不回來）</small></div><button class="chip-toggle danger" data-backup-drop>刪掉全部備份</button></div>` : ''))
     const sy = this.sync
     if (!sy) return
     const name = esc(sy.fileName)

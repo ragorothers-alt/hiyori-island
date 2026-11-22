@@ -25,6 +25,7 @@ const zhDur = (m) => {
 }
 const spendOf = (life) => life.items.reduce((a, x) => a + (x.kind === 'spend' ? x.amount : 0), 0)
 const weekOf = (date) => WEEK_ZH[parseDate(date).getDay()]
+const fullDate = (date) => `${dateLabel(date, false)}星期${weekOf(date)}`
 // 花費、睡眠圖看的那七天：到選的那一天為止（選了以後的日子就到今天為止）。
 // 看今天時就是「近 7 天」；週一也看得到上週的幾天，不會只剩一天
 function recordWeek(date, today) {
@@ -425,9 +426,11 @@ export class LifeView {
       return
     }
     const cols = days.map(({ d, v }) => {
-      const cls = `${d === s.today ? ' today' : ''}${d === this.date ? ' sel' : ''}`
+      const selected = d === this.date
+      const cls = `${d === s.today ? ' today' : ''}${selected ? ' sel' : ''}`
       const h = v ? Math.max(4, Math.round((v / max) * 38)) : 0
-      return `<button type="button" class="lsp-col${cls}" data-day="${d}" title="${dateLabel(d)}　${v ? money(v) : '未記花費'}">
+      const label = `${fullDate(d)}，${v ? `花費 ${money(v)}` : '未記花費'}`
+      return `<button type="button" class="lsp-col${cls}" data-day="${d}" aria-pressed="${selected}" aria-label="${label}" title="${label}">
         <small>${v ? shortMoney(v) : ''}</small><i style="height:${h}px"></i><span>${d === s.today ? '今' : weekOf(d)}</span>
       </button>`
     })
@@ -481,19 +484,22 @@ export class LifeView {
     const bandEl = band ? `<i class="slp-band" style="top:${pct(band[0])}%;height:${(((band[1] - band[0]) / span) * 100).toFixed(2)}%"></i>` : ''
     const mid = band ? pct((band[0] + band[1]) / 2) : 50
     const cols = st.list.map((x) => {
-      const cls = `${x.date === s.today ? ' today' : ''}${x.date === this.date ? ' sel' : ''}`
+      const selected = x.date === this.date
+      const cls = `${x.date === s.today ? ' today' : ''}${selected ? ' sel' : ''}`
       const wk = x.date === s.today ? '今' : weekOf(x.date)
+      const day = fullDate(x.date)
       if (!x.dur) {
         const future = x.date > s.today
-        return `<button type="button" class="slp-col none${cls}" data-day="${x.date}" title="${dateLabel(x.date)}　${future ? '還沒到這一天' : '還沒記錄，點一下補記'}">
+        const label = `${day}，${future ? '還沒到這一天' : '還沒記錄睡眠，點一下補記'}`
+        return `<button type="button" class="slp-col none${cls}" data-day="${x.date}" aria-pressed="${selected}" aria-label="${label}" title="${label}">
           <span class="slp-plot">${future ? '' : `<span class="slp-add" style="top:${mid}%">${ICON.plus}</span>`}</span>
           <span class="slp-foot"><b>—</b><span>${wk}</span></span>
         </button>`
       }
       const bed = nearClock(toMin(x.bed), st.center)
       const short = x.dur < SHORT
-      const tip = `${dateLabel(x.date)}　${x.bed} → ${x.wake}・${fmtDur(x.dur)}${x.q ? `・${SLEEP_Q[x.q]}` : ''}`
-      return `<button type="button" class="slp-col${short ? ' short' : ''}${cls}" data-day="${x.date}" title="${tip}">
+      const label = `${day}，${x.bed} 就寢，${x.wake} 起床，睡了 ${zhDur(x.dur)}${x.q ? `，${SLEEP_Q[x.q]}` : ''}`
+      return `<button type="button" class="slp-col${short ? ' short' : ''}${cls}" data-day="${x.date}" aria-pressed="${selected}" aria-label="${label}" title="${label}">
         <span class="slp-plot"><span class="slp-bar" style="top:${pct(bed)}%;height:${((x.dur / span) * 100).toFixed(2)}%"><small class="b">${x.bed}</small><small class="w">${x.wake}</small></span></span>
         <span class="slp-foot"><b>${hours(x.dur)}</b><span>${wk}</span></span>
       </button>`

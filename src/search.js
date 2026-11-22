@@ -10,10 +10,14 @@ export const LIMIT = { task: 30, event: 20, project: 10, life: 20, setting: 10 }
 const aliases = { fontPick: '字級 字型大小', glassRow: '玻璃 透明度', icsRow: '外部行事曆 日曆', cloudRow: '雲端同步', aiRow: 'ふじ對話 通行碼' }
 
 // 月／日可以跨年找；有寫年份，就只找那一年。
+// 日曆上真的有的那一天（2/30、平年的 2/29 不算）。沒寫年份的照閏年看（2/29 有可能）
+const realDay = (ymd) => dateStr(new Date(`${ymd}T12:00:00`)) === ymd
 function dateFilter(term) {
   const m = /^(?:(\d{4})[/-])?(\d{1,2})[/-](\d{1,2})$/.exec(term)
-  if (!m || +m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) return null
-  return `${m[1] || ''}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  if (!m) return null
+  const md = `-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  if (!realDay(`${m[1] || '2024'}${md}`)) return null
+  return `${m[1] || ''}${md}`
 }
 
 // 一筆裡的幾個欄位（[哪裡, 文字, 分數]）都找過：每個字都要在其中一欄找得到；回傳 { score, hit }，沒找到是 null。
@@ -49,7 +53,7 @@ export function searchAll(state, query, { today, external = [], settings = [], p
   const inSpan = (from, to) => {
     if (!date || !to || to <= from) return onDay(from)
     if (/^\d/.test(date)) return from <= date && date <= to
-    for (let y = +from.slice(0, 4); y <= +to.slice(0, 4); y++) if (from <= `${y}${date}` && `${y}${date}` <= to) return true
+    for (let y = +from.slice(0, 4); y <= +to.slice(0, 4); y++) if (from <= `${y}${date}` && `${y}${date}` <= to && realDay(`${y}${date}`)) return true
     return false
   }
   const out = { task: [], event: [], project: [], life: [], setting: [], total: 0 }

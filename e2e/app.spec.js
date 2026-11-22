@@ -170,7 +170,8 @@ test('每日任務只放一個地方：任務頁沒有那張；小島模式面�
     s._readyQuests = new Set(s.quests().filter((q) => q.ready).map((q) => q.id))
     for (const title of ['一', '二', '三']) s.toggleTask(s.addTask({ title, date: s.today }).id)
   })
-  const toast = page.locator('#toasts .toast', { hasText: '每日任務' }).filter({ hasText: '達成' })
+  // （做完三件時偶爾開出稀有的花、這週的每週挑戰也跟著達成：那張提示卡的小字也寫著「每日任務」，用標題分開）
+  const toast = page.locator('#toasts .toast', { hasText: '每日任務「' }).filter({ hasText: '達成' })
   await toast.getByRole('button', { name: '領取' }).click()
   await expect.poll(() => page.evaluate(() => window.hiyori.store.quests().find((q) => q.id === 'tasks3').claimed)).toBe(true)
   // 習慣頁：新增習慣時寫著跟例行公事、生活記錄的差別
@@ -689,14 +690,16 @@ test.describe('打開時的今日摘要', () => {
     // 任務頁上標著「範例」
     await page.evaluate(() => window.hiyori.ui.setTab('tasks'))
     await expect(page.locator('#taskList .item').first().locator('.ex-tag')).toHaveText('範例')
-    // 記下自己的第一件：範例收起來，可以撤銷
+    // 記下自己的第一件：範例收起來，任務頁最上面一行可以放回（不用提示卡，不會蓋住剛記的那一件）
     await page.locator('#taskTitle').fill('買牛奶')
     await page.locator('#taskTitle').press('Enter')
-    const tucked = page.locator('#toasts .toast', { hasText: '範例收起來了' })
-    await expect(tucked).toBeVisible()
+    const tucked = page.locator('#sampleNote')
+    await expect(tucked).toContainText('範例收起來了')
+    await expect(page.locator('#toasts .toast', { hasText: '範例收起來了' })).toHaveCount(0)
     await expect.poll(samples).toBe(0)
     await expect(page.locator('#taskList .item')).toHaveCount(1)
-    await tucked.locator('.toast-act', { hasText: '撤銷' }).click()
+    await tucked.getByRole('button', { name: '放回範例' }).click()
+    await expect(tucked).toBeHidden()
     await expect.poll(samples).toBe(12)
     await expect(page.locator('#toasts .toast', { hasText: '範例放回去了' })).toBeVisible()
     expect(await page.evaluate(() => window.hiyori.store.state.settings.keepSamples)).toBe(true)
@@ -3750,6 +3753,8 @@ test.describe('還沒下載好的畫面', () => {
   })
   test('連著網路、換了新版後舊的更新紀錄檔案不見了：手上有打到一半的字時只問一次「有新版本了」，不叫人連網路；剛自動換過一次的話給「重新載入」', async ({ page, context, site }) => {
     await useAppMode(context)
+    // 開場閒下來時會先把更新紀錄載好（那時手上沒字，會自動重新整理）：這個測試不讓它先載，只看按下去的那幾次
+    await context.addInitScript(() => (window.requestIdleCallback = () => 0))
     await page.route(/\/assets\/changelog-[^/]*\.js$/, (route) => route.fulfill({ status: 404, body: 'gone' }))
     await page.goto(site.url)
     await bootReady(page)
@@ -3775,6 +3780,34 @@ test.describe('還沒下載好的畫面', () => {
     await expect(toasts.getByRole('button', { name: '重新載入' })).toBeVisible()
     await expect(toasts).not.toContainText('連上網路')
   })
+})
+test('重置小島：按了先展開確認、焦點在「取消」，連按兩下、按著 Enter 都不會清空；勾了「也刪掉備份」清空後備份也沒了', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.goto(site.url)
+  await bootReady(page)
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.addTask({ title: '私事', date: s.today })
+    s.importJSON(s.exportJSON())
+    window.hiyori.ui.openSettings()
+  })
+  const reset = page.locator('#resetBtn')
+  await reset.scrollIntoViewIfNeeded()
+  await reset.dblclick()
+  await expect(page.locator('#resetCheck')).toBeHidden()
+  await reset.click()
+  await expect(page.locator('#resetCheck')).toBeVisible()
+  await expect(page.locator('#resetCancel')).toBeFocused()
+  // 按著 Enter 不放：只會開開關關，不會清空
+  for (let i = 0; i < 6; i++) await page.keyboard.press('Enter')
+  expect(await page.evaluate(() => window.hiyori.store.state.tasks.some((t) => t.title === '私事'))).toBe(true)
+  if (await page.locator('#resetCheck').isHidden()) await reset.click()
+  await page.locator('#resetDrop').check()
+  await page.waitForTimeout(600)
+  await page.locator('#resetGo').click()
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.tasks.length)).toBe(0)
+  expect(await page.evaluate(() => localStorage.getItem('hiyori-backup'))).toBeNull()
+  await expect(page.locator('#resetCheck')).toBeHidden()
 })
 test('同步連結貼回已經開著的這一頁（只差 # 後面）：一樣到設定裡展開「輸入同步碼」、填好同步碼，網址列拿掉同步碼', async ({ page, context, site }) => {
   await useAppMode(context)
@@ -5610,7 +5643,8 @@ test('找找看：別的頁按 / 或 Ctrl+K、點放大鏡都叫得出來；哪�
   await input.fill('跨日的會議筆記')
   await page.keyboard.press('Enter')
   await expect(page.locator('#search')).toBeHidden()
-  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('.life-item')?.dataset.id)).toBe(lid)
+  // 紀錄頁第一次打開要載入、畫一陣子（機器忙的時候更久）：多等一下
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('.life-item')?.dataset.id), { timeout: 20000 }).toBe(lid)
 })
 
 test('逾期的任務：超過 4 件時先列最要緊的 3 件、可以展開；挑幾件一起移到明天，撤銷後回到各自原本那天', async ({ page, context, site }) => {
@@ -5873,7 +5907,7 @@ test('總覽的今日前三要務：點名稱打開那一件（看得到完整�
     return t.id
   })
   const row = page.locator('.td-tops li', { hasText: '把下週活動' })
-  const name = row.getByRole('button', { name: /^打開「把下週活動/ })
+  const name = row.getByRole('button', { name: /^(★ )?把下週活動/ })
   await expect(name).toBeVisible()
   await name.click()
   const sheet = page.locator('#editSheet form')

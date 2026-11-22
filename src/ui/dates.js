@@ -58,7 +58,7 @@ export class DatesView {
       this.render()
       el = this.root.querySelector(`.dt-chip[data-id="${CSS.escape(id)}"]`)
     }
-    el?.focus({ preventScroll: true })
+    ;(el || $('.dt-add[data-act="add"]', this.root))?.focus({ preventScroll: true })
   }
 
   _click(e) {
@@ -118,7 +118,10 @@ export class DatesView {
       })
       .join('')
     const editing = this.editing && s.state.dates.find((x) => x.id === this.editing)
-    if (this.editing && !editing) this.editing = null
+    if (this.editing && !editing) {
+      this.editing = null
+      this.adding = false
+    }
     // 新增的從今天起；改的時候不限（記錯了，改到更早的日子也行）
     const min = editing ? '' : s.today
     const form = this.adding

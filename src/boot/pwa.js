@@ -19,11 +19,13 @@ export function installPwa({ store, ui }) {
   const askUpdate = (saved) => {
     updateAsked = true
     if (askEl?.isConnected) return
+    const draft = saved && ui.hasDraft()
     askEl = ui.toast({
       icon: '新', title: '有新版本了', ms: 30000,
-      sub: saved ? '手上還有沒打完的字，收好再按「重新整理」' : '這次的變更沒能存進去（空間可能滿了），先到「紀錄」匯出備份再重新整理',
-      // 跟其他「重新載入」同一顆：存不進去時不載入（手上還有字的話這張已經說了「收好再按」，按了就換）
-      action: { label: '重新整理', run: () => ui._reloadApp({ force: true }) },
+      sub: !saved ? '這次的變更沒能存進去（空間可能滿了），先到「設定」匯出資料再重新整理' : draft ? '手上還有沒打完的字，收好再按「重新整理」' : '按「重新整理」換上新版',
+      // 跟其他「重新載入」同一顆：存不進去時不載入。這張已經說了「收好再按」的，按了就換；
+      // 沒說的（那時手上沒字），之後才打了字再按的話照樣先問
+      action: { label: '重新整理', run: () => ui._reloadApp({ force: draft }) },
     })
   }
   addEventListener('vite:preloadError', (e) => {
@@ -69,22 +71,52 @@ export function installPwa({ store, ui }) {
       })
     }
   }
+  // 安裝到桌面：瀏覽器給了安裝的機會（beforeinstallprompt）就是一顆「安裝」；沒給、或按過取消了（瀏覽器不會馬上再給），
+  // 那一列照樣留著，改成「怎麼安裝」寫出這個瀏覽器的做法。已經是安裝好的 App（從桌面打開、Android 的 App）不列
   let installEvt = null
   const installRow = document.getElementById('installRow')
+  const installBtn = document.getElementById('installBtn')
+  const installInfo = installRow.querySelector('small')
+  installInfo.setAttribute('aria-live', 'polite')
+  const installed = () => !!window.HiyoriNative || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+  const showInstall = () => {
+    installRow.hidden = installed()
+    installBtn.textContent = installEvt ? '安裝' : '怎麼安裝'
+    installBtn.classList.toggle('on', !!installEvt)
+  }
+  showInstall()
   addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault()
     installEvt = e
-    installRow.hidden = false
+    showInstall()
   })
   addEventListener('appinstalled', () => {
+    installEvt = null
     installRow.hidden = true
     ui.toast({ icon: '島', title: '已安裝到桌面', sub: '之後可以像 App 一樣直接打開小島' })
   })
-  document.getElementById('installBtn').onclick = async () => {
-    if (!installEvt) return
-    installEvt.prompt()
-    await installEvt.userChoice.catch(() => {})
+  installBtn.onclick = async () => {
+    if (!installEvt) {
+      installInfo.textContent = installSteps(navigator.userAgent, navigator.maxTouchPoints > 1)
+      return
+    }
+    // 先拿走：安裝的視窗還開著時又按一下，不會對同一個事件再叫一次（瀏覽器會丟錯）
+    const evt = installEvt
     installEvt = null
-    installRow.hidden = true
+    try {
+      await evt.prompt()
+      await evt.userChoice
+    } catch {}
+    showInstall()
   }
+}
+
+// 這個瀏覽器怎麼安裝成 App（瀏覽器沒給安裝的機會、或按過取消時）
+// touch：有觸控（iPad 的 Safari 預設裝成電腦版的樣子，名稱跟 Mac 一樣，只能看有沒有觸控分辨）
+export function installSteps(ua = '', touch = false) {
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (/Mobile\//.test(ua) || touch))) return '用 Safari 打開這一頁，按下方的「分享」→「加入主畫面」'
+  if (/Android/.test(ua)) return '瀏覽器右上角的「⋮」→「安裝應用程式」（或「加到主畫面」）'
+  if (/Firefox\//.test(ua)) return 'Firefox 電腦版不能安裝成 App：改用 Chrome 或 Edge 打開這一頁，再按網址列右邊的安裝圖示'
+  if (/Safari\//.test(ua) && !/Chrome\/|Edg\//.test(ua)) return 'Safari 選單的「檔案」→「加入 Dock」'
+  return '網址列右邊的安裝圖示（或右上角選單裡的「安裝ひより日和」、「將這個網站安裝為應用程式」）'
 }

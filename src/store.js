@@ -25,6 +25,7 @@ import { coachMethods } from './store/coach.js'
 import { agentMethods } from './store/agent.js'
 import { agentOpsMethods } from './store/agentOps.js'
 import { grantMethods, grantKey } from './store/grants.js'
+import { merge3 } from './merge.js'
 
 
 const KEY = 'hiyori-daily-v1'
@@ -53,6 +54,18 @@ export const rememberLook = (theme) => {
 }
 // 讀不進來的存檔原文（壞掉了、或清洗時出錯）：另外留一份，不會被接下來的存檔蓋掉
 export const RESCUE_KEY = 'hiyori-rescue'
+// 存檔裡這幾份的樣子不對（應該是清單的變成一串字、應該是一本的變成清單…）：讀檔時會被當成空的，
+// 那一部分就不見了。先把原文另外留一份、說一聲（見 _load）
+export const PART_NAMES = {
+  tasks: '任務', events: '日程', projects: '專案', habits: '習慣', routines: '例行公事', dates: '重要日子', subscriptions: '訂閱',
+  parked: '先記下的事', mottos: '警語', calendars: '外部行事曆', journal: '回顧', life: '生活記錄', sleep: '睡眠',
+  history: '每天的紀錄', dex: '花的圖鑑', placed: '島上的擺設', player: '等級和金平糖',
+}
+const OBJ_PARTS = new Set(['journal', 'life', 'sleep', 'history', 'dex', 'player'])
+export function brokenParts(obj) {
+  if (!isObj(obj)) return []
+  return Object.keys(PART_NAMES).filter((k) => obj[k] != null && (OBJ_PARTS.has(k) ? !isObj(obj[k]) : !Array.isArray(obj[k])))
+}
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
 export const NEWER_TAB_MSG = '另一個分頁已經是新版 App，這邊先不換資料：重新整理頁面之後再試一次'
 export const NO_SAVE_MSG = '瀏覽器的儲存空間不夠，存不進去，所以先不換：現在的小島沒有動。請先清出一些空間再試一次'
@@ -144,6 +157,15 @@ export function dropBackup(i = 0) {
   } catch {}
 }
 // 開場時讀不進來的原始存檔（_load 另外留的）：{ at, error, raw }，沒有就是 null
+// 留著的備份全部刪掉（重置時勾了「也刪掉備份」、設定裡按了「全部刪掉」）：刪了就找不回來。回傳有沒有刪成
+export function clearBackups() {
+  try {
+    localStorage.removeItem(BACKUP_KEY)
+    return true
+  } catch {
+    return false
+  }
+}
 export function readRescue() {
   try {
     const v = JSON.parse(localStorage.getItem(RESCUE_KEY) || 'null')
@@ -241,8 +263,10 @@ export class Store {
   // 只換記憶體裡的：不寫回去（不然兩個分頁會互相寫來寫去），也不算這邊改了資料
   _adoptDisk() {
     let obj
+    let raw = null
     try {
-      obj = JSON.parse(localStorage.getItem(KEY) || 'null')
+      raw = localStorage.getItem(KEY)
+      obj = JSON.parse(raw || 'null')
     } catch {
       return false
     }
@@ -255,13 +279,17 @@ export class Store {
     if (obj.rev === this.state.rev) {
       this._diskRev = obj.rev
       this._seq = seq
+      this._baseJson = raw
       // 同一版，但另一個分頁自動記了回神紀錄（不換 rev）：數字併過來，這邊之後存檔時才不會用舊的數字蓋掉
       if (sameGen(obj, this.state) && keepTallies(obj.history, this.state.history)) this.emit('change')
       return false
     }
     try {
       this._seq = seq
+      const was = this._baseJson
       this.replaceState(obj, obj.updatedAt, { soft: true, rev: obj.rev, peer: true })
+      // 換過去之後又寫回去了（這邊多記的回神紀錄）：兩邊上次一樣的是寫回去的那一份，不是剛讀到的
+      if (this._baseJson === was) this._baseJson = raw
       return true
     } catch (err) {
       console.warn('[hiyori] 讀取另一個分頁的存檔失敗', err)
@@ -345,22 +373,30 @@ export class Store {
         const obj = JSON.parse(raw)
         // 新版 App 存的（另一個分頁已經更新了，這邊還是舊的程式）：讀進來顯示，但不寫回去
         if (newerData(obj)) this.newerApp = true
-        return migrate(obj)
+        const out = migrate(obj)
+        this._baseJson = raw
+        // 讀得進來，但有幾份的樣子不對（那幾份會變成空的）：原文另外留一份，當成「讀不進來」處理一部分——
+        // 不推上雲端（有開同步的話從雲端拿回來）、開場時說一聲，設定裡可以下載原文
+        const broken = this.newerApp ? [] : brokenParts(obj)
+        if (broken.length) this.loadFailed = { rescued: this._rescue(raw, `樣子不對：${broken.join(', ')}`), partial: broken }
+        return out
       }
     } catch (e) {
       console.warn('[hiyori] 讀取存檔失敗，使用預設資料', e)
       // 原文另外留一份再換成範例島；留不下來（空間不夠）時，saveNow 在使用者自己改資料前不會蓋掉它。
       // 範例島的 rev 是空的：有開同步的話，同步會從雲端拉回來，不會把範例島推上去（sync.js）
-      if (raw) {
-        let rescued = false
-        try {
-          localStorage.setItem(RESCUE_KEY, JSON.stringify({ at: Date.now(), error: String(e?.message || e), raw }))
-          rescued = true
-        } catch {}
-        this.loadFailed = { rescued }
-      }
+      if (raw) this.loadFailed = { rescued: this._rescue(raw, String(e?.message || e)) }
     }
     return seed()
+  }
+  // 讀不懂的存檔原文另外留一份（設定裡可以下載、再試著讀）；留不下來（空間不夠）回傳 false
+  _rescue(raw, error) {
+    try {
+      localStorage.setItem(RESCUE_KEY, JSON.stringify({ at: Date.now(), error, raw }))
+      return true
+    } catch {
+      return false
+    }
   }
   // touch：這次存檔是否算「使用者改了資料」。同步靠 rev 判斷哪一邊改過，
   // 例行實例生成、跨日這類每台裝置各自推導的變化不算，避免剛打開的裝置蓋掉雲端的新資料
@@ -423,8 +459,10 @@ export class Store {
   saveNow() {
     this._saveQueued = false
     clearTimeout(this._saveTimer)
-    // 存檔讀不進來、原文也沒能另外留下來：使用者自己改資料之前，不拿範例島蓋掉它
-    if (this.loadFailed && !this.loadFailed.rescued && !this.state.rev) return false
+    // 存檔讀不進來、原文也沒能另外留下來：使用者自己改資料之前，不拿範例島蓋掉它。
+    // 有一部分讀不懂的（原文留下來了也一樣）：沒改過就不寫，讀不懂的那幾份還留在存檔裡——
+    // 不然開場的例行存檔就把它們當成空的寫進去，下次打開看不出壞過，同步也不會再從雲端拿回來
+    if (this.loadFailed && ((!this.loadFailed.rescued && !this.state.rev) || (this.loadFailed.partial && this.state.rev === this._diskRev))) return false
     // 存檔是新版 App 寫的：用舊的格式寫回去會洗掉新的欄位。這之後改的都沒存（lostEdits：關掉、重新整理前要問一聲）
     if (this.newerApp) {
       if (this.state.rev !== this._diskRev && !this.lostEdits) {
@@ -453,7 +491,10 @@ export class Store {
           this._newer()
           return false
         }
+        const backups = snapBackups()
         if (peer?.rev && !keepBackup(peer, 'tab', peer.updatedAt)) throw new Error('空間不夠，沒辦法先備份另一個分頁的版本')
+        // 從兩邊上次一樣的那一份合在一起（那一版也留了備份）：兩邊加的都留著，不是用這邊的整份蓋過去
+        if (peer?.rev && !this._mergingTab && this._mergeTab(peer, disk, backups)) return this.saved
         if (peer?.rev) keep = 1
         // 那一版留成備份，回神紀錄（自動記的數字）照樣取比較大的帶過來
         if (isObj(peer) && sameGen(peer, this.state)) keepTallies(peer.history, this.state.history)
@@ -462,10 +503,16 @@ export class Store {
         this._diskTallies()
       }
       const t0 = performance.now()
+      const json = JSON.stringify(this.state)
       // keepBackups：至少要留下的備份份數（合併時剛留的那一份不能被主存檔擠掉）
-      writeMain(JSON.stringify(this.state), Math.max(keep, this.keepBackups || 0))
+      writeMain(json, Math.max(keep, this.keepBackups || 0))
+      this._baseJson = json
       this._slowSave = performance.now() - t0 > SLOW_SAVE
-      localStorage.setItem(REV_KEY, this.state.rev || '')
+      try {
+        localStorage.setItem(REV_KEY, this.state.rev || '')
+      } catch (e) {
+        console.warn('[hiyori] 存檔的版本記號沒寫進去', e)
+      }
       rememberLook(this.state.settings.theme)
       this._diskRev = this.state.rev || ''
       this._seq = uid()
@@ -487,6 +534,52 @@ export class Store {
       this.saveError = null
       this.emit('saveRecovered')
     }
+    return true
+  }
+  // 同一個瀏覽器的兩個分頁都改了資料（這邊還沒寫出去時，另一邊寫了）：從兩邊上次一樣的那一份（_baseJson：這邊最後讀到、
+  // 寫出去的那一版）照同步的三方合併合在一起，寫成新的一版。合不了（沒有那一份、其中一邊整份換過）回傳 false，照舊把那一版留成備份、用這邊的
+  // disk：存檔標的是哪一版（REV_KEY；平常就是 peer.rev）。backups：留那一版的備份之前，備份清單原本的樣子
+  _mergeTab(peer, disk = peer.rev, backups = snapBackups()) {
+    if (!this._baseJson) return false
+    let out = null
+    try {
+      out = merge3(JSON.parse(this._baseJson), this.state, peer)
+    } catch (e) {
+      console.warn('[hiyori] 兩個分頁的資料合不起來', e)
+      out = null
+    }
+    if (!out) return false
+    const snap = this.snapshot()
+    // 合好的那一份已經包含另一個分頁那一版：從它開始算（寫的時候不會又以為另一邊剛寫過）。
+    // 用存檔標的那一版（REV_KEY）：兩個對不上時（標記沒寫進去）才不會一寫又以為另一邊剛寫過、一直合下去
+    this._diskRev = disk
+    this._seq = readSeq()
+    // 寫合好的那一份時：剛留的那一版的備份不能被擠掉
+    const keepWas = this.keepBackups
+    this.keepBackups = Math.max(1, keepWas || 0)
+    this._mergingTab = true
+    try {
+      this.replaceState(out.state, Math.max(Date.now(), (this.state.updatedAt || 0) + 1, (peer.updatedAt || 0) + 1), { soft: true, settle: true })
+    } catch (e) {
+      if (!this.committed(snap)) {
+        console.warn('[hiyori] 兩個分頁合好的資料讀不進去', e)
+        if (this.state !== snap.state) this.restore(snap)
+        else Object.assign(this, { _diskRev: snap.disk, _baseJson: snap.base, _seq: snap.seq })
+        return false
+      }
+      console.warn('[hiyori] 兩個分頁合好、寫進存檔之後出了錯', e)
+    } finally {
+      this._mergingTab = false
+      this.keepBackups = keepWas
+    }
+    if (!this.saved) {
+      // 存不進去：換回原本這一份（存檔裡還是另一個分頁那一版），備份清單也放回去（那一版還在存檔裡，
+      // 不用另外留；不然每試一次就多一份一樣的，把真正有用的備份擠掉），下次存檔再合一次
+      this.restore(snap)
+      putBackups(backups)
+      return true
+    }
+    this.emit('tabMerged', { clashes: out.clashes })
     return true
   }
   // 記憶體裡這一版已經寫進存檔了（存不進去、還沒寫時是 false）。同步靠它判斷能不能把 base 往前推
@@ -1462,7 +1555,7 @@ export class Store {
   }
   // 整份換掉之前的樣子（換不成、存不進去時換回去用）：資料、「存檔讀不進來」的狀態、存檔裡是哪一版、還有沒寫出去的
   snapshot() {
-    return { state: this.state, failed: this.loadFailed, disk: this._diskRev, queued: !!this._saveQueued }
+    return { state: this.state, failed: this.loadFailed, disk: this._diskRev, base: this._baseJson, seq: this._seq, queued: !!this._saveQueued }
   }
   // 換成了、也寫進存檔了（之後才出的錯不用換回去）
   committed(snap) {
@@ -1479,6 +1572,8 @@ export class Store {
     }
     this.loadFailed = snap.failed
     this._diskRev = snap.disk
+    this._baseJson = snap.base
+    if (snap.seq !== undefined) this._seq = snap.seq
     if (snap.queued) this.save(false)
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
@@ -1633,8 +1728,9 @@ export class Store {
   }
 
   // 重置：清空成一座空島（不放範例）。重置前的小島留成備份（設定裡可以還原）。
-  // 備份存不進去時先不清，回傳 false 讓畫面問清楚；force：使用者知道沒有備份、還是要清（空間不夠時重置可能正是想清出空間）
-  reset({ force = false } = {}) {
+  // 備份存不進去時先不清，回傳 false 讓畫面問清楚；force：使用者知道沒有備份、還是要清（空間不夠時重置可能正是想清出空間）。
+  // backup: false：不留備份（使用者勾了「也刪掉備份」，之前的備份也一起刪掉）
+  reset({ force = false, backup = true } = {}) {
     // 存檔是新版 App 寫的：這一版刪了它就找不回來
     if (this.newerApp) throw new Error(NEWER_MSG)
     // 刪之前重讀一次存檔：另一個分頁（可能是新版）剛寫過、這邊還沒收到通知時，
@@ -1651,7 +1747,11 @@ export class Store {
       this._adoptDisk()
       throw new Error('另一個分頁剛改過資料，這邊已經換成那一版。看一下，確定還要清空的話再按一次重置')
     }
-    if (!keepBackup(this.state, 'reset', this.state.updatedAt) && !force) return false
+    if (!backup) {
+      // 要交給別人、清出空間時用：讀不懂時留的原文也一起刪；刪不掉就先不清（不然以為刪了）
+      if (!clearBackups()) throw new Error('備份刪不掉：瀏覽器不讓改這個網站的資料，等一下再試')
+      dropRescue()
+    } else if (!keepBackup(this.state, 'reset', this.state.updatedAt) && !force) return false
     try {
       localStorage.removeItem(KEY)
     } catch {}
@@ -1659,6 +1759,8 @@ export class Store {
     this.state = seed(false)
     this.state.updatedAt = version
     this.state.rev = newRev()
+    // 換成了一座空島：不再是「存檔讀不進來」的狀態（同步不會再把雲端那一份拿回來蓋掉剛清空的）
+    this.loadFailed = null
     // 空島也有今天的每日任務（不然要等到重新整理或明天才抽）
     this.today = dateStr()
     this._ensureQuests()

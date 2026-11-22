@@ -1,5 +1,5 @@
 import './styles.css'
-import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev, rememberLook, SAVE_KEY } from './store.js'
+import { Store, toMin, minToHHMM, repeatLabel, daysBetween, addDays, dateStr, weekKey, newRev, rememberLook, SAVE_KEY, PART_NAMES } from './store.js'
 import { UI, savedAppMode, FEEDBACK_URL } from './ui.js'
 import { watchErrors, bootFailed } from './errors.js'
 import { LATEST } from './data/latest.js'
@@ -1043,10 +1043,14 @@ async function boot() {
   const tuckSamples = (why) => {
     const snap = store.tuckSamples()
     if (!snap) return
+    const undo = () => store.restoreSamples(snap) && ui.toast({ icon: '例', title: '範例放回去了', sub: '之後不再自動收；「設定 → 資料與同步」裡可以清除', ms: 4200 })
+    // 在任務頁記了第一件：任務頁最上面一行說、可以放回（提示卡會蓋住剛記的那一件）。
+    // 在別的頁加的（日程、專案）：那一行看不到，照舊用提示卡
+    if (why === 'own' && ui.tab === 'tasks' && !document.body.classList.contains('panel-collapsed')) return ui.showSampleNote(undo)
     const toast = () =>
       ui.toast({
         icon: '例', title: '範例收起來了', sub: why === 'day' ? '第一次打開時放的範例，過了那天就收起來' : '島上現在只有你自己的東西', ms: 9000, tag: 'samples',
-        actions: [{ label: '撤銷', soft: true, run: () => store.restoreSamples(snap) && ui.toast({ icon: '例', title: '範例放回去了', sub: '之後不再自動收；「設定 → 資料與同步」裡可以清除', ms: 4200 }) }],
+        actions: [{ label: '撤銷', soft: true, run: undo }],
       })
     // 開場時（過了那天）等摘要說完再說
     if (greeted) bootSay(toast)
@@ -1055,6 +1059,7 @@ async function boot() {
   // 等這一次新增的事件都跑完再收（同一個事件的其他反應看到的還是收之前的樣子）
   for (const kind of ['taskAdded', 'eventAdded', 'projectAdded']) store.on(kind, (x) => !store.isSample(x) && store.sampleCount() && queueMicrotask(() => tuckSamples('own')))
   store.on('dateChanged', () => store.samplesStale() && tuckSamples('day'))
+  store.on('reload', () => ui.hideSampleNote())
   // ── 匯入的行事曆：抓回來的日程（唯讀）放進 store.external；設定變了就重新套用、去抓（src/calendars.js）──
   const calendars = createCalendars(store)
   hooks.calendars = calendars
@@ -1273,6 +1278,12 @@ async function boot() {
     ui.alertBar('save', null)
     ui.toast({ icon: '存', title: '又存得進去了', sub: '剛才的變更都已經存好' })
   })
+  // 同一個瀏覽器的另一個分頁也改了資料（這邊還沒寫出去時）：兩邊合在一起了，說一聲
+  store.on('tabMerged', ({ clashes }) =>
+    ui.toast({
+      icon: '合', title: '另一個分頁也改了資料，兩邊合在一起了', ms: 6000,
+      sub: clashes.length ? '兩邊都改了的地方用比較晚改的那一邊；另一個分頁那一版留在設定的備份裡' : '兩邊加的、改的都留著',
+    }))
   // 另一個分頁已經更新成新版：這個分頁還是舊的程式，再存下去會洗掉新版的資料（之後的變更都不存，警示列一直留著）
   // 舊分頁裡已經改了東西（store.lostEdits）：說清楚那些沒存，重新整理前也會問一聲
   const newerToast = () =>
@@ -2685,7 +2696,10 @@ async function boot() {
     const sub = store.loadFailed.rescued
       ? '原本的檔案另外留了一份，沒有刪掉（設定的「資料與同步」裡可以下載）。有開同步的話，會自動從雲端拉回來'
       : '有開同步的話，會自動從雲端拉回來；沒有的話先別在這台新增資料'
-    ui.toast({ icon: '！', title: '原本的存檔讀不進來', sub, ms: 15000 })
+    // 只有一部分讀不懂（其他的照常在）：說是哪幾份
+    const part = store.loadFailed.partial
+    const title = part ? `存檔裡的${part.map((k) => PART_NAMES[k]).join('、')}讀不懂` : '原本的存檔讀不進來'
+    ui.toast({ icon: '！', title, sub, ms: 15000 })
   }
   // 開場前就存不進去、讀到新版 App 存的資料（事件那時還沒人聽）
   else if (store.newerApp) newerToast()

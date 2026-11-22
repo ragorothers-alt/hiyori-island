@@ -99,7 +99,7 @@ export class CalendarView {
     root.setAttribute('aria-label', '日曆')
     root.innerHTML = `
       <div class="cal-card glass">
-        <header class="cal-head">
+        <div class="cal-head">
           <h2 class="cal-title"></h2>
           <div class="cal-nav">
             <button class="icon-btn" data-act="prev" title="上一頁" aria-label="上一頁">${ICON.prev}</button>
@@ -112,7 +112,7 @@ export class CalendarView {
             <button type="button" data-mode="day3" class="cal-d3" title="三日檢視">3日</button>
           </div>
           <button class="icon-btn cal-close" data-act="close" title="關閉（Esc）" aria-label="關閉日曆">${ICON.close}</button>
-        </header>
+        </div>
         <div class="cal-main"></div>
         <aside class="cal-side" aria-label="這一天的詳情"></aside>
       </div>`
@@ -515,7 +515,8 @@ export class CalendarView {
       .join('')
     const bar = total ? `<span class="cc-bar${done === total ? ' full' : ''}" style="--p:${done / total}"></span>` : ''
 
-    const label = [
+    const descId = `cal-day-desc-${date}`
+    const desc = [
       `${d.getMonth() + 1} 月 ${d.getDate()} 日（${DOW[(d.getDay() + 6) % 7]}）`,
       date === s.today && '今天',
       evs.length && `${evs.length} 個日程`,
@@ -526,12 +527,13 @@ export class CalendarView {
       .filter(Boolean)
       .join('，')
 
-    return `<button type="button" class="${this._dayCls(date, 'cal-cell')}${out ? ' is-out' : ''}" data-day="${date}" tabindex="${date === this.date ? 0 : -1}" aria-label="${label}" aria-pressed="${date === this.date}"${date === s.today ? ' aria-current="date"' : ''}>
+    return `<button type="button" class="${this._dayCls(date, 'cal-cell')}${out ? ' is-out' : ''}" data-day="${date}" tabindex="${date === this.date ? 0 : -1}" aria-describedby="${descId}" aria-pressed="${date === this.date}"${date === s.today ? ' aria-current="date"' : ''}>
       <span class="cc-top"><b class="cc-num">${num}</b><span class="cc-marks">${marks}</span>${this._moodStamp(sum)}</span>
       <span class="cc-evs">${evHtml}</span>
       <span class="cc-dots">${dots}${evs.length > 3 ? '<i class="more"></i>' : ''}</span>
       ${bar}
       <span class="cc-foot">${task}${habits}${more}</span>
+      <span id="${descId}" hidden>${esc(desc)}</span>
     </button>`
   }
 
@@ -872,6 +874,6 @@ export class CalendarView {
   }
 
   _sec(title, jp, count, rows) {
-    return `<section class="cd-sec"><h4>${title}<small>${jp}</small>${count ? `<span>${count}</span>` : ''}</h4><ul class="cd-list">${rows}</ul></section>`
+    return `<section class="cd-sec"><h3>${title}<small>${jp}</small>${count ? `<span>${count}</span>` : ''}</h3><ul class="cd-list">${rows}</ul></section>`
   }
 }

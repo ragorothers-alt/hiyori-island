@@ -142,6 +142,17 @@ describe('前端：抓回來變成唯讀的日程', () => {
     expect(calendarLabel(long[0], long)).not.toBe(calendarLabel(long[1], long))
   })
 
+  it('中文檔名照樣看得懂；只差中間一段的長網址，中段不跟頭尾重疊', () => {
+    expect(calendarLabel('https://school.example/資訊工程系課表.ics')).toBe('school.example/資訊工程系課表.ics')
+    const a = 'https://cal.example/dept/2026/fall/a/a/a/a/a/a/a/a/basic.ics'
+    const b = 'https://cal.example/dept/2026/fall/a/a/a/a/a/a/a/a/a/basic.ics'
+    for (const u of [a, b]) {
+      const label = calendarLabel(u, [a, b])
+      expect(label.match(/basic\.ics/g)).toHaveLength(1)
+    }
+    expect(calendarLabel(a, [a, b])).not.toBe(calendarLabel(b, [a, b]))
+  })
+
   it('抓回來的行事曆中途斷掉（沒有結尾、日程開了沒關）：不收，留著上一次的', () => {
     const ics = (...lines) => lines.join(String.fromCharCode(13, 10))
     expect(icsComplete(ics('BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'SUMMARY:Trip', 'END:VEVENT', 'END:VCALENDAR', ''))).toBe(true)

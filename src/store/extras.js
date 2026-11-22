@@ -1,6 +1,6 @@
 import { SUBS_MAX, SUB_PRICE_CHANGES_MAX, cleanSub, DATE_RE, cleanRates, mottoText, str, DATES_MAX, PARK_MAX, parkText, calUrlOk, CALENDARS_MAX } from './migrate.js'
 import { uid, addDays, daysBetween, dateStr } from './util.js'
-import { nextCharge, paidSoFar, priceChangeDate, revisedPriceHistory, subAtCharge, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
+import { nextCharge, paidSoFar, priceChangeDate, rateOf, revisedPriceHistory, subAtCharge, CURRENCIES, subsSummary, chargesBetween } from '../subs.js'
 import { MOTTO_MAX, PAUSE_MAX } from '../mottos.js'
 import { DATE_KINDS, XP, pullOf } from '../theme.js'
 import { grantKey } from './grants.js'
@@ -73,7 +73,9 @@ export const extrasMethods = {
     const { id: _, status, end, paid0, createdAt, priceHistory, priceFrom, ...rest } = patch
     const next = cleanSub({ ...old, ...rest }, this.today)
     if (!next) return false
-    if (next.price !== old.price || next.cur !== old.cur || ('price' in rest && priceFrom === 'current')) {
+    // 換了幣別：重新訂閱以前付過的（paid0，跟訂閱同一種幣別）照匯率換成新的幣別
+    if (next.cur !== old.cur && old.paid0) next.paid0 = Math.round(((old.paid0 * rateOf(old.cur, this.state.subRates)) / rateOf(next.cur, this.state.subRates)) * 100) / 100
+    if (next.price !== old.price || next.cur !== old.cur || (('price' in rest || 'cur' in rest) && priceFrom === 'current')) {
       const date = priceChangeDate(next, this.today, priceFrom)
       next.priceHistory = revisedPriceHistory(old, date, next.price, next.cur)
       if (next.priceHistory.length > SUB_PRICE_CHANGES_MAX) return false
@@ -106,6 +108,8 @@ export const extrasMethods = {
       return 'kept'
     }
     s.paid0 = paidSoFar(s, this.today, this.state.subRates)
+    // 以前那段的調價都已經算進 paid0：從新的開始日起照現在的價格
+    s.priceHistory = []
     s.status = 'active'
     s.end = ''
     s.trial = false

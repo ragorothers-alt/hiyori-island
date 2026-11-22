@@ -195,28 +195,56 @@ export const recordsMethods = {
         this.toast({ icon: '掃', title: `清掉了 ${n} 筆範例`, sub: '自己加的資料、經驗值和統計都還在' })
         this.renderSettings()
       })
-    $('#resetBtn').onclick = (e) =>
-      armConfirm(e.currentTarget, '再按一次，清空所有資料', () => {
-        // 剛被告知沒辦法留備份、30 秒內又按了一次：使用者知道了，照樣清
-        const force = Date.now() - (this._resetNoBackup || 0) < 30000
-        const t0 = Date.now()
-        try {
-          if (!this.store.reset({ force })) {
-            this._resetNoBackup = Date.now()
-            return this.toast({ icon: '！', title: '還沒有清空', sub: '瀏覽器空間不夠，原本的小島沒辦法先留成備份，清空後就找不回來。建議先「匯出資料」；確定要清空的話，30 秒內再按一次重置', ms: 9000 })
-          }
-        } catch (err) {
-          return this.toast({ icon: '！', title: '沒有重置', sub: err.message })
+    // 重置：按了先展開下面那一塊確認（焦點先放在「取消」）。「清空小島」在另一個位置：
+    // 連按兩下、按著 Enter 不放都只會開關這一塊，不會就清空
+    const check = $('#resetCheck')
+    const openReset = (on) => {
+      check.hidden = !on
+      $('#resetBtn').setAttribute('aria-expanded', String(on))
+      if (!on) return
+      this._resetOpenAt = Date.now()
+      $('#resetDrop').checked = false
+      check.scrollIntoView({ block: 'nearest', behavior: scrollMode() })
+      $('#resetCancel').focus({ preventScroll: true })
+    }
+    $('#resetBtn').onclick = () => openReset(check.hidden)
+    $('#resetCancel').onclick = () => {
+      openReset(false)
+      $('#resetBtn').focus({ preventScroll: true })
+    }
+    check.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      $('#resetCancel').click()
+    })
+    $('#resetGo').onclick = (e) => {
+      // 剛展開的那一下（按著鍵盤不放的重複、點兩下的第二下落在這裡）不算
+      if (e.detail > 1 || Date.now() - (this._resetOpenAt || 0) < 500) return
+      const drop = $('#resetDrop').checked
+      // 剛被告知沒辦法留備份、30 秒內又按了一次：使用者知道了，照樣清
+      const force = drop || Date.now() - (this._resetNoBackup || 0) < 30000
+      const t0 = Date.now()
+      try {
+        if (!this.store.reset({ force, backup: !drop })) {
+          this._resetNoBackup = Date.now()
+          return this.toast({ icon: '！', title: '還沒有清空', sub: '瀏覽器空間不夠，原本的小島沒辦法先留成備份，清空後就找不回來。建議先「匯出資料」；確定要清空的話，30 秒內再按一次「清空小島」', ms: 9000 })
         }
-        this._resetNoBackup = 0
-        this.renderSync()
-        const b = readBackup()
-        this.toast(
-          b?.from === 'reset' && b.savedAt >= t0
+      } catch (err) {
+        return this.toast({ icon: '！', title: '沒有重置', sub: err.message })
+      }
+      this._resetNoBackup = 0
+      openReset(false)
+      $('#resetBtn').focus({ preventScroll: true })
+      this.renderSync()
+      const b = readBackup()
+      this.toast(
+        drop
+          ? { icon: '掃', title: '小島清空了', sub: '之前留的備份也一起刪掉了' }
+          : b?.from === 'reset' && b.savedAt >= t0
             ? { icon: '戻', title: '小島清空了', sub: '原本的小島留成備份，後悔的話可以在設定裡還原' }
             : { icon: '掃', title: '小島清空了', sub: '空間不夠，這次沒有留備份' },
-        )
-      })
+      )
+    }
   },
 
   // 選好的備份檔：列出檔案裡有什麼、跟現在這台比，按「換成這份」才換（原本的留成備份）
