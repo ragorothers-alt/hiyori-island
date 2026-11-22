@@ -178,7 +178,7 @@ test('每日任務只放一個地方：任務頁沒有那張；小島模式面�
   await expect(page.locator('#habitsRoot .hb-diff').first()).toContainText('例行公事')
 })
 
-test('專案搜尋：在專案頁按 / 跳到那一頁的搜尋框，里程碑也找得到；Esc 清掉字，Enter 打開第一個', async ({ page, context, site }) => {
+test('專案搜尋：在專案頁按 / 跳到那一頁的搜尋框，里程碑也找得到；Esc 清掉字；Ctrl+K 是找找看', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.goto(site.url)
   await bootReady(page)
@@ -207,12 +207,14 @@ test('專案搜尋：在專案頁按 / 跳到那一頁的搜尋框，里程碑�
   await q.fill('不存在的東西')
   await expect(page.locator('#projectList [data-act="new-from-q"]')).toBeVisible()
 
-  // Ctrl+K 也叫得出來；Enter 打開第一個結果的詳情
+  // Ctrl+K 在專案頁也是找找看（哪一頁都一樣）；Enter 打開找到的專案的詳情
   await q.evaluate((el) => el.blur())
   await page.keyboard.press('Control+k')
-  await expect(q).toBeFocused()
-  await q.fill('搬家')
-  await q.press('Enter')
+  const find = page.locator('#findInput')
+  await expect(find).toBeFocused()
+  await find.fill('搬家')
+  await expect(page.locator('#findList .fd-row').first()).toContainText('搬家')
+  await find.press('Enter')
   await expect(page.locator('#projectDetail')).toBeVisible()
   await expect(page.locator('#projectDetail')).toContainText('搬家')
 })
@@ -5235,6 +5237,17 @@ test('跨過午夜的日程：日程頁填 23:30 到 00:30，存成這天和隔�
   await expect.poll(() => page.evaluate(() => window.hiyori.store.state.events.filter((e) => e.title === '夜班交接').map((e) => `${e.date} ${e.start}–${e.end}`))).toEqual([`${day} 23:30–23:59`, `${next} 00:00–00:30`])
   await page.evaluate((d) => window.hiyori.store.selectDate(d), next)
   await expect(page.locator('.blk', { hasText: '夜班交接' })).toBeVisible()
+  // 從隔天那段打開：面板上是整個日程（前一天 23:30 到隔天 00:30），改的也是整個日程
+  await page.locator('.blk', { hasText: '夜班交接' }).locator('[data-edit]').press('Enter')
+  const sheet = page.locator('#editSheet form')
+  await expect(sheet.locator('[name="date"]')).toHaveValue(day)
+  await expect(sheet.locator('[name="start"]')).toHaveValue('23:30')
+  await expect(sheet.locator('[name="end"]')).toHaveValue('00:30')
+  await expect(sheet.locator('.ec-over')).toContainText('到隔天 00:30')
+  await sheet.locator('[name="end"]').fill('01:30')
+  await sheet.locator('[name="end"]').dispatchEvent('change')
+  await sheet.evaluate((f) => f.requestSubmit())
+  await expect.poll(() => page.evaluate(() => window.hiyori.store.state.events.filter((e) => e.title === '夜班交接').map((e) => `${e.date} ${e.start}–${e.end}`).sort())).toEqual([`${day} 23:30–23:59`, `${next} 00:00–01:30`])
 })
 
 test('存不進去：上方一直留著警示列，可以馬上匯出；又存得進去時收起來', async ({ page, context, site }) => {
@@ -5292,9 +5305,15 @@ test('找找看：別的頁按 / 或 Ctrl+K、點放大鏡都叫得出來；哪�
   // 逾期的那件排在前面，寫著逾期
   await expect(list.locator('.fd-row').first()).toContainText('報價單給陳小姐')
   await expect(list.locator('.fd-row').first()).toContainText('逾期')
-  // 直接打勾
+  // 直接打勾：做完的那件換了位置，焦點還在同一件的勾勾上；報讀軟體念出完成了
   await list.locator('.fd-row').first().locator('[data-act="toggle"]').click()
   await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.tasks.find((t) => t.id === id).done, ids.old)).toBe(true)
+  await expect(list.locator(`[data-key="task:${ids.old}"] [data-act="toggle"]`)).toBeFocused()
+  await expect(page.locator('#findLive')).toContainText('完成了')
+  // ↓ 選下一筆（選到的跟著剛勾的那件走）：念出是第幾筆、哪一筆
+  await input.focus()
+  await input.press('ArrowDown')
+  await expect(page.locator('#findLive')).toHaveText(/^第 \d 筆，共 4 筆：/)
   // ↓ 選第二件（還沒做的「整理報價單範本」排到前面了）、Enter 打開編輯面板，日期換到那天
   await input.fill('報價單')
   await expect(list.locator('.fd-row').first()).toContainText('整理報價單範本')
@@ -5335,13 +5354,22 @@ test('逾期的任務：超過 4 件時先列最要緊的 3 件、可以展開�
   await expect(box.locator('.list .item').first()).toContainText('逾期5')
   await box.getByRole('button', { name: /還有 3 件/ }).click()
   await expect(box.locator('.list .item')).toHaveCount(6)
+  // 展開後焦點還在那顆按鈕上（換成「收起來」）
+  await expect(box.locator('[data-act="odMore"]')).toBeFocused()
 
   await box.getByRole('button', { name: '挑幾件' }).click()
   await box.locator('label', { hasText: '逾期1' }).locator('input').check()
   await box.locator('label', { hasText: '逾期4' }).locator('input').check()
+  await box.locator('label', { hasText: '逾期2' }).locator('input').check()
+  // 勾好之後另一個分頁（這裡直接改）把逾期2 排到別天：不再逾期，按鈕上的件數跟著少一件
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    s.updateTask(s.state.tasks.find((t) => t.title === '逾期2').id, { date: s.today })
+  })
+  await expect(box.getByRole('button', { name: /移到明天（2）/ })).toBeVisible()
   await box.getByRole('button', { name: /移到明天（2）/ }).click()
   const moved = () => page.evaluate(() => Object.fromEntries(window.hiyori.store.state.tasks.filter((t) => /^逾期[14]$/.test(t.title)).map((t) => [t.title, t.date])))
-  await expect(box.locator('h4')).toContainText('· 4')
+  await expect(box.locator('h4')).toContainText('· 3')
   const tomorrow = await page.evaluate(() => {
     const x = new Date(window.hiyori.store.today)
     x.setDate(x.getDate() + 1)
@@ -5350,6 +5378,7 @@ test('逾期的任務：超過 4 件時先列最要緊的 3 件、可以展開�
   expect(await moved()).toEqual({ 逾期1: tomorrow, 逾期4: tomorrow })
   await page.locator('#toasts .toast', { hasText: '2 件移到明天了' }).getByRole('button', { name: '撤銷' }).click()
   await expect.poll(moved).toEqual({ 逾期1: dates['逾期1'], 逾期4: dates['逾期4'] })
+  expect(await page.evaluate(() => window.hiyori.store.state.tasks.find((t) => t.title === '逾期2').date)).toBe(await page.evaluate(() => window.hiyori.store.today))
 })
 
 test('返回鍵：先關最上面那一層（找找看、快速記錄打到一半的字留著），再從專案回到列表；自己按 × 關掉的不會多退一步', async ({ page, context, site }) => {

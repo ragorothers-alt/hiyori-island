@@ -171,7 +171,7 @@ const TASKS = {
 - 任務照上面的 schedule、add、steps、edit、star、first、done、drop 做；也可以用 set 改任務的欄位。
 - set：改某一筆的某個欄位，value 一律寫成字串。id 是那一筆的代號；改設定時 id 寫 "settings"，改作息寫 "rhythm"。同一筆改好幾個欄位就寫好幾項（例如日程換時間：date、start、end 各一項）。能改的欄位：
   任務 t：title、date（打算哪天做）、at（"" 是取消時段）、dur（分鐘）、priority（1～3）、tag、note、project（專案的代號，"" 是移出專案）、star、first、done（"false" 是取消完成）、due（截止日，"" 是不設）
-  日程 e：title、date、start、end、note、allDay、endDate、done
+  日程 e：title、date、start、end（比 start 早＝跨過午夜、隔天才結束，像 23:30 到 00:30；world 裡標著 endsNextDay）、note、allDay、endDate、done
   重要日子 d：title、date、kind（exam 考試、deadline 截止、day 紀念）
   專案 p：title、deadline（"" 是不設）、goal、status（active、paused、archived）
   里程碑 m：title、due、note、done；細項 s、子任務 u：title、done
@@ -184,7 +184,7 @@ const TASKS = {
   project：title 名稱、date 截止日、fields 可以有 goal
   milestone：parent 是專案、title、date 期限；step：parent 是里程碑、title
   habit：title、fields：kind（build 養成、quit 戒除）、target、unit、days。title 只寫做什麼（「喝水」「跑步」），次數、單位、星期幾放在 fields，不要寫進 title（畫面上會自己加「每天 8 杯」）
-  routine（例行公事）：title；有 start、end 是例行日程，沒有是例行任務；date 從哪天開始；fields：days（"每天"、"平日"、"二四"）、tag、priority。改例行公事＝drop 舊的、create 新的
+  routine（例行公事）：title；有 start、end 是例行日程，沒有是例行任務；date 從哪天開始；fields：days（"每天"、"平日"、"二四"、"每月 15 日"）、tag、priority。改例行公事＝drop 舊的、create 新的
   motto：title 是警語的字；subscription：title、date 第一次扣款日、fields：price（一定要有）、cur、every、unit
   log（專案的進度）：parent 是專案、title 是做了什麼、date、fields：dur（分鐘）；note（專案的筆記）：parent 是專案、title、fields：text 內文
   life（生活記錄，只能記今天以前）：title 內容、date、start 時間、fields：kind（meal、move、mood、spend、rest、note）、amount 金額

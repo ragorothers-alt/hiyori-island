@@ -34,12 +34,22 @@ describe('錯誤紀錄', () => {
 
   it('記自己程式的錯誤（訊息、檔名:行號、版本），一樣的只留最新一次，最多 8 筆', () => {
     const err = ours("Cannot read properties of undefined (reading 'at')", TypeError)
-    expect(noteError(err, { version: '2026-11-22' })).toEqual({ m: "TypeError: Cannot read properties of undefined (reading 'at')", w: 'index-abc.js:12:34' })
+    expect(noteError(err, { version: '2026-11-22' })).toEqual({ m: "TypeError: Cannot read properties of undefined (reading 'at')", k: 'TypeError', w: 'index-abc.js:12:34' })
     noteError(err, { version: '2026-11-22' })
     expect(readErrors()).toHaveLength(1)
     for (let i = 0; i < 12; i++) noteError(ours(`第 ${i} 個`))
     expect(readErrors()).toHaveLength(8)
     expect(errorDigest().split('\n')).toHaveLength(5)
+  })
+
+  it('回報時附的只有種類和位置：訊息裡夾著的任務名稱這類內容不放進去', () => {
+    noteError(ours('找不到任務「看牙醫 03/12」', RangeError), { version: 'v1' })
+    // 舊版記的（沒有 k）：從訊息開頭認種類
+    localStorage.setItem('hiyori-errors', JSON.stringify([...readErrors(), { m: 'SyntaxError: Unexpected token 讀書', w: 'x.js:1:2', v: 'v0', at: 1 }]))
+    const d = errorDigest()
+    expect(d).toContain('RangeError（index-abc.js:12:34）')
+    expect(d).toContain('SyntaxError（x.js:1:2）')
+    expect(d).not.toMatch(/看牙醫|讀書|找不到/)
   })
 
   it('不算：外掛、別的網域、離線抓不到、使用者還沒點過不能出聲、取消的請求', () => {

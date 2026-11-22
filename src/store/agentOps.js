@@ -7,7 +7,7 @@
 //   tick { kind, id…, date, n }：勾完成（還是勾著的才取消；習慣是那天的次數還一樣才收回一次）
 // 撤銷紀錄的格式在 migrate.js 的 cleanUndo，兩邊要一起改。
 import { DATE_RE, TIME_RE, isObj, cleanSub, migrate, cleanTask } from './migrate.js'
-import { minToHHMM, toMin, DATA_VERSION } from './util.js'
+import { minToHHMM, toMin, DATA_VERSION, REPEAT_TYPES } from './util.js'
 import { countOn } from '../habits.js'
 import { DATE_KINDS } from '../theme.js'
 import { fieldText, okVal, UNDO_GROUPS } from '../agentOps.js'
@@ -22,6 +22,8 @@ const eq = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 const without = (o, ...ks) => Object.fromEntries(Object.entries(o).filter(([x]) => !ks.includes(x)))
 // 撤銷紀錄裡指到那一筆的欄位
 const REF_KEYS = ['id', 'pid', 'mid', 'tid', 'date']
+// 跨過午夜的日程，ふじ指的是哪一段都換成第一段的 id（K.event.find 找到的那一段）
+const headRef = (r, ent) => (r.kind === 'event' && ent.id !== r.id ? { ...r, id: ent.id } : r)
 const refOf = (r) => Object.fromEntries(REF_KEYS.filter((k) => r[k] != null && r[k] !== '').map((k) => [k, r[k]]))
 const proj = (s, pid) => s._find('projects', pid)
 const ms = (s, r) => proj(s, r.pid)?.milestones.find((m) => m.id === (r.mid ?? r.id))
@@ -57,10 +59,14 @@ const K = {
       if (Object.keys(rest).length) s.updateTask(t.id, rest)
     },
   },
+  // 跨過午夜存成兩段的日程是一個：哪一段都找到第一段，讀寫的是整個日程（結束是隔天那段的結束；store 的 eventSpan）
   event: {
-    find: (s, r) => s._find('events', r.id),
+    find: (s, r) => {
+      const e = s._find('events', r.id)
+      return e ? s.eventSpan(e).head : null
+    },
     label: (s, e) => `日程「${short(e.title)}」`,
-    read: (s, e, f) => (f === 'done' || f === 'allDay' ? !!e[f] : f === 'note' || f === 'endDate' ? e[f] || '' : e[f]),
+    read: (s, e, f) => (f === 'end' ? s.eventSpan(e).end : f === 'done' || f === 'allDay' ? !!e[f] : f === 'note' || f === 'endDate' ? e[f] || '' : e[f]),
     write: (s, e, p) => {
       if ('done' in p && done(e) !== p.done) s.toggleEvent(e.id)
       const rest = without(p, 'done')
@@ -290,7 +296,9 @@ const CREATE = {
   },
   routine: (s, c) => {
     const ev = !!c.start
-    const repeat = repeatOf(c.fields.days)
+    // days：清好的頻率（agentOps.js 的 routineRepeat）；舊的格式是星期幾的陣列
+    const d = c.fields.days
+    const repeat = isObj(d) && REPEAT_TYPES.includes(d.type) ? d : repeatOf(Array.isArray(d) ? d : [])
     const start = c.start || '09:00'
     const end = c.end && c.end > start ? c.end : minToHHMM(Math.min(toMin(start) + 60, 1439))
     const r = s.addRoutine({ kind: ev ? 'event' : 'task', title: c.title.slice(0, 120), repeat, tag: c.fields.tag || 'life', priority: c.fields.priority || 2, start, end, date: c.date && c.date >= s.today ? c.date : s.today })
@@ -328,7 +336,7 @@ const CREATE = {
 
 // 刪掉那一筆：list 是它待的那一串、del 走 store 的刪除。專案、習慣不刪（改成收起來，走 set）
 const DROP = {
-  event: (s, e) => ({ list: () => s.state.events, del: () => s.deleteEvent(e.id, { only: true }) }),
+  event: (s, e) => ({ list: () => s.state.events, del: () => s.deleteEvent(e.id) }),
   date: (s, d) => ({ list: () => s.state.dates, del: () => s.deleteDate(d.id) }),
   motto: (s, m) => ({ list: () => s.state.mottos, del: () => s.deleteMotto(m.id) }),
   subscription: (s, b) => ({ list: () => s.state.subscriptions, del: () => s.deleteSubscription(b.id) }),
@@ -352,11 +360,17 @@ const viaMigrate = (save, get) => {
   }
 }
 // 刪掉的那一筆放回去之前的樣子：清好、id 也還是原本那一個才放
+// 刪掉的日程跨過午夜的話，另一段記在 more（撤銷時一起放回去）
+const pieces = (u) => {
+  const v = parse(u.more)
+  return Array.isArray(v) ? v.filter(isObj).slice(0, 3) : []
+}
 function cleanBack(s, u, x) {
   if (!isObj(x)) return null
   const P = (more) => ({ id: u.pid, name: 'p', milestones: [], ...more })
   const wrap = {
-    event: () => [{ events: [x] }, (o) => o.events[0]],
+    // 跨過午夜的另一段一起清（兩段的 link 要對得上才留著）
+    event: () => [{ events: [x, ...pieces(u)] }, (o) => o.events[0]],
     date: () => [{ dates: [x] }, (o) => o.dates[0]],
     motto: () => [{ mottos: [x] }, (o) => o.mottos[0]],
     subscription: () => [{ subscriptions: [x] }, (o) => o.subscriptions[0]],
@@ -454,10 +468,10 @@ export const agentOpsMethods = {
       ;(groups.get(key) || groups.set(key, []).get(key)).push(x)
     }
     for (const list of groups.values()) {
-      const r = list[0]
-      const k = K[r.kind]
-      let ent = k?.find(this, r)
+      const k = K[list[0].kind]
+      let ent = k?.find(this, list[0])
       if (!ent) continue
+      const r = headRef(list[0], ent)
       const fields = list.map((x) => x.field)
       const watch = [...new Set([...fields, ...depsOf(r.kind, fields)])]
       const before = Object.fromEntries(watch.map((f) => [f, clone(k.read(this, ent, f))]))
@@ -476,9 +490,10 @@ export const agentOpsMethods = {
       const what = changed.filter((f) => f in patch).map((f) => fieldText(r.kind, f, after[f], fmt)).filter(Boolean)
       note(`${name}${what.join('、')}`, { k: 'set', kind: r.kind, ...refOf(r), before: Object.fromEntries(keep.map((f) => [f, before[f]])), after })
     }
-    for (const r of pick(ops?.done)) {
-      const ent = K[r.kind]?.find(this, r)
+    for (const x of pick(ops?.done)) {
+      const ent = K[x.kind]?.find(this, x)
       if (!ent) continue
+      const r = headRef(x, ent)
       if (r.kind === 'habit') {
         if (ent.kind !== 'build' || ent.archived) continue
         const was = countOn(ent, today)
@@ -494,10 +509,11 @@ export const agentOpsMethods = {
       K[r.kind].write(this, ent, { done: true }, r)
       if (done(K[r.kind].find(this, r) || {})) note(`完成${name}`, { k: 'tick', kind: r.kind, ...refOf(r) })
     }
-    for (const r of pick(ops?.drop)) {
-      const k = K[r.kind]
-      const ent = k?.find(this, r)
+    for (const x of pick(ops?.drop)) {
+      const k = K[x.kind]
+      const ent = k?.find(this, x)
       if (!ent) continue
+      const r = headRef(x, ent)
       const name = k.label(this, ent, r)
       // 專案、習慣：收起來（之後可以拿回來）
       if (r.kind === 'project' || r.kind === 'habit') {
@@ -513,6 +529,11 @@ export const agentOpsMethods = {
       const item = JSON.stringify(ent)
       if (item.length > ITEM_MAX) continue
       const u = { k: 'gone', kind: r.kind, ...refOf(r), item, at }
+      if (r.kind === 'event') {
+        const more = this.eventGroup(ent).filter((y) => y !== ent)
+        if (more.length) u.more = JSON.stringify(more)
+        if ((u.more || '').length > ITEM_MAX) continue
+      }
       // 里程碑：指著它的任務、進度紀錄刪掉時會被解開，記下來撤銷時接回去
       if (r.kind === 'milestone') {
         u.tasks = this.state.tasks.filter((t) => t.ms === ent.id).map((t) => t.id)
@@ -609,6 +630,13 @@ export const agentOpsMethods = {
     if (!Array.isArray(list)) return false
     if (u.kind === 'routine') this._restoreDays(x, u)
     list.splice(Math.max(0, Math.min(list.length, Number.isInteger(u.at) ? u.at : list.length)), 0, x)
+    // 跨過午夜的日程：另一段也放回去（id 被佔走了就不放，這一段自己一個）
+    if (u.kind === 'event' && x.link) {
+      const all = viaMigrate({ events: [parse(u.item), ...pieces(u)] }, (o) => o.events) || []
+      const rest = all.slice(1).filter((y) => y.link === x.link && !this._find('events', y.id))
+      if (rest.length) this.state.events.push(...rest)
+      else delete x.link
+    }
     if (u.kind === 'life') list.sort((a, b) => toMin(a.t) - toMin(b.t))
     if (u.kind === 'log') list.sort((a, b) => a.date.localeCompare(b.date) || a.at - b.at)
     // 刪掉時扣掉的累計筆數加回來（成就、小鎮照這個算）

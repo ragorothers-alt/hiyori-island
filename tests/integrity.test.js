@@ -458,9 +458,12 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     store._otherTabSaved({ key: KEY })
     expect(newer).toHaveBeenCalledTimes(1)
     expect(store.newerApp).toBe(true)
+    expect(store.lostEdits).toBeFalsy()
     store.addTask({ title: '舊分頁加的' })
     expect(store.saveNow()).toBe(false)
     expect(JSON.parse(localStorage.getItem(KEY))).toMatchObject({ version: NEXT, future: v3.future })
+    // 舊分頁裡改了沒存：再說一次（警示列換成「剛才的變更沒有存」），關掉、重新整理前也會問
+    expect([store.lostEdits, newer.mock.calls.length]).toEqual([true, 2])
   })
 
   it('這邊改了資料、存檔時才發現另一邊是新版：也不蓋掉', () => {
@@ -469,6 +472,7 @@ describe('新版 App 存的資料（這邊是還沒更新的舊分頁）', () =>
     store.addTask({ title: '同時改的' })
     expect(store.saveNow()).toBe(false)
     expect(store.newerApp).toBe(true)
+    expect(store.lostEdits).toBe(true)
     expect(JSON.parse(localStorage.getItem(KEY)).version).toBe(NEXT)
   })
 

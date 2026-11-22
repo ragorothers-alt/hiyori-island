@@ -615,9 +615,10 @@
 <!-- 找找看：任何分頁都叫得出來（Ctrl／⌘＋K、/、放大鏡）；內容在 src/ui/search.js -->
 <div class="modal cap find" id="search" role="dialog" aria-modal="true" aria-label="找找看" hidden>
   <div class="cap-card find-card">
-    <div class="cap-row find-row"><input id="findInput" type="search" maxlength="60" placeholder="找任務、日程、專案、生活記錄" enterkeyhint="search" autocomplete="off" aria-label="找找看" data-nodraft /><button type="button" class="icon-btn small" id="findClose" aria-label="關閉找找看" title="關閉 (Esc)">×</button></div>
-    <div class="find-list" id="findList" aria-live="polite"></div>
+    <div class="cap-row find-row"><input id="findInput" type="search" maxlength="60" placeholder="找任務、日程、專案、生活記錄" enterkeyhint="search" autocomplete="off" aria-label="找找看" aria-describedby="findTip" data-nodraft /><button type="button" class="icon-btn small" id="findClose" aria-label="關閉找找看" title="關閉 (Esc)">×</button></div>
+    <div class="find-list" id="findList"></div>
     <p class="cap-tip find-tip" id="findTip"></p>
+    <p class="sr-only" id="findLive" aria-live="polite"></p>
   </div>
 </div>
 <!-- 隨叫隨到的ふじ：任何分頁都叫得出來（Dock 的「藤」、J 或 Ctrl＋J）；內容在 src/ui/agent.js 的 AgentDock -->

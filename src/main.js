@@ -1207,14 +1207,16 @@ async function boot() {
     ui.toast({ icon: '存', title: '又存得進去了', sub: '剛才的變更都已經存好' })
   })
   // 另一個分頁已經更新成新版：這個分頁還是舊的程式，再存下去會洗掉新版的資料（之後的變更都不存，警示列一直留著）
+  // 舊分頁裡已經改了東西（store.lostEdits）：說清楚那些沒存，重新整理前也會問一聲
   const newerToast = () =>
     ui.alertBar('newer', {
-      icon: '新', title: '這個分頁的 App 比較舊', sub: '另一個分頁已經更新到新版。這裡的變更先不會存，重新整理這一頁再繼續',
+      icon: '新', title: '這個分頁的 App 比較舊',
+      sub: store.lostEdits ? '剛才在這裡的變更沒有存（另一個分頁已經是新版）。重新整理後請再做一次' : '另一個分頁已經更新到新版。這裡的變更先不會存，重新整理這一頁再繼續',
       actions: [{ label: '重新整理', run: () => location.reload() }],
     })
   store.on('newerApp', newerToast)
   addEventListener('beforeunload', (e) => {
-    if (!store.saveError) return
+    if (!store.saveError && !store.lostEdits) return
     e.preventDefault()
     e.returnValue = ''
   })

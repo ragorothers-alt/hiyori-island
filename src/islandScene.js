@@ -875,7 +875,7 @@ export async function createIsland(ctx) {
       }
       if (d.m0 === d.a.m0 && d.m1 === d.a.m1) return
       const ev = store.state.events.find((x) => x.id === d.id)
-      store.updateEvent(d.id, { start: minToHHMM(d.m0), end: minToHHMM(Math.min(d.m1, 1439)) })
+      store.dragEvent(d.id, { start: minToHHMM(d.m0), end: minToHHMM(Math.min(d.m1, 1439)), edge: d.mode === 'move' ? null : d.mode })
       if (ev) talk('reschedule', { event: short(ev.title) }, undefined, `${short(ev.title)} 改到 ${minToHHMM(d.m0)} 了。`)
       sfx.chime()
     },

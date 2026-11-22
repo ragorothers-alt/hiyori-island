@@ -8,7 +8,7 @@ import { lifeKindOf, ENERGY, feelOf, clipText } from './data/life.js'
 import { coatOfDay } from './catWalk.js'
 import { fmtMoney, chargesBetween } from './subs.js'
 import { TAGS, tagOf, PRIORITIES, EVENT_COLORS, PROJECT_COLORS, UNLOCKS, WEEK_JP, WEEK_ZH, FOCUS_MIN, BREAK_MIN, MAX_PROJECTS, TOWER_SLOTS, MOODS, moodOf, MAX_STARS, XP, CHARM, pullOf } from './theme.js'
-import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating, overnight } from './store.js'
+import { dateStr, addDays, parseDate, toMin, minToHHMM, repeatLabel, SEASON_ZH, weekKey, readRescue, dropRescue, floating, shiftEnd } from './store.js'
 import { notifySupported, notifyPermission, requestNotify } from './reminders.js'
 import { native, nativeMottos, nativeBack, deskWeb } from './native.js'
 import { needsHomeScreen, pushSupported } from './push.js'
@@ -215,6 +215,8 @@ export class UI {
       toggleTask: (id) => store.toggleTask(id),
       open: (r) => this._openFound(r),
     })
+    // 開著時資料變了（別台同步過來、另一個分頁改了）：照現在的資料重找
+    store.on('change', () => this.search.refresh())
     this.capture = new CaptureView($('#capture'), {
       preview: (text, asTask = false) => {
         const p = parseQuick(text, { today: store.today, projects: store.activeProjects(), span: true })
@@ -787,7 +789,7 @@ export class UI {
       else if (e.key === 'ArrowRight') $('#nextDay').click()
       else if (e.key === '/') {
         e.preventDefault()
-        this.openSearch()
+        this.openSearch(undefined, { here: true })
       } else if (/^[1-7]$/.test(e.key)) this.setTab(TAB_ORDER[+e.key - 1])
     })
   }
@@ -1527,12 +1529,14 @@ export class UI {
   // （deleteRoutine 會把今天以前的留著當紀錄：加完跨了午夜才按復原，昨天那件會變成逾期）
   // 撤銷剛記下的任務、日程：之後改過（改名、做完、排了時間、加了子任務）就留著，說一聲
   _undoAdd(made, kind = 'task') {
-    const snap = JSON.stringify(made)
+    // 跨過午夜的日程是兩段：兩段都跟剛記下時一樣才拿掉（改過隔天那段也算改過）
+    const snapOf = (x) => JSON.stringify(kind === 'event' ? this.store.eventGroup(x) : x)
+    const snap = snapOf(made)
     const id = made.id
     return () => {
       const cur = this.store.state[kind === 'event' ? 'events' : 'tasks'].find((t) => t.id === id)
       if (!cur) return true
-      if (JSON.stringify(cur) !== snap) {
+      if (snapOf(cur) !== snap) {
         this.toast({ icon: '種', title: '記下之後又改過了', sub: '就留著現在的樣子', ms: 3400 })
         return false
       }
@@ -1585,12 +1589,13 @@ export class UI {
     this.toast({ icon: '先', title: `${word}先做哪一件？`, sub: '現在挑好一件，起床後打開 App 就從它開始', ms: 9000, tag: 'first-ask', actions: [{ label: '挑一件', run: () => this.openFirst() }] })
     return true
   }
-  // 找找看（src/ui/search.js）：別的對話框開著就不疊上去。text：先填好的字
-  openSearch(text) {
+  // 找找看（src/ui/search.js）：別的對話框開著就不疊上去。text：先填好的字。
+  // here：按的是 /（「在這一頁找」）：正看著專案列表時用那一頁自己的搜尋框；Ctrl+K、放大鏡一律是找找看
+  openSearch(text, { here = false } = {}) {
     const top = this._topLayer()
     if (top && top.id !== 'search') return false
     // 正看著專案列表：用那一頁自己的搜尋框（篩選卡片、找不到時可以直接開新專案）
-    if (!this.search.isOpen && text == null && this.tab === 'projects' && !this._project.view?.id && !$('#panel').classList.contains('collapsed')) {
+    if (here && !this.search.isOpen && text == null && this.tab === 'projects' && !this._project.view?.id && !$('#panel').classList.contains('collapsed')) {
       this.findProject()
       return true
     }
@@ -1603,14 +1608,16 @@ export class UI {
     this.search.close()
     if (r.kind === 'project') return this.openProject(r.item.id)
     if (r.kind === 'task') {
-      const t = r.item
+      const t = s.state.tasks.find((x) => x.id === r.item.id)
+      if (!t) return
       if (floating(t) && t.project) return this.openProject(t.project, undefined, t.id)
       s.selectDate(t.date)
       this.setTab('tasks')
       return this.schedule.openEdit('task', t.id)
     }
     if (r.kind === 'event') {
-      const e = r.item
+      const e = isExternal(r.item) ? r.item : s.state.events.find((x) => x.id === r.item.id)
+      if (!e) return
       s.selectDate(e.date)
       this.setTab('schedule')
       if (!isExternal(e)) this.schedule.openEdit('event', e.id)
@@ -1909,7 +1916,9 @@ export class UI {
       if (act === 'allToday') return this._moveOverdue(s.overdue().map((t) => t.id), s.today)
       if (act === 'odMore') {
         this._odOpen = !this._odOpen
-        return this.renderTasks()
+        this.renderTasks()
+        // 重畫換了新的按鈕：焦點留在「還有幾件／收起來」上
+        return $('#overdueBox [data-act="odMore"]')?.focus({ preventScroll: true })
       }
       // 挑幾件：勾起來，再一起移到今天或明天
       if (act === 'odPick') {
@@ -1922,7 +1931,9 @@ export class UI {
         return this.renderTasks()
       }
       if (act === 'odToday' || act === 'odTomorrow') {
-        const ids = [...(this._odPick || [])]
+        // 勾好之後別的分頁、別台已經改過的（不再逾期了）不算
+        const still = new Set(s.overdue().map((t) => t.id))
+        const ids = [...(this._odPick || [])].filter((id) => still.has(id))
         this._odPick = null
         if (!ids.length) return this.renderTasks()
         return this._moveOverdue(ids, act === 'odToday' ? s.today : addDays(s.today, 1))
@@ -2316,6 +2327,8 @@ export class UI {
       .map((i) => [i.closest('#overdueBox') ? '#overdueBox' : '#taskList', i.closest('.sub-add').dataset.id, i.value])
     const overdue = isToday ? this._overdueOrder(s.overdue()) : []
     if (!overdue.length) this._odPick = null
+    // 挑著的那幾件被別的分頁、別台改過（移到別天、做完了）：不再逾期的從勾選拿掉，按鈕上的件數才對
+    else if (this._odPick) for (const id of [...this._odPick]) if (!overdue.some((t) => t.id === id)) this._odPick.delete(id)
     // 整串重畫：原本就在的那幾件不重播淡入，位置變了的滑過去（做完的排到後面、從逾期移到今天）
     flipItems([$('#overdueBox'), $('#taskList')], () => {
       $('#overdueBox').innerHTML = overdue.length ? this._overdueHTML(overdue) : ''
@@ -2503,12 +2516,9 @@ export class UI {
     let evPrev = $('#eventStart').value
     $('#eventStart').addEventListener('focus', () => (evPrev = $('#eventStart').value))
     $('#eventStart').addEventListener('change', () => {
-      const a = toMin(evPrev)
-      const b = toMin($('#eventEnd').value)
       const st = $('#eventStart').value
-      // 原本的長度：結束已經接到隔天的（23:30–00:30）也算
-      const len = !evPrev ? 0 : b > a ? b - a : overnight(evPrev, $('#eventEnd').value) ? b + 1440 - a : 0
-      if (st && st !== evPrev) $('#eventEnd').value = minToHHMM(len ? (toMin(st) + len) % 1440 : Math.min(toMin(st) + 60, 1439))
+      // 原本的長度（結束已經接到隔天的 23:30–00:30 也算）照 store 的規則挪：跨過午夜太久的截到 23:59
+      if (st && st !== evPrev) $('#eventEnd').value = evPrev ? shiftEnd(evPrev, $('#eventEnd').value, st) : minToHHMM(Math.min(toMin(st) + 60, 1439))
       evPrev = st
     })
     // 整天：藏起時段和重複（例行公事只有有時段的），換成「到哪天」

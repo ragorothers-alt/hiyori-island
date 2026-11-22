@@ -31,10 +31,20 @@ const asking = new Map()
 const entryAssets = (html) => [...html.matchAll(/(?:src|href)="([^"]*assets\/[^"]+)"/g)].map((m) => m[1])
 // 離線用的首頁只換成「它要的入口 JS／CSS 這個快取裡都有」的那一份。新版部署了、這一版的 Service Worker 還在管頁面時，
 // 網路拿到的是新版首頁：新版還沒裝好（或裝失敗、留在舊版）就先不換，不然離線時首頁是新版、程式卻只有舊版，整個打不開
-async function keepHome(res) {
+// 只看 App 的首頁（直接打開 favicon.svg、圖示這類檔案也算「頁面」，不能拿來當首頁）、而且要是 HTML、
+// 至少要有一個入口檔（伺服器回的維護頁、別的頁面沒有入口檔，存了離線就只剩一個空殼）
+const isHome = (url) => {
+  const scope = new URL(self.registration.scope)
+  const u = new URL(url)
+  return u.origin === scope.origin && (u.pathname === scope.pathname || u.pathname === `${scope.pathname}index.html`)
+}
+async function keepHome(req, res) {
+  if (!isHome(req.url) || !/text\/html/i.test(res.headers.get('Content-Type') || '')) return
   const cache = await caches.open(VERSION)
   const html = await res.clone().text()
-  for (const a of entryAssets(html)) if (!(await cache.match(new URL(a, self.registration.scope).href, { ignoreVary: true }))) return
+  const assets = entryAssets(html)
+  if (!assets.some((a) => /\.js(?:$|\?)/.test(a))) return
+  for (const a of assets) if (!(await cache.match(new URL(a, self.registration.scope).href, { ignoreVary: true }))) return
   await cache.put('./index.html', res)
 }
 
@@ -96,7 +106,7 @@ self.addEventListener('fetch', (event) => {
       fetch(req, { cache: 'no-cache' })
         .then((res) => {
           // 404、500 這類錯誤頁不能存成離線用的首頁；跟這個快取裡的程式不同版的也不存（keepHome）
-          if (res.ok) keepHome(res.clone()).catch(() => {})
+          if (res.ok) keepHome(req, res.clone()).catch(() => {})
           return res
         })
         .catch(() => caches.match('./index.html')),

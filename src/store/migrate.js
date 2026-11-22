@@ -368,6 +368,8 @@ function cleanUndo(u) {
       if (u.kind === 'milestone' && ts(u.pat)) Object.assign(out, { pat: ts(u.pat), ppause: ts(u.ppause), ponTime: !!u.ponTime })
       // 例行公事：刪掉時一起拿掉的、今天以後還沒做的那幾天（整份存成 JSON 字串）
       if (u.kind === 'routine' && typeof u.inst === 'string' && u.inst.length <= AGENT_DROP_MAX) out.inst = u.inst
+      // 日程：跨過午夜的另一段（JSON 字串，撤銷時一起放回去）
+      if (u.kind === 'event' && typeof u.more === 'string' && u.more.length <= AGENT_DROP_MAX) out.more = u.more
       return out
     }
     case 'tick': {
@@ -554,6 +556,19 @@ function cleanList(list, fn, keep = true) {
   return out
 }
 
+// 跨過午夜存成兩段的日程（store.js 的 _place）：要是「連著兩天、第一段到 23:59、第二段從 00:00 起、加起來不超過 16 小時」的兩段。
+// 不是的（匯入、手改壞的、好幾筆共用同一個 link）把 link 拿掉，各自當成獨立的日程：刪掉一筆才不會連帶刪掉別的
+function fixLinks(events) {
+  const by = new Map()
+  for (const e of events) if (e.link) (by.get(e.link) || by.set(e.link, []).get(e.link)).push(e)
+  for (const list of by.values()) {
+    const [a, b] = [...list].sort((x, y) => x.date.localeCompare(y.date))
+    const ok = list.length === 2 && b.date === addDays(a.date, 1) && a.end === '23:59' && b.start === '00:00' && !a.routineId && !b.routineId &&
+      toMin(b.end) < toMin(a.start) && toMin(b.end) + 1440 - toMin(a.start) <= 16 * 60
+    if (!ok) for (const e of list) delete e.link
+  }
+}
+
 // 速度（練習曲的節拍器速度）：目標，和每天練到多快（一天一筆，舊的在前；同一天有好幾筆的留最後那筆），
 // met 是說過「練到了」的那個目標。沒在記是 null；開了還沒填的是 { goal: null, log: [], met: null }
 // unit：空字串＝節拍器速度，不然是自己取的單位（頁、公里…），數字的範圍跟著單位走
@@ -677,6 +692,7 @@ function migrate(s) {
       ...(!allDay && ID_RE.test(e.link) ? { link: e.link } : {}),
     }
   })
+  fixLinks(events)
   const routines = cleanList(s.routines, (r) => {
     const title = str(r.title).trim()
     if (!title) return null

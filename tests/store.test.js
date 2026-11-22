@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating, blankTask, DATA_VERSION,
+  Store, addDays, dateStr, minToHHMM, readBackup, readBackups, keepBackup, repeatLabel, repeatMatches, toMin, weekKey, RESCUE_KEY, readRescue, dropRescue, floating, blankTask, DATA_VERSION, shiftEnd,
 } from '../src/store.js'
 import { restoreBackup } from '../src/sync.js'
 import { migrate } from '../src/store/migrate.js'
@@ -2814,12 +2814,112 @@ describe('跨過午夜的日程', () => {
     expect([odd.end, odd.link]).toEqual(['13:00', undefined])
   })
 
-  it('讀存檔時留著 link；ふじ刪掉的只刪那一段（撤銷放回的也是那一段）', () => {
+  it('讀存檔時留著 link；只刪一段（only）也做得到', () => {
     const e = store.addEvent({ title: '夜車', date: TODAY, start: '22:00', end: '01:00' })
     const again = migrate(JSON.parse(JSON.stringify(store.state)))
     expect(again.events.filter((x) => x.link === e.link)).toHaveLength(2)
     store.deleteEvent(e.id, { only: true })
     expect(pieces({ link: e.link })).toEqual([`${tomorrow} 00:00–01:00`])
+  })
+
+  it('讀存檔：不像兩段的 link（好幾筆共用、不是連著兩天、邊界不對、跨太久、例行公事）拿掉，刪一筆不會連帶刪掉別的', () => {
+    const ev = (id, date, start, end, link, more = {}) => ({ id, title: id, date, start, end, link, ...more })
+    const out = migrate({
+      events: [
+        ev('ok1', TODAY, '23:00', '23:59', 'good'), ev('ok2', tomorrow, '00:00', '01:00', 'good'),
+        ev('s1', TODAY, '10:00', '11:00', 'same'), ev('s2', TODAY, '12:00', '13:00', 'same'), ev('s3', tomorrow, '09:00', '10:00', 'same'),
+        ev('g1', TODAY, '23:00', '23:59', 'gap'), ev('g2', addDays(TODAY, 2), '00:00', '01:00', 'gap'),
+        ev('b1', TODAY, '23:00', '23:30', 'edge'), ev('b2', tomorrow, '00:00', '01:00', 'edge'),
+        ev('l1', TODAY, '06:00', '23:59', 'long'), ev('l2', tomorrow, '00:00', '05:00', 'long'),
+        ev('r1', TODAY, '23:00', '23:59', 'rt', { routineId: 'r' }), ev('r2', tomorrow, '00:00', '01:00', 'rt', { routineId: 'r' }),
+        ev('one', TODAY, '23:00', '23:59', 'solo'),
+      ],
+    })
+    expect(out.events.filter((x) => x.link).map((x) => x.id)).toEqual(['ok1', 'ok2'])
+    store.replaceState(out)
+    store.deleteEvent('s1')
+    expect(store.state.events.map((x) => x.id)).toContain('s2')
+  })
+
+  it('兩段是一個日程：從哪一段改都照整個日程（日子、開始是第一段的，結束是隔天那段的）', () => {
+    const e = store.addEvent({ title: '夜班', date: TODAY, start: '23:30', end: '00:30' })
+    const next = store.eventsOn(tomorrow)[0]
+    expect(store.eventSpan(next)).toMatchObject({ date: TODAY, start: '23:30', end: '00:30' })
+    // 從隔天那段改開始：改的是整個日程的開始（還是到隔天 00:30）
+    store.updateEvent(next.id, { start: '23:00' })
+    expect(pieces(e)).toEqual([`${TODAY} 23:00–23:59`, `${tomorrow} 00:00–00:30`])
+    // 改成剛好在午夜結束：隔天那段拿掉
+    store.updateEvent(e.id, { end: '00:00' })
+    expect(store.state.events.map((x) => `${x.date} ${x.start}–${x.end}`)).toEqual([`${TODAY} 23:00–23:59`])
+    expect(e.link).toBeUndefined()
+    // 再接回隔天，從隔天那段改成整天：整個日程變成開始那天的整天日程（不會留一段連著）
+    store.updateEvent(e.id, { end: '01:00' })
+    const n2 = store.eventsOn(tomorrow)[0]
+    store.updateEvent(n2.id, { allDay: true })
+    expect(store.state.events).toHaveLength(1)
+    expect(e).toMatchObject({ allDay: true, date: TODAY, endDate: TODAY })
+    expect(e.link).toBeUndefined()
+  })
+
+  it('時間軸上拖一段：整段拖是整個日程一起挪（長度不變，可以挪到隔天）；拉下緣改結束；拉上緣從那天那時才開始', () => {
+    const e = store.addEvent({ title: '夜車', date: TODAY, start: '23:30', end: '00:30' })
+    // 第一段往前拖一小時：整個日程 22:30–23:30（不會只剩 22:30–22:59）
+    store.dragEvent(e.id, { start: '22:30', end: '22:59' })
+    expect(store.state.events.map((x) => `${x.date} ${x.start}–${x.end}`)).toEqual([`${TODAY} 22:30–23:30`])
+    store.dragEvent(e.id, { start: '23:30', end: '00:30' })
+    store.updateEvent(e.id, { end: '00:30' })
+    expect(pieces(e)).toEqual([`${TODAY} 23:30–23:59`, `${tomorrow} 00:00–00:30`])
+    // 隔天那段往後拖一小時：整個日程挪到隔天 00:30–01:30
+    const next = store.eventsOn(tomorrow)[0]
+    store.dragEvent(next.id, { start: '01:00', end: '01:30' })
+    expect(store.state.events.map((x) => `${x.date} ${x.start}–${x.end}`)).toEqual([`${tomorrow} 00:30–01:30`])
+    // 接回去之後：拉第一段的下緣往上＝那天就結束；拉到底（23:59）不算改
+    store.updateEvent(e.id, { date: TODAY, start: '23:30', end: '00:30' })
+    store.dragEvent(e.id, { start: '23:30', end: '23:59', edge: 'end' })
+    expect(pieces(e)).toHaveLength(2)
+    const n2 = store.eventsOn(tomorrow)[0]
+    // 拉隔天那段的下緣：改結束，最長 16 小時
+    store.dragEvent(n2.id, { start: '00:00', end: '02:00', edge: 'end' })
+    expect(pieces(e)).toEqual([`${TODAY} 23:30–23:59`, `${tomorrow} 00:00–02:00`])
+    store.dragEvent(n2.id, { start: '00:00', end: '20:00', edge: 'end' })
+    expect(pieces(e)).toEqual([`${TODAY} 23:30–23:59`, `${tomorrow} 00:00–15:30`])
+    // 拉隔天那段的上緣：從隔天那時才開始
+    store.dragEvent(n2.id, { start: '00:30', end: '15:30', edge: 'start' })
+    expect(store.state.events.map((x) => `${x.date} ${x.start}–${x.end}`)).toEqual([`${tomorrow} 00:30–15:30`])
+    store.dragEvent(e.id, { start: '00:30', end: '23:45', edge: 'end' })
+    expect(e).toMatchObject({ date: tomorrow, start: '00:30', end: '23:45' })
+  })
+
+  it('整個日程挪幾分鐘（moveEvent）：跨過午夜就分成兩段，挪回來併成一段；太長的截到 23:59', () => {
+    const e = store.addEvent({ title: '電影', date: TODAY, start: '22:00', end: '23:59' })
+    store.moveEvent(e.id, 60)
+    expect(pieces(e)).toEqual([`${TODAY} 23:00–23:59`, `${tomorrow} 00:00–01:00`])
+    store.moveEvent(e.id, -120)
+    expect(store.state.events.map((x) => `${x.date} ${x.start}–${x.end}`)).toEqual([`${TODAY} 21:00–23:00`])
+    const long = store.addEvent({ title: '長', date: TODAY, start: '05:00', end: '23:00' })
+    store.moveEvent(long.id, 180)
+    expect(store.state.events.filter((x) => x.title === '長').map((x) => `${x.start}–${x.end}`)).toEqual(['08:00–23:59'])
+  })
+
+  it('例行公事不跨過午夜：新增、那一天改時段都截到 23:59', () => {
+    const r = store.addRoutine({ kind: 'event', title: '夜班', repeat: { type: 'daily' }, start: '20:00', end: '02:00', date: TODAY })
+    expect([r.start, r.end]).toEqual(['20:00', '23:59'])
+    const inst = store.eventsOn(TODAY).find((x) => x.routineId === r.id)
+    store.updateEvent(inst.id, { end: '01:00' })
+    expect([inst.end, inst.link, store.eventsOn(tomorrow).filter((x) => x.title === '夜班' && !x.routineId)]).toEqual(['23:59', undefined, []])
+  })
+})
+
+describe('改開始時結束跟著挪（shiftEnd：store、日程面板、輸入列共用）', () => {
+  it('長度不變；23:59 結束的算到午夜；挪過午夜接到隔天，超過 16 小時的截到 23:59；沒有長度的補一小時', () => {
+    expect(shiftEnd('09:00', '10:30', '13:00')).toBe('14:30')
+    expect(shiftEnd('22:00', '23:59', '21:00')).toBe('23:00')
+    expect(shiftEnd('22:00', '23:59', '22:30')).toBe('00:30')
+    expect(shiftEnd('23:30', '00:30', '23:00')).toBe('23:59')
+    expect(shiftEnd('23:30', '00:30', '22:00')).toBe('23:00')
+    expect(shiftEnd('05:00', '23:00', '08:00')).toBe('23:59')
+    expect(shiftEnd('10:00', '10:00', '12:00')).toBe('13:00')
+    expect(shiftEnd('10:00', '11:00', '23:00')).toBe('23:59')
   })
 })
 

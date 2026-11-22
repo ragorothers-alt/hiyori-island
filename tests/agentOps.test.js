@@ -249,6 +249,31 @@ describe('改了、新增、刪掉，都能撤銷', () => {
     expect(store.habit(h.id)).toBeTruthy()
   })
 
+  it('跨過午夜的日程（兩段）：ふじ看到的是一個日程（結束在隔天）；改結束、撤銷時兩段都回來；刪掉兩段一起、撤銷一起放回', () => {
+    const tomorrow = addDays(TODAY, 1)
+    const e = store.addEvent({ title: '夜車', date: TODAY, start: '23:30', end: '00:30' })
+    const view = (w) => w.events.filter((x) => x.title === '夜車')
+    const pieces = () => store.state.events.filter((x) => x.title === '夜車').map((x) => `${x.date} ${x.start}–${x.end}`)
+    // 縮短成那天 23:50 結束：隔天那段拿掉；撤銷時接回去
+    const first = chat((o, w) => {
+      expect(view(w)).toEqual([expect.objectContaining({ date: TODAY, start: '23:30', end: '00:30', endsNextDay: true })])
+      o.set.push({ id: view(w)[0].id, field: 'end', value: '23:50' })
+    }).entry
+    expect(pieces()).toEqual([`${TODAY} 23:30–23:50`])
+    expect(undo(first)).toBe(1)
+    expect(pieces()).toEqual([`${TODAY} 23:30–23:59`, `${tomorrow} 00:00–00:30`])
+    // 刪掉：兩段一起；撤銷：兩段一起放回去（還是連著的）
+    const gone = chat((o, w) => o.drop.push(view(w)[0].id)).entry
+    expect(pieces()).toEqual([])
+    store.replaceState(migrate(JSON.parse(JSON.stringify(store.state))))
+    expect(undo(store.state.agent.log.at(-1))).toBe(1)
+    expect(pieces()).toEqual([`${TODAY} 23:30–23:59`, `${tomorrow} 00:00–00:30`])
+    const [a, b] = store.state.events.filter((x) => x.title === '夜車')
+    expect(a.link && a.link === b.link).toBe(true)
+    expect(a.id).toBe(e.id)
+    expect(gone.changes[0].t).toBe('刪掉日程「夜車」')
+  })
+
   it('刪掉日程、重要日子、警語：撤銷放回原本的位置', () => {
     const a = store.addEvent({ title: 'A', date: TODAY, start: '10:00', end: '11:00' })
     const b = store.addEvent({ title: 'B', date: TODAY, start: '12:00', end: '13:00' })
@@ -341,6 +366,24 @@ describe('改了、新增、刪掉，都能撤銷', () => {
     expect(undo(gone)).toBe(1)
     expect(store.state.routines[0].id).toBe(r.id)
     expect(store.eventsOn(TODAY).some((e) => e.routineId === r.id)).toBe(true)
+  })
+
+  it('例行公事每月幾號：「每月 31 日」就是每月（沒有 31 號的月份在月底）；認不得的頻率不建（不會變成每天）', () => {
+    const first = chat((o) =>
+      o.create.push(
+        { kind: 'routine', ref: '', parent: '', title: '繳房租', date: TODAY, start: '', end: '', fields: [{ field: 'days', value: '每月31日' }] },
+        { kind: 'routine', ref: '', parent: '', title: '亂寫', date: TODAY, start: '', end: '', fields: [{ field: 'days', value: '每兩週' }] },
+        { kind: 'routine', ref: '', parent: '', title: '太大', date: TODAY, start: '', end: '', fields: [{ field: 'days', value: '每月 32 號' }] },
+      ),
+    ).entry
+    expect(store.state.routines.map((r) => [r.title, r.repeat])).toEqual([['繳房租', { type: 'monthly', days: [], day: 31 }]])
+    expect(first.changes.map((c) => c.t)).toEqual(['新增例行任務「繳房租」（每月 31 日）'])
+    const r = store.state.routines[0]
+    // 11 月沒有 31 號：月底那天（11/30）才有；12/1 不會多一件
+    store.selectDate('2026-11-30')
+    expect(store.tasksOn('2026-11-30').some((t) => t.routineId === r.id)).toBe(true)
+    store.selectDate('2026-12-01')
+    expect(store.tasksOn('2026-12-01').some((t) => t.routineId === r.id)).toBe(false)
   })
 
   it('訂閱、生活記錄、睡眠、專案的進度和筆記', () => {

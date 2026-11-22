@@ -2,6 +2,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { FakeCaches, SCOPE, loadSW, run } from './helpers/sw.js'
 
+const html = (h) => new Response(h, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+
 describe('Service Worker', () => {
   it('更新時：舊快取裡新版還用得到的檔案搬過來，其他的丟掉；別的網站的快取不動', async () => {
     const caches = new FakeCaches()
@@ -25,10 +27,32 @@ describe('Service Worker', () => {
     expect(res.status).toBe(404)
     await new Promise((r) => setTimeout(r))
     expect(await caches.match('./index.html')).toBeUndefined()
-    const ok = loadSW({ caches, fetch: async () => new Response('<html>') })
-    await run(ok.fetch, { request: req })
+    await (await caches.open('hiyori-new')).put('./assets/index-a.js', new Response('a'))
+    const home = '<script type="module" src="./assets/index-a.js"></script>'
+    const ok = loadSW({ caches, fetch: async () => html(home) })
+    await run(ok.fetch, { request: { ...req, url: SCOPE } })
     await new Promise((r) => setTimeout(r))
-    expect(await (await caches.match('./index.html')).text()).toBe('<html>')
+    expect(await (await caches.match('./index.html')).text()).toBe(home)
+  })
+
+  it('頁面：不是首頁（直接打開 favicon.svg）、不是 HTML、沒有入口檔的（維護頁）都不換掉離線首頁', async () => {
+    const caches = new FakeCaches()
+    const cur = await caches.open('hiyori-new')
+    await cur.put('./index.html', new Response('old home'))
+    await cur.put('./assets/index-a.js', new Response('a'))
+    const home = '<script type="module" src="./assets/index-a.js"></script>'
+    const visit = async (url, res) => {
+      await run(loadSW({ caches, fetch: async () => res }).fetch, { request: { method: 'GET', mode: 'navigate', url } })
+      await new Promise((r) => setTimeout(r))
+    }
+    await visit(SCOPE + 'favicon.svg', new Response('<svg/>', { headers: { 'Content-Type': 'image/svg+xml' } }))
+    await visit(SCOPE + 'other.html', html(home))
+    await visit(SCOPE, new Response(home, { headers: { 'Content-Type': 'text/plain' } }))
+    await visit(SCOPE, html('<h1>維護中</h1><link rel="stylesheet" href="./assets/index-a.css">'))
+    expect(await (await cur.match('./index.html')).text()).toBe('old home')
+    // 帶著查詢字串、或寫成 index.html 的首頁照樣換
+    await visit(SCOPE + 'index.html?hour=10', html(home))
+    expect(await (await cur.match('./index.html')).text()).toBe(home)
   })
 
   it('頁面：網路拿到的首頁要的程式不在這個快取裡（新版還沒裝好、裝失敗）就不換掉離線首頁；都在才換', async () => {
@@ -36,7 +60,7 @@ describe('Service Worker', () => {
     const cur = await caches.open('hiyori-new')
     await cur.put('./index.html', new Response('old home'))
     await cur.put('./assets/index-a.js', new Response('a'))
-    const page = (html) => loadSW({ caches, fetch: async () => new Response(html) })
+    const page = (h) => loadSW({ caches, fetch: async () => html(h) })
     const req = { method: 'GET', mode: 'navigate', url: SCOPE }
     const other = '<script type="module" src="./assets/index-b.js"></script><link rel="stylesheet" href="./assets/index-a.css">'
     expect(await (await run(page(other).fetch, { request: req })).text()).toBe(other)

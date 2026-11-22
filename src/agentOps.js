@@ -118,6 +118,16 @@ export function daysOf(v) {
   }
   return out.size ? [...out].sort((a, b) => a - b) : undefined
 }
+// 例行公事多久一次：星期幾（daysOf 認得的寫法）或「每月 15 日」「每個月 1 號」。回傳 store 的 repeat（{ type, days, day }）；
+// 認不得是 undefined（新增例行公事時寫了認不得的頻率就不建，不會變成每天）
+const MONTHLY = /^每(?:個)?月\s*(\d{1,2})\s*(?:日|號|号)?$/
+export function routineRepeat(v) {
+  const m = MONTHLY.exec(txt(v, 40))
+  if (m) return +m[1] >= 1 && +m[1] <= 31 ? { type: 'monthly', days: [], day: +m[1] } : undefined
+  const days = daysOf(v)
+  if (days === undefined) return undefined
+  return !days.length || days.length === 7 ? { type: 'daily', days: [] } : days.join() === '1,2,3,4,5' ? { type: 'weekdays', days: [] } : { type: 'weekly', days }
+}
 const dayText = (days) => (!days?.length || days.length === 7 ? '每天' : days.join() === '1,2,3,4,5' ? '平日' : days.join() === '0,6' ? '週末' : days.map((d) => WEEK_ZH[d]).join(''))
 const range = (v) => {
   const m = /(\d{1,2}[:：]\d{2})\s*[-~～到至]\s*(\d{1,2}[:：]\d{2})/.exec(txt(v, 40))
@@ -263,7 +273,7 @@ const CREATE_FIELDS = {
   milestone: { note: longStr(500) },
   step: {},
   habit: { kind: words(['build', 'quit'], { 養成: 'build', 戒除: 'quit', 戒掉: 'quit' }), target: int(1, 99), unit: str(6), days: daysOf },
-  routine: { days: daysOf, tag, priority },
+  routine: { days: routineRepeat, tag, priority },
   motto: {},
   subscription: { price: money, cur: SPEC.subscription.cur, every: int(1, 36), unit: SPEC.subscription.unit },
   log: { dur: int(0, 1440, { hours: true }) },
@@ -317,7 +327,10 @@ export function cleanOps(out, ids) {
       const clean = Object.hasOwn(CREATE_FIELDS[kind], f?.field) ? CREATE_FIELDS[kind][f.field] : null
       const v = clean ? clean(f.value) : undefined
       if (v !== undefined) c.fields[f.field] = v
+      // 例行公事寫了頻率卻認不得（「每兩週」這類）：不建，免得變成每天
+      else if (kind === 'routine' && f?.field === 'days') c.bad = true
     }
+    if (c.bad) continue
     // 上層：專案（里程碑、進度、筆記）或里程碑（細項）。可以是這一批前面剛建的（ref）
     const want = kind === 'step' ? 'milestone' : ['milestone', 'log', 'note'].includes(kind) ? 'project' : null
     if (want) {
@@ -379,8 +392,9 @@ export function worldOf(store, ids, here = null) {
   const W = {}
   const from = addDays(today, -3)
   const to = addDays(today, 45)
+  // 跨過午夜存成兩段的日程只列第一段（當成一個日程，結束在隔天：endsNextDay）
   W.events = s.events
-    .filter((e) => (e.allDay ? (e.endDate || e.date) >= from && e.date <= to : e.date >= from && e.date <= to))
+    .filter((e) => (e.allDay ? (e.endDate || e.date) >= from && e.date <= to : e.date >= from && e.date <= to) && !store.isCont?.(e))
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start))
     .slice(0, 150)
     .map((e) => {
@@ -388,6 +402,9 @@ export function worldOf(store, ids, here = null) {
       if (e.allDay) {
         o.allDay = true
         if (e.endDate && e.endDate !== e.date) o.endDate = e.endDate
+      } else if (e.link && store.eventSpan) {
+        const sp = store.eventSpan(e)
+        Object.assign(o, { start: sp.start, end: sp.end }, sp.all.length > 1 ? { endsNextDay: true } : {})
       } else Object.assign(o, { start: e.start, end: e.end })
       if (e.done) o.done = true
       if (e.routineId) o.routine = true
@@ -486,7 +503,7 @@ export function worldOf(store, ids, here = null) {
     if (DATE.test(here.date)) h.date = here.date
     if (here.project && s.projects.some((p) => p.id === here.project)) h.project = ids.of('p', here.project)
     if (here.task && s.tasks.some((t) => t.id === here.task)) h.task = ids.of('t', here.task)
-    if (here.event && s.events.some((e) => e.id === here.event)) h.event = ids.of('e', here.event)
+    if (here.event && s.events.some((e) => e.id === here.event)) h.event = ids.of('e', store.eventSpan?.(s.events.find((e) => e.id === here.event))?.head?.id || here.event)
     W.here = h
   }
   return W

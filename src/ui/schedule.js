@@ -1,7 +1,7 @@
 import './schedule.css'
 import { $, esc, ICON, armConfirm, WEEK_ZH, pickOne, setOn, keepFocus } from './dom.js'
 import { EVENT_COLORS, TAGS, tagOf, PRIORITIES } from '../theme.js'
-import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey, floating, overnight } from '../store.js'
+import { addDays, daysBetween, parseDate, toMin, minToHHMM, weekKey, floating, overnight, shiftEnd } from '../store.js'
 import { rhythmBlocks, itemBlocks, findConflicts, taskDur, fmtDur, nearestSlot, optimizeDay, awake, PEAKS, sleepMinutes, SPLIT_MIN } from '../planner.js'
 import { taskMilestone } from '../projects.js'
 import { haptic } from './haptics.js'
@@ -351,8 +351,13 @@ export class ScheduleView {
       const cal = s.state.calendars.find((c) => c.id === ext.ext)
       return this.hooks.toast({ icon: '暦', title: ext.title, sub: `從「${cal?.name || '匯入的行事曆'}」帶進來的${ext.note ? `・${ext.note}` : ''}，要改請到原本的行事曆` })
     }
-    const item = type === 'event' ? s.state.events.find((e) => e.id === id) : s.state.tasks.find((t) => t.id === id)
+    let item = type === 'event' ? s.state.events.find((e) => e.id === id) : s.state.tasks.find((t) => t.id === id)
     if (!item) return
+    // 跨過午夜存成兩段的日程：打開的是整個日程（從第一段那天的開始到隔天的結束），點哪一段都一樣
+    if (type === 'event' && item.link) {
+      const sp = s.eventSpan(item)
+      item = { ...sp.head, end: sp.end }
+    }
     this.editing = { type, id, create: false, color: item.color ?? 0, priority: item.priority ?? 2, tag: item.tag ?? 'life', allDay: !!item.allDay, ongoing: !!item.ongoing, star: !!item.star }
     this._sheet(item)
   }
@@ -453,27 +458,24 @@ export class ScheduleView {
     if (!overnight(start, end) && toMin(end) <= toMin(start)) end = hm(toMin(start) + 30)
     return { title, start, end, color: ed.color, date, note, allDay: false }
   }
-  // 日程面板的時段：改開始時結束跟著挪（長度不變，像一般的行事曆）；結束比開始早時說一聲會接到隔天
-  // 跨過午夜存成的那幾段（item.link）：說另一天那段會一起改；結束在 23:59 的那段（後面接著隔天）改開始時結束不跟著挪
+  // 日程面板的時段：改開始時結束跟著挪（長度不變，像一般的行事曆；規則跟 store 一樣，見 shiftEnd）；
+  // 結束比開始早時說一聲會接到隔天（例行公事的那一天截到 23:59）
   _overHint(item = {}) {
     const form = $('#editSheet form')
     const hint = form.querySelector('.ec-over')
     const { start, end } = form.elements
+    const routine = !!item.routineId
     let prev = start.value
-    const linked = !!item.link && this.store.state.events.some((x) => x.link === item.link && x.id !== item.id)
     const show = () => {
-      const over = !this.editing?.allDay && overnight(start.value, end.value) && toMin(end.value) > 0
-      hint.hidden = !over && !linked
-      if (over) hint.textContent = `到隔天 ${end.value} 才結束：存成這天到 23:59、隔天 00:00 起兩段（改名稱、刪除兩段一起）`
-      else if (linked) hint.textContent = '跨過午夜的日程：另一天的那一段會一起改名稱、顏色、備註，刪除也一起'
+      const over = !this.editing?.allDay && overnight(start.value, end.value)
+      hint.hidden = !over
+      if (!over) return
+      if (routine) hint.textContent = '例行日程的這一天在同一天裡：存到 23:59'
+      else if (toMin(end.value) === 0) hint.textContent = '剛好在午夜結束：存到 23:59'
+      else hint.textContent = `到隔天 ${end.value} 才結束：存成這天到 23:59、隔天 00:00 起兩段（改時間、名稱、刪除都是一整個）`
     }
     start.addEventListener('change', () => {
-      const a = toMin(prev)
-      const b = toMin(end.value)
-      if (start.value && end.value && prev && end.value !== '23:59') {
-        const len = b > a ? b - a : b < a && overnight(prev, end.value) ? b + 1440 - a : 0
-        if (len) end.value = hm((toMin(start.value) + len) % 1440)
-      }
+      if (start.value && end.value && prev && start.value !== prev) end.value = shiftEnd(prev, end.value, start.value)
       prev = start.value
       show()
     })
@@ -1022,7 +1024,8 @@ export class ScheduleView {
     }
     if (d.nStart == null || (d.nStart === d.start && d.nEnd === d.end)) return this.render(false)
     if (d.type === 'task') s.scheduleTask(d.id, hm(d.nStart), d.resize ? d.nEnd - d.nStart : undefined)
-    else s.updateEvent(d.id, { start: hm(d.nStart), end: hm(Math.min(1439, d.nEnd)) })
+    // 跨過午夜的日程拖的是那一天的那一段：整段拖是整個日程一起挪（store 的 dragEvent）
+    else s.dragEvent(d.id, { start: hm(d.nStart), end: hm(Math.min(1439, d.nEnd)), edge: d.resize ? 'end' : null })
   }
 }
 

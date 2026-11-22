@@ -123,4 +123,24 @@ export function minToHHMM(m) {
   return `${String(h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }
 
+// ── 日程的時段（store、日程面板、日程頁的輸入列共用同一套規則）──
+// 跨過午夜最長幾分鐘：結束比開始早、加起來不超過 16 小時（23:30–00:30、22:00–06:00）才當成隔天結束；
+// 超過的（12:00–11:00）多半是填錯
+export const OVERNIGHT_MAX = 16 * 60
+export const overnight = (start, end) => toMin(end) < toMin(start) && toMin(end) + 1440 - toMin(start) <= OVERNIGHT_MAX
+// 一段時間有多長（分鐘）：結束在 23:59 的算到午夜；跨過午夜的算到隔天；結束沒在開始之後的是 0
+export function spanLen(start, end) {
+  const a = toMin(start)
+  const b = end === '23:59' ? 1440 : toMin(end)
+  return b > a ? b - a : overnight(start, end) ? b + 1440 - a : 0
+}
+// 改開始時結束跟著挪（長度不變，像一般的行事曆）：挪過午夜、長度不超過 16 小時就接到隔天，太長的截到 23:59；
+// 原本沒有長度的補成一小時
+export function shiftEnd(prevStart, end, start) {
+  const len = spanLen(prevStart, end)
+  const to = toMin(start) + (len || 60)
+  if (to < 1440) return minToHHMM(to)
+  return to === 1440 || (len || 60) > OVERNIGHT_MAX ? '23:59' : minToHHMM(to - 1440)
+}
+
 export { HABIT_PAID_DAYS, townStages, POMO_SIDS, LEGACY_QUESTS, REV_RE }
