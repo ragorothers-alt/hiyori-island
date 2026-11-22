@@ -13,7 +13,7 @@ import { LIFE_KINDS } from '../data/life.js'
 import { okVal, UNDO_GROUPS } from '../agentOps.js'
 import { BUILDINGS, MAX_STAGE } from '../data/town.js'
 import { DEFAULT_RHYTHM, PEAKS } from '../planner.js'
-import { cleanGrants } from './grants.js'
+import { cleanGrants, legacyGrants, normGrants } from './grants.js'
 
 const allDayEnd = (end, date) => {
   const e = DATE_RE.test(end) && end > date ? end : date
@@ -251,7 +251,11 @@ function cleanCoach(c) {
   const l = c.last
   // 主攻項目可能是專案名稱（最長 60 字），要整個留著，下次問卷才認得出來
   const last = isObj(l)
-    ? { focus: labels(l.focus, 60, 50), slots: labels(l.slots), days: COACH_DAYS.includes(l.days) ? l.days : 5, len: num(l.len, 15, 120, 50) }
+    ? {
+        focus: labels(l.focus, 60, 50), slots: labels(l.slots), days: COACH_DAYS.includes(l.days) ? l.days : 5, len: num(l.len, 15, 120, 50),
+        // 選了哪幾項（主攻項目的 key：tag:…、proj:專案 id、item:名字）：兩個專案同名時也認得出是哪一個。舊的只有名字
+        ...(Array.isArray(l.keys) ? { keys: labels(l.keys, 80, 50) } : {}),
+      }
     : null
   // used：做完過其中一件（撤銷時照舊算一次套用）
   const plans = cleanList(c.plans, (p) => ({
@@ -370,7 +374,8 @@ function cleanUndo(u) {
       // 細項、子任務：刪掉它讓上一層（里程碑、任務）跟著完成的話，那一刻的完成時間（撤銷時還是那個時間才退回去）
       if ((u.kind === 'step' || u.kind === 'subtask') && ts(u.auto)) out.auto = ts(u.auto)
       // 里程碑：刪掉它讓專案跟著落成的話，落成的時間、之前暫停的時間、這次才記成準時的
-      if (u.kind === 'milestone' && ts(u.pat)) Object.assign(out, { pat: ts(u.pat), ppause: ts(u.ppause), ponTime: !!u.ponTime })
+      // ppaid：落成的獎勵是不是這一次才給的（本來就領過的重開專案，撤銷時什麼都不收）
+      if (u.kind === 'milestone' && ts(u.pat)) Object.assign(out, { pat: ts(u.pat), ppause: ts(u.ppause), ponTime: !!u.ponTime, ...(typeof u.ppaid === 'boolean' ? { ppaid: u.ppaid } : {}) })
       // 例行公事：刪掉時一起拿掉的、今天以後還沒做的那幾天（整份存成 JSON 字串）
       if (u.kind === 'routine' && typeof u.inst === 'string' && u.inst.length <= AGENT_DROP_MAX) out.inst = u.inst
       // 日程：跨過午夜的另一段（JSON 字串，撤銷時一起放回去）
@@ -1046,7 +1051,8 @@ function migrate(s) {
     tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),
     pomoSids: Array.isArray(s.pomoSids) ? s.pomoSids.filter((x) => ID_RE.test(x)).slice(-POMO_SIDS) : [],
-    grants: cleanGrants(s.grants),
+    // 舊版（還沒有這本帳）第一次讀進來：照它記的 xpGot、pomoGot 補一本，之後跟還沒更新的那台合併也對得起來；上一版的代號換成現在的
+    grants: normGrants(cleanGrants(isObj(s.grants) ? s.grants : legacyGrants(s)), { projects, events }),
     timer: cleanTimer(s.timer),
     // 舊存檔沒有 rev：用 updatedAt 當版本識別，跟舊的同步檔對得起來
     rev: typeof s.rev === 'string' && REV_RE.test(s.rev) ? s.rev : ts(s.updatedAt) ? String(ts(s.updatedAt)) : '',

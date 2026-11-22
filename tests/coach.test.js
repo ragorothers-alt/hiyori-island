@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { recordsMethods } from '../src/ui/recordsPage.js'
-import { planCoachWeek } from '../src/ui/coach.js'
+import { CoachView, planCoachWeek } from '../src/ui/coach.js'
+import { Store, addDays } from '../src/store.js'
 import { DEFAULT_RHYTHM } from '../src/planner.js'
 import { SLOTS, scopeDates, slotText, defaultSlots, parseCoachText, guessTag, planRules, askCoach, coachInput, fitAI, splitTotal } from '../src/coach.js'
 
@@ -183,6 +184,72 @@ describe('排一週選到同名的主攻項目', () => {
     { key: 'proj:b', project: 'b', ms: 'mb', label: '展覽', tag: 'work', milestone: '印海報' },
     { key: 'item:展覽（1）', label: '展覽（1）', tag: 'life' },
   ]
+
+  const questionnaire = (store) => {
+    const view = Object.assign(Object.create(CoachView.prototype), { store, render() {} })
+    view.a = view._defaults()
+    return view
+  }
+
+  it('套用後重讀存檔，兩個同名專案、分類和自訂項目都照上次的順序選回來', () => {
+    localStorage.clear()
+    vi.stubGlobal('requestAnimationFrame', vi.fn())
+    try {
+      const store = new Store()
+      store.importJSON(JSON.stringify({ tasks: [], player: {}, projects: [] }))
+      const a = store.addProject({ name: '展覽' })
+      const b = store.addProject({ name: '展覽' })
+      const keys = ['proj:' + b.id, 'tag:study', 'item:展覽', 'proj:' + a.id]
+      const view = questionnaire(store)
+      view.a.focus = new Set(keys)
+      view.a.custom = [{ label: '展覽', tag: 'life' }]
+      view.res = { days: [{ date: addDays(store.today, 1), items: [{ title: '展覽・校稿', at: '20:00', dur: 25 }] }] }
+      view._apply()
+      store.flushSave()
+
+      const reopened = questionnaire(new Store())
+      expect(reopened.store.state.coach.last.keys).toEqual(keys)
+      expect([...reopened.a.focus]).toEqual(keys)
+    } finally {
+      vi.unstubAllGlobals()
+      localStorage.clear()
+    }
+  })
+
+  it('有 keys 只選還在問卷裡的項目，沒有 keys 的舊答案才用名字找', () => {
+    const last = { focus: ['展覽'], slots: ['wdEve'] }
+    const store = { today: MON, state: { settings: {}, coach: { last, items: [] }, projects: [
+      { id: 'a', name: '展覽' }, { id: 'b', name: '展覽' },
+      { id: 'c', name: '展覽', archived: true }, { id: 'd', name: '展覽', completedAt: 1 },
+    ] } }
+    expect([...questionnaire(store).a.focus]).toEqual(['proj:a'])
+    last.keys = ['proj:b', 'proj:c', 'proj:d', 'proj:deleted']
+    expect([...questionnaire(store).a.focus]).toEqual(['proj:b'])
+    last.keys = []
+    expect([...questionnaire(store).a.focus]).toEqual([])
+  })
+
+  it('預覽標題裡交叉提到兩個專案都顯示原名，自訂項目原有的編號照留', async () => {
+    const ai = async (_, input) => {
+      const [a, b, custom] = input.focus.map((f) => f.label)
+      return { days: [{ date: MON, items: [{ label: b, title: `比對${b}與${a}，再看${custom}`, at: '20:00', dur: 25 }] }] }
+    }
+    const result = await planCoachWeek(req({ focus }), ai)
+    expect(all(result)).toMatchObject([{ focusKey: 'proj:b', title: '展覽・比對展覽與展覽，再看展覽（1）' }])
+  })
+
+  it('長標題和說明先還原名字才截字，邊界不會剩下半個編號', async () => {
+    const ai = async (_, input) => {
+      const [a, b] = input.focus.map((f) => f.label)
+      return {
+        days: [{ date: MON, items: [{ label: b, title: '看'.repeat(36) + a + '海報初稿', at: '20:00', dur: 25 }] }],
+        notes: ['看'.repeat(56) + b + '海報初稿'],
+      }
+    }
+    const result = await planCoachWeek(req({ focus }), ai)
+    expect.soft(all(result)[0].title).toBe('展覽・' + '看'.repeat(36) + '展覽海報')
+    expect(result.notes).toEqual(['看'.repeat(56) + '展覽海報'])
+  })
 
   it('本機排程的時段保留原名和各自的專案、里程碑', async () => {
     const result = await planCoachWeek(req({ focus }))

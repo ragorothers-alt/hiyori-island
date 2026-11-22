@@ -79,7 +79,7 @@ export async function planCoachWeek(req, ai = null, examProjectId = null) {
       do { label = `${short}（${++serial}）` } while (selected.some((other) => other.label.includes(label)))
     }
     byLabel.set(label, f)
-    return { ...f, label }
+    return label === f.label ? f : { ...f, label, displayLabel: f.label }
   })
   let exam = req.exam
   if (exam && examProjectId) {
@@ -92,15 +92,7 @@ export async function planCoachWeek(req, ai = null, examProjectId = null) {
       const f = byLabel.get(item.label)
       if (!f) continue
       item.focusKey = f.key
-      if (item.label !== f.label && item.title.startsWith(item.label)) {
-        item.title = f.label + item.title.slice(item.label.length)
-        item.label = f.label
-      }
-    }
-  }
-  if (result.ai) {
-    for (const [label, f] of byLabel) {
-      if (label !== f.label) result.notes = result.notes.map((note) => note.replaceAll(label, () => f.label))
+      item.label = f.label
     }
   }
   result.projects = Object.fromEntries(selected.filter((f) => f.project).map((f) => [f.key, { id: f.project, ms: f.ms }]))
@@ -162,9 +154,18 @@ export class CoachView {
       len: last?.len || (LENS.includes(fm) ? fm : 50),
       total: null,
     }
-    for (const label of last?.focus || []) {
-      const key = this._keyOf(label)
-      if (key) a.focus.add(key)
+    if (Array.isArray(last?.keys)) {
+      const available = new Set([
+        ...TAGS.map((t) => 'tag:' + t.id),
+        ...this._projects().map((p) => 'proj:' + p.id),
+        ...s.state.coach.items.map((it) => 'item:' + it.label),
+      ])
+      for (const key of last.keys) if (available.has(key)) a.focus.add(key)
+    } else {
+      for (const label of last?.focus || []) {
+        const key = this._keyOf(label)
+        if (key) a.focus.add(key)
+      }
     }
     return a
   }
@@ -286,9 +287,10 @@ export class CoachView {
     if (!r?.days.length) return
     const a = this.a
     const focus = this._focusList()
+    const keys = [...a.focus]
     const { id, count, skipped } = this.store.applyCoachPlan(r, {
       title: focus.map((f) => f.label).join('、'),
-      answers: { focus: focus.map((f) => f.label), slots: [...a.slots], days: a.days, len: a.len },
+      answers: { focus: focus.map((f) => f.label), keys, slots: [...a.slots], days: a.days, len: a.len },
       custom: a.custom.filter((c) => a.focus.has('item:' + c.label)),
       // 主攻的是專案：排出來的那幾段歸到那個專案（和下一個還沒完成的里程碑），回專案就找得到
       projects: r.projects,

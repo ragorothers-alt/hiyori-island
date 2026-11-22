@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { merge3 } from '../src/merge.js'
+import { migrate } from '../src/store/migrate.js'
 import { XP } from '../src/theme.js'
 import { grantKey } from '../src/store/grants.js'
 import { dateStr } from '../src/store/util.js'
@@ -353,9 +354,8 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
     delete b.grants
     Object.assign(b.tasks.find((t) => t.id === id), { xpGot: got })
     const r = merge(base, a, b)
-    expect([xp(r), r.player.coins, r.player.stats.tasksDone, r.player.stats.highTasksDone, today(r).tasks]).toEqual([
-      xp(a), a.player.coins, a.player.stats.tasksDone, 1, 1,
-    ])
+    // 優先度、本命不扣（舊版完成之後可能改過，猜錯了會把新版真的做完的扣掉）
+    expect([xp(r), r.player.coins, r.player.stats.tasksDone, today(r).tasks]).toEqual([xp(a), a.player.coins, a.player.stats.tasksDone, 1])
   })
 
   it('習慣目標 2 次、兩台各打了一次卡：合起來到了目標，補給習慣當天的獎勵（只給一次）', () => {
@@ -384,6 +384,74 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
     const r = merge(base, a, b)
     expect(r.player.stats.eventsDone).toBe(a.player.stats.eventsDone)
     expect(xp(r)).toBe(xp(a))
+  })
+
+  // 直接寫出三份存檔的帳（看合併的算法）
+  const D = '2026-11-22'
+  const withStats = (o, grants, updatedAt) => S({ updatedAt, grants, player: { ...S().player, ...o, stats: { tasksDone: 5, ...o.stats } } })
+  const live = (at, d) => ({ at, day: D, d })
+  const tomb = (at, of, was, r = was) => ({ at, day: D, d: {}, off: 1, of, was, r })
+
+  it('兩台都收回了專案落成、其中一台後來又落成了一次：算一次（不會因為收回又重給的淨變化是 0 就當成沒動）', () => {
+    const P = { xp: 120, 's:projectsDone': 1 }
+    const base = withStats({ xp: 220, stats: { projectsDone: 1 } }, { 'p:x': live(100, P) }, 1)
+    const a = withStats({ xp: 100, stats: { projectsDone: 0 } }, { 'p:x': tomb(200, 100, P) }, 2)
+    const b = withStats({ xp: 220, stats: { projectsDone: 1 } }, { 'p:x': live(300, P) }, 3)
+    const r = merge3(base, a, b).state
+    expect([r.player.xp, r.player.stats.projectsDone]).toEqual([220, 1])
+    expect(r.grants['p:x']).toMatchObject({ at: 300, d: P })
+    // 反過來（這台是又落成的那一台）也一樣
+    expect(merge3(base, b, a).state.player.xp).toBe(220)
+  })
+
+  it('兩台都收回了、金平糖已經花掉扣不到：不會把沒扣到的補回去（多生出金平糖）', () => {
+    const G = { xp: 5, c: 1 }
+    const base = withStats({ xp: 105, coins: 0 }, { 'f:s': live(100, G) }, 1)
+    const a = withStats({ xp: 100, coins: 0 }, { 'f:s': tomb(200, 100, G, { xp: 5, c: 0 }) }, 2)
+    const b = withStats({ xp: 100, coins: 0 }, { 'f:s': tomb(210, 100, G, { xp: 5, c: 0 }) }, 3)
+    const r = merge3(base, a, b).state
+    expect([r.player.xp, r.player.coins]).toEqual([100, 0])
+    expect(r.grants['f:s']).toMatchObject({ off: 1, of: 100 })
+  })
+
+  it('base 太舊（沒有那一筆）、兩邊都有同一次給的，一邊收回了：收回了（不會又活回來）', () => {
+    const G = { 's:focusMinutes': 9, xp: 5 }
+    const base = withStats({ xp: 100, stats: { focusMinutes: 50 } }, {}, 1)
+    const a = withStats({ xp: 100, stats: { focusMinutes: 50 } }, { 'f:s': tomb(200, 150, G) }, 2)
+    const b = withStats({ xp: 105, stats: { focusMinutes: 59 } }, { 'f:s': live(150, G) }, 3)
+    for (const [m, t] of [[a, b], [b, a]]) {
+      const r = merge3(base, m, t).state
+      expect([r.player.stats.focusMinutes, r.player.xp]).toEqual([50, 100])
+      expect(r.grants['f:s'].off).toBe(1)
+    }
+    // 兩邊都留著：算一次；兩邊都收回：都不算
+    expect(merge3(base, b, { ...b, updatedAt: 4 }).state.player.stats.focusMinutes).toBe(59)
+    expect(merge3(base, a, { ...a, updatedAt: 4 }).state.player.stats.focusMinutes).toBe(50)
+  })
+
+  it('一台還是上一版（里程碑的帳沒帶專案 id、跨夜日程用 link）：跟新版記的同一件事對得起來，只算一次', () => {
+    const projects = [{ id: 'p1', name: 'p', milestones: [{ id: 'm1', title: 'm', done: true }] }]
+    const events = [
+      { id: 'e1', title: '夜', date: D, start: '23:00', end: '23:59', link: 'L1' },
+      { id: 'e2', title: '夜', date: '2026-11-23', start: '00:00', end: '01:00', link: 'L1' },
+    ]
+    const at = (xp, grants, updatedAt) => S({ updatedAt, projects, events, grants, player: { ...S().player, xp, stats: { tasksDone: 5, milestonesDone: xp > 100 ? 1 : 0 } } })
+    const M = { xp: 25, 's:milestonesDone': 1 }
+    const E = { xp: 10 }
+    const base = at(100, {}, 1)
+    const old = at(135, { 'm:m1': live(200, M), 'e:L1': live(201, E) }, 2)
+    const neu = at(135, { 'm:p1:m1': live(300, M), 'e:e1': live(301, E) }, 3)
+    const r = merge3(base, old, neu).state
+    expect([r.player.xp, r.player.stats.milestonesDone]).toEqual([135, 1])
+  })
+
+  it('上一版沒有這本帳的存檔第一次讀進來：照它記的 xpGot、pomoGot 補一本帳（之後跟還沒更新的那台合也對得起來）', () => {
+    const raw = { tasks: [{ id: 't1', title: '舊的', date: D, done: true, rewarded: true, xpGot: 15, doneAt: Date.parse(`${D}T10:00:00`) }], pomoGot: { s1: { xp: 10, m: 25, d: D } }, player: {} }
+    const g = migrate(raw).grants
+    expect(g['t:t1'].d).toMatchObject({ xp: 15, 's:tasksDone': 1 })
+    expect(g['f:s1'].d).toMatchObject({ 's:focusMinutes': 25, 's:pomodoros': 1 })
+    // 已經有帳的照帳
+    expect(migrate({ ...raw, grants: {} }).grants).toEqual({})
   })
 
   it('お守り兩台各買了最後一個：只留上限那幾個，多扣的金平糖還回去', () => {

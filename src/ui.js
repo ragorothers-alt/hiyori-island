@@ -1380,18 +1380,29 @@ export class UI {
     s.selectDate(r.date)
     this.setTab('records')
     // 捲到找到的那一則、焦點也跟過去（不會回到打開找找看之前按的那一格）。紀錄頁慢一點才畫好的話多等一下（最多 3 秒）
+    // 面板剛展開（手機上還是 inert）時 focus() 會悄悄沒作用：焦點真的到了那一則才停，沒到就再等一下（使用者自己點了別的就不搶）
     const id = r.item?.id
     const until = performance.now() + 3000
+    let was = null
+    let shown = false
     const go = () => {
+      const a = document.activeElement
+      if (shown && a && a !== document.body && a !== was) return
+      was ??= a
       const row = id ? [...document.querySelectorAll('#lifeRoot .life-item')].find((x) => x.dataset.id === id) : null
-      if (!row && id && performance.now() < until && this.tab === 'records') return void setTimeout(go, 50)
-      ;(row || $('#lifeRoot'))?.scrollIntoView({ block: row ? 'center' : 'start', behavior: scrollMode() })
+      const later = () => performance.now() < until && this.tab === 'records' && void setTimeout(go, 50)
+      if (!row && id) return void later()
+      if (!shown) (row || $('#lifeRoot'))?.scrollIntoView({ block: row ? 'center' : 'start', behavior: scrollMode() })
       const btn = row?.querySelector('.li-main')
       if (!btn) return
-      row.classList.add('fresh')
+      if (!shown) row.classList.add('fresh')
+      shown = true
       btn.focus({ preventScroll: true })
+      if (document.activeElement !== btn) later()
     }
+    // 等畫面畫好再找；畫面沒在重畫時（背景、無頭瀏覽器）requestAnimationFrame 可能一直不來：另外排一次（重複叫也只會聚焦一次）
     requestAnimationFrame(() => requestAnimationFrame(go))
+    setTimeout(go, 150)
   }
   openCapture(mode) {
     // 別的對話框開著（回顧、編輯、今日摘要…）就不疊上去

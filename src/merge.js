@@ -7,10 +7,8 @@
 // 一邊刪掉、另一邊改過的留著（不丟資料，也算一處兩邊都改了）。沒有 id 的清單（星期幾、紀錄過的日子）當成集合：兩邊加的都留、刪的刪掉。
 // 一起變的幾個欄位（日程的日期和時段、任務的日期和時段）一起看：兩邊都動了就整組用比較晚改的那一邊，不會拼出 14:00 開始、12:00 結束。
 // 合不了的回傳 null（交給使用者選邊）：沒有 base、其中一邊整份換過（匯入、還原備份、重置：tallyGen 不一樣）
-import { addCode, codePath } from './store/grants.js'
-import { BOND_POINTS } from './data/bond.js'
+import { addCode, codePath, grantEffect, legacyGrants, normGrants } from './store/grants.js'
 import { CHARM } from './theme.js'
-import { dateStr } from './store/util.js'
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -264,10 +262,11 @@ class Merger {
 }
 
 // 給獎勵的帳：同一件事（同一個 key）兩台各自給了、或各自收回了，「兩邊加的都算」的那些數字就多算了一份。
-// 每一筆照 base、這台、雲端三邊實際算進去的（收回了的算 0）比：兩邊往同一個方向變了（都給了、都收回了），扣回比較少的那一份。
-// 合出來的那一筆帳記著合好之後實際算進去的多少（之後收回時扣得剛好；都收回了就是收回了）。
-// 「那天的紀錄」、專案那天的專注是記在哪一天的：兩邊是不同天做的，留用的那一筆那一天的照算，另一天的扣回去
-const live = (g) => (isObj(g) && !g.off && isObj(g.d) ? g.d : {})
+// 每一筆分兩部分比（grantEffect：收回了的只算扣不到的那一份）：
+//   base 那一次給的（同一個 at）：兩台都收回了（或都又加了），扣回比較少的那一份——收回只算一次
+//   base 之後才給的（base 沒有、或收回之後又給了新的一次）：兩台都給了是同一件事，扣回比較少的那一份
+// 合出來的那一筆帳記著合好之後實際還算在數字裡的（之後收回時扣得剛好）；base 那一次有人收回、又沒有新給的，就是收回了。
+// 「那天的紀錄」、專案那天的專注是記在哪一天的：兩邊新給的是不同天，留用的那一筆那一天的照算，另一天的扣回去
 const sameJSON = (x, y) => x !== undefined && y !== undefined && JSON.stringify(x) === JSON.stringify(y)
 const DAILY = /^(d|pf):/
 function dedupeGrants(base, mine, theirs, out) {
@@ -281,67 +280,83 @@ function dedupeGrants(base, mine, theirs, out) {
     const o = gb[k]
     // 只有一邊動過這一筆（另一邊跟 base 一樣）：合出來的就是動過的那一邊，數字也只算了一次
     if (!isObj(a) || !isObj(b) || !DATE_RE.test(a.day) || !DATE_RE.test(b.day) || sameJSON(o, a) || sameJSON(o, b)) continue
-    const [kp, dp] = sameJSON(out.grants[k], b) ? [b, a] : [a, b]
-    const eo = live(o)
-    const ek = live(kp)
-    const ed = live(dp)
-    const apart = kp.day !== dp.day
-    const d = {}
-    for (const code of new Set([...Object.keys(eo), ...Object.keys(ek), ...Object.keys(ed)])) {
-      const o0 = typeof eo[code] === 'number' ? eo[code] : 0
-      const x = (typeof ek[code] === 'number' ? ek[code] : 0) - o0
-      const y = (typeof ed[code] === 'number' ? ed[code] : 0) - o0
-      const daily = DAILY.test(code) && apart
-      let net = o0 + x + (daily ? 0 : y)
-      if (x && y && Math.sign(x) === Math.sign(y) && numRule(codePath(code, dp.day)) === 'sum') {
-        const cut = Math.sign(y) * Math.min(Math.abs(x), Math.abs(y))
-        addCode(out, code, dp.day, -cut)
-        if (!daily) net -= cut
+    const ea = grantEffect(a)
+    const eb = grantEffect(b)
+    let eo = grantEffect(o)
+    let oday = o?.day
+    // base 太舊、沒有這一筆，但兩邊帳上是同一次給的（同一個 at：是同步過來的那一筆）：當成兩邊原本都有它，
+    // 只是 base 少了它（合出來的數字裡兩邊各算了一次）。一邊收回了、另一邊沒動，就是收回了
+    const virtual = !eo && ea.batch != null && ea.batch === eb.batch
+    if (virtual) {
+      const orig = (g) => (g.off ? (isObj(g.was) ? g.was : {}) : g.d)
+      const d0 = {}
+      for (const c of new Set([...Object.keys(orig(a)), ...Object.keys(orig(b))])) {
+        const x = typeof orig(a)[c] === 'number' ? orig(a)[c] : 0
+        const y = typeof orig(b)[c] === 'number' ? orig(b)[c] : 0
+        const v = Math.abs(x) <= Math.abs(y) ? x : y
+        if (v) d0[c] = v
       }
-      if (net) d[code] = net
+      eo = { batch: ea.batch, d: d0 }
+      oday = a.day
+    }
+    const t0 = eo ? eo.batch : undefined
+    const old = (e) => (e.batch === t0 ? e.d : {})
+    const neu = (e) => (eo && e.batch === t0 ? {} : e.d)
+    // 新給的那一次：留用合出來挑的那一邊的日子（另一邊那天的扣回去）
+    const [kp, dp, nk, nd] = sameJSON(out.grants[k], b) ? [b, a, neu(eb), neu(ea)] : [a, b, neu(ea), neu(eb)]
+    const apart = kp.day !== dp.day
+    const oa = eo ? old(ea) : {}
+    const ob = eo ? old(eb) : {}
+    const oldNet = {}
+    const newNet = {}
+    const cut = (x, y) => (x && y && Math.sign(x) === Math.sign(y) ? Math.sign(y) * Math.min(Math.abs(x), Math.abs(y)) : 0)
+    const n = (v, c) => (typeof v?.[c] === 'number' ? v[c] : 0)
+    for (const c of new Set([...Object.keys(eo?.d || {}), ...Object.keys(oa), ...Object.keys(ob), ...Object.keys(nk), ...Object.keys(nd)])) {
+      // base 那一次
+      if (eo) {
+        const o0 = n(eo.d, c)
+        const x = n(oa, c) - o0
+        const y = n(ob, c) - o0
+        let v = o0 + x + y
+        const sum = numRule(codePath(c, oday)) === 'sum'
+        const z = sum ? cut(x, y) : 0
+        // base 少了它的話，合出來的數字是 base（沒有它）＋兩邊各自的：還要再扣一份它原本的
+        const fix = z + (virtual && sum ? o0 : 0)
+        if (fix) addCode(out, c, oday, -fix)
+        v -= z
+        if (v) oldNet[c] = v
+      }
+      // base 之後新給的
+      const x = n(nk, c)
+      const y = n(nd, c)
+      const daily = DAILY.test(c) && apart
+      let v = x + (daily ? 0 : y)
+      const z = numRule(codePath(c, dp.day)) === 'sum' ? cut(x, y) : 0
+      if (z) {
+        addCode(out, c, dp.day, -z)
+        if (!daily) v -= z
+      }
+      if (v) newNet[c] = v
     }
     const at = Math.max(Number(a.at) || 0, Number(b.at) || 0)
-    out.grants[k] = Object.keys(d).length ? { at, day: kp.day, d } : { at, day: kp.day, d: {}, off: 1 }
-  }
-}
-// 還沒有這本帳的舊版寫的那一份（另一台還沒更新）：照它記的（任務完成時拿了幾點經驗 xpGot、那一輪專注 pomoGot）補一本帳，
-// 跟新版記的同一件事對得起來（兩台各用新、舊版勾了同一件任務也只算一次）
-function legacyGrants(s) {
-  const out = {}
-  for (const t of Array.isArray(s.tasks) ? s.tasks : []) {
-    if (!isObj(t) || !t.rewarded || typeof t.id !== 'string' || !Number.isFinite(t.xpGot) || !Number.isFinite(t.doneAt)) continue
-    const at = new Date(t.doneAt)
-    const h = at.getHours()
-    const xp = t.xpGot
-    const d = { xp, c: Math.max(1, Math.round(xp / 5)), 'd:xp': xp, 's:tasksDone': 1, 'd:tasks': 1 }
-    if (t.priority === 3) Object.assign(d, { 's:highTasksDone': 1, 'd:high': 1 })
-    if (t.star) Object.assign(d, { 's:starsDone': 1, 'd:stars': 1 })
-    if (h < 9) d['s:earlyTasks'] = 1
-    if (h >= 22) d['s:nightTasks'] = 1
-    if (h < 12) d['d:early'] = 1
-    if (t.routineId) d['d:routines'] = 1
-    if (typeof t.flower === 'string' && t.flower) d[`x:${t.flower}`] = 1
-    out[`t:${t.id}`] = { at: t.doneAt, day: dateStr(at), d }
-  }
-  for (const [sid, g] of Object.entries(isObj(s.pomoGot) ? s.pomoGot : {})) {
-    if (!isObj(g) || !DATE_RE.test(g.d)) continue
-    const m = Number(g.m) || 0
-    const xp = Number(g.xp) || 0
-    const d = { 's:focusMinutes': m, 'd:focus': m }
-    if (xp) Object.assign(d, { xp, c: Math.max(1, Math.round(xp / 5)), 'd:xp': xp })
-    if (typeof g.s === 'string' && g.s) d[`d:${g.s}`] = m
-    if (!g.x) Object.assign(d, { 's:pomodoros': 1, 'd:pomodoros': 1, b: BOND_POINTS.pomodoro })
-    if (typeof g.t === 'string' && g.t) {
-      d[`ts:${g.t}`] = Math.round(m)
-      if (!g.x) d[`tp:${g.t}`] = 1
+    const fresh = Object.keys(newNet).length > 0
+    if (!fresh && eo && (a.off || b.off)) {
+      // base 那一次有人收回了、也沒有新給的：收回了（扣不到的那一份照實記著）
+      const was = { ...eo.d }
+      const r = {}
+      for (const c of Object.keys(was)) r[c] = was[c] - (oldNet[c] || 0)
+      out.grants[k] = { at, day: oday, d: {}, off: 1, of: t0, was, r }
+      continue
     }
-    if (typeof g.p === 'string' && g.p && m) d[`pf:${g.p}`] = Math.round(m)
-    for (const c of Object.keys(d)) if (!d[c]) delete d[c]
-    out[`f:${sid}`] = { at: Number(g.at) || Date.parse(`${g.d}T12:00:00`), day: g.d, d }
+    const d = { ...oldNet }
+    for (const [c, v] of Object.entries(newNet)) d[c] = (d[c] || 0) + v
+    const batch = fresh ? (Object.keys(nk).length ? (kp.off ? kp.of : kp.at) : dp.off ? dp.of : dp.at) : t0
+    const day = fresh ? (Object.keys(nk).length ? kp.day : dp.day) : oday || kp.day
+    out.grants[k] = Object.keys(d).length ? { at: Number.isFinite(batch) ? batch : at, day, d } : { at, day, d: {}, off: 1 }
   }
-  return out
 }
-const withLedger = (s) => (isObj(s.grants) ? s : { ...s, grants: legacyGrants(s) })
+// 還沒有這本帳的舊版寫的那一份照它記的補一本（legacyGrants）；上一版的代號換成現在的（normGrants）
+const withLedger = (s) => ({ ...s, grants: normGrants(isObj(s.grants) ? s.grants : legacyGrants(s), s) })
 
 export function merge3(base, mine, theirs) {
   if (!isObj(base) || !isObj(mine) || !isObj(theirs)) return null

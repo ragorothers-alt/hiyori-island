@@ -469,7 +469,7 @@ export class ScheduleView {
     const ed = this.editing
     const title = form.title.value.trim()
     const date = form.date.value || this.store.selectedDate
-    const note = form.note.value.trim().slice(0, 200)
+    const note = form.note.value.trim().slice(0, PL.taskNote)
     if (ed.allDay) return { title, color: ed.color, date, note, allDay: true, endDate: form.until.value }
     const start = form.start.value || '09:00'
     let end = form.end.value || '10:00'

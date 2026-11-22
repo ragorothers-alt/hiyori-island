@@ -1084,6 +1084,28 @@ describe('存檔讀不進來、存不進去', () => {
     expect(restoreBackup(store, 0)).toBe(true)
   })
 
+  it('還原備份時，還原前的小島留不進備份：不還原（現在的小島、備份清單都不動）', () => {
+    store.addTask({ title: '最新的' })
+    store.saveNow()
+    keepBackup({ ...JSON.parse(store.exportJSON()), tasks: [{ id: 'old', title: '舊的' }] }, 'cloud', 1)
+    const before = localStorage.getItem('hiyori-backup')
+    const real = localStorage.setItem.bind(localStorage)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k, v) => {
+      if (k === 'hiyori-backup' && v.includes('"from":"restore"')) throw new Error('QuotaExceededError')
+      real(k, v)
+    })
+    expect(() => restoreBackup(store, 0)).toThrow('沒辦法先備份')
+    spy.mockRestore()
+    expect(titlesOf(store.state)).toContain('最新的')
+    expect(titlesOf(JSON.parse(localStorage.getItem('hiyori-daily-v1')))).toContain('最新的')
+    expect(localStorage.getItem('hiyori-backup')).toBe(before)
+    // 留得下：還原、還原前的那一份在備份最前面、還原的那份拿掉了
+    expect(restoreBackup(store, 0)).toBe(true)
+    expect(titlesOf(store.state)).toContain('舊的')
+    expect(readBackups().map((b) => b.from)).toEqual(['restore', 'import'])
+    expect(titlesOf(readBackup(0).state)).toContain('最新的')
+  })
+
   it('已經有三份備份時匯入、主存檔寫不進去：三份備份原樣留著（最舊的那份不會被剛留的那份擠掉）', () => {
     store.saveNow()
     for (const n of [1, 2, 3]) keepBackup({ ...JSON.parse(store.exportJSON()), tasks: [{ id: `b${n}`, title: `備份 ${n}` }] }, 'cloud', n)

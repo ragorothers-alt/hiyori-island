@@ -56,6 +56,7 @@ export const RESCUE_KEY = 'hiyori-rescue'
 export const NEWER_MSG = '這份資料是新版 App 存的，重新整理頁面更新到最新版再試一次'
 export const NEWER_TAB_MSG = '另一個分頁已經是新版 App，這邊先不換資料：重新整理頁面之後再試一次'
 export const NO_SAVE_MSG = '瀏覽器的儲存空間不夠，存不進去，所以先不換：現在的小島沒有動。請先清出一些空間再試一次'
+export const NO_ROOM_MSG = '瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份'
 // 到點自動延長時先留著的慶祝（store.quietly）：這個分頁重新整理也放得出來
 const HELD_KEY = 'hiyori-held-cheers'
 // 寫一次存檔超過這麼多毫秒，就改成停手後再寫（SAVE_WAIT）
@@ -93,8 +94,9 @@ export function putBackups(raw) {
 }
 // from：'local'（這台）、'file'、'cloud'、'tab'（另一個分頁）、'import'（匯入前）、'reset'（重置前）、'restore'（還原前）。
 // 空間不夠時先少留幾份舊的；連這一份都存不進去才回傳 false
-export function keepBackup(state, from, at) {
-  let list = [{ from, at, savedAt: Date.now(), state }, ...readBackups()].slice(0, BACKUPS)
+// without：同時從清單拿掉第幾份（還原那一份時：還原前的小島留成備份、還原的那份拿掉，一次寫好）
+export function keepBackup(state, from, at, { without = -1 } = {}) {
+  let list = [{ from, at, savedAt: Date.now(), state }, ...readBackups().filter((_, i) => i !== without)].slice(0, BACKUPS)
   for (; list.length; list = list.slice(0, -1)) {
     try {
       localStorage.setItem(BACKUP_KEY, JSON.stringify(list))
@@ -1419,12 +1421,15 @@ export class Store {
     if (newerData(obj)) throw new Error(NEWER_MSG)
     if (this.newerApp) throw new Error(NEWER_TAB_MSG)
     const backups = snapBackups()
-    if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error('瀏覽器空間不夠，沒辦法先備份現在的小島。請先「匯出資料」存一份')
+    if (!keepBackup(this.state, 'import', this.state.updatedAt)) throw new Error(NO_ROOM_MSG)
     // 存匯入的那一份時，剛留的備份不能被擠掉（擠不下就是存不進去：換回原本那一份、拿掉剛留的備份）
     this.keepBackups = 1
     let ok = false
     try {
       ok = this.replaceOrUndo(obj)
+    } catch (e) {
+      putBackups(backups)
+      throw e
     } finally {
       this.keepBackups = 0
     }
@@ -1439,11 +1444,27 @@ export class Store {
   replaceOrUndo(obj) {
     const cur = this.state
     const failed = this.loadFailed
-    if (this.replaceState(obj)) return true
-    this.replaceState(cur, cur.updatedAt, { rev: cur.rev, peer: true })
-    // 原本是「存檔讀不進來」的範例島：換回去後也一樣不能蓋掉那份讀不懂的存檔
-    this.loadFailed = failed
+    let ok = false
+    try {
+      ok = this.replaceState(obj)
+    } catch (e) {
+      // 換的途中出錯（讀不懂、算不下去）：一樣換回原本那一份再說
+      if (this.state !== cur) this.revertTo(cur, failed, { soft: false })
+      throw e
+    }
+    if (ok) return true
+    this.revertTo(cur, failed, { soft: false })
     return false
+  }
+  // 換回原本那一份（剛換上的那一份存不進去、或換到一半出錯）：存檔裡也還是它，不寫、不算改了資料。
+  // 原本是「存檔讀不進來」的範例島的話，換回去後也一樣不能拿去蓋掉雲端、那份讀不懂的存檔（loadFailed 照舊）
+  revertTo(st, failed = this.loadFailed, { soft = true } = {}) {
+    try {
+      this.replaceState(st, st.updatedAt, { soft, rev: st.rev, peer: true })
+    } catch {
+      this.state = st
+    }
+    this.loadFailed = failed
   }
   // 整份替換（匯入、同步拉回）：先完整清洗成功，才替換現有狀態
   // 同步拉回時帶著雲端那一版的 updatedAt 和 rev；匯入、還原備份則算一次新的變更
@@ -1491,12 +1512,10 @@ export class Store {
       this._applyCharms()
       this._quitMilestones(this._pending)
     }
+    const settled = []
     if (settle && !peer) {
-      const fx = this._settleFx()
-      if (fx.length) {
-        this._collect(fx)
-        this._pending.push(...fx)
-      }
+      settled.push(...this._settleFx())
+      if (settled.length) this._collect(settled)
     }
     let saved = true
     if (peer) {
@@ -1505,6 +1524,8 @@ export class Store {
       // 不排隊：另一個分頁緊接著記的那一則才讀得到
       if (raised) this.saveNow()
     } else saved = this.saveNow()
+    // 合起來才湊齊的落成、全清：真的存進去了才說（存不進去會換回原本那一份，下次合好再說一次）
+    if (saved) this._pending.push(...settled)
     this._readyQuests = new Set(this.quests().filter((q) => q.ready).map((q) => q.id))
     this._weeklyReady = this.weekly()?.ready
     if (!peer) this.emit('dirty')

@@ -544,6 +544,21 @@ describe('壞掉的資料、store 順便動到的、同一批的先後', () => {
     expect(store.state.grants[`p:${p.id}`].off).toBeUndefined()
   })
 
+  it('同上，刪掉之後重新整理（存檔讀回來）才撤銷：以前領的落成獎勵一樣不會被收走', () => {
+    const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
+    store.toggleMilestone(p.id, p.milestones[0].id)
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    store.toggleMilestone(p.id, p.milestones[1].id)
+    const before = { xp: store.player.xp, done: store.stats.projectsDone }
+    const { entry } = chat((o, w) => o.drop.push(w.projects[0].milestones[1].id))
+    store.flushSave()
+    store = new Store()
+    expect(undo(entry)).toBe(1)
+    const q = store.state.projects.find((x) => x.id === p.id)
+    expect([q.completedAt, q.paid]).toEqual([null, true])
+    expect([store.player.xp, store.stats.projectsDone]).toEqual([before.xp, before.done])
+  })
+
   it('落成的帳已經清掉了（很多天前）才撤銷：跟重開一樣，獎勵留著、之後再落成不再給一次', () => {
     const p = store.addProject({ name: '專題', milestones: ['訪談', '初稿'] })
     store.toggleMilestone(p.id, p.milestones[0].id)

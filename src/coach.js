@@ -303,16 +303,17 @@ export function planRules(req) {
   }
   const titleOf = (i, date) => {
     const f = focus[i]
+    const label = f.displayLabel ?? f.label
     const k = count[i]++
     const left = exam && related(f) ? daysBetween(date, exam.date) : 0
     const work = f.tag !== 'study'
     // 截止日前一天的專案：收尾確認比下一個里程碑重要
-    if (f.milestone && left !== 1) return `${f.label}・${f.milestone}`
+    if (f.milestone && left !== 1) return `${label}・${f.milestone}`
     const list =
       left === 1 ? (work ? EXAM_PHASES.finalWork : EXAM_PHASES.final)
       : left >= 2 && left <= 3 ? (work ? EXAM_PHASES.mockWork : EXAM_PHASES.mock)
       : PHASES[f.tag] || PHASES.life
-    return `${f.label}・${list[(k + seed) % list.length]}`
+    return `${label}・${list[(k + seed) % list.length]}`
   }
 
   const out = []
@@ -341,7 +342,7 @@ export function planRules(req) {
       if (at != null) {
         const f = focus[i]
         const light = f.tag === 'study' ? EXAM_PHASES.light : EXAM_PHASES.lightWork
-        items.push({ i, title: `${f.label}・${light[seed % light.length]}`, label: f.label, tag: f.tag, dur: 15, at: toHHMM(at), priority: 2 })
+        items.push({ i, title: `${f.displayLabel ?? f.label}・${light[seed % light.length]}`, label: f.label, tag: f.tag, dur: 15, at: toHHMM(at), priority: 2 })
         notes.push(`「${exam.title}」當天只排 15 分鐘看重點`)
       }
     }
@@ -387,6 +388,12 @@ export function coachInput(req) {
 export function fitAI(req, out) {
   const buf = req.ctx.rhythm.buffer || 0
   const focus = new Map(req.focus.map((f) => [f.label, f]))
+  // Claude 可能在一句話裡提到好幾個項目，先把這次加的編號換回原名，再截字。
+  const numbered = req.focus.filter((f) => f.displayLabel != null)
+  const displayText = (text) => {
+    for (const f of numbered) text = text.replaceAll(f.label, () => f.displayLabel)
+    return text
+  }
   // 考試當天那 15 分鐘不算在想做的天數裡（planRules 也是）
   const maxDays = wantDays(req) + (req.exam && req.dates.includes(req.exam.date) ? 1 : 0)
   // 寫了總時數：加起來不超過它（切段時以 5 分鐘為單位，留一點進位的餘地）
@@ -414,15 +421,17 @@ export function fitAI(req, out) {
       sum += dur
       info.busy.push([at - buf, at + dur + buf])
       // 標題要以項目開頭：「數學・錯題訂正」
-      let title = String(it.title || '').replace(/\s+/g, ' ').trim().slice(0, 40)
-      if (!title.startsWith(f.label)) title = title ? `${f.label}・${title}`.slice(0, 50) : f.label
+      const label = f.displayLabel ?? f.label
+      const text = displayText(String(it.title || '')).replace(/\s+/g, ' ').trim()
+      let title = text.slice(0, 40)
+      if (!text.startsWith(label)) title = (title ? `${label}・${title}` : label).slice(0, 50)
       items.push({ title, label: f.label, tag: f.tag, dur, at: toHHMM(at), priority: it.important ? 3 : 2 })
     }
     if (items.length) days.push({ date: day.date, items: items.sort((a, b) => a.at.localeCompare(b.at)) })
   }
   const notes = (Array.isArray(out?.notes) ? out.notes : [])
     .filter((s) => typeof s === 'string' && s.trim())
-    .map((s) => s.trim().slice(0, 60))
+    .map((s) => displayText(s).trim().slice(0, 60))
     .slice(0, 3)
   const totalMin = days.reduce((a, d) => a + d.items.reduce((x, it) => x + it.dur, 0), 0)
   return { days, unplaced, totalMin, picked: days.length, notes }

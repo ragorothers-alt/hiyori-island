@@ -250,7 +250,8 @@ export const coachMethods = {
     if (!fx.length) return { id: null, count: 0, skipped }
     const c = this.state.coach
     c.plans = [...c.plans, { id, createdAt: Date.now(), title: str(title, 40), from: dates[0], to: dates[dates.length - 1], count: fx.length }].slice(-10)
-    if (answers) c.last = { focus: answers.focus || [], slots: answers.slots || [], days: answers.days || 5, len: answers.len || 50 }
+    // keys：選了哪幾項（主攻項目的 key）：兩個專案同名時，下次問卷也選得回是哪一個
+    if (answers) c.last = { focus: answers.focus || [], slots: answers.slots || [], days: answers.days || 5, len: answers.len || 50, ...(Array.isArray(answers.keys) ? { keys: answers.keys.filter((k) => typeof k === 'string').slice(0, 50) } : {}) }
     for (const it of custom) {
       const label = str(it.label, 16).trim()
       if (!label) continue

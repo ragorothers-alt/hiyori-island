@@ -281,6 +281,64 @@ describe('雲端資料夾同步', () => {
     expect(titles(b.store)).not.toContain('真正的資料')
   })
 
+  it('同上，但拿回來的那一份存不進去：換回範例島（還是「讀不進來」的狀態），清出空間再同步也不會把範例島推上去', async () => {
+    const a = device()
+    await a.run((s) => s.addTask({ title: '真正的資料' }))
+    await link(a, file)
+    const saved = file.content
+    a.mem.setItem('hiyori-daily-v1', '{壞掉的')
+    later()
+    const b = reopen(a)
+    await b.run((s) => s.addTask({ title: '範例島上加的' }))
+    let full = true
+    const real = b.mem.setItem.bind(b.mem)
+    b.mem.setItem = (k, v) => {
+      if (full && k === 'hiyori-daily-v1' && v.includes('真正的資料')) throw new Error('QuotaExceededError')
+      real(k, v)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await resume(b, file)
+    expect(b.sync.state).toBe('error')
+    expect(titles(b.store)).toContain('範例島上加的')
+    expect(b.store.loadFailed).toBeTruthy()
+    expect(file.content).toBe(saved)
+    full = false
+    later()
+    await b.run((_s, sync) => sync.sync())
+    warn.mockRestore()
+    expect(file.content).toBe(saved)
+    expect(titles(b.store)).toContain('真正的資料')
+    expect(b.store.loadFailed).toBeNull()
+  })
+
+  it('一般拉取（這台沒改過）存不進去：記憶體也還是這台的，清出空間再同步就拿得到', async () => {
+    const a = device()
+    const b = device()
+    await link(a, file)
+    later()
+    await link(b, file)
+    later()
+    await a.run(async (s, sync) => (s.addTask({ title: 'A 新加的' }), sync.sync()))
+    later()
+    let full = true
+    const real = b.mem.setItem.bind(b.mem)
+    b.mem.setItem = (k, v) => {
+      if (full && k === 'hiyori-daily-v1') throw new Error('QuotaExceededError')
+      real(k, v)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await b.run((_s, sync) => sync.sync())
+    expect(b.sync.state).toBe('error')
+    expect(titles(b.store)).not.toContain('A 新加的')
+    full = false
+    later()
+    await b.run((_s, sync) => sync.sync())
+    warn.mockRestore()
+    expect(b.sync.state).toBe('linked')
+    expect(titles(b.store)).toContain('A 新加的')
+    expect(titles(JSON.parse(b.mem.getItem('hiyori-daily-v1')))).toContain('A 新加的')
+  })
+
   it('寫出去之後這台存不進去：base 不往前推，重新打開會再拉一次，不會拿舊存檔蓋掉', async () => {
     const a = device()
     await link(a, file)
