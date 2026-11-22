@@ -159,10 +159,11 @@ export function normGrants(grants, state) {
     const m = /^m:([^:]+)$/.exec(k)
     const e = /^e:([^:]+)$/.exec(k)
     const nk = m && owner.get(m[1]) ? `m:${owner.get(m[1])}:${m[1]}` : e && heads.get(e[1]) && heads.get(e[1]).id !== e[1] ? `e:${heads.get(e[1]).id}` : null
-    if (!nk || nk in grants || !KEY_RE.test(nk)) continue
+    if (!nk || !KEY_RE.test(nk)) continue
     out ||= { ...grants }
     delete out[k]
-    out[nk] = g
+    // 新的代號也已經有了（上一版合併時兩種都留著）：是同一件事，留新的那一筆
+    if (!(nk in grants)) out[nk] = g
   }
   return out || grants
 }

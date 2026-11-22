@@ -323,7 +323,9 @@ function dedupeGrants(base, mine, theirs, out) {
         const o0 = num(d0, c)
         const x = num(ko, c) - o0
         const y = num(dO, c) - o0
-        const v = o0 + x + y - cutOf(x, y)
+        // base 太舊、兩邊各自記了同一次，其中一邊收回了：那一次就是不算了（另一邊記的同一次也一起；扣不到的那一份照實）
+        const off = virtual && (a.off || b.off)
+        const v = off ? Math.min(...[a, b].filter((g) => g.off).map((g) => num(grantEffect(g).d, c))) : o0 + x + y - cutOf(x, y)
         if (v) To[c] = v
         put(want, c, oday, v)
         if (eo) put(have, c, oday, o0 + x + y)
@@ -379,10 +381,25 @@ export function merge3(base, mine, theirs) {
   state.events = expandLinks(state.events)
   dedupeGrants(base, mine, theirs, state)
   // 專案「落成的獎勵給過了沒」（paid）照帳：一台收回、另一台又落成時，專案的欄位用了比較晚改的那一邊，跟實際算的對不上的話之後會再給一次
+  // 任務、日程、里程碑「給過獎勵了沒」（rewarded）也照帳：一台撤銷（放回去的是給獎勵之前的樣子）、另一台又做完了，
+  // 欄位用了比較晚改的那一邊的話，之後再勾會再給一次
+  const G = isObj(state.grants) ? state.grants : {}
+  const paidBy = (k) => isObj(G[k]) && !G[k].off
   for (const p of Array.isArray(state.projects) ? state.projects : []) {
-    const g = isObj(p) && isObj(state.grants) ? state.grants[`p:${p.id}`] : null
+    if (!isObj(p)) continue
+    const g = G[`p:${p.id}`]
     if (isObj(g)) p.paid = !g.off
+    for (const m of Array.isArray(p.milestones) ? p.milestones : []) if (isObj(m) && !m.rewarded && paidBy(`m:${p.id}:${m.id}`)) m.rewarded = true
   }
+  for (const t of Array.isArray(state.tasks) ? state.tasks : []) if (isObj(t) && !t.rewarded && paidBy(`t:${t.id}`)) t.rewarded = true
+  const heads = new Map()
+  for (const e of Array.isArray(state.events) ? state.events : []) {
+    if (!isObj(e)) continue
+    const k = e.link || e.id
+    const h = heads.get(k)
+    if (!h || `${e.date} ${e.start}` < `${h.date} ${h.start}`) heads.set(k, e)
+  }
+  for (const e of Array.isArray(state.events) ? state.events : []) if (isObj(e) && !e.rewarded && paidBy(`e:${heads.get(e.link || e.id)?.id}`)) e.rewarded = true
   // お守り兩台各買了最後一個：只留得下上限那幾個，多扣的金平糖還回去（お守り只有買的會多）
   const p = state.player
   if (isObj(p) && typeof p.charms === 'number' && p.charms > CHARM.max) {

@@ -1380,28 +1380,35 @@ export class UI {
     s.selectDate(r.date)
     this.setTab('records')
     // 捲到找到的那一則、焦點也跟過去（不會回到打開找找看之前按的那一格）。紀錄頁慢一點才畫好的話多等一下（最多 3 秒）
-    // 面板剛展開（手機上還是 inert）時 focus() 會悄悄沒作用：焦點真的到了那一則才停，沒到就再等一下（使用者自己點了別的就不搶）
+    // 面板剛展開（手機上還是 inert）時 focus() 會悄悄沒作用：焦點真的到了那一則才停，沒到就再等一下（最多 3 秒）。
+    // 聚焦好了一次就結束；這段時間使用者自己點了、按了鍵盤，也整個不做了（不搶走使用者的焦點）
     const id = r.item?.id
     const until = performance.now() + 3000
-    let was = null
+    let done = false
     let shown = false
+    const stop = () => {
+      done = true
+      removeEventListener('pointerdown', stop, true)
+      removeEventListener('keydown', stop, true)
+    }
+    addEventListener('pointerdown', stop, true)
+    addEventListener('keydown', stop, true)
+    setTimeout(stop, 3100)
     const go = () => {
-      // 焦點已經不在第一次看的那個地方：聚焦好了、或使用者自己點了別的，都不再動
-      const a = document.activeElement
-      if (was && a && a !== document.body && a !== was) return
-      was ??= a
+      if (done) return
       const row = id ? [...document.querySelectorAll('#lifeRoot .life-item')].find((x) => x.dataset.id === id) : null
-      const later = () => performance.now() < until && this.tab === 'records' && void setTimeout(go, 50)
+      const later = () => (performance.now() < until && this.tab === 'records' ? void setTimeout(go, 50) : stop())
       if (!row && id) return void later()
       if (!shown) (row || $('#lifeRoot'))?.scrollIntoView({ block: row ? 'center' : 'start', behavior: scrollMode() })
       const btn = row?.querySelector('.li-main')
-      if (!btn) return
+      if (!btn) return stop()
       if (!shown) row.classList.add('fresh')
       shown = true
       btn.focus({ preventScroll: true })
-      if (document.activeElement !== btn) later()
+      if (document.activeElement === btn) stop()
+      else later()
     }
-    // 等畫面畫好再找；畫面沒在重畫時（背景、無頭瀏覽器）requestAnimationFrame 可能一直不來：另外排一次（重複叫也只會聚焦一次）
+    // 等畫面畫好再找；畫面沒在重畫時（背景、無頭瀏覽器）requestAnimationFrame 可能一直不來：另外排一次（聚焦好了就不會再動）
     requestAnimationFrame(() => requestAnimationFrame(go))
     setTimeout(go, 150)
   }

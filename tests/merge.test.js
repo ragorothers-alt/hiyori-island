@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { merge3 } from '../src/merge.js'
 import { migrate } from '../src/store/migrate.js'
 import { XP } from '../src/theme.js'
-import { grantKey } from '../src/store/grants.js'
+import { grantKey, normGrants } from '../src/store/grants.js'
 import { dateStr } from '../src/store/util.js'
 import { Store } from '../src/store.js'
 import { FileSync, readBackups } from '../src/sync.js'
@@ -519,6 +519,38 @@ describe('給獎勵的帳（兩台做了同一件事只算一次）', () => {
     const r = merge3(base, again, undone).state
     expect([r.player.xp, r.player.stats.projectsDone]).toEqual([220, 1])
     expect(r.projects[0].paid).toBe(true)
+  })
+
+  it('base 太舊、兩台各自記了同一輪（9、18 分鐘），記得少的那台按了「不算這段」：整輪都不算', () => {
+    const base = withStats({ xp: 100, stats: { focusMinutes: 50 } }, {}, 1)
+    const a = withStats({ xp: 100, stats: { focusMinutes: 50 } }, { 'f:s': tomb(200, 1, { 's:focusMinutes': 9, xp: 5 }) }, 2)
+    const b = withStats({ xp: 110, stats: { focusMinutes: 68 } }, { 'f:s': live(150, { 's:focusMinutes': 18, xp: 10 }) }, 3)
+    for (const [m, t] of [[a, b], [b, a]]) {
+      const r = merge3(base, m, t).state
+      expect([r.player.stats.focusMinutes, r.player.xp]).toEqual([50, 100])
+      expect(r.grants['f:s'].off).toBe(1)
+    }
+  })
+
+  it('合好之後任務、里程碑、日程「給過獎勵了」照帳（比較晚改的那邊欄位是給獎勵之前的樣子，之後再勾也不會再給）', () => {
+    const T = { xp: 15, 's:tasksDone': 1 }
+    const task = (rewarded) => [{ id: 't1', title: 't', date: D, done: rewarded, rewarded }]
+    const at = (xp, tasks, grants, updatedAt) => S({ updatedAt, tasks, grants, player: { ...S().player, xp, stats: { tasksDone: 5 + (xp > 100) } } })
+    const base = at(115, task(true), { 't:t1': live(100, T) }, 1)
+    // 這台撤銷之後又做完了（第 2 次）；比較晚改的那台撤銷了（欄位回到給獎勵之前的樣子）
+    const did = at(115, task(true), { 't:t1': live(300, T, 2) }, 2)
+    const later = at(100, task(false), { 't:t1': tomb(200, 1, T) }, 3)
+    const r = merge3(base, did, later).state
+    expect([r.player.xp, r.tasks[0].rewarded]).toEqual([115, true])
+  })
+
+  it('上一版合併時新舊兩種代號都留著了：讀進來時合成一筆（同一件事不會被扣兩次）', () => {
+    const events = [
+      { id: 'e1', title: '夜', date: D, start: '23:00', end: '23:59', link: 'L1' },
+      { id: 'e2', title: '夜', date: '2026-11-23', start: '00:00', end: '01:00', link: 'L1' },
+    ]
+    const g = normGrants({ 'e:L1': live(1, { xp: 10 }), 'e:e1': live(2, { xp: 10 }), 'm:m1': live(3, { xp: 25 }) }, { events, projects: [{ id: 'p1', milestones: [{ id: 'm1' }] }] })
+    expect(Object.keys(g).sort()).toEqual(['e:e1', 'm:p1:m1'])
   })
 
   it('上一版沒有這本帳的存檔第一次讀進來：照它記的 xpGot、pomoGot 補一本帳（之後跟還沒更新的那台合也對得起來）', () => {

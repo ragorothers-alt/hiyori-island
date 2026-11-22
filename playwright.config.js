@@ -11,7 +11,9 @@ export default defineConfig({
   // 小島用軟體算圖（沒有顯示卡），好幾個同時建會互相拖慢：同時最多跑 3 個。
   // CI 的機器只有 2 核心，軟體算圖會吃滿，連隔壁測試的開機都會拖到逾時：一次跑一個
   workers: process.env.CI ? 1 : 3,
-  retries: process.env.CI ? 1 : 0,
+  // 本機也重試一次：同一台電腦上常常同時在跑別的（另一份審查的瀏覽器、影片算圖），忙的時候偶爾有一兩個測試逾時。
+  // 重試過的報告上會標 flaky（還是看得到），連兩次都沒過的才是真的壞掉
+  retries: 1,
   reporter: process.env.CI ? [['list'], ['github']] : 'list',
   outputDir: 'e2e/.out/results',
   use: {
