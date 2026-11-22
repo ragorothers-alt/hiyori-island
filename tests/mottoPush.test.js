@@ -142,6 +142,19 @@ describe('警語的推播：頁面什麼時候交給伺服器、什麼時候取�
     await log([{ got: NOW + 60 * MIN, at: NOW + 60 * MIN }, { got: NOW - 5 * MIN, at: NOW + 90 * MIN }])
     expect(await p.shown()).toEqual([{ id: `${NOW + 60 * MIN}:${NOW + 60 * MIN}`, at: NOW + 60 * MIN }, { id: `${NOW - 5 * MIN}:${NOW + 90 * MIN}`, at: NOW + 90 * MIN }])
   })
+  it('日程、任務的提醒跟警語排在同一串（remind: true）：離開頁面時一起交給伺服器；Service Worker 顯示過的回到頁面時讀得到', async () => {
+    const p = await boot()
+    const remind = { at: NOW + 20 * MIN, key: 'e1@09:30', date: '2026-11-10', title: 'ひより · 會', body: '10 分鐘後開始（09:30）', tag: 'e1', remind: true }
+    p.sync([...items(15), remind, ...items(30)].sort((a, b) => a.at - b.at), true, now)
+    await flush()
+    await flush()
+    expect(mottoCalls().at(-1).body.after).toEqual([15 * MIN, 20 * MIN, 30 * MIN])
+    expect((await file(MOTTO_FILE)).find((x) => x.remind)).toEqual(remind)
+    expect(await p.remindShown()).toEqual([])
+    await (await caches.open(PLAN_CACHE)).put(SCOPE + '__remind-shown', new Response(JSON.stringify([{ key: 'e1@09:30', date: '2026-11-10', at: remind.at }, { key: 3 }, null])))
+    expect(await p.remindShown()).toEqual([{ key: 'e1@09:30', date: '2026-11-10' }])
+  })
+
   it('時鐘被往回調了（念到的那一則在十分鐘以後）：念到哪改回現在（快取裡的也照寫），頁面又念得到；推播早幾秒到的不算', async () => {
     const p = await boot()
     expect(p.claim(NOW + 120 * MIN)).toBe(true)

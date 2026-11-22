@@ -23,6 +23,10 @@ const FUJI_LOG = '__fuji-log'
 const ACT_FILE = '__act'
 // 到點晚了這麼久的警語就不顯示了（src/mottos.js 的 MOTTO_LATE，兩邊要一樣）
 const MOTTO_LATE = 10 * 60000
+// 日程、排定的任務、就寢的提醒（src/remindPlan.js 排的，跟警語排在同一串，remind: true）：顯示過的 [{ key, date, at }]，
+// 頁面回來時讀（src/push.js 的 remindShown），記成提醒過了。晚了這麼久就不顯示（跟頁面一樣：開始後 15 分鐘內還補）
+const REMIND_SHOWN = '__remind-shown'
+const REMIND_LATE = 15 * 60000
 // 計時器到點多久以內的字還對得上（推播最晚 10 分鐘後送到）
 const TIMER_LATE = 15 * 60000
 // 推播送到時問頁面「正看著 App 嗎」，等它回答：問題的 id → 收到回答時叫的函式
@@ -37,6 +41,15 @@ const isHome = (url) => {
   const scope = new URL(self.registration.scope)
   const u = new URL(url)
   return u.origin === scope.origin && (u.pathname === scope.pathname || u.pathname === `${scope.pathname}index.html`)
+}
+// 是這一版的首頁嗎：HTML、有入口的 JS，入口的 JS／CSS 都是這一版建置出來的檔案（BUILD；開發時沒有建置清單就只看前兩個）
+function isBuildHome(res, html) {
+  if (!/text\/html/i.test(res.headers.get('Content-Type') || '')) return false
+  const assets = entryAssets(html)
+  if (!assets.some((a) => /\.js(?:$|\?)/.test(a))) return false
+  if (!BUILD.length) return true
+  const built = new Set(BUILD.map((f) => new URL(f, self.registration.scope).href))
+  return assets.every((a) => built.has(new URL(a, self.registration.scope).href.replace(/[?#].*$/, '')))
 }
 async function keepHome(req, res) {
   if (!isHome(req.url) || !/text\/html/i.test(res.headers.get('Content-Type') || '')) return
@@ -57,8 +70,8 @@ self.addEventListener('install', (event) => {
         const res = await fetch('./', { cache: 'no-store' })
         if (!res.ok) throw new Error(`首頁抓不到（${res.status}）`)
         const html = await res.clone().text()
-        // 伺服器回的是維護頁、別的頁面（不是 HTML、沒有入口的 JS）：不是這一版的首頁，不裝
-        if (!/text\/html/i.test(res.headers.get('Content-Type') || '') || !entryAssets(html).some((a) => /\.js(?:$|\?)/.test(a))) throw new Error('首頁不是這一版的 App')
+        // 伺服器回的是維護頁、別的頁面（不是 HTML、沒有入口的 JS、入口不是這一版建置出來的檔案）：不是這一版的首頁，不裝
+        if (!isBuildHome(res, html)) throw new Error('首頁不是這一版的 App')
         await cache.put('./', res.clone())
         await cache.put('./index.html', res)
         // 打包後帶 hash 的入口 JS／CSS 一起快取，第一次安裝後就能離線
@@ -261,6 +274,9 @@ async function showPush() {
   let timer = null
   // 警語和ふじ的那一則（跟警語排在同一串，fuji: true）各挑各的：推播晚到時其中一種不會把另一種吞掉
   let fresh = []
+  // 日程、任務、就寢的提醒：到點、還沒顯示過的每一則（各自一則通知）
+  let reminds = []
+  let remindsBefore = null
   let again = null
   const repeat = (x, tag, log) => {
     if (!again || x.at > again.at) again = { ...x, tag, log }
@@ -283,7 +299,15 @@ async function showPush() {
       timer = null
     }
     const list = Array.isArray(mottos) ? mottos : []
-    const picks = [latestDue(list.filter((x) => !x?.fuji), now, MOTTO_LATE), latestDue(list.filter((x) => x?.fuji), now, MOTTO_LATE)].filter(Boolean)
+    const picks = [latestDue(list.filter((x) => !x?.fuji && !x?.remind), now, MOTTO_LATE), latestDue(list.filter((x) => x?.fuji), now, MOTTO_LATE)].filter(Boolean)
+    // 先記下這幾則顯示過了再顯示（同一則推播送了兩次、頁面在背景也記過的就不再顯示）
+    const old = await readJSON(cache, REMIND_SHOWN)
+    remindsBefore = Array.isArray(old) ? old : []
+    const seen = new Set(remindsBefore.map((x) => x?.key))
+    // 晚到多久還顯示：每一則的 until（日程開始後 15 分鐘內、就寢那一刻以前），沒寫的照 REMIND_LATE
+    const lastFor = (x) => (Number.isFinite(x.until) ? x.until : x.at + REMIND_LATE)
+    reminds = list.filter((x) => x?.remind && typeof x.key === 'string' && typeof x.title === 'string' && Number.isFinite(x.at) && x.at <= now + 5000 && now < lastFor(x) && !seen.has(x.key))
+    if (reminds.length) await putJSON(cache, REMIND_SHOWN, [...remindsBefore, ...reminds.map((x) => ({ key: x.key, date: x.date, at: x.at }))].slice(-80))
     const again1 = (x) => (x.fuji ? repeat(x, 'fuji', FUJI_LOG) : repeat(x, 'motto', MOTTO_LOG))
     // 已經念過、顯示過的（念到哪一則的記號以後的才算新的）
     const keepNew = (d) => (x) => (x.at > d ? true : (again1(x), false))
@@ -299,8 +323,9 @@ async function showPush() {
     }
   } catch {}
   const shows = []
-  // 同一次到點，頁面自己發的通知也用同一個 tag（計時器：hiyori-focus-到點的時間；警語：motto）
+  // 同一次到點，頁面自己發的通知也用同一個 tag（計時器：hiyori-focus-到點的時間；警語：motto；提醒：那一件的 id）
   if (timer) shows.push({ ...timer, tag: `hiyori-focus-${timer.at}`, log: LOG_FILE, kind: 'timer' })
+  for (const r of reminds) shows.push({ ...r, tag: typeof r.tag === 'string' && r.tag ? r.tag : 'hiyori-remind', log: null, kind: 'remind', fresh: true })
   // 推播晚到、已經過了那一段醒著的時間（頁面排的時候記下的就寢時間 sleep）：不出聲地放（已經在睡了），也不算進回神紀錄
   for (const m of fresh) {
     if (m.fuji) {
@@ -337,6 +362,10 @@ async function showPush() {
       try {
         if (s.kind === 'timer' && (await readJSON(cache, SHOWN_FILE))?.at === s.at) await putJSON(cache, SHOWN_FILE, shownBefore || {})
         if (s.kind === 'motto' && Number((await readJSON(cache, MOTTO_DONE))?.at) === s.at) await putJSON(cache, MOTTO_DONE, doneBefore || { at: 0 })
+        if (s.kind === 'remind') {
+          const cur = await readJSON(cache, REMIND_SHOWN)
+          if (Array.isArray(cur)) await putJSON(cache, REMIND_SHOWN, cur.filter((x) => x?.key !== s.key))
+        }
       } catch {}
     }
   }
@@ -348,8 +377,15 @@ async function showPush() {
       for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'hiyori-motto-shown', at: said.at })
     } catch {}
   }
+  // 提醒顯示了：開著的頁面（在背景、JavaScript 還在跑）馬上記成提醒過了
+  const told = out.filter((s) => s.kind === 'remind').map((s) => ({ key: s.key, date: s.date }))
+  if (told.length) {
+    try {
+      for (const c of await self.clients.matchAll({ type: 'window' })) c.postMessage({ type: 'hiyori-remind-shown', list: told })
+    } catch {}
+  }
   const entries = out.map((s) => [s, { got: now, at: s.at, closed: false, ...(s.quiet ? { quiet: true } : s.asleep ? { asleep: true } : s.silent ? { again: true } : {}) }])
-  if (cache) for (const [s, e] of entries) await note(cache, s.log, e)
+  if (cache) for (const [s, e] of entries) if (s.log) await note(cache, s.log, e)
   return { cache, entries }
 }
 

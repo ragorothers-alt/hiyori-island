@@ -102,6 +102,19 @@ describe('Service Worker', () => {
     }
   })
 
+  it('安裝：維護頁自己也有 assets 底下的 JS（不是這一版建置出來的）：不裝；是這一版的就裝', async () => {
+    const maint = '<script src="./assets/maintenance.js"></script><h1>維護中</h1>'
+    for (const [home, ok] of [[maint, false], [HTML, true]]) {
+      const f = fetcher(null, home)
+      const caches = new FakeCaches(f)
+      await (await caches.open('hiyori-old')).put('./index.html', new Response('old'))
+      const on = loadSW({ caches, fetch: f, build: ['assets/index-new.js', 'assets/index-new.css', 'index.html'] })
+      if (ok) await run(on.install, {})
+      else await expect(run(on.install, {})).rejects.toThrow()
+      expect(await caches.keys()).toEqual(ok ? ['hiyori-old', 'hiyori-new'] : ['hiyori-old'])
+    }
+  })
+
   it('安裝：入口 JS 抓不到就讓安裝失敗，舊版和舊快取留著', async () => {
     const f = fetcher('index-new.js')
     const caches = new FakeCaches(f)
@@ -184,7 +197,7 @@ function setup({ plans, mottos, done, windows = () => [], before = [], broken = 
   const page = (w) => ({
     ...w,
     postMessage: (msg) => {
-      if (msg?.type === 'hiyori-motto-shown') return messages.push(msg)
+      if (msg?.type === 'hiyori-motto-shown' || msg?.type === 'hiyori-remind-shown') return messages.push(msg)
       if (w.frozen || msg?.type !== 'hiyori-looking?') return
       queueMicrotask(() => on.message({ data: { type: 'hiyori-looking', id: msg.id, looking: !!(typeof w.looking === 'function' ? w.looking() : w.looking) } }))
     },
@@ -432,6 +445,42 @@ describe('Service Worker：警語的推播', () => {
       await run(s.on.push, { data: null })
       expect(s.shown().find((n) => n.tag === 'fuji')).toMatchObject({ silent: true })
       expect(s.alerts).toEqual(['ひより · 給自己的警語', 'ふじ · 今天的安排'])
+    }))
+
+  it('日程、任務、就寢的提醒（跟警語排在同一串，remind: true）：到點的每一則都顯示（tag 是那一件的 id），記下顯示過了、跟頁面說；同一則再來不再顯示；晚 15 分鐘以上的不顯示；不算警語', () =>
+    withClock(async () => {
+      const r = (key, min, tag) => ({ at: NOW + min * MIN, key, date: '2026-11-10', title: `ひより · ${key}`, body: '10 分鐘後開始', tag, remind: true })
+      const s = setup({ mottos: [m(0), r('e1@12:10', 0, 'e1'), r('t1@12:10', 0, 't1'), r('old@11:40', -20, 'old'), r('later@13:00', 50, 'later')], windows: () => [{ looking: false }] })
+      await s.ready
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.tag).sort()).toEqual(['e1', 'motto', 't1'])
+      expect(s.shown().find((n) => n.tag === 'e1')).toMatchObject({ title: 'ひより · e1@12:10', body: '10 分鐘後開始', renotify: true, silent: false })
+      expect(s.shown().find((n) => n.tag === 'e1').actions).toBeUndefined()
+      expect(await (await (await s.caches.open('hiyoripush')).match(SCOPE + '__remind-shown'))?.json()).toEqual([
+        { key: 'e1@12:10', date: '2026-11-10', at: NOW },
+        { key: 't1@12:10', date: '2026-11-10', at: NOW },
+      ])
+      expect(s.messages).toContainEqual({ type: 'hiyori-remind-shown', list: [{ key: 'e1@12:10', date: '2026-11-10' }, { key: 't1@12:10', date: '2026-11-10' }] })
+      // 警語念到哪不受提醒影響；提醒不記進警語的紀錄
+      expect(await s.done()).toEqual({ at: NOW })
+      expect(await s.mottoLog()).toEqual([{ got: NOW, at: NOW, closed: false }])
+      // 同一次推播又送來：提醒不再響（警語不出聲地再放一次）
+      vi.setSystemTime(NOW + 3000)
+      await run(s.on.push, { data: null })
+      expect([...s.alerts].sort()).toEqual(['ひより · e1@12:10', 'ひより · t1@12:10', 'ひより · 給自己的警語'].sort())
+    }))
+
+  it('提醒沒顯示出來（瀏覽器出錯）：「顯示過了」拿掉，下一則推播來時照樣顯示', () =>
+    withClock(async () => {
+      const r = { at: NOW, key: 'e1@12:10', date: '2026-11-10', title: 'ひより · 會', body: '現在開始', tag: 'e1', remind: true }
+      const s = setup({ mottos: [r], windows: () => [] })
+      await s.ready
+      s.ctl.broken = true
+      await run(s.on.push, { data: null }).catch(() => {})
+      expect(await (await (await s.caches.open('hiyoripush')).match(SCOPE + '__remind-shown'))?.json()).toEqual([])
+      s.ctl.broken = false
+      await run(s.on.push, { data: null })
+      expect(s.shown().map((n) => n.tag)).toEqual(['e1'])
     }))
 
   it('推播晚到、警語和ふじ的那一則都到點了：各自顯示（不會只顯示最晚的那一則，把另一種吞掉）', () =>

@@ -4,7 +4,7 @@
 // store/tasks.js、projects.js、habits.js、extras.js、coach.js：各領域的方法。
 // 這裡保留 Store 核心與其餘區段，並轉出原本的公開名稱。
 
-import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS, overnight, spanLen, OVERNIGHT_MAX } from './store/util.js'
+import { uid, isSampleId, parseDate, addDays, dateStr, newerData, toMin, daysBetween, townStages, REVIEW_TEXT, seasonKey, repeatMatches, REPEAT_TYPES, minToHHMM, POMO_SIDS, DEFAULT_SETTINGS, overnight, spanLen, OVERNIGHT_MAX, routineInstanceId } from './store/util.js'
 import { WEEK_ZH, levelFromXp, XP, MOODS, CHARM, CAT_MOTTOS } from './theme.js'
 import { MOTTO_EVERY } from './mottos.js'
 import { isEvent, CHEERS } from './events.js'
@@ -140,8 +140,7 @@ export function dropRescue() {
     localStorage.removeItem(RESCUE_KEY)
   } catch {}
 }
-// 例行公事某一天的實例：id 固定是「例行公事-日期」（id 最長 40 字，匯入的長 id 才退回隨機）
-const instanceId = (r, date) => (r.id.length <= 29 ? `${r.id}-${date}` : uid())
+const instanceId = routineInstanceId
 // 同步用的版本識別：每次使用者改了資料就換一個。比對「是不是同一版」用它，不比時間大小（各台時鐘可能不準）
 export const newRev = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
 export const SEASON_ZH = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }
@@ -1060,7 +1059,7 @@ export class Store {
   }
   // 整個日程（每一段的日子、時段、名稱、備註、完成）的樣子：撤銷新增時比對「之後有沒有改過」
   _eventSig(e) {
-    return JSON.stringify(this.eventGroup(e).map((x) => [x.id, x.date, x.start, x.end, x.title, x.note || '', !!x.done, !!x.allDay, x.endDate || '']))
+    return JSON.stringify(this.eventGroup(e).map((x) => [x.id, x.date, x.start, x.end, x.title, x.color, x.note || '', !!x.done, !!x.allDay, x.endDate || '']))
   }
   // 接在前一天後面的那一段（00:00 開始的）：提醒只在第一段開始前響
   isCont(e) {
@@ -1127,7 +1126,7 @@ export class Store {
     } else {
       let { start, end } = v
       // 本來就跨過午夜、只把開始往前挪：最早挪到整段 16 小時的地方（結束留著，不會因為長過頭變成那天就結束）
-      if (span.all.length > 1 && !('end' in clean) && toMin(start) > toMin(end) && !overnight(start, end)) start = minToHHMM(toMin(end) + 1440 - OVERNIGHT_MAX)
+      if (span.all.length > 1 && !('end' in clean) && 'start' in clean && !overnight(start, end)) start = minToHHMM(toMin(end) + 1440 - OVERNIGHT_MAX)
       let over = overnight(start, end) && ('end' in clean || span.all.length > 1)
       if (!over && toMin(end) <= toMin(start)) {
         end = minToHHMM(Math.min(toMin(start) + ('end' in clean ? 60 : spanLen(span.start, span.end) || 60), 1439))

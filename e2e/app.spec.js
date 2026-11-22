@@ -4575,6 +4575,73 @@ test('警語通知上的按鈕：手機的 App 按了「先停 1 小時」「▶
   await expect.poll(() => page.evaluate(() => window.hiyori.ui.focus.mode)).toBe('focus')
 })
 
+test('網頁版：日程開始前的提醒在頁面關掉時也會響（跟警語同一串交給伺服器，字留在這台的快取）；看著頁面時頁面自己提醒', async ({ page, context, site }) => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
+  const T = Date.parse(`${ymd}T10:00:00+08:00`)
+  await context.addInitScript(({ ymd }) => {
+    Object.defineProperty(Notification, 'permission', { get: () => 'granted' })
+    const cur = { endpoint: 'https://fcm.googleapis.com/fcm/send/e2e', options: {}, unsubscribe: async () => true }
+    PushManager.prototype.getSubscription = async () => cur
+    PushManager.prototype.subscribe = async () => cur
+    Object.defineProperty(Document.prototype, 'hidden', { get: () => !!window.__hidden, configurable: true })
+    Object.defineProperty(Document.prototype, 'visibilityState', { get: () => (window.__hidden ? 'hidden' : 'visible'), configurable: true })
+    if (sessionStorage.getItem('seed') === '1') {
+      sessionStorage.removeItem('seed')
+      const events = [{ id: 'e2e-ev1', title: '牙醫', date: ymd, start: '10:30', end: '11:30' }]
+      localStorage.removeItem('hiyori-daily-rev')
+      localStorage.setItem('hiyori-daily-v1', JSON.stringify({ tasks: [], events, player: {}, mottos: [], settings: { notify: true, remindLead: 10 } }))
+    }
+  }, { ymd })
+  const calls = []
+  await context.route('**/v1/push/**', (route) => {
+    const req = route.request()
+    const path = new URL(req.url()).pathname
+    calls.push({ path, body: req.postDataJSON() })
+    route.fulfill({ json: path.endsWith('/key') ? { key: 'BAAA' } : { ok: true }, headers: { 'Access-Control-Allow-Origin': '*' } })
+  })
+  const armed = () => calls.filter((c) => c.path === '/v1/push/mottos')
+  await useAppMode(context)
+  await page.clock.setFixedTime(new Date(T))
+  await page.goto(site.url)
+  await bootReady(page)
+  await swReady(page)
+  await page.evaluate(() => sessionStorage.setItem('seed', '1'))
+  await page.reload()
+  await bootReady(page)
+  await swReady(page)
+  const file = (name) =>
+    page.evaluate(async (n) => {
+      const hit = await (await caches.open('hiyoripush')).match(new URL(n, (await navigator.serviceWorker.ready).scope).href)
+      return hit ? hit.json() : null
+    }, name)
+  // 10:20 那一則（10:30 開始前 10 分鐘）的字留在快取裡；看著頁面時不交給伺服器
+  await expect
+    .poll(async () => (await file('__motto-plan'))?.find((x) => x.remind))
+    .toEqual({ at: T + 20 * 60000, key: 'e2e-ev1@10:30', date: ymd, title: 'ひより · 牙醫', body: '10 分鐘後開始（10:30）', tag: 'e2e-ev1', remind: true, until: T + 45 * 60000 })
+  expect(armed()).toEqual([])
+  // 離開頁面：那一則的時間交給伺服器
+  await page.evaluate(() => {
+    window.__hidden = true
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => armed().length).toBe(1)
+  // （後面還有就寢前 30 分鐘的那幾則）
+  expect(armed()[0].body.after[0]).toBe(20 * 60000)
+  // Service Worker 推播到了、顯示過（這裡直接寫進它記的那一份）；回到頁面、到了 10:20：記成提醒過了，不再跳提示卡
+  await page.evaluate(async ({ ymd, at }) => {
+    const url = new URL('__remind-shown', (await navigator.serviceWorker.ready).scope).href
+    await (await caches.open('hiyoripush')).put(url, new Response(JSON.stringify([{ key: 'e2e-ev1@10:30', date: ymd, at }])))
+  }, { ymd, at: T + 20 * 60000 })
+  await page.clock.setFixedTime(new Date(T + 20 * 60000 + 5000))
+  await page.evaluate(() => {
+    window.__hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => page.evaluate((d) => JSON.parse(localStorage.getItem('hiyori-reminded') || '{}')[d] || [], ymd)).toContain('e2e-ev1@10:30')
+  await page.waitForTimeout(1500)
+  await expect(page.locator('#toasts .toast', { hasText: '牙醫' })).toHaveCount(0)
+})
+
 // 收到推播後顯示什麼、頁面和 Service Worker 怎麼分「念到哪」在 tests/sw.test.js、tests/mottoPush.test.js 測
 test('網頁版的警語推播：看著頁面時頁面自己念；離開頁面時把接下來的時間交給伺服器，回來後下一則快到了才取消；關掉通知就取消', async ({ page, context, site }) => {
   const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date())
@@ -5429,9 +5496,29 @@ test('返回鍵：先關最上面那一層（找找看、快速記錄打到一�
     f.toggleSet(true)
     f.toggleSet(false)
   })
-  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(0)
+  await expect.poll(() => page.evaluate(() => history.state?.hb || 0)).toBe(0)
   await page.waitForTimeout(300)
   expect(await page.evaluate(() => !!window.hiyori?.ui)).toBe(true)
+  expect(page.url()).toBe(url)
+  await page.evaluate(() => window.hiyori.ui.focus.stop?.())
+  await expect.poll(() => page.evaluate(() => history.state?.hb || 0)).toBe(0)
+  // 前進鍵：關掉的那一層打不回來，不會被拉回去，也不會多一筆要退
+  await page.evaluate(() => window.hiyori.ui.openSearch())
+  await expect(page.locator('#search')).toBeVisible()
+  await back()
+  await expect(page.locator('#search')).toBeHidden()
+  await page.evaluate(() => history.forward())
+  await expect.poll(() => page.evaluate(() => history.state?.hb ?? -1)).toBe(0)
+  await page.waitForTimeout(300)
+  expect(page.url()).toBe(url)
+  // 重新整理之前開著幾層：重新整理後退回最底下那一筆
+  await page.evaluate(() => window.hiyori.ui.openSearch())
+  await page.evaluate(() => window.hiyori.ui.openCapture?.())
+  expect(await page.evaluate(() => history.state?.hb)).toBeGreaterThan(0)
+  await page.reload()
+  await bootReady(page)
+  await expect.poll(() => page.evaluate(() => history.state?.hb || 0)).toBe(0)
+  await page.waitForTimeout(300)
   expect(page.url()).toBe(url)
   // 再開一層、按返回：關掉的是那一層，還在 App 裡
   await page.evaluate(() => window.hiyori.ui.openSearch())
@@ -5443,12 +5530,12 @@ test('返回鍵：先關最上面那一層（找找看、快速記錄打到一�
   await page.evaluate(() => window.hiyori.ui.focus.stop?.())
   await page.evaluate((pid) => window.hiyori.ui.openProject(pid), id)
   await expect(page.locator('#projectDetail')).toBeVisible()
-  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(1)
+  await expect.poll(() => page.evaluate(() => history.state?.hb || 0)).toBe(1)
   await page.locator('.tabs [data-tab="today"]').click()
-  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(0)
+  await expect.poll(() => page.evaluate(() => history.state?.hb || 0)).toBe(0)
   await page.locator('.tabs [data-tab="projects"]').click()
   await expect(page.locator('#projectDetail')).toBeVisible()
-  await expect.poll(() => page.evaluate(() => history.state?.hiyori || 0)).toBe(1)
+  await expect.poll(() => page.evaluate(() => history.state?.hb || 0)).toBe(1)
   await back()
   await expect(page.locator('#projectDetail')).toBeHidden()
   expect(await page.evaluate(() => !!window.hiyori?.ui)).toBe(true)

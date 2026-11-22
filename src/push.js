@@ -25,6 +25,8 @@ export const MOTTO_DONE = '__motto-done'
 // store/extras.js 的 SHOWN_KEEP 要比這個多
 export const MOTTO_LOG = '__motto-log'
 export const MOTTO_LOG_KEEP = 150
+// 推播送到時 Service Worker 顯示過的日程、任務、就寢提醒 [{ key, date, at }]（public/sw.js 也寫了一份，要一起改）
+export const REMIND_SHOWN = '__remind-shown'
 // 念到的那一則比現在晚這麼久以上：時鐘被往回調過了（推播會早幾秒到，一點點不算）
 const MOTTO_REWIND = 10 * 60000
 // 警語一次最多交給伺服器幾則（伺服器的上限也是 200）
@@ -609,7 +611,9 @@ export class MottoPush extends PushBase {
         let recent = []
         try {
           const old = keep ? await (await cache.match(url))?.json() : null
-          if (Array.isArray(old)) recent = old.filter((x) => x && Number.isFinite(x.at) && x.at <= now && now - x.at < MOTTO_LATE && !items.some((y) => y.at === x.at))
+          // 日程、任務的提醒照它自己的期限（until）留著，警語留 10 分鐘
+          const keepFor = (x) => (x.remind ? (Number.isFinite(x.until) ? x.until : x.at + 15 * 60000) : x.at + MOTTO_LATE)
+          if (Array.isArray(old)) recent = old.filter((x) => x && Number.isFinite(x.at) && x.at <= now && now < keepFor(x) && !items.some((y) => y.at === x.at && (y.key ?? null) === (x.key ?? null)))
         } catch {}
         await cache.put(url, jsonRes([...recent, ...items]))
         // 存的時候那一串又換了：這次存的是舊的，下一秒照新的再存
@@ -731,6 +735,12 @@ export class MottoPush extends PushBase {
     await this.saving
     await this._saveTexts(false)
     this.sub = null
+  }
+
+  // 推播送到時 Service Worker 顯示過的日程、任務、就寢提醒：[{ key, date }]（頁面記成提醒過了，回來時不再跳提示卡）
+  async remindShown() {
+    const v = await this._read(REMIND_SHOWN)
+    return Array.isArray(v) ? v.filter((x) => x && typeof x.key === 'string' && typeof x.date === 'string').map(({ key, date }) => ({ key, date })) : []
   }
 
   // 上一則警語的推播 { got, at }（沒有是 null）：警語卡上寫「上一則推播幾點送到」

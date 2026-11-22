@@ -1,6 +1,8 @@
 package app.hiyori.daily;
 
 import android.app.AlarmManager;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
@@ -17,7 +19,7 @@ final class RemindNotice {
     private static final String PREFS = "hiyori";
     private static final String KEY = "reminds";
     private static final String KEY_POSTED = "remindPosted";
-    // 晚了這麼久還沒發的就不發了（跟網頁一樣：睡著時錯過的，開始後 15 分鐘內還補）
+    // 晚了這麼久還沒發的就不發了：每一則的 until（日程開始後 15 分鐘內、就寢那一刻以前），沒寫的照 LATE
     private static final long LATE = 15 * 60_000L;
     private static final int MAX = 60;
     private static final int POSTED_MAX = 80;
@@ -46,14 +48,19 @@ final class RemindNotice {
         }
     }
 
-    // 留下還沒到、或剛到點不久的，存起來，鬧鐘排到最早的那一則（已經到點的馬上響）
+    private static long until(JSONObject o) {
+        long u = o.optLong("until", 0);
+        return u > 0 ? u : o.optLong("at", 0) + LATE;
+    }
+
+    // 留下還沒到、或到點了還沒過期限的，存起來，鬧鐘排到最早的那一則（已經到點的馬上響）
     private static void keep(Context c, JSONArray items, long now) {
         JSONArray rest = new JSONArray();
         long next = 0;
         for (int i = 0; i < items.length(); i++) {
             JSONObject o = items.optJSONObject(i);
             long at = o == null ? 0 : o.optLong("at", 0);
-            if (at <= now - LATE) continue;
+            if (o == null || at <= 0 || now >= until(o)) continue;
             rest.put(o);
             if (next == 0 || at < next) next = at;
         }
@@ -71,24 +78,48 @@ final class RemindNotice {
         }
     }
 
-    // 網頁交來的：{ items: [{ at, key, date, title, body, tag }] }，空字串是都不提醒了（排著的取消）。內容當成資料看，只收需要的欄位
+    // 網頁交來的：{ items: [{ at, until, key, date, title, body, tag }] }，空字串是都不提醒了（排著的全部取消）。
+    // 網頁排的只有還沒到的：已經到點、鬧鐘還沒來得及發的那幾則（同一刻網頁剛好重排）留著，不然兩邊都沒發。
+    // 內容當成資料看，只收需要的欄位
     static synchronized void plan(Context c, String json) {
+        long now = System.currentTimeMillis();
         JSONArray items = new JSONArray();
+        java.util.HashSet<String> keys = new java.util.HashSet<>();
         try {
             JSONArray in = json == null || json.isEmpty() ? null : new JSONObject(json).optJSONArray("items");
-            for (int i = 0; in != null && i < in.length() && items.length() < MAX; i++) {
+            if (in == null) {
+                keep(c, items, now);
+                return;
+            }
+            for (int i = 0; i < in.length() && items.length() < MAX; i++) {
                 JSONObject o = in.optJSONObject(i);
                 if (o == null) continue;
                 long at = o.optLong("at", 0);
                 String title = o.optString("title");
                 String key = o.optString("key");
                 if (at <= 0 || title.isEmpty() || key.isEmpty()) continue;
-                items.put(new JSONObject().put("at", at).put("key", clip(key, 120)).put("date", clip(o.optString("date"), 10))
+                long u = o.optLong("until", 0);
+                items.put(new JSONObject().put("at", at).put("until", u > at ? u : at + LATE).put("key", clip(key, 120)).put("date", clip(o.optString("date"), 10))
                         .put("title", clip(title, 80)).put("body", clip(o.optString("body"), 200)).put("tag", clip(o.optString("tag"), 60)));
+                keys.add(clip(key, 120));
+            }
+            JSONArray old = read(c, KEY);
+            for (int i = 0; i < old.length() && items.length() < MAX; i++) {
+                JSONObject o = old.optJSONObject(i);
+                if (o == null || o.optLong("at", 0) > now || keys.contains(o.optString("key"))) continue;
+                items.put(o);
             }
         } catch (Exception ignored) {
         }
-        keep(c, items, System.currentTimeMillis());
+        keep(c, items, now);
+    }
+
+    // 通知發得出去嗎（App 的通知、提醒這一類都沒被關掉）：發不出去就不記成發過了，回到 App 時頁面自己說
+    private static boolean canShow(Context c) {
+        NotificationManager m = c.getSystemService(NotificationManager.class);
+        if (m == null || !m.areNotificationsEnabled()) return false;
+        NotificationChannel ch = m.getNotificationChannel("remind");
+        return ch == null || ch.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
 
     // 鬧鐘響了：到點的每一則，App 不在前面的話都發（晚太久的不發），記成發過了；再排下一則
@@ -104,7 +135,7 @@ final class RemindNotice {
                 rest.put(o);
                 continue;
             }
-            if (o == null || MainActivity.foreground || now - at >= LATE) continue;
+            if (o == null || MainActivity.foreground || now >= until(o) || !canShow(c)) continue;
             TimerNotice.remind(c, o.optString("title"), o.optString("body"), o.optString("tag"));
             try {
                 posted.put(new JSONObject().put("key", o.optString("key")).put("date", o.optString("date")));

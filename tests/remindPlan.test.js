@@ -28,9 +28,10 @@ describe('App 關著時的提醒', () => {
     const e = store.addEvent({ title: '晨間會議', date: TODAY, start: '09:00', end: '10:00' })
     const t = store.addTask({ title: '寫報告', date: TODAY, at: '13:00', dur: 60 })
     expect(plan()).toEqual([
-      { at: at(TODAY, '08:50'), key: `${e.id}@09:00`, date: TODAY, title: 'ひより · 晨間會議', body: '10 分鐘後開始（09:00）', tag: e.id },
-      { at: at(TODAY, '12:50'), key: `${t.id}@13:00`, date: TODAY, title: 'ひより · 寫報告', body: '排定的任務・10 分鐘後開始（13:00）', tag: t.id },
-      { at: at(TODAY, '13:00'), key: `${t.id}@13:00!`, date: TODAY, title: 'ひより · 寫報告', body: '排在 13:00，現在開始吧', tag: t.id },
+      // until：晚到多久還發（日程開始後 15 分鐘內；提前的那一次到開始為止）
+      { at: at(TODAY, '08:50'), until: at(TODAY, '09:15'), key: `${e.id}@09:00`, date: TODAY, title: 'ひより · 晨間會議', body: '10 分鐘後開始（09:00）', tag: e.id },
+      { at: at(TODAY, '12:50'), until: at(TODAY, '13:00'), key: `${t.id}@13:00`, date: TODAY, title: 'ひより · 寫報告', body: '排定的任務・10 分鐘後開始（13:00）', tag: t.id },
+      { at: at(TODAY, '13:00'), until: at(TODAY, '13:15'), key: `${t.id}@13:00!`, date: TODAY, title: 'ひより · 寫報告', body: '排在 13:00，現在開始吧', tag: t.id },
     ])
   })
 
@@ -57,6 +58,26 @@ describe('App 關著時的提醒', () => {
     // 之後長出來的那一筆是同一個 key
     store.prepareRoutines(addDays(TODAY, 1))
     expect(plan().map((x) => x.key)).toEqual(list.map((x) => x.key))
+  })
+
+  it('匯入的長 id 的例行公事：明天、後天還沒長出來的也排，id 跟之後長出來的一樣', () => {
+    const long = 'imported-routine-with-a-very-long-id-35'
+    store.importJSON(JSON.stringify({ tasks: [], events: [], player: {}, settings: { remindLead: 10, notify: true }, routines: [{ id: long, kind: 'event', title: '晨跑', repeat: { type: 'daily', days: [] }, start: '06:30', end: '07:00', startDate: TODAY, made: {} }] }))
+    const keys = plan().map((x) => x.key)
+    expect(keys).toHaveLength(2)
+    store.prepareRoutines(addDays(TODAY, 1))
+    const made = store.state.events.find((x) => x.routineId === long && x.date === addDays(TODAY, 1))
+    expect(keys[0]).toBe(`${made.id}@06:30`)
+  })
+
+  it('就寢提醒可以每一天各自決定（ふじ那天有排睡前那則就不排）；就寢在午夜後的照就寢那一刻往前 30 分鐘、記在響的那一天', () => {
+    store.state.rhythm.bedRemind = true
+    store.state.rhythm.sleep = '00:30'
+    const skip = at(addDays(TODAY, 1), '00:00')
+    const list = plan({ bed: (t) => (t === skip ? null : { title: 'ひより · 就寢提醒', body: '預定 00:30 就寢' }) })
+    // 10/26 00:00 那則ふじ會說（不排）；10/27 00:00 那則排在 10/27（響的那一天），到 00:30 就寢為止
+    const d2 = addDays(TODAY, 2)
+    expect(list.map((x) => [x.date, x.at, x.until])).toEqual([[d2, at(d2, '00:00'), at(d2, '00:30')]])
   })
 
   it('就寢前 30 分鐘（字由 main.js 給；沒給是不排）；關掉提醒、沒開通知、日程提醒設成不提醒就不排日程', () => {

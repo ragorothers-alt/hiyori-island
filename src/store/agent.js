@@ -409,7 +409,8 @@ export const agentMethods = {
         n++
       } else if (u.k === 'event') {
         const e = this._find('events', u.id)
-        if (!e || (u.sig && this._eventSig(e) !== u.sig)) continue
+        // 沒有簽章（舊的紀錄）認不出之後改過沒有：留著
+        if (!e || !u.sig || this._eventSig(e) !== u.sig) continue
         this.deleteEvent(u.id)
         n++
       } else if (u.k === 'date') {

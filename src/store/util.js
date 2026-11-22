@@ -123,6 +123,15 @@ export function minToHHMM(m) {
   return `${String(h).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }
 
+// 例行公事某一天的實例：id 固定是「例行公事-日期」（id 最長 40 字；匯入的長 id 換成它的雜湊），
+// 兩個分頁各做一次也不會重複，App 關著時的提醒（remindPlan.js）也能先排還沒長出來的那幾天
+const fnv = (str, seed) => {
+  let h = seed >>> 0
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0
+  return h.toString(36)
+}
+export const routineInstanceId = (r, date) => (r.id.length <= 29 ? `${r.id}-${date}` : `r${fnv(r.id, 2166136261)}${fnv(r.id, 5381)}-${date}`)
+
 // ── 日程的時段（store、日程面板、日程頁的輸入列共用同一套規則）──
 // 跨過午夜最長幾分鐘：結束比開始早、加起來不超過 16 小時（23:30–00:30、22:00–06:00）才當成隔天結束；
 // 超過的（12:00–11:00）多半是填錯

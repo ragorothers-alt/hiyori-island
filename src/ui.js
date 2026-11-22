@@ -927,29 +927,37 @@ export class UI {
   // 按了返回鍵（popstate、不是自己退的）：多出來的那幾層一層一層關，關不掉的（擋著）把紀錄補回去
   _bindBack() {
     this._going = false
-    const stateDepth = () => (Number.isInteger(history.state?.hiyori) && history.state.hiyori > 0 ? history.state.hiyori : 0)
+    // 紀錄上寫的是第幾層（hb：這一套寫的；別的格式、不合理的數字都當成最底下那一層）
+    const stateDepth = () => {
+      const n = history.state?.hb
+      return Number.isInteger(n) && n > 0 && n <= 50 ? n : 0
+    }
     this._stateDepth = stateDepth
     addEventListener('popstate', () => {
       if (this._going) {
         this._going = false
         clearTimeout(this._goingT)
-      } else {
-        const have = stateDepth()
-        for (let n = this._backDepth(); n > have; ) {
-          this._backOne()
-          const m = this._backDepth()
-          if (m >= n) break
-          n = m
-        }
+        return this._syncBack()
+      }
+      const have = stateDepth()
+      // 按了返回鍵：多出來的那幾層一層一層關，關不掉的（擋著）之後把紀錄補回去
+      for (let n = this._backDepth(); n > have; ) {
+        this._backOne()
+        const m = this._backDepth()
+        if (m >= n) break
+        n = m
+      }
+      // 按了前進鍵（或回到之前留下的那一筆）：關掉的那一層打不回來，這一筆改寫成現在的層數就好，
+      // 不把人拉回去（再按前進才走得到後面的頁面）
+      const want = this._backDepth()
+      if (want < have) {
+        try {
+          history.replaceState({ hb: want }, '')
+        } catch {}
       }
       this._syncBack()
     })
-    // 重新整理之前開著的那幾層已經不在了：這一筆當成最底下那一層
-    if (stateDepth() > this._backDepth()) {
-      try {
-        history.replaceState({ hiyori: 0 }, '')
-      } catch {}
-    }
+    // 重新整理之前開著的那幾層已經不在了：退回最底下那一筆（同一頁裡的切換，不會重新載入），返回鍵按一次就離開
     this._syncBack()
     // 哪一層打開、關掉（hidden 換了）、按了什麼（專案、任務頁開關）之後：對一下紀錄跟開著的層數
     new MutationObserver(() => this._syncBackSoon()).observe(document.body, { attributes: true, attributeFilter: ['hidden'], subtree: true })
@@ -960,8 +968,9 @@ export class UI {
   _backDepth() {
     const layers = [...$$('.modal').filter((m) => !m.hidden), ...[$('#placeBar'), $('#focusSet'), $('#focusPick'), $('#focusFull'), $('#shop')].filter((el) => el && !el.hidden)]
     let n = layers.length + (this.brief?.open ? 1 : 0) + (this._calendar?.view?.isOpen ? 1 : 0)
+    // 專案：看得到專案頁時才算（小島模式把面板收起來了就不算）
     const pv = this._project?.view
-    if (this.tab === 'projects' && pv?.id) n += pv.taskId ? 2 : 1
+    if (this.tab === 'projects' && pv?.id && !$('#panel')?.classList.contains('collapsed')) n += pv.taskId ? 2 : 1
     return n
   }
   _syncBackSoon() {
@@ -977,7 +986,7 @@ export class UI {
     const want = this._backDepth()
     const have = this._stateDepth()
     try {
-      if (want > have) for (let n = have + 1; n <= want; n++) history.pushState({ hiyori: n }, '')
+      if (want > have) for (let n = have + 1; n <= want; n++) history.pushState({ hb: n }, '')
       else if (want < have) {
         this._going = true
         // 一直沒收到 popstate（瀏覽器擋了）：不要卡住，之後照現在的再對一次
