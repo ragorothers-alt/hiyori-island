@@ -11,6 +11,9 @@
   --ff-ring: min(72vw, 44dvh, 320px);
   /* 只會上下捲：打開時圓環浮現那一下可能多出 1px，窄螢幕上會跳出左右的捲軸 */
   position: fixed; inset: 0; z-index: 48; display: grid; place-items: start center; padding: 20px; overflow-x: hidden; overflow-y: auto;
+  /* 一欄、最寬就是畫面寬：目標的下拉選單照最長的那個選項算寬度（任務標題很長時好幾百 px），
+     不鎖的話欄會被撐得比畫面寬，整張卡片往右偏、右半邊被切掉（手機上） */
+  grid-template-columns: minmax(0, 1fr);
   background:
     radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--ff-b) 16%, transparent), transparent 70%),
     radial-gradient(90% 60% at 50% 112%, color-mix(in srgb, var(--ff-a) 13%, transparent), transparent 70%),
@@ -52,7 +55,8 @@ body.night .focus-full.paused { --ff-ink: var(--ink-faint); }
 @media (max-width: 380px) { .ff-goal-w { display: none; } .ff-today.has-goal { font-size: max(var(--fmin), 11.5px); } }
 
 /* 圓環的中心大約在畫面 46% 的高度：下面一排排的東西（接下來、目標、按鈕、先記下來、想分心了？）放完，筆電的畫面（860 高）底下還留得出地板給貓咪 */
-.ff-card { width: min(420px, 100%); display: grid; justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(46dvh - 104px - var(--ff-ring) / 2)); }
+/* 卡片裡也是一欄、不超過卡片寬（理由同上：下拉選單、很長的一行字不會把裡面撐寬） */
+.ff-card { width: min(420px, 100%); display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 16px; text-align: center; margin-top: max(52px, calc(46dvh - 104px - var(--ff-ring) / 2)); }
 .ff-ctl { display: contents; }
 /* 字距會在最後一個字後面多留一格：左邊補回來，整行才置中 */
 .ff-kicker { font-family: var(--font-display); font-size: 15px; line-height: 24px; letter-spacing: .3em; padding-left: .3em; color: var(--ff-ink); }
@@ -214,5 +218,5 @@ body.night .ff-knob i { background: #1c1a2e; }
   .ff-card { margin-top: 0; width: auto; max-width: 100%; grid-template-columns: auto minmax(0, 300px); grid-template-rows: auto auto; gap: 8px 32px; align-items: center; }
   .ff-kicker { grid-column: 1; grid-row: 1; }
   .ff-ring { grid-column: 1; grid-row: 2; }
-  .ff-ctl { display: grid; justify-items: center; gap: 12px; grid-column: 2; grid-row: 1 / span 2; }
+  .ff-ctl { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 12px; grid-column: 2; grid-row: 1 / span 2; }
 }

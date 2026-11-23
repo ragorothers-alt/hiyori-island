@@ -3647,6 +3647,41 @@ test('手機的 App 模式：用鍵盤移到下面的按鈕時停在輸入列和
   await page.evaluate(() => window.hiyori.ui.setTab('today'))
   expect(await page.evaluate(() => Math.round(document.querySelector('#panel').getBoundingClientRect().top))).toBe(0)
 })
+
+test('手機的 App 模式：今天有一件標題很長的任務時，專注頁不會被目標選單撐寬（圓環、選單、按鈕都在畫面中間）；橫放也是', async ({ page, context, site }) => {
+  await useAppMode(context)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(site.url)
+  await bootReady(page)
+  // 下拉選單照最長的選項算寬度：以前整張卡片被撐到比畫面寬，往右偏、右半邊被切掉
+  await page.evaluate(() => {
+    const s = window.hiyori.store
+    const t = s.addTask({ title: '學測', date: s.today })
+    s.addTask({ title: '把上週的英文作文改完再寄給老師看一下順便整理錯字筆記與單字卡', date: s.today })
+    const f = window.hiyori.ui.focus
+    f.taskId = t.id
+    f.toggle()
+  })
+  await expect(page.locator('#focusFull')).toBeVisible()
+  await expect(page.locator('#ffTarget option')).not.toHaveCount(0)
+  const layout = () =>
+    page.evaluate(() => {
+      const full = document.querySelector('#focusFull')
+      const r = (s) => document.querySelector(s).getBoundingClientRect()
+      const mid = (b) => b.left + b.width / 2
+      return { over: full.scrollWidth - full.clientWidth, vw: full.clientWidth, ring: mid(r('#ffRing')), wrap: [r('#ffTargetWrap').left, r('#ffTargetWrap').right], btns: mid(r('.ff-btns')) }
+    })
+  const p = await layout()
+  expect(p.over).toBeLessThanOrEqual(0)
+  expect(Math.abs(p.ring - p.vw / 2)).toBeLessThan(2)
+  expect(Math.abs(p.btns - p.vw / 2)).toBeLessThan(2)
+  expect(p.wrap[0]).toBeGreaterThanOrEqual(0)
+  expect(p.wrap[1]).toBeLessThanOrEqual(p.vw)
+  // 橫放（圓環在左、按鈕在右）：右邊那一欄也不會被撐出畫面
+  await page.setViewportSize({ width: 750, height: 340 })
+  await expect.poll(async () => (await layout()).over).toBeLessThanOrEqual(0)
+  expect((await layout()).wrap[1]).toBeLessThanOrEqual(750)
+})
 test('用上面的輸入框加任務：看得到的那件亮一下；排到看不到的地方時輸入框下面冒「剛加的在下面」，點了捲過去', async ({ page, context, site }) => {
   await useAppMode(context)
   await page.setViewportSize({ width: 393, height: 852 })
