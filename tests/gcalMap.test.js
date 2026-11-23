@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appItems, b32, fromGoogle, gidOf, GID, importId, plain, plan, sigOf, slotEnd, spanOf, toGoogle } from '../src/gcalMap.js'
+import { appItems, b32, fromGoogle, gidOf, GID, importId, instant, plain, plan, sigOf, slotEnd, spanOf, toGoogle } from '../src/gcalMap.js'
 
 const TZ = 'Asia/Taipei'
 const TODAY = '2026-11-23'
@@ -192,6 +192,15 @@ describe('決定要做什麼', () => {
 
 describe('第二輪審查找到的情境', () => {
   const S = sigOf
+  it('時間沒帶時差（只有 timeZone）：照那個時區的牆上時間，不照這台裝置的時區', () => {
+    expect(instant('2026-11-24T09:00:00', 'Asia/Taipei')).toBe(Date.parse('2026-11-24T09:00:00+08:00'))
+    expect(instant('2026-10-31T15:00:00', 'America/New_York')).toBe(Date.parse('2026-10-31T15:00:00-04:00'))
+    expect(instant('2026-11-01T06:30:00', 'America/New_York')).toBe(Date.parse('2026-11-01T06:30:00-05:00'))
+    expect(instant('2026-11-24T09:00:00Z', 'Asia/Taipei')).toBe(Date.parse('2026-11-24T09:00:00Z'))
+    expect(spanOf({ start: { dateTime: '2026-11-24T09:00:00', timeZone: 'Asia/Tokyo' }, end: { dateTime: '2026-11-24T10:00:00', timeZone: 'Asia/Tokyo' } }, TZ)).toMatchObject({ date: '2026-11-24', start: '08:00', end: '09:00' })
+    // 活動上沒寫時區、寫了看不懂的：照連上時記下的
+    expect(spanOf({ start: { dateTime: '2026-11-24T09:00:00', timeZone: 'Mars/Base' }, end: { dateTime: '2026-11-24T10:00:00' } }, TZ)).toMatchObject({ start: '09:00', end: '10:00' })
+  })
   it('混著 Google 的標籤和自己寫的尖括號：只拿掉 Google 的標籤', () => {
     expect(plain('Read <API><br/>Next')).toBe('Read <API>\nNext')
     expect(plain('<p>看 <待確認> 的</p>')).toBe('看 <待確認> 的\n')

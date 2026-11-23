@@ -185,6 +185,30 @@ export function plain(v) {
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
 }
+// 時間點：帶著時差的照它；沒帶的（只有 timeZone）照那個時區的牆上時間換算，不照這台裝置的時區
+const OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/i
+const WALL = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/
+const zoneOk = (z) => {
+  try {
+    return typeof z === 'string' && !!z && !!local(0, z)
+  } catch {
+    return false
+  }
+}
+export function instant(dt, zone) {
+  if (typeof dt !== 'string') return NaN
+  if (OFFSET.test(dt)) return Date.parse(dt)
+  const m = WALL.exec(dt)
+  if (!m) return NaN
+  // 先當成 UTC，再照那個時區差多少拉回來（日光節約時間前後再對一次）。local 只到分鐘：秒數最後加回去
+  const wall = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5])
+  let t = wall
+  for (let i = 0; i < 2; i++) {
+    const l = local(t, zone)
+    t += wall - Date.parse(`${l.date}T${l.time}:00Z`)
+  }
+  return t + Number(m[6] || 0) * 1000
+}
 // 活動的時間 → { date, start, end, allDay, endDate }（看不懂的是 null）
 export function spanOf(ev, tz) {
   if (DATE.test(ev?.start?.date)) {
@@ -192,9 +216,11 @@ export function spanOf(ev, tz) {
     const endEx = DATE.test(ev.end?.date) ? ev.end.date : ''
     return { allDay: true, date, start: '', end: '', endDate: endEx > date ? addDays(endEx, -1) : date }
   }
-  const s = Date.parse(ev?.start?.dateTime)
+  const zs = zoneOk(ev?.start?.timeZone) ? ev.start.timeZone : tz
+  const ze = zoneOk(ev?.end?.timeZone) ? ev.end.timeZone : zs
+  const s = instant(ev?.start?.dateTime, zs)
   if (!Number.isFinite(s)) return null
-  const e0 = Date.parse(ev?.end?.dateTime)
+  const e0 = instant(ev?.end?.dateTime, ze)
   const e = Number.isFinite(e0) && e0 > s ? e0 : s + 30 * 60000
   const a = local(s, tz)
   const b = local(e, tz)
