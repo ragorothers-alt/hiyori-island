@@ -130,6 +130,7 @@ function seed(samples = true) {
     mottos: [],
     parked: [],
     calendars: [],
+    gcal: cleanGcal(),
     // 回神紀錄跟著哪一份資料（見 store.js 的 sameGen）
     tallyGen: uid(),
     templates: [],
@@ -462,6 +463,24 @@ function cleanCalendars(list) {
     if (!calUrlOk(url)) return null
     return { id: str(c.id), url, name: str(c.name, 30).trim(), color: num(c.color, 0, 99, 0), on: c.on !== false, createdAt: ts(c.createdAt) || Date.now() }
   }).slice(0, CALENDARS_MAX)
+}
+
+// ── Google 日曆同步（src/gcal.js）：寫到哪一個日曆（App 在 Google 開的「ひより日和」，id 不是祕密）、開著沒有、
+// 用哪個時區換算時間（連上時那台的時區：每台照同一個換，不會因為裝置在別的時區就以為改過）。
+// 授權不在這裡（存在裝置上，跟著加密的線上同步走，見 src/store/gcal.js）
+const zoneOk = (z) => {
+  if (typeof z !== 'string' || !z || z.length > 60) return false
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: z })
+    return true
+  } catch {
+    return false
+  }
+}
+export function cleanGcal(g) {
+  if (!isObj(g)) return { cal: '', on: false, tz: '', at: 0 }
+  const cal = typeof g.cal === 'string' && /^[\w.@-]{1,200}$/.test(g.cal) ? g.cal : ''
+  return { cal, on: !!g.on && !!cal, tz: zoneOk(g.tz) ? g.tz : '', at: ts(g.at) || 0 }
 }
 
 // ── 訂閱服務（扣款日、月費怎麼算在 src/subs.js）──
@@ -1058,6 +1077,7 @@ function migrate(s) {
     subscriptions: cleanSubs(s.subscriptions, today), subRates: cleanRates(s.subRates), mottos: cleanMottos(s.mottos),
     parked: cleanParked(s.parked),
     calendars: cleanCalendars(s.calendars),
+    gcal: cleanGcal(s.gcal),
     // 舊存檔沒有：空字串（每台都一樣，照常取比較大的）
     tallyGen: typeof s.tallyGen === 'string' && ID_RE.test(s.tallyGen) ? s.tallyGen : '',
     templates: cleanTemplates(s.templates),

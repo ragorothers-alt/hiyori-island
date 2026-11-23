@@ -24,6 +24,7 @@ import { extrasMethods } from './store/extras.js'
 import { coachMethods } from './store/coach.js'
 import { agentMethods } from './store/agent.js'
 import { agentOpsMethods } from './store/agentOps.js'
+import { gcalMethods } from './store/gcal.js'
 import { grantMethods, grantKey } from './store/grants.js'
 import { merge3 } from './merge.js'
 
@@ -1587,6 +1588,8 @@ export class Store {
     if (!isObj(obj) || !Array.isArray(obj.tasks) || !isObj(obj.player)) throw new Error('不是有效的ひより存檔')
     if (newerData(obj)) throw new Error(NEWER_MSG)
     const next = migrate(obj)
+    // 整份換掉的（匯入、還原備份，或同步拿到別台整份換掉的那一份：回神紀錄的 gen 不一樣）：聽 reload 的（Google 日曆）從頭比
+    const whole = !soft || !sameGen(this.state, next)
     next.updatedAt = updatedAt
     next.rev = rev
     // 匯入、還原備份：計時照現在的樣子（那份檔案裡的計時是當時的，換過去的話別台會把那一輪接回來重新倒數）
@@ -1641,7 +1644,7 @@ export class Store {
     this._weeklyReady = this.weekly()?.ready
     if (!peer) this.emit('dirty')
     this.emit('change')
-    this.emit('reload', { soft })
+    this.emit('reload', { soft, whole })
     this.flushPending()
     return saved
   }
@@ -1751,6 +1754,10 @@ export class Store {
       // 要交給別人、清出空間時用：讀不懂時留的原文也一起刪；刪不掉就先不清（不然以為刪了）
       if (!clearBackups()) throw new Error('備份刪不掉：瀏覽器不讓改這個網站的資料，等一下再試')
       dropRescue()
+      // Google 日曆的授權、這台記著的 Google 上的樣子也拿掉（這台不再能動你的「ひより日和」日曆）
+      try {
+        for (const k of Object.keys(localStorage)) if (k.startsWith('hiyori-gcal-')) localStorage.removeItem(k)
+      } catch {}
     } else if (!keepBackup(this.state, 'reset', this.state.updatedAt) && !force) return false
     try {
       localStorage.removeItem(KEY)
@@ -1779,7 +1786,7 @@ export { DATA_VERSION, newerData, REVIEW_TEXT, ALLDAY_MAX, dateStr, parseDate, a
 export { floating, DATES_MAX, SUBS_MAX, httpUrl, blankTask, cleanRhythm } from './store/migrate.js'
 
 // 各領域的方法掛回 Store：跟直接寫在 class 裡一樣（getter 照原樣、不可列舉）
-for (const obj of [tasksMethods, projectsMethods, habitsMethods, extrasMethods, coachMethods, agentMethods, agentOpsMethods, grantMethods]) {
+for (const obj of [tasksMethods, projectsMethods, habitsMethods, extrasMethods, coachMethods, agentMethods, agentOpsMethods, grantMethods, gcalMethods]) {
   const ds = Object.getOwnPropertyDescriptors(obj)
   for (const d of Object.values(ds)) d.enumerable = false
   Object.defineProperties(Store.prototype, ds)

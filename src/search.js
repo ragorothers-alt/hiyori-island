@@ -7,7 +7,7 @@ import { dateStr } from './store/util.js'
 // 每多看一頁，各類再列幾筆
 export const LIMIT = { task: 30, event: 20, project: 10, life: 20, setting: 10 }
 
-const aliases = { fontPick: '字級 字型大小', glassRow: '玻璃 透明度', icsRow: '外部行事曆 日曆', cloudRow: '雲端同步', aiRow: 'ふじ對話 通行碼' }
+const aliases = { fontPick: '字級 字型大小', glassRow: '玻璃 透明度', icsRow: '外部行事曆 日曆', gcalRow: 'Google 日曆 同步 行事曆', cloudRow: '雲端同步', aiRow: 'ふじ對話 通行碼' }
 
 // 月／日可以跨年找；有寫年份，就只找那一年。
 // 日曆上真的有的那一天（2/30、平年的 2/29 不算）。沒寫年份的照閏年看（2/29 有可能）

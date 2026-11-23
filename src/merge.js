@@ -26,8 +26,9 @@ const GROUPS = {
   // 一台改價、一台取消，兩邊的都留著
   subscriptions: [['price', 'cur', 'priceHistory', 'every', 'unit', 'start', 'trial', 'paid0'], ['status', 'end']],
 }
-// 兩邊都改了就整個用比較晚改的那一邊（不拆開來合）：計時（跨裝置的計時是一整個狀態）
-const ATOMIC = new Set(['timer'])
+// 兩邊都改了就整個用比較晚改的那一邊（不拆開來合）：計時（跨裝置的計時是一整個狀態）、
+// Google 日曆同步的設定（一台中斷、另一台重新連上別的日曆，不會拼出「關著、但換了日曆」）
+const ATOMIC = new Set(['timer', 'gcal'])
 // 最後一次改的時間、哪一天做過：取比較晚的
 const LATEST = new Set(['updatedAt', 'editedAt', 'lastActive', 'visit', 'petDay', 'gift', 'weekCard', 'logDay', 'paid', 'morning', 'evening', 'week', 'pullActed', 'mottoActed'])
 

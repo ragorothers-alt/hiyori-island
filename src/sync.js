@@ -223,6 +223,8 @@ export class SyncEngine {
       return
     }
     if (epoch !== this.epoch) return
+    // 確定是這一次、這一組的資料了：一起帶來的東西（線上同步才有）現在才用
+    this._adopt?.(remote)
     // 這台或雲端的資料是新版 App 存的：這一版看不懂新的欄位，不拉也不推，等使用者更新
     if (this.store.newerApp || newerData(remote?.state)) return this._set('error', NEWER_MSG)
     // 存檔很大時會等停手才寫：比對版本前先寫好，base 才推得動

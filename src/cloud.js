@@ -300,15 +300,19 @@ export class CloudSync extends SyncEngine {
       throw new Error(e instanceof SyntaxError ? '雲端的資料格式不對' : e.message)
     }
     if (data?.app !== 'hiyori' || !data.state) throw new Error('雲端的資料格式不對')
-    // 一起帶來的東西（通行碼）：這台要不要用由 extras.set 決定；出錯也不影響同步
-    if (data.extras && typeof data.extras === 'object' && !Array.isArray(data.extras)) {
-      try {
-        this.extras?.set?.(data.extras)
-      } catch {}
-    }
     // 加密內容裡的版本要跟伺服器說的一樣：伺服器（被入侵時）拿舊的一份冒充新版本，這裡就擋下來
     if (data.state.rev && data.state.rev !== r.rev) throw new Error('雲端的資料版本對不上，先不同步')
-    return { rev: r.rev, savedAt: r.savedAt, state: data.state }
+    // 一起帶來的東西（ふじ的通行碼、Google 日曆的授權）：等確定是這一組同步碼、這一次同步的才用（sync.js 叫 _adopt）。
+    // 途中換了同步碼的話，舊的那一組的授權不會被帶進新的那一組
+    const extras = data.extras && typeof data.extras === 'object' && !Array.isArray(data.extras) ? data.extras : null
+    return { rev: r.rev, savedAt: r.savedAt, state: data.state, extras }
+  }
+  // 這台要不要用由 extras.set 決定；出錯也不影響同步
+  _adopt(remote) {
+    if (!remote?.extras) return
+    try {
+      this.extras?.set?.(remote.extras)
+    } catch {}
   }
 
   async _push(expect, { rev, savedAt }, json, { keepalive } = {}) {

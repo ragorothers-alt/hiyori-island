@@ -9,10 +9,12 @@
 // 還沒記下的舊 vault 到 LEGACY_UNTIL 為止才收寫入，也不能只憑 id 刪除。
 // /v1/ai：ふじ的 AI，經過這裡呼叫 Claude（見 ai.js；金鑰和通行碼都是 Worker 的 secret）。
 // /v1/push/*：番茄鐘到點、警語定時提醒的推播（見 push.js；跟同步碼無關，沒開線上同步也能用）。
+// /v1/gcal/*：Google 日曆同步的授權（見 gcal.js；只換 token，不存、不經手日程內容）。
 import { HttpError } from './http.js'
 import { askAI, askAIStream, checkAI, aiGate, aiFailed, aiCount, AI_MAX } from './ai.js'
 import { pushKey, pushTimer, pushMottos } from './push.js'
 import { fetchICS } from './ics.js'
+import { gcalConfig, gcalToken, gcalRefresh, gcalRevoke } from './gcal.js'
 import { MAX_DATA, CREATE_DAILY, MAX_TOTAL, LEGACY_UNTIL } from './limits.js'
 
 // 主檔只匯出 Worker 本身和 Durable Object（其他匯出會被當成進入點，數字放在 limits.js）
@@ -54,7 +56,7 @@ export default {
         }
       }
       // 推播的請求只有一個網址和幾個數字（警語最多 200 個）；匯入行事曆只有一個網址
-      const small = pathname.startsWith('/v1/push/') || pathname === '/v1/ics'
+      const small = pathname.startsWith('/v1/push/') || pathname.startsWith('/v1/gcal/') || pathname === '/v1/ics'
       const text = await readBody(req, ai ? AI_MAX : small ? 8000 : MAX_DATA + 1000)
       let body
       try {
@@ -77,6 +79,10 @@ export default {
       if (pathname === '/v1/push/timer') return json(await pushTimer(env, body, now, new URL(req.url).origin))
       if (pathname === '/v1/push/mottos') return json(await pushMottos(env, body, now, new URL(req.url).origin))
       if (pathname === '/v1/ics') return json(await fetchICS(body, env.ICS_FETCH || fetch))
+      if (pathname === '/v1/gcal/config') return json(gcalConfig(env))
+      if (pathname === '/v1/gcal/token') return json(await gcalToken(env, body, env.GCAL_FETCH || fetch))
+      if (pathname === '/v1/gcal/refresh') return json(await gcalRefresh(env, body, env.GCAL_FETCH || fetch))
+      if (pathname === '/v1/gcal/revoke') return json(await gcalRevoke(env, body, env.GCAL_FETCH || fetch))
       throw new HttpError(404, 'not found')
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message, ...e.extra }, e.status)
@@ -124,6 +130,7 @@ async function limit(env, req, pathname) {
     : pathname === '/v1/ai' ? env.AI_LIMIT
     : pathname === '/v1/ics' ? env.ICS_LIMIT || env.SYNC_LIMIT
     : pathname.startsWith('/v1/push/') ? env.PUSH_LIMIT || env.SYNC_LIMIT
+    : pathname.startsWith('/v1/gcal/') ? env.GCAL_LIMIT || env.SYNC_LIMIT
     : env.SYNC_LIMIT
   if (!limiter) return
   const { success } = await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'unknown' })

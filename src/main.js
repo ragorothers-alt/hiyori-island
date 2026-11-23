@@ -31,6 +31,7 @@ import { dayWord } from './agent.js'
 import { createRiskWatch } from './riskWatch.js'
 import { planNotes, deviceId, notesHere } from './fujiNotes.js'
 import { createCalendars } from './calendars.js'
+import { createGcal, gcalExtras, gcalText, gcalUnshared, joinExtras } from './gcal.js'
 import { AI_MODELS, aiModel, aiExtras, aiUnshared } from './ai.js'
 import { installPwa } from './boot/pwa.js'
 
@@ -1065,6 +1066,37 @@ async function boot() {
   hooks.calendars = calendars
   calendars.sync()
   store.on('change', () => calendars.sync())
+  // ── Google 日曆同步（src/gcal.js）：App 改了資料等一下就寫進 Google；回到 App、每 2 分鐘拉一次 Google 上的改動。
+  // 在 Google 上改的帶進 App 時說一聲，可以撤銷（撤銷了的那幾筆，下一次同步照 App 的樣子寫回 Google）──
+  // 開機時線上同步先拉完才開始（這台的資料可能是舊的）；授權回來時也等它拉完才決定用哪個日曆
+  let gcalReady = false
+  const gcal = createGcal(store, {
+    ready: () => gcalReady,
+    settle: () => syncBoot,
+    onApplied: (rec) => {
+      const names = rec.titles.slice(0, 2).map((t) => `「${t}」`).join('、') + (rec.titles.length > 2 ? ` 等 ${rec.titles.length} 筆` : '')
+      ui.toast({
+        icon: '暦',
+        title: rec.dropped === rec.n ? `Google 日曆上刪了 ${rec.n} 筆，App 也刪了` : `Google 日曆上改了 ${rec.n} 筆，App 跟著改了`,
+        sub: names,
+        ms: 9000,
+        tag: 'gcal',
+        actions: [
+          {
+            label: '撤銷',
+            soft: true,
+            run: () => {
+              const n = store.gcalUndo(rec)
+              ui.toast({ icon: '戻', title: n ? '換回來了，Google 日曆也會改回去' : '那幾筆之後又改過，沒有換回來', ms: 5000 })
+            },
+          },
+        ],
+      })
+    },
+  })
+  hooks.gcal = gcal
+  // 改了資料才同步（換頁、換日子不算）
+  store.on('dirty', () => gcal.kick())
   // ── ふじ在 App 關著時的通知（src/fujiNotes.js）：只從一台送（settings.fujiNotify 是那一台的代號，'off' 是不送），
   // 還沒選過的話手機（Android 殼、手機的瀏覽器）先送 ──
   const myDevice = deviceId()
@@ -2322,12 +2354,17 @@ async function boot() {
   // ふじ的 AI 通行碼和選的模型跟著同步碼走：放在加密的那一包裡帶到別台（伺服器看不到），別台輸入同步碼就能用，不用再填、再選一次。
   // 通行碼、模型各自用比較新設的那一個（src/ai.js 的 aiExtras）
   const cloudSync = new CloudSync(store, {
-    extras: aiExtras(({ pass }) => {
+    extras: joinExtras(gcalExtras((on) => {
+      // 別台連上（或中斷）Google 日曆的授權到了
+      ui.renderGcal?.()
+      // 新的授權：之前「授權過期」的也再試（等這一次同步把資料換好）
+      if (on) setTimeout(() => gcal.run(), 800)
+    }), aiExtras(({ pass }) => {
       // 別台設的通行碼、選的模型到了：設定那一列跟著變、ふじ的卡片出現、之前連不上的再試
       ui.aiShared()
       if (pass) ui.toast({ icon: '藤', stamp: true, title: 'ふじ的 AI 通行碼同步過來了', sub: '別台設好的，這台不用再填一次', ms: 6000 })
       else ui.toast({ icon: '藤', stamp: true, title: aiModel() === 'auto' ? 'ふじ改成自動選模型了' : `ふじ改用 ${AI_MODELS.find((m) => m.id === aiModel())?.label || 'Claude'} 了`, sub: '別台選的模型，這台跟著換', ms: 5000 })
-    }),
+    })),
     onStatus: () => ui.renderSync(),
     onPulled: () => pulledToast({ icon: '雲', title: '已同步別台裝置的變更', sub: '線上同步' }),
     onConflict,
@@ -2342,8 +2379,9 @@ async function boot() {
   ui.attachCloud(cloudSync)
   ui.attachSync(fileSync)
   // 這台的通行碼、模型還沒跟著同步送上去過（剛設、剛換，或這個功能上線前就設好的）：送一次（同步接上後也看一次）
+  // Google 日曆的授權也一樣（連上之後才開線上同步、加入的同步碼雲端比較新只拉不推的時候）
   const shareAi = () => {
-    if (cloudSync.state !== 'off' && cloudSync.state !== 'unsupported' && aiUnshared()) store.save()
+    if (cloudSync.state !== 'off' && cloudSync.state !== 'unsupported' && (aiUnshared() || gcalUnshared())) store.save()
   }
   hooks.aiSet = shareAi
   // 開機時的第一次同步：做完之前，到點晚了的那一輪先等它（別台可能已經接手記好了）
@@ -2658,7 +2696,7 @@ async function boot() {
   }
 
   // 方便除錯：在 console 用 hiyori.store；小島建好後還有 hiyori.sky.hourOverride = 20、hiyori.world…
-  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise, agent, reminders }
+  window.hiyori = { store, ui, fileSync, cloudSync, ensureIsland, noise, agent, reminders, gcal }
 
   // ── PWA：註冊 Service Worker、部署了新版時重新整理、請瀏覽器保留資料、安裝成 App（src/boot/pwa.js）──
   installPwa({ store, ui })
@@ -2726,6 +2764,17 @@ async function boot() {
   // 匯入的行事曆：回到 App、每 10 分鐘看一次（超過 30 分鐘沒抓才真的去抓）
   document.addEventListener('visibilitychange', () => !document.hidden && calendars.refresh())
   setInterval(() => !document.hidden && calendars.refresh(), 10 * 60000)
+  // Google 日曆：從授權畫面回來的話接著連好；之後回到 App、每 2 分鐘同步一次（App 改了資料另外會等一下就同步）
+  gcal.finish().then(
+    (r) => r && ui.toast({ icon: '暦', stamp: true, title: '連上 Google 日曆了', sub: r.created ? '開了一個「ひより日和」日曆，正在把日程寫進去' : '接回原本的「ひより日和」日曆，正在同步', ms: 7000 }),
+    (e) => ui.toast({ icon: '暦', title: '沒有連上 Google 日曆', sub: gcalText(e?.code), ms: 8000 }),
+  )
+  syncBoot.then(() => {
+    gcalReady = true
+    if (store.state.gcal.on) gcal.kick(500)
+  })
+  document.addEventListener('visibilitychange', () => !document.hidden && gcal.kick(1000))
+  setInterval(() => !document.hidden && gcal.run({ auto: true }), 2 * 60000)
   backReady = true
   suggestReady = true
   if (bootAct) {

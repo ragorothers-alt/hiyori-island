@@ -216,6 +216,38 @@ API 金鑰**不會**放進網頁：它存在自己的 Cloudflare Worker（就是
 
 Worker 端（`worker/src/ai.js`）：提示詞和回傳格式都寫在 Worker 裡，前端只送資料；回傳用 structured outputs 固定成 JSON（排程的日期和項目直接寫進 schema 的 enum）。Opus／Sonnet 開了伺服器端備援（`fallbacks: 'default'`，被安全機制擋下時換備援模型重跑；Haiku 沒有）。通行碼用雜湊比對，而且先驗通行碼才讀請求內容；每個 IP 每分鐘最多 10 次，請求最大 120 KB（邊讀邊算，超過就停）。錯誤會換成看得懂的話（通行碼不對、金鑰不能用、額度用完的原因、Claude 太忙…）。測試（`tests/ai.test.js`）把 Claude 的用戶端換成假的，檢查送出的參數和各種回應。
 
+## Google 日曆同步
+
+「設定 → 資料與同步 → Google 日曆同步」按「連接 Google 日曆」：App 在你的 Google 日曆開一個「ひより日和」日曆，兩邊自動同步（`src/gcal.js`、`src/gcalMap.js`）：
+
+- **App → Google**：日程（跨過午夜的寫成一整段、整天的照幾天）、排了時段的任務（做完了標題前面加 ✓）、有截止日的任務（截止那天一個「截止：…」的全天活動）。App 改了資料約 2.5 秒後寫上去；Google 那邊不另外響提醒（App 自己會提醒）
+- **Google → App**：在 Google 上改這個日曆的時間、日子、名稱、說明，App 跟著改；刪掉的 App 也刪（任務只拿掉時段或截止日，任務本身留著）；在這個日曆新增的變成 App 的日程。回到 App、每 2 分鐘拉一次。帶進來時提示卡說改了哪幾筆，按「撤銷」換回來（Google 上也跟著改回去）。在 Google 新增的重複活動不帶進 App
+- **誰改過**：每台記著「上次兩邊對好時，App 和 Google 各是什麼樣子」（內容的指紋），App 的不一樣＝這台的 App 改過，Google 的不一樣＝在 Google（或別台）改過；兩邊都改了同一筆，用比較晚改的那一邊（App 這邊看的是那一筆在 App 改的時間，之後改了別的不算）。只在這台的 App 真的改過時才寫上 Google：這台還沒從線上同步拿到別台的改動時，不會把舊的寫回去，而是照 Google 上別台寫的改；這台的 App 沒有、也沒對過的不刪（可能是別台剛加的）。剛連上的裝置：App 還是活動上記著的那個樣子（`extendedProperties.private`，上次寫進去的指紋）就照 Google 的改，不然比誰比較晚改。做完了沒是 App 管的：在 Google 拿掉標題的 ✓ 不算，這台還沒拿到別台勾的完成時也不會把 Google 上的 ✓ 改回去。匯入、還原備份、重置（別台做的也一樣）之後重新比，不會把 App 少掉的那幾筆從 Google 刪掉；App 的資料存不進去（瀏覽器空間滿了）時先不記成對好了
+- **寫的時候帶著版本**（etag）：拿到清單之後、寫上去之前，Google 那邊剛好又被改了的話不蓋掉，讀回來下一輪再比。在 Google 上幫活動加的地點、顏色、邀請的人，App 再改這一筆時留著
+- **App 表示不了的**：在 Google 把任務的時段改成整天，任務只拿掉時段、Google 上那一筆留著；不到 5 分鐘一格的時間、App 存不下的長度，照 App 的樣子整理一次寫回去。App 寫上去的活動在 Google 改成重複的，之後就不再動它
+- **不會一筆變兩筆**：Google 那邊的活動 id 由 App 的 id 算出來，好幾台同時寫也是同一筆；同一台開好幾個分頁時只有一個在同步。時間照連上時記下的時區換算（各台在不同時區也一樣）
+- **出錯時**：斷線、太頻繁等一下自己再試；授權過期、日曆被刪掉這種要你動手的，設定裡寫著原因、有「重新連接」，不會一直重試
+- **只管最近的**：開始在 30 天前的不寫、不改、不刪（Google 上留著當紀錄）
+- **授權**：只要「建立、管理 App 自己開的日曆」（`calendar.app.created`），看不到你其他的日曆（那些用「匯入行事曆」唯讀帶進來）。授權存在這台；開著線上同步時放在加密的那一包裡帶到別台（跟ふじ的通行碼一樣；確定是這一組同步碼的資料才採用），不會出現在匯出、資料夾同步的檔案裡；重置時勾「也刪掉所有備份」會一起拿掉。Android 的 App 裡 Google 不讓登入：在瀏覽器連一次，開著線上同步的話 App 會跟著連上。「中斷連線」每台都停、撤銷授權；Google 上的「ひより日和」日曆留著，不要的話自己在 Google 刪
+- 日程的內容是這台直接跟 Google 同步的，不經過 Worker；Worker 只幫忙換授權（`/v1/gcal/*`，`worker/src/gcal.js`：用授權碼換 token、換新的 access token、撤銷，不存任何東西；每個 IP 每分鐘 30 次）
+
+第一次要自己建一組 Google 的 OAuth 用戶端（Google 規定，大約 10 分鐘）：
+
+1. 到 [Google Cloud Console](https://console.cloud.google.com/) 建一個專案（名字隨意）
+2. 「API 和服務 → 程式庫」搜尋 **Google Calendar API**，按「啟用」
+3. 「Google Auth Platform」（舊的介面叫「OAuth 同意畫面」）：
+   - 應用程式名稱填「ひより日和」，使用者類型選「外部」，聯絡信箱填自己的
+   - 「資料存取」按「新增或移除範圍」，加入 `https://www.googleapis.com/auth/calendar.app.created`
+   - 「目標對象」把自己的 Google 帳號加成測試使用者
+4. 「用戶端 → 建立用戶端」：類型選「網頁應用程式」，「已授權的重新導向 URI」填 App 的網址，結尾的 `/` 要有，例如 `https://ragorothers-alt.github.io/hiyori-island/`（本機開發另外加 `http://localhost:5300/`）。建好後記下用戶端 ID 和用戶端密鑰
+5. 在 `worker/` 資料夾執行下面兩行，照提示貼上（兩個都放 secret；用戶端 ID 不是祕密，也可以寫在 `wrangler.toml` 的 `[vars]`）：
+   ```bash
+   npx wrangler@4 secret put GOOGLE_CLIENT_ID
+   npx wrangler@4 secret put GOOGLE_CLIENT_SECRET
+   ```
+6. **發布狀態**：停在「測試中」的話，Google 給的授權 7 天就過期（App 會說要重新連接）。不想每週重連，就在「目標對象」按「發布應用程式」改成正式版：沒送 Google 審查的話，連接時會先看到「Google 尚未驗證這個應用程式」，按「進階 → 前往ひより日和」繼續（只有你自己在用）
+7. 回到 App 按「連接 Google 日曆」，在 Google 的畫面同意就好
+
 ## 資料與同步
 
 資料都存在瀏覽器的 localStorage。同一個瀏覽器開了兩個分頁時，一邊存檔，另一邊會馬上換成那一版，不會用舊資料把它蓋掉。存檔平常是改完就存；資料多到存一次要超過 8 毫秒時，連續的變更會合併成 0.4 秒存一次，關分頁、切到背景或同步之前一定先存完。在「設定」可以：
@@ -342,6 +374,7 @@ src/
   sync.js          同步共用的新舊判斷與備份；資料夾同步（File System Access API）
   cloud.js         線上同步：同步碼、端對端加密、和 worker/ 溝通
   ai.js            ふじ的 AI：通行碼、模型，經過 worker/ 呼叫 Claude
+  gcal.js          Google 日曆同步（雙向）：授權、呼叫 Google Calendar API、跑一次同步；gcalMap.js 是換格式、比對、決定要做什麼的純函式
   agent.js         自主的ふじ：整理給 Claude 的資料、檢查回來的動作、判斷什麼時候該自己整理（純函式）
   agentRunner.js   自主的ふじ什麼時候動：早上、晚上、進度落後、剛加任務、對話；先問我的模式、出錯的退避
   coach.js         排程教練：時段換算、本機規則排程、交給 Claude 時的資料和結果檢查（純函式）
@@ -383,7 +416,7 @@ public/
   sw.js            Service Worker（離線快取、通知點擊、番茄鐘到點和警語的推播；小島載入後由頁面請它收好小島的檔案）
   manifest.webmanifest
 android/           Android 殼：WebView 開線上的網站，加上原生通知（即時倒數、到點的鬧鐘、警語的定時提醒）；build.ps1 建 APK
-worker/            線上同步後端（Cloudflare Worker + D1）、ふじ的 AI（/v1/ai，呼叫 Claude）、番茄鐘到點和警語的推播（/v1/push，Durable Object）
+worker/            線上同步後端（Cloudflare Worker + D1）、ふじ的 AI（/v1/ai，呼叫 Claude）、番茄鐘到點和警語的推播（/v1/push，Durable Object）、Google 日曆同步的授權（/v1/gcal，只換 token）
 tests/             Vitest 單元測試
 e2e/               Playwright 瀏覽器端對端測試（離線、自動更新、教練、專案搜尋、平板的專案任務欄、練習曲的速度、番茄鐘和專注頁的貓），playwright.config.js 是設定
 ```

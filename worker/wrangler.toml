@@ -51,3 +51,13 @@ simple = { limit = 10, period = 60 }
 name = "ICS_LIMIT"
 namespace_id = "2005"
 simple = { limit = 20, period = 60 }
+
+# Google 日曆同步的授權（/v1/gcal/*，見 src/gcal.js）：只換 token。用戶端 ID 和密鑰要自己建（README 的「Google 日曆同步」），
+# 在這個資料夾設定（兩個都用 secret 也可以）：
+#   npx wrangler@4 secret put GOOGLE_CLIENT_ID
+#   npx wrangler@4 secret put GOOGLE_CLIENT_SECRET
+# 沒設的話 /v1/gcal/* 回 503 gcal off（設定裡會寫還沒設定）。每個 IP 每分鐘 30 次
+[[ratelimits]]
+name = "GCAL_LIMIT"
+namespace_id = "2006"
+simple = { limit = 30, period = 60 }

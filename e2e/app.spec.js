@@ -6043,3 +6043,123 @@ test('小島模式（電腦寬度）：面板開著時 Dock 放在每日任務�
   await page.evaluate(() => window.hiyori.ui.togglePanel(true))
   await expect.poll(() => page.evaluate(() => document.body.classList.contains('dock-tight'))).toBe(false)
 })
+
+// 假的 Google Calendar API（只做同步用到的那幾個）：syncToken 只給變動的；刪掉的只剩 id 和狀態
+function fakeGoogleCalendar() {
+  const g = { cals: new Set(), ev: new Map(), seq: 0, worker: [] }
+  const stamp = (e) => Object.assign(e, { updated: new Date().toISOString(), _s: ++g.seq })
+  const view = ({ _s, ...e }) => (e.status === 'cancelled' ? { id: e.id, status: 'cancelled', updated: e.updated } : e)
+  g.live = () => [...g.ev.values()].filter((e) => e.status !== 'cancelled')
+  g.edit = (id, patch) => stamp(Object.assign(g.ev.get(id), patch))
+  g.route = async (route) => {
+    const req = route.request()
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE' }
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+    const u = new URL(req.url())
+    const path = decodeURIComponent(u.pathname.replace('/calendar/v3', ''))
+    const body = req.postData() ? JSON.parse(req.postData()) : null
+    const send = (status, json) => route.fulfill({ status, headers: cors, ...(json ? { json } : {}) })
+    const method = req.method()
+    if (method === 'POST' && path === '/calendars') {
+      g.cals.add('c1')
+      return send(200, { id: 'c1', summary: body.summary })
+    }
+    const m = /^\/calendars\/([^/]+)(?:\/events(?:\/([^/]+))?)?$/.exec(path)
+    if (!m || !g.cals.has(m[1])) return send(404, { error: { code: 404 } })
+    if (!path.includes('/events')) return send(200, { id: m[1] })
+    const id = m[2]
+    const ev = id && g.ev.get(id)
+    if (!id && method === 'GET') {
+      const t = Number(u.searchParams.get('syncToken') || 0)
+      return send(200, { items: [...g.ev.values()].filter((e) => e._s > t).map(view), nextSyncToken: String(g.seq) })
+    }
+    if (!id && method === 'POST') {
+      if (g.ev.has(body.id)) return send(409, { error: { code: 409 } })
+      const e = stamp({ status: 'confirmed', ...body })
+      g.ev.set(e.id, e)
+      return send(200, view(e))
+    }
+    if (!ev) return send(404, { error: { code: 404 } })
+    if (method === 'PUT') {
+      const e = stamp({ ...body, id })
+      g.ev.set(id, e)
+      return send(200, view(e))
+    }
+    if (method === 'PATCH') {
+      const time = (o, was) => (o ? Object.fromEntries(Object.entries({ ...was, ...o }).filter(([, v]) => v != null)) : was)
+      Object.assign(ev, body, { start: time(body.start, ev.start), end: time(body.end, ev.end), extendedProperties: { private: { ...ev.extendedProperties?.private, ...body.extendedProperties?.private } } })
+      return send(200, view(stamp(ev)))
+    }
+    if (method === 'DELETE') {
+      stamp(Object.assign(ev, { status: 'cancelled' }))
+      return send(204)
+    }
+    return send(404, { error: { code: 404 } })
+  }
+  return g
+}
+
+test('Google 日曆同步：設定裡連接（授權畫面回來接著連好），日程和排了時段的任務寫進「ひより日和」；在 Google 改了帶回 App、可以撤銷；中斷連線', async ({ page, context, site }) => {
+  await useAppMode(context)
+  const g = fakeGoogleCalendar()
+  await context.route('**/v1/gcal/**', (route) => {
+    const path = new URL(route.request().url()).pathname
+    g.worker.push(path)
+    const json = path.endsWith('/config')
+      ? { ok: true, clientId: 'cid.apps.googleusercontent.com', scope: 'https://www.googleapis.com/auth/calendar.app.created' }
+      : path.endsWith('/token') ? { ok: true, access: 'a1', expires: 3600, refresh: 'r1' }
+      : path.endsWith('/refresh') ? { ok: true, access: 'a2', expires: 3600 }
+      : { ok: true }
+    return route.fulfill({ json, headers: { 'Access-Control-Allow-Origin': '*' } })
+  })
+  // Google 的授權畫面：直接同意，帶著授權碼回到 App
+  await context.route('https://accounts.google.com/**', (route) => {
+    const u = new URL(route.request().url())
+    return route.fulfill({ status: 302, headers: { Location: `${u.searchParams.get('redirect_uri')}?state=${u.searchParams.get('state')}&code=c1&scope=x` } })
+  })
+  await context.route('https://www.googleapis.com/calendar/v3/**', g.route)
+  await page.goto(site.url)
+  await bootReady(page)
+  const ids = await page.evaluate(() => {
+    const s = window.hiyori.store
+    const e = s.addEvent({ title: '期末報告討論', date: s.today, start: '10:00', end: '11:00' })
+    const t = s.addTask({ title: '整理筆記', date: s.today, at: '14:00', dur: 45 })
+    window.hiyori.ui.setTab('settings')
+    return { e: e.id, t: t.id }
+  })
+  const row = page.locator('#gcalRow')
+  await expect(row.locator('#gcalInfo')).toHaveText('還沒連接')
+  await row.getByRole('button', { name: '連接 Google 日曆' }).click()
+  // 整頁換到 Google 再回來：開機時接著換 token、開日曆、寫進去
+  await page.waitForURL(/code=c1/)
+  await bootReady(page)
+  await toastSeen(page, '連上 Google 日曆了')
+  await expect.poll(() => new URL(page.url()).search).toBe('')
+  await expect.poll(() => g.live().map((e) => e.summary).sort()).toEqual(['整理筆記', '期末報告討論'])
+  expect(await page.evaluate(() => window.hiyori.store.state.gcal)).toMatchObject({ cal: 'c1', on: true })
+  // 授權不在小島的資料裡（匯出、資料夾同步的檔案都沒有）
+  expect(await page.evaluate(() => JSON.stringify(window.hiyori.store.state).includes('"r1"'))).toBe(false)
+  await page.evaluate(() => window.hiyori.ui.setTab('settings'))
+  await expect(row.locator('#gcalInfo')).toContainText('已連上・2 筆')
+
+  // 在 Google 上把討論挪到下午、改名：App 跟著改，提示卡可以撤銷
+  const ev = g.live().find((e) => e.summary === '期末報告討論')
+  const day = ev.start.dateTime.slice(0, 10)
+  g.edit(ev.id, { summary: '期末報告討論（圖書館）', start: { dateTime: `${day}T15:00:00+08:00` }, end: { dateTime: `${day}T16:00:00+08:00` } })
+  await page.evaluate(() => window.hiyori.gcal.run())
+  await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.events.find((x) => x.id === id), ids.e)).toMatchObject({ title: '期末報告討論（圖書館）', start: '15:00', end: '16:00' })
+  const toast = page.locator('#toasts .toast', { hasText: 'Google 日曆上改了 1 筆' })
+  await expect(toast).toBeVisible()
+  await toast.getByRole('button', { name: '撤銷' }).click()
+  await expect.poll(() => page.evaluate((id) => window.hiyori.store.state.events.find((x) => x.id === id)?.start, ids.e)).toBe('10:00')
+  // 撤銷的那一筆寫回 Google
+  await expect.poll(() => g.ev.get(ev.id).summary).toBe('期末報告討論')
+
+  // 中斷連線（按兩下）：不再同步、撤銷授權
+  await page.evaluate(() => window.hiyori.ui.setTab('settings'))
+  await row.getByRole('button', { name: '中斷連線' }).click()
+  await row.getByRole('button', { name: '確定中斷？' }).click()
+  await expect(row.locator('#gcalInfo')).toHaveText('還沒連接')
+  await expect.poll(() => g.worker.at(-1)).toBe('/v1/gcal/revoke')
+  expect(await page.evaluate(() => window.hiyori.store.state.gcal.on)).toBe(false)
+})

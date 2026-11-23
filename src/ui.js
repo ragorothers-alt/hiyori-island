@@ -24,6 +24,7 @@ import { DatesView } from './ui/dates.js'
 import { SubsView } from './ui/subs.js'
 import { MottosView, MottoBar } from './ui/mottos.js'
 import { CalendarRow } from './ui/calendars.js'
+import { GcalRow } from './ui/gcal.js'
 import { AiView } from './ui/ai.js'
 import { AgentCard, AgentView, AgentDock } from './ui/agent.js'
 import { TodayView } from './ui/today.js'
@@ -288,9 +289,12 @@ export class UI {
     })
     // 設定裡的「匯入行事曆」
     if (hooks.calendars) this.icsView = new CalendarRow($('#icsRow'), store, hooks.calendars, { toast: (o) => this.toast(o) })
+    // 設定裡的「Google 日曆同步」
+    if (hooks.gcal) this.gcalView = new GcalRow($('#gcalRow'), store, hooks.gcal, { toast: (o) => this.toast(o) })
     // 另一個分頁（或同一個網站的另一個視窗）設了、換了通行碼或模型：這邊的設定列和ふじ的卡片跟著變
     addEventListener('storage', (e) => {
       if (e.key === null || e.key === 'hiyori-ai-pass' || e.key === 'hiyori-ai-model') this.aiShared()
+      if (e.key === null || e.key === 'hiyori-gcal-token') this.renderGcal()
     })
     this.applyFontScale()
     this.applyGlass()
@@ -390,6 +394,10 @@ export class UI {
     this.renderSettings()
   }
   // 別台設的通行碼、選的模型同步過來了（main.js），或另一個分頁改了
+  // Google 日曆的授權換了（別台同步過來、另一個分頁連上或中斷）：設定那一列跟著變
+  renderGcal() {
+    this.gcalView?.render()
+  }
   aiShared() {
     this.aiView.result = ''
     this.aiView.refresh()

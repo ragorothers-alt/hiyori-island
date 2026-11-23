@@ -377,6 +377,7 @@
         <div class="settings">
           <div class="set-row sync-row" id="cloudRow"></div>
           <div class="set-row sync-row" id="icsRow"></div>
+          <div class="set-row sync-row" id="gcalRow"></div>
           <div class="set-row sync-row" id="syncRow"><div><b>資料夾同步<span class="sync-dot" id="syncDot"></span></b><small id="syncInfo"></small></div><div class="sync-btns" id="syncBtns"></div></div>
           <div class="backup-list" id="backupList" hidden></div>
         </div>
@@ -402,6 +403,7 @@
             <li><b>資料夾同步</b>：寫成一般的 JSON 檔放在你選的資料夾（OneDrive、Dropbox…），沒有加密，跟那個資料夾一樣安全。</li>
             <li><b>匯出的檔案</b>：一般的 JSON 檔，打開就看得到內容，收好別亂傳。</li>
             <li><b>ふじ（接上 Claude 時）</b>：請她排程、跟她說話時，相關的任務和日程會經過你設定的 Worker 交給 Claude 處理。</li>
+            <li><b>Google 日曆同步（連接時）</b>：日程、排了時段的任務、截止日直接從這台寫進你 Google 帳號裡的「ひより日和」日曆（不經過 Worker），Google 看得到這些內容。授權只能動這一個日曆；它存在這台，開著線上同步時加密帶到別台，不在匯出和資料夾同步的檔案裡。</li>
             <li><b>備份</b>：同步、匯入、重置之前留的那幾份也在這台瀏覽器裡（上面的清單），可以還原，也可以全部刪掉。</li>
           </ul>
         </details>
